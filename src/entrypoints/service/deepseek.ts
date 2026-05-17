@@ -76,29 +76,25 @@ function buildTranslationBody(
     messages: [
       {
         role: 'system',
-        content: `You are a professional translator. Translate the given text blocks to ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}.
+        content: `Professional translator. Translate blocks to ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}.
 
-Requirements:
-- Keep all block IDs unchanged
-- Keep terminology consistent
-- Use natural ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}
-- Do not omit content
-- Do not summarize
-- Return ONLY a valid JSON object with a "translations" key containing an array
+Rules:
+- Keep IDs unchanged
+- Consistent terminology
+- Natural translation
+- No omissions
+- Return JSON only
 
-Terminology Glossary:
-${glossaryText}
-
-${context ? `Document Context:\n${context}` : ''}`,
+Glossary: ${glossaryText}
+${context ? `Context: ${context}` : ''}`,
       },
       {
         role: 'user',
-        content: `Translate these blocks and return:\n{\n  "translations": [\n    {"id": "b1", "translated_text": "译文1"},\n    {"id": "b2", "translated_text": "译文2"}\n  ]\n}\n\nBlocks:\n${blocksJson}`,
+        content: `Translate and return {"translations":[{"id":"b1","translated_text":"译文1"}]}:\n\n${blocksJson}`,
       },
     ],
     response_format: { type: 'json_object' },
-    reasoning_effort: 'high',
-    output_config: { effort: 'high' },
+    reasoning_effort: 'low',
     stream: false,
   });
 }

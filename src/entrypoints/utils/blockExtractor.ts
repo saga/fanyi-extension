@@ -20,6 +20,37 @@ const SKIP_SET = new Set([
   'input', 'textarea', 'select', 'button', 'code', 'pre'
 ]);
 
+const SKIP_CLASS_PATTERNS = [
+  'sidebar', 'side-bar', 'sideBar',
+  'nav-menu', 'main-menu', 'navigation-menu',
+  'footer-wrap', 'post-footer', 'site-footer', 'footnote', 'copyright',
+  'subscribe-widget', 'widget-area',
+  'ad-container', 'ad-slot', 'ads-box', 'advertisement',
+  'cookie-consent', 'gdpr-banner', 'banner-ad',
+  'popup-overlay', 'modal-dialog', 'modal-backdrop',
+  'notranslate'
+];
+
+function shouldSkipByClass(el: Element): boolean {
+  if (!el.className || typeof el.className !== 'string') return false;
+  const className = el.className.toLowerCase();
+  const classList = className.split(/\s+/);
+  return SKIP_CLASS_PATTERNS.some(pattern =>
+    classList.some(cls => cls === pattern || cls.startsWith(pattern + '-') || cls.startsWith(pattern + '_'))
+  );
+}
+
+function isInArticleContext(el: Element): boolean {
+  let current: Element | null = el;
+  while (current) {
+    if (current.tagName.toLowerCase() === 'article') return true;
+    const role = current.getAttribute('role');
+    if (role === 'article') return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
 const INLINE_SET = new Set([
   'a', 'b', 'strong', 'span', 'em', 'i', 'u', 'small', 'sub', 'sup',
   'font', 'mark', 'cite', 'q', 'abbr', 'time', 'ruby', 'bdi', 'bdo',
@@ -103,13 +134,17 @@ function grabNode(node: Node): Element | false {
 
   if (SKIP_SET.has(tag)) return false;
   if (node.classList?.contains('notranslate')) return false;
+  if (shouldSkipByClass(node) && !isInArticleContext(node)) return false;
   if (node.isContentEditable) return false;
-  if (tag === 'header' || tag === 'footer') return false;
+  if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') return false;
 
   if (DIRECT_SET.has(tag)) {
     const text = node.textContent?.trim();
     if (text && text.length >= 3 && text.length < 3072) {
       return node;
+    }
+    if (text) {
+      console.log('[BlockExtractor] grabNode REJECTED', tag, 'length:', text.length, 'text:', text.substring(0, 60));
     }
     return false;
   }
@@ -147,6 +182,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   let skippedCount = 0;
   let rejectedCount = 0;
   let acceptedCount = 0;
+  let debugSkippedClasses: string[] = [];
 
   const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
   if (!startNode) {
@@ -174,7 +210,23 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
         }
-        if (tag === 'header' || tag === 'footer') {
+        if (shouldSkipByClass(el) && !isInArticleContext(el)) {
+          debugSkippedClasses.push(`${tag}.${Array.from(el.classList || []).join('.')}`);
+          rejectedCount++;
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') {
+          skippedCount++;
+          return NodeFilter.FILTER_SKIP;
+        }
+
+        // DIRECT_SET 标签直接接受，不检查子元素类型
+        if (DIRECT_SET.has(tag)) {
+          const text = el.textContent?.trim();
+          if (text && text.length >= 3 && text.length < 3072) {
+            acceptedCount++;
+            return NodeFilter.FILTER_ACCEPT;
+          }
           skippedCount++;
           return NodeFilter.FILTER_SKIP;
         }
@@ -211,6 +263,9 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
             acceptedCount++;
             return NodeFilter.FILTER_ACCEPT;
           }
+          if (text && (text.length < 3 || text.length >= 3072)) {
+            console.log('[BlockExtractor] REJECTED by length:', text.length, 'tag:', tag, 'text:', text.substring(0, 60));
+          }
         }
 
         skippedCount++;
@@ -243,6 +298,9 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   }
 
   console.log(`[BlockExtractor] Extraction complete: accepted=${acceptedCount}, skipped=${skippedCount}, rejected=${rejectedCount}, totalBlocks=${blocks.length}`);
+  if (debugSkippedClasses.length > 0) {
+    console.log('[BlockExtractor] Elements skipped by class pattern:', [...new Set(debugSkippedClasses)].slice(0, 20));
+  }
   if (blocks.length > 0) {
     console.log('[BlockExtractor] First 3 blocks:', blocks.slice(0, 3).map(b => ({ id: b.id, tag: b.tag, text: b.text.substring(0, 50) })));
   }
