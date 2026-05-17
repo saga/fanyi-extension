@@ -1,5 +1,31 @@
+import { DeepSeekTranslationService } from './service/deepseek';
+import type { GlossaryEntry } from './service/_service';
+import { getConfig } from './utils/config';
+import {
+  getAnalyzeTask,
+  getTranslationTasks,
+  getCachedAnalysis,
+  getCachedTranslation,
+  cacheAnalysis,
+  cacheTranslation,
+  buildTranslationContext,
+  processTranslationResult,
+  prepareSelectionTask,
+  clearAllCache,
+} from './utils/translateApi';
+import { globalQueue } from './utils/translationQueue';
+
 export default defineBackground(() => {
   console.log('Background script loaded');
+
+  const serviceCache = new Map<string, DeepSeekTranslationService>();
+
+  function getService(apiKey: string): DeepSeekTranslationService {
+    if (!serviceCache.has(apiKey)) {
+      serviceCache.set(apiKey, new DeepSeekTranslationService(apiKey));
+    }
+    return serviceCache.get(apiKey)!;
+  }
 
   browser.runtime.onInstalled.addListener(() => {
     console.log('Extension installed');
@@ -74,8 +100,18 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'proxyRequest') {
-      handleProxyRequest(message, sendResponse);
+    if (message.action === 'analyzeDocument') {
+      handleAnalyzeDocument(message, sendResponse);
+      return true;
+    }
+
+    if (message.action === 'translateChunk') {
+      handleTranslateChunk(message, sendResponse);
+      return true;
+    }
+
+    if (message.action === 'translateSelection') {
+      handleTranslateSelection(message, sendResponse);
       return true;
     }
 
@@ -83,32 +119,111 @@ export default defineBackground(() => {
       handleClearCache(sendResponse);
       return true;
     }
-
-    if (message.action === 'translatePage') {
-      if (sender.tab?.id) {
-        browser.tabs.sendMessage(sender.tab.id, { action: 'translatePage' });
-      }
-    }
   });
 
-  async function handleProxyRequest(
+  async function handleAnalyzeDocument(
     message: any,
     sendResponse: (response: any) => void
   ) {
     try {
-      const { url, method, headers, body } = message;
+      const config = await getConfig();
+      if (!config.deepseekApiKey) {
+        sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
+        return;
+      }
 
-      const response = await fetch(url, {
-        method: method || 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-        body: body ? JSON.stringify(body) : undefined,
+      const { fullText, sourceLang, targetLang } = message;
+      const { cacheKey, needsAnalysis } = await getAnalyzeTask(fullText, sourceLang, targetLang);
+
+      if (!needsAnalysis) {
+        const cached = await getCachedAnalysis(cacheKey);
+        sendResponse({ success: true, analysis: cached, cacheKey });
+        return;
+      }
+
+      const service = getService(config.deepseekApiKey);
+      const analysis = await globalQueue.add(() =>
+        service.analyzeDocument(fullText, sourceLang, targetLang)
+      );
+
+      await cacheAnalysis(cacheKey, analysis);
+      sendResponse({ success: true, analysis, cacheKey });
+    } catch (error) {
+      sendResponse({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
+    }
+  }
 
-      const data = await response.json();
-      sendResponse({ success: true, data });
+  async function handleTranslateChunk(
+    message: any,
+    sendResponse: (response: any) => void
+  ) {
+    try {
+      const config = await getConfig();
+      if (!config.deepseekApiKey) {
+        sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
+        return;
+      }
+
+      const { xmlContent, sourceLang, targetLang, glossary, context, cacheKey } = message;
+
+      const cached = await getCachedTranslation(cacheKey);
+      if (cached) {
+        sendResponse({ success: true, result: Array.from(cached.entries()) });
+        return;
+      }
+
+      const service = getService(config.deepseekApiKey);
+      const xmlResult = await globalQueue.add(() =>
+        service.translate(xmlContent, sourceLang, targetLang, glossary, context)
+      );
+
+      const result = processTranslationResult(xmlResult);
+      await cacheTranslation(cacheKey, result);
+
+      sendResponse({ success: true, result: Array.from(result.entries()) });
+    } catch (error) {
+      sendResponse({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  async function handleTranslateSelection(
+    message: any,
+    sendResponse: (response: any) => void
+  ) {
+    try {
+      const config = await getConfig();
+      if (!config.deepseekApiKey) {
+        sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
+        return;
+      }
+
+      const { text, sourceLang, targetLang } = message;
+      const xmlContent = prepareSelectionTask(text);
+      const cacheKey = `selection_${text.length}_${sourceLang}_${targetLang}`;
+
+      const cached = await getCachedTranslation(cacheKey);
+      if (cached) {
+        sendResponse({ success: true, translated: cached.get('b1') || text });
+        return;
+      }
+
+      const service = getService(config.deepseekApiKey);
+      const xmlResult = await globalQueue.add(() =>
+        service.translate(xmlContent, sourceLang, targetLang, [])
+      );
+
+      const result = processTranslationResult(xmlResult);
+      const translated = result.get('b1') || text;
+
+      await cacheTranslation(cacheKey, new Map([['b1', translated]]));
+
+      sendResponse({ success: true, translated });
     } catch (error) {
       sendResponse({
         success: false,
@@ -119,7 +234,7 @@ export default defineBackground(() => {
 
   async function handleClearCache(sendResponse: (response: any) => void) {
     try {
-      await browser.storage.local.clear();
+      clearAllCache();
       sendResponse({ success: true });
     } catch (error) {
       sendResponse({

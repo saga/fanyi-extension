@@ -1,10 +1,6 @@
-import { DeepSeekTranslationService } from '../service/deepseek';
-import type { GlossaryEntry, DocumentAnalysis } from '../service/_service';
-import { getConfig } from './config';
 import { extractBlocks, type TextBlock } from './blockExtractor';
 import { buildChunks, buildContextForChunk, type Chunk } from './chunkBuilder';
 import { parseTranslationXml } from './xmlParser';
-import { globalQueue } from './translationQueue';
 import { analysisCache, translationCache } from './cacheManager';
 
 function generateCacheKey(content: string): string {
@@ -32,19 +28,11 @@ function generateTranslationCacheKey(
   return `translation_${Math.abs(hash)}`;
 }
 
-export async function analyzeDocument(
-  root: Document | Element
-): Promise<{
+export function prepareDocument(root: Document | Element): {
   blocks: TextBlock[];
-  analysis: DocumentAnalysis;
   chunks: Chunk[];
-}> {
-  const config = await getConfig();
-
-  if (!config.deepseekApiKey) {
-    throw new Error('DeepSeek API Key not configured');
-  }
-
+  fullText: string;
+} {
   const blocks = extractBlocks(root);
 
   if (blocks.length === 0) {
@@ -52,134 +40,84 @@ export async function analyzeDocument(
   }
 
   const fullText = blocks.map((b) => b.text).join('\n\n');
-  const cacheKey = generateCacheKey(fullText.substring(0, 8000));
-
-  const cachedAnalysis = await analysisCache.get<DocumentAnalysis>(cacheKey);
-  if (cachedAnalysis) {
-    const chunks = buildChunks(blocks);
-    return { blocks, analysis: cachedAnalysis, chunks };
-  }
-
-  const service = new DeepSeekTranslationService(config.deepseekApiKey);
-
-  const analysis = await globalQueue.add(() =>
-    service.analyzeDocument(fullText, config.sourceLang, config.targetLang)
-  );
-
-  await analysisCache.set(cacheKey, analysis, 24 * 60 * 60 * 1000);
-
   const chunks = buildChunks(blocks);
 
-  return { blocks, analysis, chunks };
+  return { blocks, chunks, fullText };
 }
 
-export async function translateChunks(
+export async function getAnalyzeTask(
+  fullText: string,
+  sourceLang: string,
+  targetLang: string
+): Promise<{ cacheKey: string; needsAnalysis: boolean }> {
+  const cacheKey = generateCacheKey(fullText.substring(0, 8000));
+  const cached = await analysisCache.get(cacheKey);
+
+  return {
+    cacheKey,
+    needsAnalysis: !cached,
+  };
+}
+
+export async function getTranslationTasks(
   chunks: Chunk[],
-  analysis: DocumentAnalysis,
-  onProgress?: (current: number, total: number) => void
-): Promise<Map<string, string>> {
-  const config = await getConfig();
-
-  if (!config.deepseekApiKey) {
-    throw new Error('DeepSeek API Key not configured');
-  }
-
-  const service = new DeepSeekTranslationService(config.deepseekApiKey);
-
-  const glossaryText = analysis.glossary
-    .map((g: GlossaryEntry) => `${g.term} => ${g.translation}`)
-    .join('\n');
-
-  const translationMap = new Map<string, string>();
-
-  const translationTasks = chunks.map(async (chunk, index) => {
-    const cacheKey = generateTranslationCacheKey(
-      chunk.xmlContent,
-      config.sourceLang,
-      config.targetLang
-    );
-
-    const cachedResult = await translationCache.get<Map<string, string>>(cacheKey);
-    if (cachedResult) {
-      for (const [id, text] of cachedResult) {
-        translationMap.set(id, text);
-      }
-      onProgress?.(index + 1, chunks.length);
-      return;
-    }
-
-    const context = buildContextForChunk(
-      chunk,
-      chunks,
-      glossaryText,
-      analysis.summary
-    );
-
-    const xmlResult = await globalQueue.add(() =>
-      service.translate(
+  sourceLang: string,
+  targetLang: string
+): Promise<Array<{
+  cacheKey: string;
+  needsTranslation: boolean;
+  chunk: Chunk;
+}>> {
+  return Promise.all(
+    chunks.map(async (chunk) => {
+      const cacheKey = generateTranslationCacheKey(
         chunk.xmlContent,
-        config.sourceLang,
-        config.targetLang,
-        analysis.glossary,
-        context
-      )
-    );
+        sourceLang,
+        targetLang
+      );
+      const cached = await translationCache.get<Map<string, string>>(cacheKey);
 
-    const parsedBlocks = parseTranslationXml(xmlResult);
-    const chunkMap = new Map<string, string>();
-
-    for (const block of parsedBlocks) {
-      translationMap.set(block.id, block.translatedText);
-      chunkMap.set(block.id, block.translatedText);
-    }
-
-    await translationCache.set(cacheKey, chunkMap, 7 * 24 * 60 * 60 * 1000);
-
-    onProgress?.(index + 1, chunks.length);
-  });
-
-  await Promise.all(translationTasks);
-
-  return translationMap;
+      return {
+        cacheKey,
+        needsTranslation: !cached,
+        chunk,
+      };
+    })
+  );
 }
 
-export async function translateText(
-  text: string
-): Promise<string> {
-  const config = await getConfig();
+export async function getCachedAnalysis(cacheKey: string) {
+  return analysisCache.get(cacheKey);
+}
 
-  if (!config.deepseekApiKey) {
-    throw new Error('DeepSeek API Key not configured');
+export async function getCachedTranslation(cacheKey: string) {
+  return translationCache.get<Map<string, string>>(cacheKey);
+}
+
+export async function cacheAnalysis(cacheKey: string, data: any) {
+  await analysisCache.set(cacheKey, data, 24 * 60 * 60 * 1000);
+}
+
+export async function cacheTranslation(cacheKey: string, data: Map<string, string>) {
+  await translationCache.set(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
+}
+
+export function buildTranslationContext(
+  chunk: Chunk,
+  allChunks: Chunk[],
+  glossaryText: string,
+  summary: string
+): string {
+  return buildContextForChunk(chunk, allChunks, glossaryText, summary);
+}
+
+export function processTranslationResult(xmlResult: string): Map<string, string> {
+  const parsedBlocks = parseTranslationXml(xmlResult);
+  const result = new Map<string, string>();
+  for (const block of parsedBlocks) {
+    result.set(block.id, block.translatedText);
   }
-
-  const cacheKey = generateTranslationCacheKey(
-    text,
-    config.sourceLang,
-    config.targetLang
-  );
-
-  const cached = await translationCache.get<string>(cacheKey);
-  if (cached) return cached;
-
-  const service = new DeepSeekTranslationService(config.deepseekApiKey);
-
-  const xmlContent = `<DOC><BLOCK id="b1">${escapeXml(text)}</BLOCK></DOC>`;
-
-  const result = await globalQueue.add(() =>
-    service.translate(
-      xmlContent,
-      config.sourceLang,
-      config.targetLang,
-      []
-    )
-  );
-
-  const parsed = parseTranslationXml(result);
-  const translated = parsed[0]?.translatedText || text;
-
-  await translationCache.set(cacheKey, translated, 24 * 60 * 60 * 1000);
-
-  return translated;
+  return result;
 }
 
 function escapeXml(text: string): string {
@@ -191,7 +129,11 @@ function escapeXml(text: string): string {
     .replace(/'/g, '&apos;');
 }
 
-export function clearCache(): void {
+export function prepareSelectionTask(text: string): string {
+  return `<DOC><BLOCK id="b1">${escapeXml(text)}</BLOCK></DOC>`;
+}
+
+export function clearAllCache(): void {
   analysisCache.clear();
   translationCache.clear();
 }

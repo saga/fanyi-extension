@@ -1,4 +1,8 @@
-import { analyzeDocument, translateChunks, translateText } from './utils/translateApi';
+import {
+  prepareDocument,
+  buildTranslationContext,
+  type Chunk,
+} from './utils/contentHelper';
 import { buildNodeMap } from './utils/blockExtractor';
 import { getConfig } from './utils/config';
 import { DOMObserverManager } from './utils/domObserver';
@@ -14,11 +18,6 @@ export default defineContentScript({
     let originalTexts = new Map<string, string>();
     let translatedBlocks = new Set<string>();
     let domObserver: DOMObserverManager | null = null;
-
-    const PROCESSABLE_TAGS = new Set([
-      'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-      'TD', 'TH', 'CAPTION', 'FIGCAPTION', 'LABEL', 'LEGEND',
-    ]);
 
     browser.runtime.onMessage.addListener(async (message) => {
       if (message.action === 'translatePage') {
@@ -42,7 +41,17 @@ export default defineContentScript({
       showStatus('正在分析文档...', 'loading');
 
       try {
-        const { blocks, analysis, chunks } = await analyzeDocument(document);
+        const { blocks, chunks, fullText } = prepareDocument(document);
+
+        const response = await browser.runtime.sendMessage({
+          action: 'analyzeDocument',
+          fullText,
+          sourceLang: config.sourceLang,
+          targetLang: config.targetLang,
+        });
+
+        if (!response.success) throw new Error(response.error);
+        const analysis = response.analysis;
 
         showStatus(
           `分析完成，共 ${blocks.length} 个文本块，${chunks.length} 个翻译块`,
@@ -50,12 +59,19 @@ export default defineContentScript({
         );
 
         const nodeMap = buildNodeMap(blocks, document);
-
         saveOriginalTexts(blocks, nodeMap);
 
-        const translationMap = await translateChunks(
+        const glossaryText = analysis.glossary
+          .map((g: { term: string; translation: string }) => `${g.term} => ${g.translation}`)
+          .join('\n');
+
+        const translationMap = await translateChunksViaBackground(
           chunks,
-          analysis,
+          config.sourceLang,
+          config.targetLang,
+          analysis.glossary,
+          glossaryText,
+          analysis.summary,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
           }
@@ -84,11 +100,66 @@ export default defineContentScript({
       if (!text || text.length < 2) return;
 
       try {
-        const translated = await translateText(text);
-        showSelectionPopup(translated, text);
+        const config = await getConfig();
+        const response = await browser.runtime.sendMessage({
+          action: 'translateSelection',
+          text,
+          sourceLang: config.sourceLang,
+          targetLang: config.targetLang,
+        });
+
+        if (response.success) {
+          showSelectionPopup(response.translated, text);
+        } else {
+          console.error('Selection translation failed:', response.error);
+        }
       } catch (error) {
         console.error('Selection translation failed:', error);
       }
+    }
+
+    async function translateChunksViaBackground(
+      chunks: Chunk[],
+      sourceLang: string,
+      targetLang: string,
+      glossary: Array<{ term: string; translation: string }>,
+      glossaryText: string,
+      summary: string,
+      onProgress?: (current: number, total: number) => void
+    ): Promise<Map<string, string>> {
+      const translationMap = new Map<string, string>();
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+
+        const context = buildTranslationContext(
+          chunk,
+          chunks,
+          glossaryText,
+          summary
+        );
+
+        const response = await browser.runtime.sendMessage({
+          action: 'translateChunk',
+          xmlContent: chunk.xmlContent,
+          sourceLang,
+          targetLang,
+          glossary,
+          context,
+        });
+
+        if (response.success) {
+          for (const [id, text] of response.result) {
+            translationMap.set(id, text);
+          }
+        } else {
+          console.error(`Chunk ${chunk.id} translation failed:`, response.error);
+        }
+
+        onProgress?.(i + 1, chunks.length);
+      }
+
+      return translationMap;
     }
 
     function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
@@ -108,7 +179,6 @@ export default defineContentScript({
       for (const [blockId, translatedText] of translationMap) {
         const node = nodeMap.get(blockId);
         if (!node || !(node instanceof HTMLElement)) continue;
-
         applyBlockTranslation(node, translatedText, mode);
       }
     }
@@ -188,9 +258,18 @@ export default defineContentScript({
       if (!originalText) return;
 
       try {
-        const translated = await translateText(originalText);
-        applyBlockTranslation(node, translated, mode);
-        translatedBlocks.add(blockId);
+        const config = await getConfig();
+        const response = await browser.runtime.sendMessage({
+          action: 'translateSelection',
+          text: originalText,
+          sourceLang: config.sourceLang,
+          targetLang: config.targetLang,
+        });
+
+        if (response.success) {
+          applyBlockTranslation(node, response.translated, mode);
+          translatedBlocks.add(blockId);
+        }
       } catch (error) {
         console.error(`Lazy translation failed for block ${blockId}:`, error);
       }
@@ -207,11 +286,20 @@ export default defineContentScript({
             if (block.text && block.text.length > 10) {
               originalTexts.set(block.id, block.text);
               try {
-                const translated = await translateText(block.text);
-                const node = findNodeByBlockId(block.id);
-                if (node) {
-                  applyBlockTranslation(node, translated, mode);
-                  translatedBlocks.add(block.id);
+                const config = await getConfig();
+                const response = await browser.runtime.sendMessage({
+                  action: 'translateSelection',
+                  text: block.text,
+                  sourceLang: config.sourceLang,
+                  targetLang: config.targetLang,
+                });
+
+                if (response.success) {
+                  const node = findNodeByBlockId(block.id);
+                  if (node) {
+                    applyBlockTranslation(node, response.translated, mode);
+                    translatedBlocks.add(block.id);
+                  }
                 }
               } catch (error) {
                 console.error('Dynamic content translation failed:', error);

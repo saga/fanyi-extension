@@ -1,20 +1,56 @@
-import OpenAI from 'openai';
 import type {
   TranslationService,
   DocumentAnalysis,
   GlossaryEntry,
 } from './_service';
 
+const API_URL = 'https://api.deepseek.com/v1/chat/completions';
+const MODEL = 'deepseek-v4-flash';
+
+function buildHeaders(apiKey: string): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  };
+}
+
+function buildBody(messages: Array<{ role: string; content: string }>) {
+  return JSON.stringify({
+    model: MODEL,
+    messages,
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high',
+    stream: false,
+  });
+}
+
+async function callApi(apiKey: string, messages: Array<{ role: string; content: string }>): Promise<string> {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: buildHeaders(apiKey),
+    body: buildBody(messages),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('No response from DeepSeek');
+  }
+
+  return content;
+}
+
 export class DeepSeekTranslationService implements TranslationService {
-  private client: OpenAI;
-  private model = 'deepseek-v4-flash';
+  private apiKey: string;
 
   constructor(apiKey: string) {
-    this.client = new OpenAI({
-      baseURL: 'https://api.deepseek.com',
-      apiKey,
-      dangerouslyAllowBrowser: true,
-    });
+    this.apiKey = apiKey;
   }
 
   async analyzeDocument(
@@ -44,20 +80,7 @@ Return ONLY a valid JSON object with this structure:
 Document:
 ${text.substring(0, 8000)}`;
 
-    const completion = await this.client.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: this.model,
-      thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
-      stream: false,
-    });
-
-    const content = completion.choices[0]?.message?.content;
-
-    if (!content) {
-      throw new Error('No analysis result from DeepSeek');
-    }
-
+    const content = await callApi(this.apiKey, [{ role: 'user', content: prompt }]);
     return JSON.parse(content);
   }
 
@@ -92,20 +115,6 @@ Translate the following XML to ${targetLang === 'zh' ? 'Simplified Chinese' : ta
 
 ${xmlContent}`;
 
-    const completion = await this.client.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: this.model,
-      thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
-      stream: false,
-    });
-
-    const content = completion.choices[0]?.message?.content;
-
-    if (!content) {
-      throw new Error('No translation result from DeepSeek');
-    }
-
-    return content;
+    return callApi(this.apiKey, [{ role: 'user', content: prompt }]);
   }
 }
