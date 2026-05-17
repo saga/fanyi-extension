@@ -3,7 +3,7 @@ import type { TextBlock } from './blockExtractor';
 export interface Chunk {
   id: string;
   blocks: TextBlock[];
-  xmlContent: string;
+  jsonContent: string;
   estimatedTokens: number;
 }
 
@@ -14,24 +14,10 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-function buildXmlContent(blocks: TextBlock[]): string {
-  const lines = ['<DOC>'];
-
-  for (const block of blocks) {
-    const escapedText = block.text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
-
-    lines.push(`  <BLOCK id="${block.id}">`);
-    lines.push(`    ${escapedText}`);
-    lines.push(`  </BLOCK>`);
-  }
-
-  lines.push('</DOC>');
-  return lines.join('\n');
+function buildJsonContent(blocks: TextBlock[]): string {
+  return JSON.stringify(
+    blocks.map((b) => ({ id: b.id, text: b.text }))
+  );
 }
 
 function isStructuralBoundary(block: TextBlock): boolean {
@@ -58,7 +44,7 @@ export function buildChunks(blocks: TextBlock[]): Chunk[] {
       chunks.push({
         id: `chunk${chunkIndex}`,
         blocks: currentBlocks,
-        xmlContent: buildXmlContent(currentBlocks),
+        jsonContent: buildJsonContent(currentBlocks),
         estimatedTokens: currentTokens,
       });
       currentBlocks = [];

@@ -7,6 +7,41 @@ import type {
 const API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 
+const TRANSLATE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'translate_blocks',
+    description: 'Translate text blocks and return the results as a JSON array',
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        translations: {
+          type: 'array',
+          description: 'Array of translated blocks',
+          items: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'The original block ID',
+              },
+              translated_text: {
+                type: 'string',
+                description: 'The translated text',
+              },
+            },
+            required: ['id', 'translated_text'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['translations'],
+      additionalProperties: false,
+    },
+  },
+};
+
 function buildHeaders(apiKey: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -14,51 +49,17 @@ function buildHeaders(apiKey: string): Record<string, string> {
   };
 }
 
-function buildBody(messages: Array<{ role: string; content: string }>) {
+function buildAnalysisBody(
+  text: string,
+  sourceLang: string,
+  targetLang: string
+) {
   return JSON.stringify({
     model: MODEL,
-    messages,
-    thinking: { type: 'enabled' },
-    reasoning_effort: 'high',
-    stream: false,
-  });
-}
-
-async function callApi(apiKey: string, messages: Array<{ role: string; content: string }>): Promise<string> {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: buildHeaders(apiKey),
-    body: buildBody(messages),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('No response from DeepSeek');
-  }
-
-  return content;
-}
-
-export class DeepSeekTranslationService implements TranslationService {
-  private apiKey: string;
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async analyzeDocument(
-    text: string,
-    sourceLang: string,
-    targetLang: string
-  ): Promise<DocumentAnalysis> {
-    const prompt = `You are a professional translator and document analyst.
+    messages: [
+      {
+        role: 'user',
+        content: `You are a professional translator and document analyst.
 
 Analyze the following document and extract:
 1. Domain/field of the document
@@ -78,43 +79,151 @@ Return ONLY a valid JSON object with this structure:
 }
 
 Document:
-${text.substring(0, 8000)}`;
+${text.substring(0, 8000)}`,
+      },
+    ],
+    response_format: { type: 'json_object' },
+    reasoning_effort: 'high',
+    output_config: { effort: 'high' },
+    stream: false,
+  });
+}
 
-    const content = await callApi(this.apiKey, [{ role: 'user', content: prompt }]);
+function buildTranslationBody(
+  blocks: Array<{ id: string; text: string }>,
+  sourceLang: string,
+  targetLang: string,
+  glossary: GlossaryEntry[],
+  context?: string
+) {
+  const glossaryText = glossary
+    .map((g) => `${g.term} => ${g.translation}`)
+    .join('\n');
+
+  const blocksText = blocks
+    .map((b) => `[${b.id}] ${b.text}`)
+    .join('\n');
+
+  return JSON.stringify({
+    model: MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: `You are a professional translator. Translate the given text blocks to ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}.
+
+Requirements:
+- Keep all block IDs unchanged
+- Keep terminology consistent
+- Use natural ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}
+- Do not omit content
+- Do not summarize
+- Use the translate_blocks tool to return results
+
+Terminology Glossary:
+${glossaryText}
+
+${context ? `Document Context:\n${context}` : ''}`,
+      },
+      {
+        role: 'user',
+        content: `Translate these blocks:\n\n${blocksText}`,
+      },
+    ],
+    tools: [TRANSLATE_TOOL],
+    tool_choice: 'required',
+    reasoning_effort: 'high',
+    output_config: { effort: 'high' },
+    stream: false,
+  });
+}
+
+async function callApi(
+  apiKey: string,
+  body: string
+): Promise<string> {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: buildHeaders(apiKey),
+    body,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('No response from DeepSeek');
+  }
+
+  return content;
+}
+
+async function callApiWithTool(
+  apiKey: string,
+  body: string
+): Promise<Array<{ id: string; translated_text: string }>> {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: buildHeaders(apiKey),
+    body,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const toolCalls = data.choices?.[0]?.message?.tool_calls;
+
+  if (!toolCalls || toolCalls.length === 0) {
+    throw new Error('No tool call returned from DeepSeek');
+  }
+
+  const toolArgs = JSON.parse(toolCalls[0].function.arguments);
+  return toolArgs.translations || [];
+}
+
+export class DeepSeekTranslationService implements TranslationService {
+  private apiKey: string;
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
+
+  async analyzeDocument(
+    text: string,
+    sourceLang: string,
+    targetLang: string
+  ): Promise<DocumentAnalysis> {
+    const body = buildAnalysisBody(text, sourceLang, targetLang);
+    const content = await callApi(this.apiKey, body);
     return JSON.parse(content);
   }
 
   async translate(
-    xmlContent: string,
+    jsonContent: string,
     sourceLang: string,
     targetLang: string,
     glossary: GlossaryEntry[],
     context?: string
   ): Promise<string> {
-    const glossaryText = glossary
-      .map((g) => `${g.term} => ${g.translation}`)
-      .join('\n');
+    const blocks = JSON.parse(jsonContent);
 
-    const prompt = `You are a professional translator.
+    const body = buildTranslationBody(
+      blocks,
+      sourceLang,
+      targetLang,
+      glossary,
+      context
+    );
 
-Requirements:
-- Preserve XML structure
-- Preserve all BLOCK ids unchanged
-- Keep terminology consistent
-- Use natural ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}
-- Do not omit content
-- Do not summarize
-- Return valid XML only
+    const translations = await callApiWithTool(this.apiKey, body);
 
-Terminology Glossary:
-${glossaryText}
-
-${context ? `Document Context:\n${context}\n` : ''}
-
-Translate the following XML to ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}:
-
-${xmlContent}`;
-
-    return callApi(this.apiKey, [{ role: 'user', content: prompt }]);
+    return JSON.stringify(translations);
   }
 }

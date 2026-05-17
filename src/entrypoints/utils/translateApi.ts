@@ -1,6 +1,5 @@
 import { extractBlocks, type TextBlock } from './blockExtractor';
 import { buildChunks, buildContextForChunk, type Chunk } from './chunkBuilder';
-import { parseTranslationXml } from './xmlParser';
 import { analysisCache, translationCache } from './cacheManager';
 
 function generateCacheKey(content: string): string {
@@ -14,12 +13,12 @@ function generateCacheKey(content: string): string {
 }
 
 function generateTranslationCacheKey(
-  xmlContent: string,
+  jsonContent: string,
   sourceLang: string,
   targetLang: string
 ): string {
   let hash = 0;
-  const combined = `${xmlContent}_${sourceLang}_${targetLang}`;
+  const combined = `${jsonContent}_${sourceLang}_${targetLang}`;
   for (let i = 0; i < combined.length; i++) {
     const char = combined.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
@@ -71,7 +70,7 @@ export async function getTranslationTasks(
   return Promise.all(
     chunks.map(async (chunk) => {
       const cacheKey = generateTranslationCacheKey(
-        chunk.xmlContent,
+        chunk.jsonContent,
         sourceLang,
         targetLang
       );
@@ -111,26 +110,17 @@ export function buildTranslationContext(
   return buildContextForChunk(chunk, allChunks, glossaryText, summary);
 }
 
-export function processTranslationResult(xmlResult: string): Map<string, string> {
-  const parsedBlocks = parseTranslationXml(xmlResult);
+export function processTranslationResult(jsonResult: string): Map<string, string> {
+  const translations = JSON.parse(jsonResult);
   const result = new Map<string, string>();
-  for (const block of parsedBlocks) {
-    result.set(block.id, block.translatedText);
+  for (const item of translations) {
+    result.set(item.id, item.translated_text);
   }
   return result;
 }
 
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
 export function prepareSelectionTask(text: string): string {
-  return `<DOC><BLOCK id="b1">${escapeXml(text)}</BLOCK></DOC>`;
+  return JSON.stringify([{ id: 'b1', text }]);
 }
 
 export function clearAllCache(): void {

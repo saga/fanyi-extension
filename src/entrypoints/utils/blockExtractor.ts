@@ -95,6 +95,52 @@ function findLastHeading(element: Element): Element | null {
   return null;
 }
 
+function grabNode(node: Node): Element | false {
+  if (!node || node instanceof Text) return false;
+  if (!(node instanceof Element)) return false;
+
+  const tag = node.tagName.toLowerCase();
+
+  if (SKIP_SET.has(tag)) return false;
+  if (node.classList?.contains('notranslate')) return false;
+  if (node.isContentEditable) return false;
+  if (tag === 'header' || tag === 'footer') return false;
+
+  if (DIRECT_SET.has(tag)) {
+    const text = node.textContent?.trim();
+    if (text && text.length >= 3 && text.length < 3072) {
+      return node;
+    }
+    return false;
+  }
+
+  let hasDirectText = false;
+  let hasNonInlineChild = false;
+  
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+      hasDirectText = true;
+    }
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const childTag = (child as Element).tagName.toLowerCase();
+      if (!INLINE_SET.has(childTag)) {
+        hasNonInlineChild = true;
+      }
+    }
+  }
+
+  if (hasNonInlineChild) return false;
+
+  if (hasDirectText) {
+    const text = node.textContent?.trim();
+    if (text && text.length >= 3 && text.length < 3072) {
+      return node;
+    }
+  }
+
+  return false;
+}
+
 export function extractBlocks(rootNode: Node): TextBlock[] {
   const blocks: TextBlock[] = [];
   let blockId = 0;
@@ -112,19 +158,30 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
 
   const walker = document.createTreeWalker(
     startNode,
-    NodeFilter.SHOW_ELEMENT,
+    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
     {
       acceptNode: (node: Node): number => {
+        if (node instanceof Text) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+
+        if (!(node instanceof Element)) return NodeFilter.FILTER_SKIP;
+
         const el = node as Element;
         const tag = el.tagName.toLowerCase();
 
-        if (SKIP_SET.has(tag)) { skippedCount++; return NodeFilter.FILTER_SKIP; }
-        if (el.classList?.contains('notranslate')) { rejectedCount++; return NodeFilter.FILTER_REJECT; }
-        if (el.isContentEditable) { rejectedCount++; return NodeFilter.FILTER_REJECT; }
-        if (tag === 'header' || tag === 'footer') { skippedCount++; return NodeFilter.FILTER_SKIP; }
+        if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.isContentEditable) {
+          rejectedCount++;
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (tag === 'header' || tag === 'footer') {
+          skippedCount++;
+          return NodeFilter.FILTER_SKIP;
+        }
 
         let hasDirectText = false;
-        let hasNonInlineChild = false;
+        let hasNonEmptyElement = false;
+        let hasOnlyInlineChildren = true;
         
         for (const child of Array.from(el.childNodes)) {
           if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
@@ -132,15 +189,23 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           }
           if (child.nodeType === Node.ELEMENT_NODE) {
             const childTag = (child as Element).tagName.toLowerCase();
+            if ((child as Element).textContent?.trim()) {
+              hasNonEmptyElement = true;
+            }
             if (!INLINE_SET.has(childTag)) {
-              hasNonInlineChild = true;
+              hasOnlyInlineChildren = false;
             }
           }
         }
 
-        if (hasNonInlineChild) { skippedCount++; return NodeFilter.FILTER_SKIP; }
+        // 如果有块级子元素，跳过当前节点（让子元素被单独处理）
+        if (!hasOnlyInlineChildren) {
+          skippedCount++;
+          return NodeFilter.FILTER_SKIP;
+        }
 
-        if (hasDirectText) {
+        // 如果有内联子元素且有文本，接受当前节点（获取完整段落文本）
+        if (hasDirectText || hasNonEmptyElement) {
           const text = el.textContent?.trim();
           if (text && text.length >= 3 && text.length < 3072) {
             acceptedCount++;
@@ -154,21 +219,26 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
     }
   );
 
-  let currentNode: Element | null;
-  while (currentNode = walker.nextNode() as Element) {
-    const text = currentNode.textContent?.trim();
-    if (text) {
-      const id = `b${++blockId}`;
-      blocks.push({
-        id,
-        xpath: getXPath(currentNode),
-        tag: currentNode.tagName.toLowerCase(),
-        text,
-        context: {
-          headingPath: getHeadingPath(currentNode),
-          position: blockId,
-        },
-      });
+  let currentNode: Node | null;
+  while (currentNode = walker.nextNode()) {
+    const translateNode = grabNode(currentNode);
+    if (translateNode) {
+      const text = translateNode.textContent?.trim();
+      if (text) {
+        const id = `b${++blockId}`;
+        blocks.push({
+          id,
+          xpath: getXPath(translateNode),
+          tag: translateNode.tagName.toLowerCase(),
+          text,
+          context: {
+            headingPath: getHeadingPath(translateNode),
+            position: blockId,
+          },
+        });
+      }
+      // 跳过已确定要翻译的节点的所有子节点
+      walker.currentNode = currentNode.nextSibling || currentNode;
     }
   }
 

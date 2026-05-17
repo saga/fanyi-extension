@@ -93,7 +93,8 @@ export default defineContentScript({
         applyTranslations(translationMap, nodeMap, config.mode);
         translatedBlocks = new Set(translationMap.keys());
 
-        setupLazyTranslation(blocks, nodeMap, config.mode);
+        console.log(`[ContentScript] Translation applied: ${translationMap.size} blocks translated`);
+
         setupDynamicContentObserver(config.mode);
 
         showStatus('翻译完成', 'success');
@@ -140,10 +141,12 @@ export default defineContentScript({
       summary: string,
       onProgress?: (current: number, total: number) => void
     ): Promise<Map<string, string>> {
+      console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
       const translationMap = new Map<string, string>();
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
+        console.log(`[ContentScript] Translating chunk ${i + 1}/${chunks.length}, blocks: ${chunk.blocks.length}`);
 
         const context = buildTranslationContext(
           chunk,
@@ -152,16 +155,20 @@ export default defineContentScript({
           summary
         );
 
+        const startTime = Date.now();
         const response = await browser.runtime.sendMessage({
           action: 'translateChunk',
-          xmlContent: chunk.xmlContent,
+          jsonContent: chunk.jsonContent,
           sourceLang,
           targetLang,
           glossary,
           context,
         });
+        const elapsed = Date.now() - startTime;
+        console.log(`[ContentScript] Chunk ${i + 1} response time: ${elapsed}ms, success: ${response.success}`);
 
         if (response.success) {
+          console.log(`[ContentScript] Chunk ${i + 1} result blocks:`, response.result?.length || 0);
           for (const [id, text] of response.result) {
             translationMap.set(id, text);
           }
@@ -172,6 +179,7 @@ export default defineContentScript({
         onProgress?.(i + 1, chunks.length);
       }
 
+      console.log('[ContentScript] translateChunksViaBackground complete, total blocks:', translationMap.size);
       return translationMap;
     }
 
@@ -223,71 +231,6 @@ export default defineContentScript({
       node.dataset.originalText = originalText;
     }
 
-    function setupLazyTranslation(
-      blocks: TextBlock[],
-      nodeMap: Map<string, Node>,
-      mode: 'bilingual' | 'target'
-    ) {
-      const untranslatedBlocks = blocks.filter(
-        (b) => !translatedBlocks.has(b.id)
-      );
-
-      if (untranslatedBlocks.length === 0) return;
-
-      const lazyObserver = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (entry.isIntersecting) {
-              const blockId = (entry.target as HTMLElement).dataset.blockId;
-              if (blockId && originalTexts.has(blockId)) {
-                translateBlockLazy(blockId, entry.target as HTMLElement, mode);
-              }
-              lazyObserver.unobserve(entry.target);
-            }
-          }
-        },
-        {
-          root: null,
-          rootMargin: '200px',
-          threshold: 0.1,
-        }
-      );
-
-      for (const block of untranslatedBlocks) {
-        const node = nodeMap.get(block.id);
-        if (node && node instanceof HTMLElement) {
-          node.dataset.blockId = block.id;
-          lazyObserver.observe(node);
-        }
-      }
-    }
-
-    async function translateBlockLazy(
-      blockId: string,
-      node: HTMLElement,
-      mode: 'bilingual' | 'target'
-    ) {
-      const originalText = originalTexts.get(blockId);
-      if (!originalText) return;
-
-      try {
-        const config = await getConfig();
-        const response = await browser.runtime.sendMessage({
-          action: 'translateSelection',
-          text: originalText,
-          sourceLang: config.sourceLang,
-          targetLang: config.targetLang,
-        });
-
-        if (response.success) {
-          applyBlockTranslation(node, response.translated, mode);
-          translatedBlocks.add(blockId);
-        }
-      } catch (error) {
-        console.error(`Lazy translation failed for block ${blockId}:`, error);
-      }
-    }
-
     function setupDynamicContentObserver(mode: 'bilingual' | 'target') {
       if (domObserver) {
         domObserver.destroy();
@@ -295,9 +238,10 @@ export default defineContentScript({
 
       domObserver = new DOMObserverManager(
         async (newBlocks: TextBlock[]) => {
+          console.log('[ContentScript] Dynamic content detected:', newBlocks.length, 'new blocks');
+          
           for (const block of newBlocks) {
             if (block.text && block.text.length > 10) {
-              originalTexts.set(block.id, block.text);
               try {
                 const config = await getConfig();
                 const response = await browser.runtime.sendMessage({
@@ -308,10 +252,13 @@ export default defineContentScript({
                 });
 
                 if (response.success) {
-                  const node = findNodeByBlockId(block.id);
+                  const node = findNodeByText(block.text);
                   if (node) {
                     applyBlockTranslation(node, response.translated, mode);
                     translatedBlocks.add(block.id);
+                    console.log('[ContentScript] Dynamic block translated:', block.id);
+                  } else {
+                    console.warn('[ContentScript] Could not find node for block:', block.id);
                   }
                 }
               } catch (error) {
@@ -327,11 +274,24 @@ export default defineContentScript({
       domObserver.startMutationObserver();
     }
 
-    function findNodeByBlockId(blockId: string): HTMLElement | null {
-      const allElements = document.querySelectorAll('[data-block-id]');
-      for (const el of Array.from(allElements)) {
-        if ((el as HTMLElement).dataset.blockId === blockId) {
-          return el as HTMLElement;
+    function findNodeByText(text: string): HTMLElement | null {
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: (node: Node): number => {
+            const el = node as Element;
+            if (el.classList.contains('fanyi-translated')) return NodeFilter.FILTER_REJECT;
+            if (el.textContent?.trim() === text) return NodeFilter.FILTER_ACCEPT;
+            return NodeFilter.FILTER_SKIP;
+          }
+        }
+      );
+
+      let current: Element | null;
+      while (current = walker.nextNode() as Element) {
+        if (current.textContent?.trim() === text) {
+          return current;
         }
       }
       return null;

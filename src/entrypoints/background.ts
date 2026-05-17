@@ -15,6 +15,21 @@ import {
 } from './utils/translateApi';
 import { globalQueue } from './utils/translationQueue';
 
+function generateTranslationCacheKey(
+  jsonContent: string,
+  sourceLang: string,
+  targetLang: string
+): string {
+  let hash = 0;
+  const combined = `${jsonContent}_${sourceLang}_${targetLang}`;
+  for (let i = 0; i < combined.length; i++) {
+    const char = combined.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return `translation_${Math.abs(hash)}`;
+}
+
 export default defineBackground(() => {
   console.log('Background script loaded');
 
@@ -180,10 +195,17 @@ export default defineBackground(() => {
         return;
       }
 
-      const { xmlContent, sourceLang, targetLang, glossary, context, cacheKey } = message;
+      const { jsonContent, sourceLang, targetLang, glossary, context, cacheKey: providedCacheKey } = message;
+
+      // 如果没有提供 cacheKey，根据 jsonContent 生成
+      const cacheKey = providedCacheKey || generateTranslationCacheKey(jsonContent, sourceLang, targetLang);
 
       const cached = await getCachedTranslation(cacheKey);
-      if (cached) {
+      const hasValidCache = cached && (cached instanceof Map ? cached.size > 0 : Object.keys(cached).length > 0);
+      
+      console.log('[Background] translateChunk cache check:', { cacheKey, hasCache: !!cached, hasValidCache });
+
+      if (hasValidCache) {
         const resultArray = cached instanceof Map 
           ? Array.from(cached.entries()) 
           : Object.entries(cached);
@@ -192,12 +214,15 @@ export default defineBackground(() => {
         return;
       }
 
+      console.log('[Background] Calling DeepSeek API for translation...');
       const service = getService(config.deepseekApiKey);
-      const xmlResult = await globalQueue.add(() =>
-        service.translate(xmlContent, sourceLang, targetLang, glossary, context)
+      const jsonResult = await globalQueue.add(() =>
+        service.translate(jsonContent, sourceLang, targetLang, glossary, context)
       );
+      console.log('[Background] Translation API response length:', jsonResult?.length || 0);
 
-      const result = processTranslationResult(xmlResult);
+      const result = processTranslationResult(jsonResult);
+      console.log('[Background] Parsed translation blocks:', result.size);
       await cacheTranslation(cacheKey, result);
 
       sendResponse({ success: true, result: Array.from(result.entries()) });
@@ -221,7 +246,7 @@ export default defineBackground(() => {
       }
 
       const { text, sourceLang, targetLang } = message;
-      const xmlContent = prepareSelectionTask(text);
+      const jsonContent = prepareSelectionTask(text);
       const cacheKey = `selection_${text.length}_${sourceLang}_${targetLang}`;
 
       const cached = await getCachedTranslation(cacheKey);
@@ -231,11 +256,11 @@ export default defineBackground(() => {
       }
 
       const service = getService(config.deepseekApiKey);
-      const xmlResult = await globalQueue.add(() =>
-        service.translate(xmlContent, sourceLang, targetLang, [])
+      const jsonResult = await globalQueue.add(() =>
+        service.translate(jsonContent, sourceLang, targetLang, [])
       );
 
-      const result = processTranslationResult(xmlResult);
+      const result = processTranslationResult(jsonResult);
       const translated = result.get('b1') || text;
 
       await cacheTranslation(cacheKey, new Map([['b1', translated]]));

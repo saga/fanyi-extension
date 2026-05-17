@@ -25,7 +25,7 @@ export interface TranslationService {
   ): Promise<DocumentAnalysis>;
 
   translate(
-    xmlContent: string,
+    jsonContent: string,
     sourceLang: string,
     targetLang: string,
     glossary: GlossaryEntry[],
