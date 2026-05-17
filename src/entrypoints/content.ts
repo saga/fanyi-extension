@@ -1,6 +1,5 @@
 import {
   prepareDocument,
-  buildTranslationContext,
   type Chunk,
 } from './utils/contentHelper';
 import { buildNodeMap } from './utils/blockExtractor';
@@ -39,13 +38,13 @@ export default defineContentScript({
       if (!config.enabled) return;
 
       isTranslating = true;
-      showStatus('正在分析文档...', 'loading');
+      showStatus('正在提取文本...', 'loading');
 
       try {
         console.log('[ContentScript] Calling prepareDocument...');
         const { blocks, chunks, fullText } = prepareDocument(document);
         console.log('[ContentScript] prepareDocument result:', { blocksCount: blocks.length, chunksCount: chunks.length, fullTextLength: fullText.length });
-        console.log(`[ContentScript] API Request Estimate: 1 (analysis) + ${chunks.length} (translation) = ${1 + chunks.length} requests`);
+        console.log(`[ContentScript] API Request Estimate: ${chunks.length} requests (concurrent)`);
 
         if (blocks.length === 0) {
           console.warn('[ContentScript] No blocks found! Page structure:');
@@ -54,37 +53,18 @@ export default defineContentScript({
           throw new Error('No translatable content found');
         }
 
-        console.log('[ContentScript] Sending analyzeDocument message to background...');
-        const response = await browser.runtime.sendMessage({
-          action: 'analyzeDocument',
-          fullText,
-          sourceLang: config.sourceLang,
-          targetLang: config.targetLang,
-        });
-        console.log('[ContentScript] Background response:', response);
-
-        if (!response.success) throw new Error(response.error);
-        const analysis = response.analysis;
-
         showStatus(
-          `分析完成，共 ${blocks.length} 个文本块，${chunks.length} 个翻译块`,
+          `共 ${blocks.length} 个文本块，${chunks.length} 个翻译块`,
           'loading'
         );
 
         const nodeMap = buildNodeMap(blocks, document);
         saveOriginalTexts(blocks, nodeMap);
 
-        const glossaryText = analysis.glossary
-          .map((g: { term: string; translation: string }) => `${g.term} => ${g.translation}`)
-          .join('\n');
-
         const translationMap = await translateChunksViaBackground(
           chunks,
           config.sourceLang,
           config.targetLang,
-          analysis.glossary,
-          glossaryText,
-          analysis.summary,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
           }
@@ -136,24 +116,16 @@ export default defineContentScript({
       chunks: Chunk[],
       sourceLang: string,
       targetLang: string,
-      glossary: Array<{ term: string; translation: string }>,
-      glossaryText: string,
-      summary: string,
       onProgress?: (current: number, total: number) => void
     ): Promise<Map<string, string>> {
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
       const translationMap = new Map<string, string>();
+      const concurrency = 3;
+      let completedCount = 0;
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        console.log(`[ContentScript] Translating chunk ${i + 1}/${chunks.length}, blocks: ${chunk.blocks.length}`);
-
-        const context = buildTranslationContext(
-          chunk,
-          chunks,
-          glossaryText,
-          summary
-        );
+      async function translateChunk(index: number): Promise<void> {
+        const chunk = chunks[index];
+        console.log(`[ContentScript] Translating chunk ${index + 1}/${chunks.length}, blocks: ${chunk.blocks.length}`);
 
         const startTime = Date.now();
         const response = await browser.runtime.sendMessage({
@@ -161,14 +133,12 @@ export default defineContentScript({
           jsonContent: chunk.jsonContent,
           sourceLang,
           targetLang,
-          glossary,
-          context,
         });
         const elapsed = Date.now() - startTime;
-        console.log(`[ContentScript] Chunk ${i + 1} response time: ${elapsed}ms, success: ${response.success}`);
+        console.log(`[ContentScript] Chunk ${index + 1} response time: ${elapsed}ms, success: ${response.success}`);
 
         if (response.success) {
-          console.log(`[ContentScript] Chunk ${i + 1} result blocks:`, response.result?.length || 0);
+          console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
           for (const [id, text] of response.result) {
             translationMap.set(id, text);
           }
@@ -176,9 +146,22 @@ export default defineContentScript({
           console.error(`Chunk ${chunk.id} translation failed:`, response.error);
         }
 
-        onProgress?.(i + 1, chunks.length);
+        completedCount++;
+        onProgress?.(completedCount, chunks.length);
       }
 
+      async function worker(startIndex: number): Promise<void> {
+        for (let i = startIndex; i < chunks.length; i += concurrency) {
+          await translateChunk(i);
+        }
+      }
+
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < concurrency && i < chunks.length; i++) {
+        workers.push(worker(i));
+      }
+
+      await Promise.all(workers);
       console.log('[ContentScript] translateChunksViaBackground complete, total blocks:', translationMap.size);
       return translationMap;
     }

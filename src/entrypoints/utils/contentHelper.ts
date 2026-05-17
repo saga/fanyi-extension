@@ -1,5 +1,5 @@
 import { extractBlocks, type TextBlock } from './blockExtractor';
-import { buildChunks, buildContextForChunk, type Chunk } from './chunkBuilder';
+import { buildChunks, type Chunk } from './chunkBuilder';
 
 export function prepareDocument(root: Document | Element): {
   blocks: TextBlock[];
@@ -20,15 +20,6 @@ export function prepareDocument(root: Document | Element): {
   const chunks = buildChunks(blocks);
 
   return { blocks, chunks, fullText };
-}
-
-export function buildTranslationContext(
-  chunk: Chunk,
-  allChunks: Chunk[],
-  glossaryText: string,
-  summary: string
-): string {
-  return buildContextForChunk(chunk, allChunks, glossaryText, summary);
 }
 
 export type { TextBlock, Chunk };

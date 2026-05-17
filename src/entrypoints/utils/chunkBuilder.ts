@@ -8,7 +8,7 @@ export interface Chunk {
 }
 
 const MAX_INPUT_TOKENS = 500000;
-const TARGET_TOKENS = 400000;
+const TARGET_TOKENS = 3000;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -22,11 +22,6 @@ function buildJsonContent(blocks: TextBlock[]): string {
 
 function isStructuralBoundary(block: TextBlock): boolean {
   return /^h[1-6]$/.test(block.tag);
-}
-
-function getSectionLevel(block: TextBlock): number {
-  const match = block.tag.match(/^h(\d)$/);
-  return match ? parseInt(match[1]) : 0;
 }
 
 export function buildChunks(blocks: TextBlock[]): Chunk[] {
@@ -104,36 +99,4 @@ function findNextBoundary(blocks: TextBlock[], startIndex: number): number | nul
     if (isStructuralBoundary(blocks[i])) return i;
   }
   return null;
-}
-
-export function buildContextForChunk(
-  chunk: Chunk,
-  allChunks: Chunk[],
-  glossaryText: string,
-  documentSummary: string
-): string {
-  const currentIndex = allChunks.findIndex((c) => c.id === chunk.id);
-  const parts: string[] = [];
-
-  if (documentSummary) {
-    parts.push(`Document Summary:\n${documentSummary}`);
-  }
-
-  if (currentIndex > 0) {
-    const prevChunk = allChunks[currentIndex - 1];
-    const prevHeadings = prevChunk.blocks
-      .filter((b) => isStructuralBoundary(b))
-      .map((b) => b.text)
-      .join(' → ');
-
-    if (prevHeadings) {
-      parts.push(`Previous Section Headings:\n${prevHeadings}`);
-    }
-  }
-
-  if (glossaryText) {
-    parts.push(`Terminology Glossary:\n${glossaryText}`);
-  }
-
-  return parts.join('\n\n');
 }

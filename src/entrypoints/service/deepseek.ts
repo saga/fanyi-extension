@@ -14,57 +14,11 @@ function buildHeaders(apiKey: string): Record<string, string> {
   };
 }
 
-function buildAnalysisBody(
-  text: string,
-  sourceLang: string,
-  targetLang: string
-) {
-  return JSON.stringify({
-    model: MODEL,
-    messages: [
-      {
-        role: 'user',
-        content: `You are a professional translator and document analyst.
-
-Analyze the following document and extract:
-1. Domain/field of the document
-2. Tone/style
-3. Key technical terms with their preferred translations
-4. A brief summary
-
-Source Language: ${sourceLang}
-Target Language: ${targetLang}
-
-Return ONLY a valid JSON object with this structure:
-{
-  "domain": "string",
-  "tone": "string",
-  "glossary": [{"term": "string", "translation": "string"}],
-  "summary": "string"
-}
-
-Document:
-${text.substring(0, 8000)}`,
-      },
-    ],
-    response_format: { type: 'json_object' },
-    reasoning_effort: 'high',
-    output_config: { effort: 'high' },
-    stream: false,
-  });
-}
-
 function buildTranslationBody(
   blocks: Array<{ id: string; text: string }>,
   sourceLang: string,
-  targetLang: string,
-  glossary: GlossaryEntry[],
-  context?: string
+  targetLang: string
 ) {
-  const glossaryText = glossary
-    .map((g) => `${g.term} => ${g.translation}`)
-    .join('\n');
-
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
     null,
@@ -83,10 +37,7 @@ Rules:
 - Consistent terminology
 - Natural translation
 - No omissions
-- Return JSON only
-
-Glossary: ${glossaryText}
-${context ? `Context: ${context}` : ''}`,
+- Return JSON only`,
       },
       {
         role: 'user',
@@ -132,30 +83,31 @@ export class DeepSeekTranslationService implements TranslationService {
   }
 
   async analyzeDocument(
-    text: string,
-    sourceLang: string,
-    targetLang: string
+    _text: string,
+    _sourceLang: string,
+    _targetLang: string
   ): Promise<DocumentAnalysis> {
-    const body = buildAnalysisBody(text, sourceLang, targetLang);
-    const content = await callApi(this.apiKey, body);
-    return JSON.parse(content);
+    return {
+      domain: '',
+      tone: '',
+      glossary: [],
+      summary: '',
+    };
   }
 
   async translate(
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: GlossaryEntry[],
-    context?: string
+    _glossary: GlossaryEntry[],
+    _context?: string
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
 
     const body = buildTranslationBody(
       blocks,
       sourceLang,
-      targetLang,
-      glossary,
-      context
+      targetLang
     );
 
     return await callApi(this.apiKey, body);
