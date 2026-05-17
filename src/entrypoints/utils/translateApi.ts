@@ -111,7 +111,8 @@ export function buildTranslationContext(
 }
 
 export function processTranslationResult(jsonResult: string): Map<string, string> {
-  const translations = JSON.parse(jsonResult);
+  const parsed = JSON.parse(jsonResult);
+  const translations = parsed.translations || parsed;
   const result = new Map<string, string>();
   for (const item of translations) {
     result.set(item.id, item.translated_text);

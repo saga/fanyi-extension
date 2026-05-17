@@ -7,41 +7,6 @@ import type {
 const API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 
-const TRANSLATE_TOOL = {
-  type: 'function',
-  function: {
-    name: 'translate_blocks',
-    description: 'Translate text blocks and return the results as a JSON array',
-    strict: true,
-    parameters: {
-      type: 'object',
-      properties: {
-        translations: {
-          type: 'array',
-          description: 'Array of translated blocks',
-          items: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                description: 'The original block ID',
-              },
-              translated_text: {
-                type: 'string',
-                description: 'The translated text',
-              },
-            },
-            required: ['id', 'translated_text'],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ['translations'],
-      additionalProperties: false,
-    },
-  },
-};
-
 function buildHeaders(apiKey: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -100,9 +65,11 @@ function buildTranslationBody(
     .map((g) => `${g.term} => ${g.translation}`)
     .join('\n');
 
-  const blocksText = blocks
-    .map((b) => `[${b.id}] ${b.text}`)
-    .join('\n');
+  const blocksJson = JSON.stringify(
+    blocks.map((b) => ({ id: b.id, text: b.text })),
+    null,
+    2
+  );
 
   return JSON.stringify({
     model: MODEL,
@@ -117,7 +84,7 @@ Requirements:
 - Use natural ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}
 - Do not omit content
 - Do not summarize
-- Use the translate_blocks tool to return results
+- Return ONLY a valid JSON object with a "translations" key containing an array
 
 Terminology Glossary:
 ${glossaryText}
@@ -126,11 +93,10 @@ ${context ? `Document Context:\n${context}` : ''}`,
       },
       {
         role: 'user',
-        content: `Translate these blocks:\n\n${blocksText}`,
+        content: `Translate these blocks and return:\n{\n  "translations": [\n    {"id": "b1", "translated_text": "译文1"},\n    {"id": "b2", "translated_text": "译文2"}\n  ]\n}\n\nBlocks:\n${blocksJson}`,
       },
     ],
-    tools: [TRANSLATE_TOOL],
-    tool_choice: 'required',
+    response_format: { type: 'json_object' },
     reasoning_effort: 'high',
     output_config: { effort: 'high' },
     stream: false,
@@ -160,32 +126,6 @@ async function callApi(
   }
 
   return content;
-}
-
-async function callApiWithTool(
-  apiKey: string,
-  body: string
-): Promise<Array<{ id: string; translated_text: string }>> {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: buildHeaders(apiKey),
-    body,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
-  }
-
-  const data = await response.json();
-  const toolCalls = data.choices?.[0]?.message?.tool_calls;
-
-  if (!toolCalls || toolCalls.length === 0) {
-    throw new Error('No tool call returned from DeepSeek');
-  }
-
-  const toolArgs = JSON.parse(toolCalls[0].function.arguments);
-  return toolArgs.translations || [];
 }
 
 export class DeepSeekTranslationService implements TranslationService {
@@ -222,8 +162,6 @@ export class DeepSeekTranslationService implements TranslationService {
       context
     );
 
-    const translations = await callApiWithTool(this.apiKey, body);
-
-    return JSON.stringify(translations);
+    return await callApi(this.apiKey, body);
   }
 }
