@@ -11,6 +11,8 @@
         @change="saveConfig"
       />
 
+      <el-divider content-position="left">翻译设置</el-divider>
+
       <el-select v-model="config.sourceLang" placeholder="源语言" @change="saveConfig">
         <el-option label="自动检测" value="auto" />
         <el-option label="英语" value="en" />
@@ -28,6 +30,47 @@
         <el-radio label="bilingual">双语对照</el-radio>
         <el-radio label="target">仅译文</el-radio>
       </el-radio-group>
+
+      <el-divider content-position="left">快捷键设置</el-divider>
+
+      <div class="shortcuts">
+        <div class="shortcut-item">
+          <span class="shortcut-label">翻译页面</span>
+          <el-input
+            v-model="config.shortcuts.translatePage"
+            placeholder="Alt+T"
+            size="small"
+            @change="saveConfig"
+          />
+        </div>
+        <div class="shortcut-item">
+          <span class="shortcut-label">划词翻译</span>
+          <el-input
+            v-model="config.shortcuts.translateSelection"
+            placeholder="Alt+S"
+            size="small"
+            @change="saveConfig"
+          />
+        </div>
+        <div class="shortcut-item">
+          <span class="shortcut-label">恢复原文</span>
+          <el-input
+            v-model="config.shortcuts.restoreOriginal"
+            placeholder="Alt+R"
+            size="small"
+            @change="saveConfig"
+          />
+        </div>
+        <div class="shortcut-item">
+          <span class="shortcut-label">切换译文</span>
+          <el-input
+            v-model="config.shortcuts.toggleTranslation"
+            placeholder="Alt+V"
+            size="small"
+            @change="saveConfig"
+          />
+        </div>
+      </div>
 
       <div class="actions">
         <el-button @click="restoreOriginal" size="small">恢复原文</el-button>
@@ -47,6 +90,12 @@ const config = ref<Config>({
   targetLang: 'zh',
   mode: 'bilingual',
   deepseekApiKey: '',
+  shortcuts: {
+    translatePage: 'Alt+T',
+    translateSelection: 'Alt+S',
+    restoreOriginal: 'Alt+R',
+    toggleTranslation: 'Alt+V',
+  },
 });
 
 onMounted(async () => {
@@ -72,7 +121,7 @@ async function clearCache() {
 <style scoped>
 .popup-container {
   padding: 16px;
-  min-width: 300px;
+  min-width: 320px;
 }
 
 h2 {
@@ -86,10 +135,33 @@ h2 {
   gap: 12px;
 }
 
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shortcut-label {
+  font-size: 14px;
+  color: #606266;
+  min-width: 80px;
+}
+
 .actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+.el-divider {
+  margin: 8px 0;
 }
 </style>

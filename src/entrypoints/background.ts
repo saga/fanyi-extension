@@ -27,6 +27,28 @@ export default defineBackground(() => {
       title: '切换译文显示',
       contexts: ['page'],
     });
+
+    registerCommands();
+  });
+
+  browser.commands.onCommand.addListener(async (command) => {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+
+    switch (command) {
+      case 'translate-page':
+        browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+        break;
+      case 'translate-selection':
+        browser.tabs.sendMessage(tab.id, { action: 'translateSelection' });
+        break;
+      case 'restore-original':
+        browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+        break;
+      case 'toggle-translation':
+        browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
+        break;
+    }
   });
 
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -104,6 +126,15 @@ export default defineBackground(() => {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+    }
+  }
+
+  async function registerCommands() {
+    try {
+      const commands = await browser.commands.getAll();
+      console.log('Registered commands:', commands);
+    } catch (error) {
+      console.warn('Commands API not available:', error);
     }
   }
 });

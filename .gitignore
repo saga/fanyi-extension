@@ -7,6 +7,8 @@
 /.angular/
 .angular/
 
+output/
+
 temp/
 
 # Node modules and dependency files

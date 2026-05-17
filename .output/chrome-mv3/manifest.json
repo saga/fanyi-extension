@@ -1,1 +1,0 @@
-{"manifest_version":3,"name":"fanyi-extension","description":"浏览器翻译插件 - 支持 Chrome, Firefox, Android Firefox","version":"0.2.0","permissions":["storage","contextMenus"],"background":{"service_worker":"background.js"},"action":{"default_title":"翻译插件","default_popup":"popup.html"},"content_scripts":[{"matches":["*://*/*"],"js":["content-scripts/content.js"]}]}

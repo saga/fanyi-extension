@@ -1,5 +1,12 @@
 import { storage } from '@wxt-dev/storage';
 
+export interface ShortcutConfig {
+  translatePage: string;
+  translateSelection: string;
+  restoreOriginal: string;
+  toggleTranslation: string;
+}
+
 export interface Config {
   enabled: boolean;
   sourceLang: string;
@@ -7,6 +14,7 @@ export interface Config {
   mode: 'bilingual' | 'target';
   deepseekApiKey: string;
   floatingBallPosition?: { x: number; y: number };
+  shortcuts: ShortcutConfig;
 }
 
 const defaultConfig: Config = {
@@ -15,6 +23,12 @@ const defaultConfig: Config = {
   targetLang: 'zh',
   mode: 'bilingual',
   deepseekApiKey: '',
+  shortcuts: {
+    translatePage: 'Alt+T',
+    translateSelection: 'Alt+S',
+    restoreOriginal: 'Alt+R',
+    toggleTranslation: 'Alt+V',
+  },
 };
 
 export async function getConfig(): Promise<Config> {
