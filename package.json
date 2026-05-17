@@ -1,6 +1,6 @@
 {
   "name": "fanyi-extension",
-  "version": "0.4.9",
+  "version": "0.5.1",
   "description": "浏览器翻译插件 - 支持 Chrome, Firefox, Android Firefox",
   "homepage": "https://github.com/saga/fanyi-extension#readme",
   "bugs": {
@@ -20,6 +20,8 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -30,7 +32,9 @@
   "devDependencies": {
     "@types/dompurify": "^3.2.0",
     "@wxt-dev/module-vue": "^1.0.3",
+    "jsdom": "^29.1.1",
     "typescript": "^6.0.3",
+    "vitest": "^4.1.6",
     "wxt": "^0.20.26"
   }
 }

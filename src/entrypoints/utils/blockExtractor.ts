@@ -17,7 +17,8 @@ const DIRECT_SET = new Set([
 
 const SKIP_SET = new Set([
   'html', 'body', 'script', 'style', 'noscript', 'iframe',
-  'input', 'textarea', 'select', 'button', 'code', 'pre'
+  'input', 'textarea', 'select', 'button', 'code', 'pre',
+  'dt'
 ]);
 
 const SKIP_CLASS_PATTERNS = [
@@ -135,16 +136,14 @@ function grabNode(node: Node): Element | false {
   if (SKIP_SET.has(tag)) return false;
   if (node.classList?.contains('notranslate')) return false;
   if (shouldSkipByClass(node) && !isInArticleContext(node)) return false;
-  if (node.isContentEditable) return false;
+  if (node.isContentEditable || node.getAttribute('contenteditable') === 'true') return false;
   if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') return false;
+  if (INLINE_SET.has(tag)) return false;
 
   if (DIRECT_SET.has(tag)) {
     const text = node.textContent?.trim();
     if (text && text.length >= 3 && text.length < 3072) {
       return node;
-    }
-    if (text) {
-      console.log('[BlockExtractor] grabNode REJECTED', tag, 'length:', text.length, 'text:', text.substring(0, 60));
     }
     return false;
   }
@@ -182,15 +181,12 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   let skippedCount = 0;
   let rejectedCount = 0;
   let acceptedCount = 0;
-  let debugSkippedClasses: string[] = [];
 
   const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
   if (!startNode) {
     console.warn('[BlockExtractor] No valid start node found');
     return [];
   }
-
-  console.log('[BlockExtractor] Starting extraction from:', startNode.nodeName);
 
   const walker = document.createTreeWalker(
     startNode,
@@ -206,18 +202,17 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
         const el = node as Element;
         const tag = el.tagName.toLowerCase();
 
-        if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.isContentEditable) {
+        if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
         }
         if (shouldSkipByClass(el) && !isInArticleContext(el)) {
-          debugSkippedClasses.push(`${tag}.${Array.from(el.classList || []).join('.')}`);
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
         }
         if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') {
           skippedCount++;
-          return NodeFilter.FILTER_SKIP;
+          return NodeFilter.FILTER_REJECT;
         }
 
         // DIRECT_SET 标签直接接受，不检查子元素类型
@@ -263,9 +258,6 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
             acceptedCount++;
             return NodeFilter.FILTER_ACCEPT;
           }
-          if (text && (text.length < 3 || text.length >= 3072)) {
-            console.log('[BlockExtractor] REJECTED by length:', text.length, 'tag:', tag, 'text:', text.substring(0, 60));
-          }
         }
 
         skippedCount++;
@@ -298,9 +290,6 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   }
 
   console.log(`[BlockExtractor] Extraction complete: accepted=${acceptedCount}, skipped=${skippedCount}, rejected=${rejectedCount}, totalBlocks=${blocks.length}`);
-  if (debugSkippedClasses.length > 0) {
-    console.log('[BlockExtractor] Elements skipped by class pattern:', [...new Set(debugSkippedClasses)].slice(0, 20));
-  }
   if (blocks.length > 0) {
     console.log('[BlockExtractor] First 3 blocks:', blocks.slice(0, 3).map(b => ({ id: b.id, tag: b.tag, text: b.text.substring(0, 50) })));
   }
