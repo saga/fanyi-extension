@@ -1,6 +1,8 @@
 import { analyzeDocument, translateChunks, translateText } from './utils/translateApi';
 import { buildNodeMap } from './utils/blockExtractor';
 import { getConfig } from './utils/config';
+import { DOMObserverManager } from './utils/domObserver';
+import type { TextBlock } from './utils/blockExtractor';
 
 export default defineContentScript({
   matches: ['*://*/*'],
@@ -9,12 +11,24 @@ export default defineContentScript({
 
     let isTranslating = false;
     let translationOverlay: HTMLElement | null = null;
+    let originalTexts = new Map<string, string>();
+    let translatedBlocks = new Set<string>();
+    let domObserver: DOMObserverManager | null = null;
+
+    const PROCESSABLE_TAGS = new Set([
+      'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+      'TD', 'TH', 'CAPTION', 'FIGCAPTION', 'LABEL', 'LEGEND',
+    ]);
 
     browser.runtime.onMessage.addListener(async (message) => {
       if (message.action === 'translatePage') {
         await handleFullTranslation();
       } else if (message.action === 'translateSelection') {
         await handleSelectionTranslation(message.text);
+      } else if (message.action === 'restoreOriginal') {
+        restoreOriginal();
+      } else if (message.action === 'toggleTranslation') {
+        toggleTranslation();
       }
     });
 
@@ -37,6 +51,8 @@ export default defineContentScript({
 
         const nodeMap = buildNodeMap(blocks, document);
 
+        saveOriginalTexts(blocks, nodeMap);
+
         const translationMap = await translateChunks(
           chunks,
           analysis,
@@ -46,8 +62,12 @@ export default defineContentScript({
         );
 
         applyTranslations(translationMap, nodeMap, config.mode);
-        showStatus('翻译完成', 'success');
+        translatedBlocks = new Set(translationMap.keys());
 
+        setupLazyTranslation(blocks, nodeMap, config.mode);
+        setupDynamicContentObserver(config.mode);
+
+        showStatus('翻译完成', 'success');
         setTimeout(() => hideStatus(), 2000);
       } catch (error) {
         console.error('Translation failed:', error);
@@ -71,6 +91,15 @@ export default defineContentScript({
       }
     }
 
+    function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
+      for (const block of blocks) {
+        const node = nodeMap.get(block.id);
+        if (node && node instanceof HTMLElement) {
+          originalTexts.set(block.id, node.textContent || '');
+        }
+      }
+    }
+
     function applyTranslations(
       translationMap: Map<string, string>,
       nodeMap: Map<string, Node>,
@@ -80,28 +109,166 @@ export default defineContentScript({
         const node = nodeMap.get(blockId);
         if (!node || !(node instanceof HTMLElement)) continue;
 
-        const originalText = node.textContent || '';
+        applyBlockTranslation(node, translatedText, mode);
+      }
+    }
 
-        if (mode === 'bilingual') {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'fanyi-bilingual-block';
-          wrapper.innerHTML = `
-            <div class="fanyi-source">${escapeHtml(originalText)}</div>
-            <div class="fanyi-target">${escapeHtml(translatedText)}</div>
-          `;
+    function applyBlockTranslation(
+      node: HTMLElement,
+      translatedText: string,
+      mode: 'bilingual' | 'target'
+    ) {
+      if (node.classList.contains('fanyi-translated')) return;
 
-          node.textContent = '';
-          node.appendChild(wrapper);
-        } else {
-          node.textContent = translatedText;
+      const originalText = node.textContent || '';
+
+      if (mode === 'bilingual') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'fanyi-bilingual-block';
+        wrapper.innerHTML = `
+          <div class="fanyi-source">${escapeHtml(originalText)}</div>
+          <div class="fanyi-target">${escapeHtml(translatedText)}</div>
+        `;
+
+        node.textContent = '';
+        node.appendChild(wrapper);
+      } else {
+        node.textContent = translatedText;
+      }
+
+      node.classList.add('fanyi-translated');
+      node.dataset.originalText = originalText;
+    }
+
+    function setupLazyTranslation(
+      blocks: TextBlock[],
+      nodeMap: Map<string, Node>,
+      mode: 'bilingual' | 'target'
+    ) {
+      const untranslatedBlocks = blocks.filter(
+        (b) => !translatedBlocks.has(b.id)
+      );
+
+      if (untranslatedBlocks.length === 0) return;
+
+      const lazyObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              const blockId = (entry.target as HTMLElement).dataset.blockId;
+              if (blockId && originalTexts.has(blockId)) {
+                translateBlockLazy(blockId, entry.target as HTMLElement, mode);
+              }
+              lazyObserver.unobserve(entry.target);
+            }
+          }
+        },
+        {
+          root: null,
+          rootMargin: '200px',
+          threshold: 0.1,
+        }
+      );
+
+      for (const block of untranslatedBlocks) {
+        const node = nodeMap.get(block.id);
+        if (node && node instanceof HTMLElement) {
+          node.dataset.blockId = block.id;
+          lazyObserver.observe(node);
         }
       }
     }
 
-    function escapeHtml(text: string): string {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
+    async function translateBlockLazy(
+      blockId: string,
+      node: HTMLElement,
+      mode: 'bilingual' | 'target'
+    ) {
+      const originalText = originalTexts.get(blockId);
+      if (!originalText) return;
+
+      try {
+        const translated = await translateText(originalText);
+        applyBlockTranslation(node, translated, mode);
+        translatedBlocks.add(blockId);
+      } catch (error) {
+        console.error(`Lazy translation failed for block ${blockId}:`, error);
+      }
+    }
+
+    function setupDynamicContentObserver(mode: 'bilingual' | 'target') {
+      if (domObserver) {
+        domObserver.destroy();
+      }
+
+      domObserver = new DOMObserverManager(
+        async (newBlocks: TextBlock[]) => {
+          for (const block of newBlocks) {
+            if (block.text && block.text.length > 10) {
+              originalTexts.set(block.id, block.text);
+              try {
+                const translated = await translateText(block.text);
+                const node = findNodeByBlockId(block.id);
+                if (node) {
+                  applyBlockTranslation(node, translated, mode);
+                  translatedBlocks.add(block.id);
+                }
+              } catch (error) {
+                console.error('Dynamic content translation failed:', error);
+              }
+            }
+          }
+        },
+        () => {},
+        1000
+      );
+
+      domObserver.startMutationObserver();
+    }
+
+    function findNodeByBlockId(blockId: string): HTMLElement | null {
+      const allElements = document.querySelectorAll('[data-block-id]');
+      for (const el of Array.from(allElements)) {
+        if ((el as HTMLElement).dataset.blockId === blockId) {
+          return el as HTMLElement;
+        }
+      }
+      return null;
+    }
+
+    function restoreOriginal() {
+      for (const [blockId, originalText] of originalTexts) {
+        const nodes = document.querySelectorAll(`[data-original-text]`);
+        for (const node of Array.from(nodes)) {
+          const el = node as HTMLElement;
+          if (el.dataset.originalText === originalText) {
+            el.textContent = originalText;
+            el.classList.remove('fanyi-translated');
+            delete el.dataset.originalText;
+          }
+        }
+      }
+
+      const translatedElements = document.querySelectorAll('.fanyi-bilingual-block');
+      for (const el of Array.from(translatedElements)) {
+        const parent = el.parentElement;
+        if (parent && parent.dataset.originalText) {
+          parent.textContent = parent.dataset.originalText;
+          parent.classList.remove('fanyi-translated');
+          delete parent.dataset.originalText;
+        }
+      }
+
+      showStatus('已恢复原文', 'success');
+      setTimeout(() => hideStatus(), 2000);
+    }
+
+    function toggleTranslation() {
+      const translatedElements = document.querySelectorAll('.fanyi-target');
+      for (const el of Array.from(translatedElements)) {
+        const isVisible = (el as HTMLElement).style.display !== 'none';
+        (el as HTMLElement).style.display = isVisible ? 'none' : 'block';
+      }
     }
 
     function showStatus(message: string, type: 'loading' | 'success' | 'error') {
@@ -131,7 +298,10 @@ export default defineContentScript({
       popup.innerHTML = `
         <div class="fanyi-popup-header">
           <span class="fanyi-original-text">${escapeHtml(original.substring(0, 50))}${original.length > 50 ? '...' : ''}</span>
-          <button class="fanyi-close-btn">✕</button>
+          <div class="fanyi-popup-actions">
+            <button class="fanyi-copy-btn" title="复制译文">📋</button>
+            <button class="fanyi-close-btn" title="关闭">✕</button>
+          </div>
         </div>
         <div class="fanyi-popup-content">
           <p class="fanyi-source">${escapeHtml(original)}</p>
@@ -141,6 +311,12 @@ export default defineContentScript({
 
       popup.querySelector('.fanyi-close-btn')?.addEventListener('click', () => {
         popup.remove();
+      });
+
+      popup.querySelector('.fanyi-copy-btn')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(translated);
+        showStatus('已复制', 'success');
+        setTimeout(() => hideStatus(), 1000);
       });
 
       const selection = window.getSelection();
@@ -159,6 +335,12 @@ export default defineContentScript({
           }
         }, { once: true });
       }, 100);
+    }
+
+    function escapeHtml(text: string): string {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
 
     const style = document.createElement('style');
@@ -182,19 +364,25 @@ export default defineContentScript({
 
       .fanyi-bilingual-block {
         margin: 4px 0;
+        padding: 8px;
+        border-radius: 4px;
+        background: rgba(64, 158, 255, 0.05);
       }
       .fanyi-source {
         color: #606266;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
+        line-height: 1.6;
       }
       .fanyi-target {
         color: #303133;
         font-weight: 500;
+        line-height: 1.6;
       }
 
       .fanyi-selection-popup {
         position: absolute;
         max-width: 400px;
+        min-width: 250px;
         background: white;
         border: 1px solid #e4e7ed;
         border-radius: 8px;
@@ -216,14 +404,22 @@ export default defineContentScript({
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        max-width: 320px;
+        max-width: 280px;
       }
-      .fanyi-close-btn {
+      .fanyi-popup-actions {
+        display: flex;
+        gap: 4px;
+      }
+      .fanyi-close-btn, .fanyi-copy-btn {
         background: none;
         border: none;
         cursor: pointer;
-        padding: 4px;
+        padding: 4px 8px;
         font-size: 14px;
+        border-radius: 4px;
+      }
+      .fanyi-close-btn:hover, .fanyi-copy-btn:hover {
+        background: #f5f7fa;
       }
       .fanyi-popup-content {
         font-size: 14px;
@@ -237,6 +433,10 @@ export default defineContentScript({
         color: #303133;
         margin: 0;
         font-weight: 500;
+      }
+
+      .fanyi-translated {
+        position: relative;
       }
     `;
     document.head.appendChild(style);

@@ -1,0 +1,68 @@
+type Task<T> = () => Promise<T>;
+
+interface QueueItem<T> {
+  task: Task<T>;
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+  retries: number;
+}
+
+export class TranslationQueue {
+  private queue: QueueItem<any>[] = [];
+  private running = 0;
+  private concurrency: number;
+  private maxRetries: number;
+  private retryDelay: number;
+
+  constructor(concurrency = 3, maxRetries = 2, retryDelay = 1000) {
+    this.concurrency = concurrency;
+    this.maxRetries = maxRetries;
+    this.retryDelay = retryDelay;
+  }
+
+  async add<T>(task: Task<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.queue.push({ task, resolve, reject, retries: 0 });
+      this.process();
+    });
+  }
+
+  private async process() {
+    while (this.running < this.concurrency && this.queue.length > 0) {
+      const item = this.queue.shift();
+      if (!item) break;
+
+      this.running++;
+
+      try {
+        const result = await item.task();
+        item.resolve(result);
+      } catch (error) {
+        if (item.retries < this.maxRetries) {
+          item.retries++;
+          await this.delay(this.retryDelay * item.retries);
+          this.queue.unshift(item);
+        } else {
+          item.reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      } finally {
+        this.running--;
+        this.process();
+      }
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  get pendingCount(): number {
+    return this.queue.length;
+  }
+
+  get runningCount(): number {
+    return this.running;
+  }
+}
+
+export const globalQueue = new TranslationQueue(3, 2, 1000);

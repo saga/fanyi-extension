@@ -2,7 +2,7 @@
   <div class="popup-container">
     <h2>翻译插件</h2>
     <div class="settings">
-      <el-switch v-model="config.enabled" active-text="启用翻译" />
+      <el-switch v-model="config.enabled" active-text="启用翻译" @change="saveConfig" />
 
       <el-input
         v-model="config.deepseekApiKey"
@@ -28,6 +28,11 @@
         <el-radio label="bilingual">双语对照</el-radio>
         <el-radio label="target">仅译文</el-radio>
       </el-radio-group>
+
+      <div class="actions">
+        <el-button @click="restoreOriginal" size="small">恢复原文</el-button>
+        <el-button @click="clearCache" size="small">清除缓存</el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -51,6 +56,17 @@ onMounted(async () => {
 async function saveConfig() {
   await setConfig(config.value);
 }
+
+async function restoreOriginal() {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+  }
+}
+
+async function clearCache() {
+  await browser.runtime.sendMessage({ action: 'clearCache' });
+}
 </script>
 
 <style scoped>
@@ -68,5 +84,12 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
 }
 </style>
