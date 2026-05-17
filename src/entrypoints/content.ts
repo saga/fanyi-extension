@@ -35,20 +35,33 @@ export default defineContentScript({
       if (isTranslating) return;
 
       const config = await getConfig();
+      console.log('[ContentScript] handleFullTranslation called, config:', { enabled: config.enabled, sourceLang: config.sourceLang, targetLang: config.targetLang });
       if (!config.enabled) return;
 
       isTranslating = true;
       showStatus('正在分析文档...', 'loading');
 
       try {
+        console.log('[ContentScript] Calling prepareDocument...');
         const { blocks, chunks, fullText } = prepareDocument(document);
+        console.log('[ContentScript] prepareDocument result:', { blocksCount: blocks.length, chunksCount: chunks.length, fullTextLength: fullText.length });
+        console.log(`[ContentScript] API Request Estimate: 1 (analysis) + ${chunks.length} (translation) = ${1 + chunks.length} requests`);
 
+        if (blocks.length === 0) {
+          console.warn('[ContentScript] No blocks found! Page structure:');
+          console.log('[ContentScript] document.body children:', Array.from(document.body.children).map(c => c.tagName));
+          console.log('[ContentScript] document.body innerText length:', document.body.innerText?.length);
+          throw new Error('No translatable content found');
+        }
+
+        console.log('[ContentScript] Sending analyzeDocument message to background...');
         const response = await browser.runtime.sendMessage({
           action: 'analyzeDocument',
           fullText,
           sourceLang: config.sourceLang,
           targetLang: config.targetLang,
         });
+        console.log('[ContentScript] Background response:', response);
 
         if (!response.success) throw new Error(response.error);
         const analysis = response.analysis;

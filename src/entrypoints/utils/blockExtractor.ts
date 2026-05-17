@@ -9,56 +9,21 @@ export interface TextBlock {
   };
 }
 
-const PROCESSABLE_TAGS = new Set([
-  'P',
-  'LI',
-  'BLOCKQUOTE',
-  'H1',
-  'H2',
-  'H3',
-  'H4',
-  'H5',
-  'H6',
-  'TD',
-  'TH',
-  'CAPTION',
-  'FIGCAPTION',
-  'LABEL',
-  'LEGEND',
-  'SUMMARY',
-  'DT',
-  'DD',
-  'SPAN',
-  'DIV',
-  'SECTION',
-  'ARTICLE',
-  'MAIN',
+const DIRECT_SET = new Set([
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'p', 'li', 'dd', 'blockquote',
+  'figcaption'
 ]);
 
-const IGNORE_TAGS = new Set([
-  'SCRIPT',
-  'STYLE',
-  'NOSCRIPT',
-  'CODE',
-  'PRE',
-  'SVG',
-  'BUTTON',
-  'NAV',
-  'TEXTAREA',
-  'INPUT',
-  'SELECT',
-  'OPTION',
-  'IFRAME',
-  'VIDEO',
-  'AUDIO',
-  'CANVAS',
-  'FORM',
-  'HEADER',
-  'FOOTER',
-  'MENU',
-  'DIALOG',
-  'DETAILS',
-  'SUMMARY',
+const SKIP_SET = new Set([
+  'html', 'body', 'script', 'style', 'noscript', 'iframe',
+  'input', 'textarea', 'select', 'button', 'code', 'pre'
+]);
+
+const INLINE_SET = new Set([
+  'a', 'b', 'strong', 'span', 'em', 'i', 'u', 'small', 'sub', 'sup',
+  'font', 'mark', 'cite', 'q', 'abbr', 'time', 'ruby', 'bdi', 'bdo',
+  'img', 'br', 'wbr', 'svg'
 ]);
 
 function getXPath(node: Node): string {
@@ -130,60 +95,88 @@ function findLastHeading(element: Element): Element | null {
   return null;
 }
 
-export function extractBlocks(root: Document | Element): TextBlock[] {
+export function extractBlocks(rootNode: Node): TextBlock[] {
   const blocks: TextBlock[] = [];
   let blockId = 0;
+  let skippedCount = 0;
+  let rejectedCount = 0;
+  let acceptedCount = 0;
 
-  const GENERIC_TAGS = new Set(['DIV', 'SPAN', 'SECTION', 'ARTICLE', 'MAIN']);
-
-  function hasProcessableChild(element: Element): boolean {
-    for (const child of Array.from(element.children)) {
-      if (PROCESSABLE_TAGS.has(child.tagName) && !IGNORE_TAGS.has(child.tagName)) {
-        return true;
-      }
-      if (hasProcessableChild(child)) return true;
-    }
-    return false;
+  const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
+  if (!startNode) {
+    console.warn('[BlockExtractor] No valid start node found');
+    return [];
   }
 
-  function traverse(node: Node) {
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
+  console.log('[BlockExtractor] Starting extraction from:', startNode.nodeName);
 
-    const element = node as Element;
+  const walker = document.createTreeWalker(
+    startNode,
+    NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode: (node: Node): number => {
+        const el = node as Element;
+        const tag = el.tagName.toLowerCase();
 
-    if (IGNORE_TAGS.has(element.tagName)) return;
+        if (SKIP_SET.has(tag)) { skippedCount++; return NodeFilter.FILTER_SKIP; }
+        if (el.classList?.contains('notranslate')) { rejectedCount++; return NodeFilter.FILTER_REJECT; }
+        if (el.isContentEditable) { rejectedCount++; return NodeFilter.FILTER_REJECT; }
+        if (tag === 'header' || tag === 'footer') { skippedCount++; return NodeFilter.FILTER_SKIP; }
 
-    if (PROCESSABLE_TAGS.has(element.tagName)) {
-      const text = element.textContent?.trim();
-      const isGeneric = GENERIC_TAGS.has(element.tagName);
-      const minTextLength = isGeneric ? 50 : 0;
+        let hasDirectText = false;
+        let hasNonInlineChild = false;
+        
+        for (const child of Array.from(el.childNodes)) {
+          if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+            hasDirectText = true;
+          }
+          if (child.nodeType === Node.ELEMENT_NODE) {
+            const childTag = (child as Element).tagName.toLowerCase();
+            if (!INLINE_SET.has(childTag)) {
+              hasNonInlineChild = true;
+            }
+          }
+        }
 
-      if (
-        text &&
-        text.length > minTextLength &&
-        (!isGeneric || !hasProcessableChild(element))
-      ) {
-        const id = `b${++blockId}`;
-        blocks.push({
-          id,
-          xpath: getXPath(element),
-          tag: element.tagName.toLowerCase(),
-          text,
-          context: {
-            headingPath: getHeadingPath(element),
-            position: blockId,
-          },
-        });
-        return;
+        if (hasNonInlineChild) { skippedCount++; return NodeFilter.FILTER_SKIP; }
+
+        if (hasDirectText) {
+          const text = el.textContent?.trim();
+          if (text && text.length >= 3 && text.length < 3072) {
+            acceptedCount++;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+
+        skippedCount++;
+        return NodeFilter.FILTER_SKIP;
       }
     }
+  );
 
-    for (const child of Array.from(element.children)) {
-      traverse(child);
+  let currentNode: Element | null;
+  while (currentNode = walker.nextNode() as Element) {
+    const text = currentNode.textContent?.trim();
+    if (text) {
+      const id = `b${++blockId}`;
+      blocks.push({
+        id,
+        xpath: getXPath(currentNode),
+        tag: currentNode.tagName.toLowerCase(),
+        text,
+        context: {
+          headingPath: getHeadingPath(currentNode),
+          position: blockId,
+        },
+      });
     }
   }
 
-  traverse(root);
+  console.log(`[BlockExtractor] Extraction complete: accepted=${acceptedCount}, skipped=${skippedCount}, rejected=${rejectedCount}, totalBlocks=${blocks.length}`);
+  if (blocks.length > 0) {
+    console.log('[BlockExtractor] First 3 blocks:', blocks.slice(0, 3).map(b => ({ id: b.id, tag: b.tag, text: b.text.substring(0, 50) })));
+  }
+
   return blocks;
 }
 

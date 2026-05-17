@@ -44,6 +44,7 @@ function getSectionLevel(block: TextBlock): number {
 }
 
 export function buildChunks(blocks: TextBlock[]): Chunk[] {
+  console.log('[ChunkBuilder] buildChunks called with', blocks.length, 'blocks');
   if (blocks.length === 0) return [];
 
   const chunks: Chunk[] = [];
@@ -105,6 +106,10 @@ export function buildChunks(blocks: TextBlock[]): Chunk[] {
   }
 
   flushChunk();
+  console.log('[ChunkBuilder] Built', chunks.length, 'chunks');
+  if (chunks.length > 0) {
+    console.log('[ChunkBuilder] Chunk sizes:', chunks.map(c => ({ id: c.id, blocks: c.blocks.length, tokens: c.estimatedTokens })));
+  }
   return chunks;
 }
 

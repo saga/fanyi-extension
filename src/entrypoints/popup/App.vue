@@ -13,8 +13,11 @@
           type="password"
           v-model="config.deepseekApiKey"
           placeholder="输入 DeepSeek API Key"
-          @change="saveConfig"
+          @input="onApiKeyChange"
         />
+        <span v-if="apiStatus === 'checking'" class="status-text checking">验证中...</span>
+        <span v-else-if="apiStatus === 'ok'" class="status-text success">已配置</span>
+        <span v-else-if="apiStatus === 'fail'" class="status-text error">未配置或无效</span>
       </div>
 
       <div class="select-item">
@@ -45,7 +48,8 @@
       </div>
 
       <div class="actions">
-        <button @click="restoreOriginal">恢复原文</button>
+        <button @click="triggerTranslate" class="primary">翻译</button>
+        <button @click="restoreOriginal">恢复</button>
         <button @click="clearCache">清除缓存</button>
       </div>
     </div>
@@ -53,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 
 const config = ref<Config>({
@@ -64,12 +68,48 @@ const config = ref<Config>({
   deepseekApiKey: '',
 });
 
+const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
+let checkTimer: number | null = null;
+
 onMounted(async () => {
   config.value = await getConfig();
+  checkApiKey();
 });
 
 async function saveConfig() {
   await setConfig(config.value);
+}
+
+function onApiKeyChange() {
+  apiStatus.value = 'checking';
+  if (checkTimer) clearTimeout(checkTimer);
+  checkTimer = window.setTimeout(() => {
+    saveConfig();
+    checkApiKey();
+  }, 800);
+}
+
+async function checkApiKey() {
+  if (!config.value.deepseekApiKey) {
+    apiStatus.value = 'fail';
+    return;
+  }
+  
+  apiStatus.value = 'checking';
+  try {
+    const response = await browser.runtime.sendMessage({ action: 'checkConfig' });
+    apiStatus.value = response.success ? 'ok' : 'fail';
+  } catch {
+    apiStatus.value = 'fail';
+  }
+}
+
+async function triggerTranslate() {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+    window.close();
+  }
 }
 
 async function restoreOriginal() {
@@ -190,9 +230,38 @@ h2 {
   font-size: 13px;
 }
 
+.actions button.primary {
+  background: #409eff;
+  color: white;
+  border-color: #409eff;
+}
+
+.actions button.primary:hover {
+  background: #66b1ff;
+  border-color: #66b1ff;
+}
+
 .actions button:hover {
   background: #f5f5f5;
   border-color: #409eff;
   color: #409eff;
 }
+
+.actions button.success {
+  border-color: #67c23a;
+  color: #67c23a;
+}
+
+.actions button.error {
+  border-color: #f56c6c;
+  color: #f56c6c;
+}
+
+.status-text {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.status-text.checking { color: #909399; }
+.status-text.success { color: #67c23a; }
+.status-text.error { color: #f56c6c; }
 </style>

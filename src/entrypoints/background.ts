@@ -119,36 +119,49 @@ export default defineBackground(() => {
       handleClearCache(sendResponse);
       return true;
     }
+
+    if (message.action === 'checkConfig') {
+      handleCheckConfig(sendResponse);
+      return true;
+    }
   });
 
   async function handleAnalyzeDocument(
     message: any,
     sendResponse: (response: any) => void
   ) {
+    console.log('[Background] handleAnalyzeDocument called, fullText length:', message?.fullText?.length);
     try {
       const config = await getConfig();
+      console.log('[Background] Config loaded, hasApiKey:', !!config.deepseekApiKey);
       if (!config.deepseekApiKey) {
         sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
         return;
       }
 
       const { fullText, sourceLang, targetLang } = message;
+      console.log('[Background] Getting analyze task...');
       const { cacheKey, needsAnalysis } = await getAnalyzeTask(fullText, sourceLang, targetLang);
+      console.log('[Background] Cache key:', cacheKey, 'Needs analysis:', needsAnalysis);
 
       if (!needsAnalysis) {
         const cached = await getCachedAnalysis(cacheKey);
+        console.log('[Background] Using cached analysis');
         sendResponse({ success: true, analysis: cached, cacheKey });
         return;
       }
 
+      console.log('[Background] Calling DeepSeek API for analysis...');
       const service = getService(config.deepseekApiKey);
       const analysis = await globalQueue.add(() =>
         service.analyzeDocument(fullText, sourceLang, targetLang)
       );
+      console.log('[Background] Analysis complete:', { domain: analysis.domain, glossaryCount: analysis.glossary?.length });
 
       await cacheAnalysis(cacheKey, analysis);
       sendResponse({ success: true, analysis, cacheKey });
     } catch (error) {
+      console.error('[Background] handleAnalyzeDocument error:', error);
       sendResponse({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -171,7 +184,11 @@ export default defineBackground(() => {
 
       const cached = await getCachedTranslation(cacheKey);
       if (cached) {
-        sendResponse({ success: true, result: Array.from(cached.entries()) });
+        const resultArray = cached instanceof Map 
+          ? Array.from(cached.entries()) 
+          : Object.entries(cached);
+        console.log('[Background] Using cached translation:', resultArray.length, 'blocks');
+        sendResponse({ success: true, result: resultArray });
         return;
       }
 
@@ -241,6 +258,18 @@ export default defineBackground(() => {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+    }
+  }
+
+  async function handleCheckConfig(sendResponse: (response: any) => void) {
+    try {
+      const config = await getConfig();
+      const hasKey = !!config.deepseekApiKey;
+      console.log('[Background] checkConfig: hasApiKey =', hasKey, ', key length =', config.deepseekApiKey?.length || 0);
+      sendResponse({ success: hasKey });
+    } catch (error) {
+      console.error('[Background] checkConfig error:', error);
+      sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 

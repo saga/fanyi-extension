@@ -6,6 +6,11 @@ export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   outDir: 'output',
   srcDir: 'src',
+  vite: () => ({
+    build: {
+      minify: false,
+    },
+  }),
   manifest: {
     permissions: ['storage', 'contextMenus'],
     commands: {
