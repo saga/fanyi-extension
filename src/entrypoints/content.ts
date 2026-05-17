@@ -61,19 +61,20 @@ export default defineContentScript({
         const nodeMap = buildNodeMap(blocks, document);
         saveOriginalTexts(blocks, nodeMap);
 
-        const translationMap = await translateChunksViaBackground(
+        await translateChunksViaBackground(
           chunks,
           config.sourceLang,
           config.targetLang,
+          nodeMap,
+          config.mode,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
           }
         );
 
-        applyTranslations(translationMap, nodeMap, config.mode);
-        translatedBlocks = new Set(translationMap.keys());
+        translatedBlocks = new Set(nodeMap.keys());
 
-        console.log(`[ContentScript] Translation applied: ${translationMap.size} blocks translated`);
+        console.log(`[ContentScript] Translation applied: ${nodeMap.size} blocks translated`);
 
         setupDynamicContentObserver(config.mode);
 
@@ -116,11 +117,11 @@ export default defineContentScript({
       chunks: Chunk[],
       sourceLang: string,
       targetLang: string,
+      nodeMap: Map<string, Node>,
+      mode: 'bilingual' | 'target',
       onProgress?: (current: number, total: number) => void
-    ): Promise<Map<string, string>> {
+    ): Promise<void> {
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
-      const translationMap = new Map<string, string>();
-      const concurrency = 3;
       let completedCount = 0;
 
       async function translateChunk(index: number): Promise<void> {
@@ -139,9 +140,11 @@ export default defineContentScript({
 
         if (response.success) {
           console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
+          const chunkMap = new Map<string, string>();
           for (const [id, text] of response.result) {
-            translationMap.set(id, text);
+            chunkMap.set(id, text);
           }
+          applyTranslations(chunkMap, nodeMap, mode);
         } else {
           console.error(`Chunk ${chunk.id} translation failed:`, response.error);
         }
@@ -150,20 +153,18 @@ export default defineContentScript({
         onProgress?.(completedCount, chunks.length);
       }
 
-      async function worker(startIndex: number): Promise<void> {
-        for (let i = startIndex; i < chunks.length; i += concurrency) {
-          await translateChunk(i);
+      for (let i = 0; i < chunks.length; i++) {
+        translateChunk(i);
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
 
-      const workers: Promise<void>[] = [];
-      for (let i = 0; i < concurrency && i < chunks.length; i++) {
-        workers.push(worker(i));
+      while (completedCount < chunks.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
 
-      await Promise.all(workers);
-      console.log('[ContentScript] translateChunksViaBackground complete, total blocks:', translationMap.size);
-      return translationMap;
+      console.log('[ContentScript] translateChunksViaBackground complete');
     }
 
     function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
