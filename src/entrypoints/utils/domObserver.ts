@@ -128,11 +128,13 @@ export class DOMObserverManager {
     const PROCESSABLE_TAGS = new Set([
       'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
       'TD', 'TH', 'CAPTION', 'FIGCAPTION', 'LABEL', 'LEGEND',
+      'SPAN', 'DIV', 'SECTION', 'ARTICLE', 'MAIN',
     ]);
 
     const IGNORE_TAGS = new Set([
       'SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'PRE', 'SVG',
       'BUTTON', 'NAV', 'TEXTAREA', 'INPUT', 'SELECT',
+      'HEADER', 'FOOTER', 'MENU', 'DIALOG',
     ]);
 
     function traverse(node: Node) {
@@ -144,7 +146,8 @@ export class DOMObserverManager {
 
       if (PROCESSABLE_TAGS.has(el.tagName)) {
         const text = el.textContent?.trim();
-        if (text && text.length > 0) {
+        const isGeneric = new Set(['DIV', 'SPAN', 'SECTION', 'ARTICLE', 'MAIN']).has(el.tagName);
+        if (text && text.length > (isGeneric ? 50 : 0)) {
           blocks.push({
             id: `dynamic_${Date.now()}_${blocks.length}`,
             xpath: '',
@@ -167,6 +170,7 @@ export class DOMObserverManager {
     const PROCESSABLE_TAGS = new Set([
       'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
       'TD', 'TH', 'CAPTION', 'FIGCAPTION', 'LABEL', 'LEGEND',
+      'SPAN', 'DIV', 'SECTION', 'ARTICLE', 'MAIN',
     ]);
     return PROCESSABLE_TAGS.has(element.tagName);
   }

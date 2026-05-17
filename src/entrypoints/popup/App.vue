@@ -2,79 +2,51 @@
   <div class="popup-container">
     <h2>翻译插件</h2>
     <div class="settings">
-      <el-switch v-model="config.enabled" active-text="启用翻译" @change="saveConfig" />
+      <label class="switch-item">
+        <input type="checkbox" v-model="config.enabled" @change="saveConfig" />
+        <span>启用翻译</span>
+      </label>
 
-      <el-input
-        v-model="config.deepseekApiKey"
-        placeholder="输入 DeepSeek API Key"
-        show-password
-        @change="saveConfig"
-      />
+      <div class="input-item">
+        <label>DeepSeek API Key</label>
+        <input
+          type="password"
+          v-model="config.deepseekApiKey"
+          placeholder="输入 DeepSeek API Key"
+          @change="saveConfig"
+        />
+      </div>
 
-      <el-divider content-position="left">翻译设置</el-divider>
+      <div class="select-item">
+        <label>源语言</label>
+        <select v-model="config.sourceLang" @change="saveConfig">
+          <option value="auto">自动检测</option>
+          <option value="en">英语</option>
+          <option value="zh">中文</option>
+          <option value="ja">日语</option>
+        </select>
+      </div>
 
-      <el-select v-model="config.sourceLang" placeholder="源语言" @change="saveConfig">
-        <el-option label="自动检测" value="auto" />
-        <el-option label="英语" value="en" />
-        <el-option label="中文" value="zh" />
-        <el-option label="日语" value="ja" />
-      </el-select>
+      <div class="select-item">
+        <label>目标语言</label>
+        <select v-model="config.targetLang" @change="saveConfig">
+          <option value="zh">中文</option>
+          <option value="en">英语</option>
+          <option value="ja">日语</option>
+        </select>
+      </div>
 
-      <el-select v-model="config.targetLang" placeholder="目标语言" @change="saveConfig">
-        <el-option label="中文" value="zh" />
-        <el-option label="英语" value="en" />
-        <el-option label="日语" value="ja" />
-      </el-select>
-
-      <el-radio-group v-model="config.mode" @change="saveConfig">
-        <el-radio label="bilingual">双语对照</el-radio>
-        <el-radio label="target">仅译文</el-radio>
-      </el-radio-group>
-
-      <el-divider content-position="left">快捷键设置</el-divider>
-
-      <div class="shortcuts">
-        <div class="shortcut-item">
-          <span class="shortcut-label">翻译页面</span>
-          <el-input
-            v-model="config.shortcuts.translatePage"
-            placeholder="Alt+T"
-            size="small"
-            @change="saveConfig"
-          />
-        </div>
-        <div class="shortcut-item">
-          <span class="shortcut-label">划词翻译</span>
-          <el-input
-            v-model="config.shortcuts.translateSelection"
-            placeholder="Alt+S"
-            size="small"
-            @change="saveConfig"
-          />
-        </div>
-        <div class="shortcut-item">
-          <span class="shortcut-label">恢复原文</span>
-          <el-input
-            v-model="config.shortcuts.restoreOriginal"
-            placeholder="Alt+R"
-            size="small"
-            @change="saveConfig"
-          />
-        </div>
-        <div class="shortcut-item">
-          <span class="shortcut-label">切换译文</span>
-          <el-input
-            v-model="config.shortcuts.toggleTranslation"
-            placeholder="Alt+V"
-            size="small"
-            @change="saveConfig"
-          />
+      <div class="radio-item">
+        <label>翻译模式</label>
+        <div class="radio-group">
+          <label><input type="radio" value="bilingual" v-model="config.mode" @change="saveConfig" /> 双语对照</label>
+          <label><input type="radio" value="target" v-model="config.mode" @change="saveConfig" /> 仅译文</label>
         </div>
       </div>
 
       <div class="actions">
-        <el-button @click="restoreOriginal" size="small">恢复原文</el-button>
-        <el-button @click="clearCache" size="small">清除缓存</el-button>
+        <button @click="restoreOriginal">恢复原文</button>
+        <button @click="clearCache">清除缓存</button>
       </div>
     </div>
   </div>
@@ -90,12 +62,6 @@ const config = ref<Config>({
   targetLang: 'zh',
   mode: 'bilingual',
   deepseekApiKey: '',
-  shortcuts: {
-    translatePage: 'Alt+T',
-    translateSelection: 'Alt+S',
-    restoreOriginal: 'Alt+R',
-    toggleTranslation: 'Alt+V',
-  },
 });
 
 onMounted(async () => {
@@ -118,15 +84,29 @@ async function clearCache() {
 }
 </script>
 
-<style scoped>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: #333;
+}
+
 .popup-container {
   padding: 16px;
-  min-width: 320px;
+  min-width: 300px;
+  max-width: 350px;
 }
 
 h2 {
   margin: 0 0 16px;
   font-size: 18px;
+  color: #1a1a1a;
 }
 
 .settings {
@@ -135,23 +115,63 @@ h2 {
   gap: 12px;
 }
 
-.shortcuts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.shortcut-item {
+.switch-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  cursor: pointer;
 }
 
-.shortcut-label {
+.switch-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.input-item,
+.select-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.input-item label,
+.select-item label,
+.radio-item label:first-child {
+  font-size: 12px;
+  color: #666;
+}
+
+.input-item input,
+.select-item select {
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
   font-size: 14px;
-  color: #606266;
-  min-width: 80px;
+}
+
+.input-item input:focus,
+.select-item select:focus {
+  outline: none;
+  border-color: #409eff;
+}
+
+.radio-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
 }
 
 .actions {
@@ -161,7 +181,18 @@ h2 {
   margin-top: 8px;
 }
 
-.el-divider {
-  margin: 8px 0;
+.actions button {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.actions button:hover {
+  background: #f5f5f5;
+  border-color: #409eff;
+  color: #409eff;
 }
 </style>

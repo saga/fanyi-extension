@@ -1,8 +1,11 @@
 import { defineConfig } from 'wxt';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
+import { join } from 'path';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   outDir: 'output',
+  srcDir: 'src',
   manifest: {
     permissions: ['storage', 'contextMenus'],
     commands: {
@@ -32,5 +35,27 @@ export default defineConfig({
       },
     },
   },
-  srcDir: 'src',
+  hooks: {
+    'build:done': async (wxt, output) => {
+      const chromeDir = join(process.cwd(), 'output', 'chrome-mv3');
+      if (existsSync(chromeDir)) fixHtmlPaths(chromeDir);
+
+      const firefoxDir = join(process.cwd(), 'output', 'firefox-mv2');
+      if (existsSync(firefoxDir)) fixHtmlPaths(firefoxDir);
+    },
+  },
 });
+
+function fixHtmlPaths(dir) {
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      fixHtmlPaths(fullPath);
+    } else if (entry.name.endsWith('.html')) {
+      let content = readFileSync(fullPath, 'utf-8');
+      content = content.replace(/src="\//g, 'src="./').replace(/href="\//g, 'href="./');
+      writeFileSync(fullPath, content);
+    }
+  }
+}

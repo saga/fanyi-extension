@@ -28,6 +28,11 @@ const PROCESSABLE_TAGS = new Set([
   'SUMMARY',
   'DT',
   'DD',
+  'SPAN',
+  'DIV',
+  'SECTION',
+  'ARTICLE',
+  'MAIN',
 ]);
 
 const IGNORE_TAGS = new Set([
@@ -48,6 +53,12 @@ const IGNORE_TAGS = new Set([
   'AUDIO',
   'CANVAS',
   'FORM',
+  'HEADER',
+  'FOOTER',
+  'MENU',
+  'DIALOG',
+  'DETAILS',
+  'SUMMARY',
 ]);
 
 function getXPath(node: Node): string {
@@ -123,6 +134,18 @@ export function extractBlocks(root: Document | Element): TextBlock[] {
   const blocks: TextBlock[] = [];
   let blockId = 0;
 
+  const GENERIC_TAGS = new Set(['DIV', 'SPAN', 'SECTION', 'ARTICLE', 'MAIN']);
+
+  function hasProcessableChild(element: Element): boolean {
+    for (const child of Array.from(element.children)) {
+      if (PROCESSABLE_TAGS.has(child.tagName) && !IGNORE_TAGS.has(child.tagName)) {
+        return true;
+      }
+      if (hasProcessableChild(child)) return true;
+    }
+    return false;
+  }
+
   function traverse(node: Node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
 
@@ -132,7 +155,14 @@ export function extractBlocks(root: Document | Element): TextBlock[] {
 
     if (PROCESSABLE_TAGS.has(element.tagName)) {
       const text = element.textContent?.trim();
-      if (text && text.length > 0) {
+      const isGeneric = GENERIC_TAGS.has(element.tagName);
+      const minTextLength = isGeneric ? 50 : 0;
+
+      if (
+        text &&
+        text.length > minTextLength &&
+        (!isGeneric || !hasProcessableChild(element))
+      ) {
         const id = `b${++blockId}`;
         blocks.push({
           id,
@@ -144,6 +174,7 @@ export function extractBlocks(root: Document | Element): TextBlock[] {
             position: blockId,
           },
         });
+        return;
       }
     }
 
