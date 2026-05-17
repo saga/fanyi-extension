@@ -127,6 +127,19 @@ function findLastHeading(element: Element): Element | null {
   return null;
 }
 
+function isInsideContentContainer(el: Element): boolean {
+  let current: Element | null = el;
+  while (current) {
+    const tag = current.tagName.toLowerCase();
+    if (tag === 'article') return true;
+    const role = current.getAttribute('role');
+    if (role === 'article' || role === 'main') return true;
+    if (current.hasAttribute('lang')) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
 function grabNode(node: Node): Element | false {
   if (!node || node instanceof Text) return false;
   if (!(node instanceof Element)) return false;
@@ -138,7 +151,6 @@ function grabNode(node: Node): Element | false {
   if (shouldSkipByClass(node) && !isInArticleContext(node)) return false;
   if (node.isContentEditable || node.getAttribute('contenteditable') === 'true') return false;
   if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') return false;
-  if (INLINE_SET.has(tag)) return false;
 
   if (DIRECT_SET.has(tag)) {
     const text = node.textContent?.trim();
@@ -147,6 +159,15 @@ function grabNode(node: Node): Element | false {
     }
     return false;
   }
+
+  if (INLINE_SET.has(tag) && isInsideContentContainer(node)) {
+    const text = node.textContent?.trim();
+    if (text && text.length >= 3 && text.length < 3072) {
+      return node;
+    }
+  }
+
+  if (INLINE_SET.has(tag)) return false;
 
   let hasDirectText = false;
   let hasNonInlineChild = false;

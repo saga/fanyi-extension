@@ -8,7 +8,7 @@ export interface Chunk {
 }
 
 const MAX_INPUT_TOKENS = 500000;
-const TARGET_TOKENS = 2200;
+const TARGET_TOKENS = 1800;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);

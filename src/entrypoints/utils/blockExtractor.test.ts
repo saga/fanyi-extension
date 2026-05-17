@@ -463,6 +463,104 @@ describe('extractBlocks - Text Length Filtering', () => {
   });
 });
 
+describe('extractBlocks - SPA Content (Twitter/X)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract span text inside article container', () => {
+    setupHTML(`
+      <div>
+        <article role="article">
+          <div>
+            <div>
+              <span>This is a tweet with enough text content to be extracted.</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const tweetBlocks = blocks.filter(b => b.text.includes('tweet'));
+    expect(tweetBlocks).toHaveLength(1);
+    expect(tweetBlocks[0].tag).toBe('span');
+  });
+
+  it('should extract multiple spans inside article', () => {
+    setupHTML(`
+      <article>
+        <div>
+          <span>First part of the tweet content.</span>
+          <span>Second part of the tweet content.</span>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should NOT extract span outside article context', () => {
+    setupHTML(`
+      <div class="sidebar">
+        <span>This is sidebar content that should not be extracted.</span>
+      </div>
+      <article>
+        <div>
+          <span>This is article content that should be extracted.</span>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const sidebarBlocks = blocks.filter(b => b.text.includes('sidebar'));
+    expect(sidebarBlocks).toHaveLength(0);
+    const articleBlocks = blocks.filter(b => b.text.includes('article content'));
+    expect(articleBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should extract div with text inside article', () => {
+    setupHTML(`
+      <article>
+        <div>
+          <div>
+            This is a div with enough text content inside an article container.
+          </div>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const divBlocks = blocks.filter(b => b.tag === 'div' && b.text.includes('div with enough text'));
+    expect(divBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should handle Twitter-like nested structure', () => {
+    setupHTML(`
+      <div>
+        <div>
+          <main>
+            <div>
+              <article role="article">
+                <div>
+                  <div>
+                    <span>Full tweet text with enough characters to be extracted properly.</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </main>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const tweetBlocks = blocks.filter(b => b.text.includes('Full tweet text'));
+    expect(tweetBlocks).toHaveLength(1);
+  });
+});
+
 describe('extractBlocks - Content Editable', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
