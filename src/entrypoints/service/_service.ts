@@ -5,10 +5,30 @@ export interface TranslationResult {
   targetLang: string;
 }
 
+export interface GlossaryEntry {
+  term: string;
+  translation: string;
+}
+
+export interface DocumentAnalysis {
+  domain: string;
+  tone: string;
+  glossary: GlossaryEntry[];
+  summary: string;
+}
+
 export interface TranslationService {
-  translate(
+  analyzeDocument(
     text: string,
     sourceLang: string,
     targetLang: string
-  ): Promise<TranslationResult>;
+  ): Promise<DocumentAnalysis>;
+
+  translate(
+    xmlContent: string,
+    sourceLang: string,
+    targetLang: string,
+    glossary: GlossaryEntry[],
+    context?: string
+  ): Promise<string>;
 }

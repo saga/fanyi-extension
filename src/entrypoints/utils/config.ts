@@ -2,20 +2,19 @@ import { storage } from '@wxt-dev/storage';
 
 export interface Config {
   enabled: boolean;
-  engine: 'microsoft' | 'google' | 'deepl';
   sourceLang: string;
   targetLang: string;
   mode: 'bilingual' | 'target';
-  deeplApiKey?: string;
+  deepseekApiKey: string;
   floatingBallPosition?: { x: number; y: number };
 }
 
 const defaultConfig: Config = {
   enabled: true,
-  engine: 'microsoft',
   sourceLang: 'auto',
   targetLang: 'zh',
   mode: 'bilingual',
+  deepseekApiKey: '',
 };
 
 export async function getConfig(): Promise<Config> {
@@ -30,4 +29,9 @@ export async function setConfig(config: Partial<Config>): Promise<void> {
 
 export async function resetConfig(): Promise<void> {
   await storage.setItem('local:config', defaultConfig);
+}
+
+export async function hasApiKey(): Promise<boolean> {
+  const config = await getConfig();
+  return !!config.deepseekApiKey;
 }
