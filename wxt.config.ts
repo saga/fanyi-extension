@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 export default defineConfig({
-  modules: ['@wxt-dev/module-vue'],
+  modules: ['@wxt-dev/module-vue', '@wxt-dev/webextension-polyfill'],
   outDir: 'output',
   srcDir: 'src',
   vite: () => ({
@@ -19,12 +19,6 @@ export default defineConfig({
           default: 'Alt+T',
         },
         description: '翻译此页面',
-      },
-      'translate-selection': {
-        suggested_key: {
-          default: 'Alt+S',
-        },
-        description: '划词翻译',
       },
       'restore-original': {
         suggested_key: {

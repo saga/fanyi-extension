@@ -1,3 +1,4 @@
+import browser from 'webextension-polyfill';
 import {
   prepareDocument,
   type Chunk,
@@ -21,14 +22,43 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener(async (message) => {
       if (message.action === 'translatePage') {
         await handleFullTranslation();
-      } else if (message.action === 'translateSelection') {
-        await handleSelectionTranslation(message.text);
       } else if (message.action === 'restoreOriginal') {
         restoreOriginal();
       } else if (message.action === 'toggleTranslation') {
         toggleTranslation();
       }
     });
+
+    setupTouchEvents();
+
+    function setupTouchEvents() {
+      let touchCount = 0;
+      let touchTimer: number | undefined;
+
+      document.body.addEventListener('touchstart', (event: TouchEvent) => {
+        if (event.touches.length !== 1) return;
+
+        touchCount++;
+
+        if (touchCount === 1) {
+          touchTimer = window.setTimeout(() => {
+            touchCount = 0;
+          }, 500);
+        } else if (touchCount === 2) {
+          if (touchTimer) clearTimeout(touchTimer);
+          touchCount = 0;
+          handleFullTranslation();
+        }
+      });
+
+      document.body.addEventListener('touchstart', (event: TouchEvent) => {
+        if (event.touches.length === 3) {
+          const centerX = Array.from(event.touches).reduce((sum, t) => sum + t.clientX, 0) / 3;
+          const centerY = Array.from(event.touches).reduce((sum, t) => sum + t.clientY, 0) / 3;
+          handleFullTranslation();
+        }
+      }, { passive: true });
+    }
 
     async function handleFullTranslation() {
       if (isTranslating) return;
@@ -88,28 +118,6 @@ export default defineContentScript({
         );
       } finally {
         isTranslating = false;
-      }
-    }
-
-    async function handleSelectionTranslation(text: string) {
-      if (!text || text.length < 2) return;
-
-      try {
-        const config = await getConfig();
-        const response = await browser.runtime.sendMessage({
-          action: 'translateSelection',
-          text,
-          sourceLang: config.sourceLang,
-          targetLang: config.targetLang,
-        });
-
-        if (response.success) {
-          showSelectionPopup(response.translated, text);
-        } else {
-          console.error('Selection translation failed:', response.error);
-        }
-      } catch (error) {
-        console.error('Selection translation failed:', error);
       }
     }
 
@@ -335,54 +343,6 @@ export default defineContentScript({
       }
     }
 
-    function showSelectionPopup(translated: string, original: string) {
-      const existing = document.querySelector('.fanyi-selection-popup');
-      if (existing) existing.remove();
-
-      const popup = document.createElement('div');
-      popup.className = 'fanyi-selection-popup';
-      popup.innerHTML = `
-        <div class="fanyi-popup-header">
-          <span class="fanyi-original-text">${escapeHtml(original.substring(0, 50))}${original.length > 50 ? '...' : ''}</span>
-          <div class="fanyi-popup-actions">
-            <button class="fanyi-copy-btn" title="复制译文">📋</button>
-            <button class="fanyi-close-btn" title="关闭">✕</button>
-          </div>
-        </div>
-        <div class="fanyi-popup-content">
-          <p class="fanyi-source">${escapeHtml(original)}</p>
-          <p class="fanyi-target">${escapeHtml(translated)}</p>
-        </div>
-      `;
-
-      popup.querySelector('.fanyi-close-btn')?.addEventListener('click', () => {
-        popup.remove();
-      });
-
-      popup.querySelector('.fanyi-copy-btn')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(translated);
-        showStatus('已复制', 'success');
-        setTimeout(() => hideStatus(), 1000);
-      });
-
-      const selection = window.getSelection();
-      if (selection?.rangeCount) {
-        const rect = selection.getRangeAt(0).getBoundingClientRect();
-        popup.style.left = `${rect.left + window.scrollX}px`;
-        popup.style.top = `${rect.bottom + window.scrollY + 8}px`;
-      }
-
-      document.body.appendChild(popup);
-
-      setTimeout(() => {
-        document.addEventListener('click', (e) => {
-          if (!popup.contains(e.target as Node)) {
-            popup.remove();
-          }
-        }, { once: true });
-      }, 100);
-    }
-
     function escapeHtml(text: string): string {
       const div = document.createElement('div');
       div.textContent = text;
@@ -425,64 +385,18 @@ export default defineContentScript({
         line-height: 1.6;
       }
 
-      .fanyi-selection-popup {
-        position: absolute;
-        max-width: 400px;
-        min-width: 250px;
-        background: white;
-        border: 1px solid #e4e7ed;
-        border-radius: 8px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-        z-index: 999998;
-        padding: 12px;
-      }
-      .fanyi-popup-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid #ebeef5;
-      }
-      .fanyi-original-text {
-        font-size: 12px;
-        color: #909399;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: 280px;
-      }
-      .fanyi-popup-actions {
-        display: flex;
-        gap: 4px;
-      }
-      .fanyi-close-btn, .fanyi-copy-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 4px 8px;
-        font-size: 14px;
-        border-radius: 4px;
-      }
-      .fanyi-close-btn:hover, .fanyi-copy-btn:hover {
-        background: #f5f7fa;
-      }
-      .fanyi-popup-content {
-        font-size: 14px;
-        line-height: 1.6;
-      }
-      .fanyi-popup-content .fanyi-source {
-        color: #606266;
-        margin: 0 0 8px;
-      }
-      .fanyi-popup-content .fanyi-target {
-        color: #303133;
-        margin: 0;
-        font-weight: 500;
-      }
-
       .fanyi-translated {
         position: relative;
+      }
+
+      @-moz-document url-prefix() {
+        .fanyi-status-overlay {
+          animation: moz-fade-in 0.3s ease-in-out;
+        }
+        @keyframes moz-fade-in {
+          from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
       }
     `;
     document.head.appendChild(style);
