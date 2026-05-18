@@ -8,6 +8,8 @@ import {
   clearAllCache,
 } from './utils/translateApi';
 import { globalQueue } from './utils/translationQueue';
+import { matchSiteRule, buildSitePrompt } from '../rules';
+import type { SiteRule } from '../rules/types';
 
 function generateTranslationCacheKey(
   jsonContent: string,
@@ -141,7 +143,10 @@ export default defineBackground(() => {
         return;
       }
 
-      const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey } = message;
+      const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl } = message;
+
+      const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
+      const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
       const cacheKey = providedCacheKey || generateTranslationCacheKey(jsonContent, sourceLang, targetLang);
 
@@ -162,7 +167,7 @@ export default defineBackground(() => {
       console.log('[Background] Calling DeepSeek API for translation...');
       const service = getService(config.deepseekApiKey);
       const jsonResult = await globalQueue.add(() =>
-        service.translate(jsonContent, sourceLang, targetLang, [])
+        service.translate(jsonContent, sourceLang, targetLang, [], sitePrompt)
       );
       console.log('[Background] Translation API response length:', jsonResult?.length || 0);
 

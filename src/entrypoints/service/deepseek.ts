@@ -17,7 +17,8 @@ function buildHeaders(apiKey: string): Record<string, string> {
 function buildTranslationBody(
   blocks: Array<{ id: string; text: string }>,
   sourceLang: string,
-  targetLang: string
+  targetLang: string,
+  sitePrompt?: string
 ) {
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
@@ -25,19 +26,25 @@ function buildTranslationBody(
     2
   );
 
-  return JSON.stringify({
-    model: MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: `Professional translator. Translate blocks to ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}.
+  let systemContent = `Professional translator. Translate blocks to ${targetLang === 'zh' ? 'Simplified Chinese' : targetLang}.
 
 Rules:
 - Keep IDs unchanged
 - Consistent terminology
 - Natural translation
 - No omissions
-- Return JSON only`,
+- Return JSON only`;
+
+  if (sitePrompt) {
+    systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
+  }
+
+  return JSON.stringify({
+    model: MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: systemContent,
       },
       {
         role: 'user',
@@ -100,14 +107,15 @@ export class DeepSeekTranslationService implements TranslationService {
     sourceLang: string,
     targetLang: string,
     _glossary: GlossaryEntry[],
-    _context?: string
+    context?: string,
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
 
     const body = buildTranslationBody(
       blocks,
       sourceLang,
-      targetLang
+      targetLang,
+      context
     );
 
     return await callApi(this.apiKey, body);

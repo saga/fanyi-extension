@@ -1,0 +1,42 @@
+import type { SiteRule } from './types';
+
+export const hackernewsRule: SiteRule = {
+  hostPattern: 'news.ycombinator.com',
+  skipTerms: [
+    'Hacker News',
+    'new',
+    'past',
+    'comments',
+    'hide',
+    'favorite',
+    'flag',
+    'upvote',
+    'points',
+    'user',
+    'about',
+    'favorite',
+    'submit',
+    'show',
+    'ask',
+    'jobs',
+    'threads',
+    'guidelines',
+    'FAQ',
+    'API',
+    'Security',
+    'YC',
+    'Startup',
+    'Book',
+    'Login',
+  ],
+  skipSelectors: [
+    '.votelinks',
+    '.rank',
+    '.score',
+    '.subtext',
+    'code',
+    'pre',
+  ],
+  promptInstructions:
+    'This is Hacker News. Keep navigation terms, voting-related vocabulary, YC-specific terminology, and code snippets untranslated. Preserve article titles in their original form when they contain proper nouns or technical terms.',
+};

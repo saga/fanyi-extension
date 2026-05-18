@@ -134,6 +134,7 @@ export default defineContentScript({
           jsonContent: chunk.jsonContent,
           sourceLang,
           targetLang,
+          pageUrl: window.location.href,
         });
         const elapsed = Date.now() - startTime;
         console.log(`[ContentScript] Chunk ${index + 1} response time: ${elapsed}ms, success: ${response.success}`);
