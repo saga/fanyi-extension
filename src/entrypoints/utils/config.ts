@@ -40,7 +40,8 @@ export async function getConfig(): Promise<Config> {
 
 export async function setConfig(config: Partial<Config>): Promise<void> {
   const currentConfig = await getConfig();
-  await storage.setItem('local:config', { ...currentConfig, ...config });
+  const cleanConfig = JSON.parse(JSON.stringify({ ...currentConfig, ...config }));
+  await storage.setItem('local:config', cleanConfig);
 }
 
 export async function resetConfig(): Promise<void> {

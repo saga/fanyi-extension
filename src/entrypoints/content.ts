@@ -273,6 +273,8 @@ export default defineContentScript({
             apiKey,
           });
 
+          console.log('[ContentScript] Validation response:', response);
+
           if (response && response.success) {
             const config = await getConfig();
             config.deepseekApiKey = apiKey;
@@ -284,12 +286,16 @@ export default defineContentScript({
             showStatus('API Key 验证成功，设置已保存', 'success');
             setTimeout(() => hideStatus(), 2000);
           } else {
-            showStatus('API Key 无效: ' + (response?.error || '未知错误'), 'error');
-            setTimeout(() => hideStatus(), 3000);
+            const errorMsg = response?.error || '未知错误';
+            console.error('[ContentScript] Validation failed:', errorMsg);
+            showStatus('API Key 无效: ' + errorMsg, 'error');
+            setTimeout(() => hideStatus(), 5000);
           }
         } catch (error) {
-          showStatus('验证失败: ' + (error instanceof Error ? error.message : '网络错误'), 'error');
-          setTimeout(() => hideStatus(), 3000);
+          const errorMsg = error instanceof Error ? error.message : '网络错误';
+          console.error('[ContentScript] Validation error:', error);
+          showStatus('验证失败: ' + errorMsg, 'error');
+          setTimeout(() => hideStatus(), 5000);
         }
       });
 

@@ -194,13 +194,24 @@ export default defineBackground({
           return;
         }
 
+        console.log('[Background] Validating API Key, length:', apiKey.length);
+
         const service = new DeepSeekTranslationService(apiKey);
         const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
         
-        await service.translate(testContent, 'en', 'zh', []);
+        const timeout = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('请求超时（10秒）')), 10000);
+        });
+
+        await Promise.race([
+          service.translate(testContent, 'en', 'zh', []),
+          timeout
+        ]);
         
+        console.log('[Background] API Key validation successful');
         sendResponse({ success: true });
       } catch (error) {
+        console.error('[Background] API Key validation failed:', error);
         sendResponse({
           success: false,
           error: error instanceof Error ? error.message : '验证失败',
