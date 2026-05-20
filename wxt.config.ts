@@ -17,6 +17,7 @@ export default defineConfig({
       manifest.permissions = ['storage', 'contextMenus'];
       manifest.browser_specific_settings = {
         gecko: {
+          id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
           strict_min_version: '109.0',
         },
         gecko_android: {

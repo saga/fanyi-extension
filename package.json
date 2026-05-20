@@ -1,6 +1,6 @@
 {
   "name": "fanyi-extension",
-  "version": "0.59.3",
+  "version": "0.59.5",
   "description": "浏览器翻译插件 - 支持 Chrome, Firefox, Android Firefox",
   "homepage": "https://github.com/saga/fanyi-extension#readme",
   "bugs": {

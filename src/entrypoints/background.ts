@@ -1,6 +1,6 @@
 import browser from 'webextension-polyfill';
 import { DeepSeekTranslationService } from './service/deepseek';
-import { getConfig } from './utils/config';
+import { getConfig, setConfig } from './utils/config';
 import {
   getCachedTranslation,
   cacheTranslation,
@@ -115,6 +115,11 @@ export default defineBackground({
         return true;
       }
 
+      if (message.action === 'validateApiKey') {
+        handleValidateApiKey(message, sendResponse);
+        return true;
+      }
+
       if (message.action === 'clearCache') {
         handleClearCache(sendResponse);
         return true;
@@ -174,6 +179,31 @@ export default defineBackground({
         sendResponse({
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    async function handleValidateApiKey(
+      message: any,
+      sendResponse: (response: any) => void
+    ) {
+      try {
+        const { apiKey } = message;
+        if (!apiKey) {
+          sendResponse({ success: false, error: 'API Key 不能为空' });
+          return;
+        }
+
+        const service = new DeepSeekTranslationService(apiKey);
+        const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
+        
+        await service.translate(testContent, 'en', 'zh', []);
+        
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : '验证失败',
         });
       }
     }

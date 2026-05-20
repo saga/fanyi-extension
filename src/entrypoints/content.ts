@@ -258,15 +258,39 @@ export default defineContentScript({
       panel.querySelector('.fanyi-config-close')?.addEventListener('click', () => panel.remove());
 
       panel.querySelector('.fanyi-btn-save')?.addEventListener('click', async () => {
-        const config = await getConfig();
-        config.deepseekApiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value;
-        config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
-        config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
-        const modeRadio = panel.querySelector('input[name="mode"]:checked') as HTMLInputElement;
-        config.mode = modeRadio?.value || 'bilingual';
-        await setConfig(config);
-        showStatus('设置已保存', 'success');
-        setTimeout(() => hideStatus(), 1500);
+        const apiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value.trim();
+        if (!apiKey) {
+          showStatus('API Key 不能为空', 'error');
+          setTimeout(() => hideStatus(), 2000);
+          return;
+        }
+
+        showStatus('正在验证 API Key...', 'loading');
+
+        try {
+          const response = await browser.runtime.sendMessage({
+            action: 'validateApiKey',
+            apiKey,
+          });
+
+          if (response && response.success) {
+            const config = await getConfig();
+            config.deepseekApiKey = apiKey;
+            config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
+            config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
+            const modeRadio = panel.querySelector('input[name="mode"]:checked') as HTMLInputElement;
+            config.mode = modeRadio?.value || 'bilingual';
+            await setConfig(config);
+            showStatus('API Key 验证成功，设置已保存', 'success');
+            setTimeout(() => hideStatus(), 2000);
+          } else {
+            showStatus('API Key 无效: ' + (response?.error || '未知错误'), 'error');
+            setTimeout(() => hideStatus(), 3000);
+          }
+        } catch (error) {
+          showStatus('验证失败: ' + (error instanceof Error ? error.message : '网络错误'), 'error');
+          setTimeout(() => hideStatus(), 3000);
+        }
       });
 
       panel.querySelector('.fanyi-btn-translate')?.addEventListener('click', () => {
@@ -614,17 +638,17 @@ export default defineContentScript({
 
       .fanyi-floating-btn {
         position: fixed;
-        right: 20px;
-        bottom: 100px;
-        width: 48px;
-        height: 48px;
+        right: 16px;
+        bottom: 80px;
+        width: 44px;
+        height: 44px;
         background: #409eff;
         color: white;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: bold;
         box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
         z-index: 999998;
@@ -647,84 +671,94 @@ export default defineContentScript({
         left: 50%;
         transform: translate(-50%, -50%);
         width: 90%;
-        max-width: 360px;
-        max-height: 80vh;
+        max-width: 320px;
+        max-height: 85vh;
         background: white;
-        border-radius: 12px;
+        border-radius: 10px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.2);
         z-index: 999999;
         overflow: hidden;
         display: flex;
         flex-direction: column;
+        font-size: 13px;
       }
       .fanyi-config-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 16px;
+        padding: 10px 14px;
         background: #f5f7fa;
         border-bottom: 1px solid #ebeef5;
-        font-size: 16px;
+        font-size: 14px;
         font-weight: 500;
       }
       .fanyi-config-close {
         background: none;
         border: none;
-        font-size: 20px;
+        font-size: 18px;
         cursor: pointer;
-        padding: 4px 8px;
+        padding: 2px 6px;
         color: #666;
       }
       .fanyi-config-body {
-        padding: 16px;
+        padding: 12px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 10px;
       }
       .fanyi-config-row {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 3px;
       }
       .fanyi-config-row label {
-        font-size: 12px;
+        font-size: 11px;
         color: #666;
       }
       .fanyi-api-input,
       .fanyi-source-lang,
       .fanyi-target-lang {
-        padding: 8px;
+        padding: 8px 10px;
         border: 1px solid #ddd;
         border-radius: 6px;
         font-size: 14px;
+        -webkit-appearance: none;
+        appearance: none;
       }
       .fanyi-radio-group {
         display: flex;
-        gap: 16px;
+        gap: 12px;
       }
       .fanyi-radio-group label {
         display: flex;
         align-items: center;
         gap: 4px;
         cursor: pointer;
+        font-size: 13px;
+      }
+      .fanyi-radio-group input[type="radio"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
       }
       .fanyi-config-actions {
         display: flex;
-        gap: 8px;
-        padding-top: 8px;
+        gap: 6px;
+        padding-top: 6px;
       }
       .fanyi-btn-save,
       .fanyi-btn-translate,
       .fanyi-btn-restore {
         flex: 1;
-        padding: 10px 12px;
+        padding: 8px 10px;
         border: 1px solid #ddd;
         border-radius: 6px;
         background: white;
         cursor: pointer;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 500;
+        white-space: nowrap;
       }
       .fanyi-btn-save {
         background: #409eff;
