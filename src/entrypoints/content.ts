@@ -4,7 +4,7 @@ import {
   type Chunk,
 } from './utils/contentHelper';
 import { buildNodeMap } from './utils/blockExtractor';
-import { getConfig } from './utils/config';
+import { getConfig, setConfig } from './utils/config';
 import { DOMObserverManager } from './utils/domObserver';
 import type { TextBlock } from './utils/blockExtractor';
 
@@ -30,6 +30,7 @@ export default defineContentScript({
     });
 
     setupTouchEvents();
+    setupFloatingButton();
 
     function setupTouchEvents() {
       let touchCount = 0;
@@ -58,6 +59,209 @@ export default defineContentScript({
           handleFullTranslation();
         }
       }, { passive: true });
+    }
+
+    function setupFloatingButton() {
+      const btn = document.createElement('div');
+      btn.className = 'fanyi-floating-btn';
+      btn.innerHTML = '译';
+      btn.title = '点击翻译，长按设置';
+
+      const savedPosition = localStorage.getItem('fanyi-btn-position');
+      if (savedPosition) {
+        try {
+          const pos = JSON.parse(savedPosition);
+          btn.style.right = pos.right + 'px';
+          btn.style.bottom = pos.bottom + 'px';
+        } catch {
+          btn.style.right = '20px';
+          btn.style.bottom = '100px';
+        }
+      } else {
+        btn.style.right = '20px';
+        btn.style.bottom = '100px';
+      }
+
+      let isDragging = false;
+      let startX = 0, startY = 0;
+      let startRight = 0, startBottom = 0;
+      let longPressTimer: number | null = null;
+      let hasMoved = false;
+
+      btn.addEventListener('mousedown', startDrag);
+      btn.addEventListener('touchstart', startDrag, { passive: false });
+
+      function startDrag(e: MouseEvent | TouchEvent) {
+        e.preventDefault();
+        hasMoved = false;
+        isDragging = false;
+
+        longPressTimer = window.setTimeout(() => {
+          if (!hasMoved) {
+            showConfigPanel();
+          }
+        }, 600);
+
+        if (e instanceof MouseEvent) {
+          startX = e.clientX;
+          startY = e.clientY;
+        } else {
+          startX = e.touches[0].clientX;
+          startY = e.touches[0].clientY;
+        }
+
+        const rect = btn.getBoundingClientRect();
+        startRight = window.innerWidth - rect.right;
+        startBottom = window.innerHeight - rect.bottom;
+
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchmove', onDrag, { passive: false });
+        document.addEventListener('touchend', endDrag);
+      }
+
+      function onDrag(e: MouseEvent | TouchEvent) {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+
+        let clientX: number, clientY: number;
+        if (e instanceof MouseEvent) {
+          clientX = e.clientX;
+          clientY = e.clientY;
+        } else {
+          clientX = e.touches[0].clientX;
+          clientY = e.touches[0].clientY;
+        }
+
+        const dx = Math.abs(clientX - startX);
+        const dy = Math.abs(clientY - startY);
+
+        if (dx > 5 || dy > 5) {
+          hasMoved = true;
+          isDragging = true;
+        }
+
+        if (isDragging) {
+          const newRight = window.innerWidth - clientX - btn.offsetWidth / 2;
+          const newBottom = window.innerHeight - clientY - btn.offsetHeight / 2;
+          btn.style.right = Math.max(0, Math.min(newRight, window.innerWidth - btn.offsetWidth)) + 'px';
+          btn.style.bottom = Math.max(0, Math.min(newBottom, window.innerHeight - btn.offsetHeight)) + 'px';
+        }
+
+        if (e instanceof TouchEvent) e.preventDefault();
+      }
+
+      function endDrag() {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+
+        document.removeEventListener('mousemove', onDrag);
+        document.removeEventListener('mouseup', endDrag);
+        document.removeEventListener('touchmove', onDrag);
+        document.removeEventListener('touchend', endDrag);
+
+        if (!hasMoved) {
+          handleFullTranslation();
+        } else {
+          const right = parseInt(btn.style.right) || 20;
+          const bottom = parseInt(btn.style.bottom) || 100;
+          localStorage.setItem('fanyi-btn-position', JSON.stringify({ right, bottom }));
+        }
+
+        isDragging = false;
+      }
+
+      document.body.appendChild(btn);
+    }
+
+    function showConfigPanel() {
+      const existing = document.querySelector('.fanyi-config-panel');
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      const panel = document.createElement('div');
+      panel.className = 'fanyi-config-panel';
+      panel.innerHTML = `
+        <div class="fanyi-config-header">
+          <span>翻译设置</span>
+          <button class="fanyi-config-close">&times;</button>
+        </div>
+        <div class="fanyi-config-body">
+          <div class="fanyi-config-row">
+            <label>API Key</label>
+            <input type="password" class="fanyi-api-input" placeholder="输入 DeepSeek API Key" />
+          </div>
+          <div class="fanyi-config-row">
+            <label>源语言</label>
+            <select class="fanyi-source-lang">
+              <option value="auto">自动检测</option>
+              <option value="en">英语</option>
+              <option value="zh">中文</option>
+              <option value="ja">日语</option>
+            </select>
+          </div>
+          <div class="fanyi-config-row">
+            <label>目标语言</label>
+            <select class="fanyi-target-lang">
+              <option value="zh">中文</option>
+              <option value="en">英语</option>
+              <option value="ja">日语</option>
+            </select>
+          </div>
+          <div class="fanyi-config-row">
+            <label>翻译模式</label>
+            <div class="fanyi-radio-group">
+              <label><input type="radio" name="mode" value="bilingual" /> 双语对照</label>
+              <label><input type="radio" name="mode" value="target" /> 仅译文</label>
+            </div>
+          </div>
+          <div class="fanyi-config-actions">
+            <button class="fanyi-btn-save">保存</button>
+            <button class="fanyi-btn-translate">翻译页面</button>
+            <button class="fanyi-btn-restore">恢复原文</button>
+          </div>
+        </div>
+      `;
+
+      getConfig().then(config => {
+        (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value = config.deepseekApiKey || '';
+        (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value = config.sourceLang || 'auto';
+        (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
+        const modeRadio = panel.querySelector(`input[name="mode"][value="${config.mode || 'bilingual'}"]`) as HTMLInputElement;
+        if (modeRadio) modeRadio.checked = true;
+      });
+
+      panel.querySelector('.fanyi-config-close')?.addEventListener('click', () => panel.remove());
+
+      panel.querySelector('.fanyi-btn-save')?.addEventListener('click', async () => {
+        const config = await getConfig();
+        config.deepseekApiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value;
+        config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
+        config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
+        const modeRadio = panel.querySelector('input[name="mode"]:checked') as HTMLInputElement;
+        config.mode = modeRadio?.value || 'bilingual';
+        await setConfig(config);
+        showStatus('设置已保存', 'success');
+        setTimeout(() => hideStatus(), 1500);
+      });
+
+      panel.querySelector('.fanyi-btn-translate')?.addEventListener('click', () => {
+        panel.remove();
+        handleFullTranslation();
+      });
+
+      panel.querySelector('.fanyi-btn-restore')?.addEventListener('click', () => {
+        panel.remove();
+        restoreOriginal();
+      });
+
+      document.body.appendChild(panel);
     }
 
     async function handleFullTranslation() {
@@ -233,21 +437,22 @@ export default defineContentScript({
         async (newBlocks: TextBlock[]) => {
           console.log('[ContentScript] Dynamic content detected:', newBlocks.length, 'new blocks');
           
+          const config = await getConfig();
           for (const block of newBlocks) {
             if (block.text && block.text.length > 10) {
               try {
-                const config = await getConfig();
                 const response = await browser.runtime.sendMessage({
-                  action: 'translateSelection',
-                  text: block.text,
+                  action: 'translateChunk',
+                  jsonContent: JSON.stringify([{ id: block.id, text: block.text }]),
                   sourceLang: config.sourceLang,
                   targetLang: config.targetLang,
+                  pageUrl: window.location.href,
                 });
 
-                if (response.success) {
+                if (response.success && response.result?.length > 0) {
                   const node = findNodeByText(block.text);
                   if (node) {
-                    applyBlockTranslation(node, response.translated, mode);
+                    applyBlockTranslation(node, response.result[0][1], config.mode);
                     translatedBlocks.add(block.id);
                     console.log('[ContentScript] Dynamic block translated:', block.id);
                   } else {
@@ -387,6 +592,135 @@ export default defineContentScript({
 
       .fanyi-translated {
         position: relative;
+      }
+
+      .fanyi-floating-btn {
+        position: fixed;
+        right: 20px;
+        bottom: 100px;
+        width: 48px;
+        height: 48px;
+        background: #409eff;
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        font-weight: bold;
+        box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+        z-index: 999998;
+        cursor: pointer;
+        user-select: none;
+        touch-action: none;
+      }
+      .fanyi-floating-btn:hover {
+        background: #66b1ff;
+        transform: scale(1.05);
+      }
+      .fanyi-floating-btn:active {
+        transform: scale(0.95);
+      }
+
+      .fanyi-config-panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 90%;
+        max-width: 360px;
+        max-height: 80vh;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        z-index: 999999;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .fanyi-config-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        background: #f5f7fa;
+        border-bottom: 1px solid #ebeef5;
+        font-size: 16px;
+        font-weight: 500;
+      }
+      .fanyi-config-close {
+        background: none;
+        border: none;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 4px 8px;
+        color: #666;
+      }
+      .fanyi-config-body {
+        padding: 16px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .fanyi-config-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .fanyi-config-row label {
+        font-size: 12px;
+        color: #666;
+      }
+      .fanyi-api-input,
+      .fanyi-source-lang,
+      .fanyi-target-lang {
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .fanyi-radio-group {
+        display: flex;
+        gap: 16px;
+      }
+      .fanyi-radio-group label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+      }
+      .fanyi-config-actions {
+        display: flex;
+        gap: 8px;
+        padding-top: 8px;
+      }
+      .fanyi-btn-save,
+      .fanyi-btn-translate,
+      .fanyi-btn-restore {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background: white;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .fanyi-btn-save {
+        background: #409eff;
+        color: white;
+        border-color: #409eff;
+      }
+      .fanyi-btn-translate {
+        background: #67c23a;
+        color: white;
+        border-color: #67c23a;
+      }
+      .fanyi-btn-restore {
+        background: #e6a23c;
+        color: white;
+        border-color: #e6a23c;
       }
 
       @-moz-document url-prefix() {

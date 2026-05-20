@@ -13,6 +13,18 @@ export default defineConfig({
   }),
   manifest: {
     permissions: ['storage', 'contextMenus'],
+    browser_specific_settings: {
+      gecko: {
+        id: 'fanyi-extension@local',
+        strict_min_version: '109.0',
+      },
+      gecko_android: {
+        strict_min_version: '120.0',
+      },
+    },
+    browser_action: {
+      default_area: 'navbar',
+    },
     commands: {
       'translate-page': {
         suggested_key: {
@@ -33,6 +45,9 @@ export default defineConfig({
         description: '切换译文显示',
       },
     },
+  },
+  suppressWarnings: {
+    firefoxDataCollection: true,
   },
   hooks: {
     'build:done': async (wxt, output) => {
