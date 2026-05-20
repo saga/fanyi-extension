@@ -11,21 +11,25 @@ export default defineConfig({
       minify: false,
     },
   }),
-  manifest: {
-    permissions: ['storage', 'contextMenus'],
-    browser_specific_settings: {
-      gecko: {
-        id: 'fanyi-extension@local',
-        strict_min_version: '109.0',
-      },
-      gecko_android: {
-        strict_min_version: '120.0',
-      },
-    },
-    browser_action: {
-      default_area: 'navbar',
-    },
-    commands: {
+  manifest: (env) => {
+    const manifest: any = {};
+    if (env.browser === 'firefox') {
+      manifest.permissions = ['storage', 'contextMenus'];
+      manifest.browser_specific_settings = {
+        gecko: {
+          strict_min_version: '109.0',
+        },
+        gecko_android: {
+          strict_min_version: '120.0',
+        },
+      };
+      manifest.browser_action = {
+        default_area: 'navbar',
+      };
+    } else {
+      manifest.permissions = ['storage', 'contextMenus'];
+    }
+    manifest.commands = {
       'translate-page': {
         suggested_key: {
           default: 'Alt+T',
@@ -44,7 +48,8 @@ export default defineConfig({
         },
         description: '切换译文显示',
       },
-    },
+    };
+    return manifest;
   },
   suppressWarnings: {
     firefoxDataCollection: true,

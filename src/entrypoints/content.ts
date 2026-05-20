@@ -7,6 +7,8 @@ import { buildNodeMap } from './utils/blockExtractor';
 import { getConfig, setConfig } from './utils/config';
 import { DOMObserverManager } from './utils/domObserver';
 import type { TextBlock } from './utils/blockExtractor';
+import { GESTURES } from './utils/constants';
+import { getCenterPoint } from './utils/common';
 
 export default defineContentScript({
   matches: ['*://*/*'],
@@ -33,32 +35,48 @@ export default defineContentScript({
     setupFloatingButton();
 
     function setupTouchEvents() {
-      let touchCount = 0;
-      let touchTimer: number | undefined;
+      let tapCount = 0;
+      let tapTimer: number | undefined;
 
-      document.body.addEventListener('touchstart', (event: TouchEvent) => {
-        if (event.touches.length !== 1) return;
+      document.body.addEventListener('touchstart', async (event: TouchEvent) => {
+        const config = await getConfig();
+        const gesture = config.touchGesture || 'DoubleTap';
 
-        touchCount++;
+        const multiFingerGestures = [GESTURES.TwoFinger, GESTURES.ThreeFinger, GESTURES.FourFinger];
+        const tapGestures = [GESTURES.DoubleTap, GESTURES.TripleTap];
 
-        if (touchCount === 1) {
-          touchTimer = window.setTimeout(() => {
-            touchCount = 0;
-          }, 500);
-        } else if (touchCount === 2) {
-          if (touchTimer) clearTimeout(touchTimer);
-          touchCount = 0;
-          handleFullTranslation();
+        if (multiFingerGestures.includes(gesture)) {
+          const requiredFingers = gesture === GESTURES.TwoFinger ? 2 : gesture === GESTURES.ThreeFinger ? 3 : 4;
+          if (event.touches.length === requiredFingers) {
+            const center = getCenterPoint(event.touches, requiredFingers);
+            if (center && config.enabled) {
+              event.preventDefault();
+              handleFullTranslation();
+            }
+          }
+          return;
         }
-      });
 
-      document.body.addEventListener('touchstart', (event: TouchEvent) => {
-        if (event.touches.length === 3) {
-          const centerX = Array.from(event.touches).reduce((sum, t) => sum + t.clientX, 0) / 3;
-          const centerY = Array.from(event.touches).reduce((sum, t) => sum + t.clientY, 0) / 3;
-          handleFullTranslation();
+        if (tapGestures.includes(gesture)) {
+          if (event.touches.length !== 1) return;
+
+          const requiredTaps = gesture === GESTURES.DoubleTap ? 2 : 3;
+          tapCount++;
+
+          if (tapCount === 1) {
+            tapTimer = window.setTimeout(() => {
+              tapCount = 0;
+            }, 500);
+          } else if (tapCount === requiredTaps) {
+            if (tapTimer) clearTimeout(tapTimer);
+            tapCount = 0;
+            if (config.enabled) {
+              event.preventDefault();
+              handleFullTranslation();
+            }
+          }
         }
-      }, { passive: true });
+      }, { passive: false });
     }
 
     function setupFloatingButton() {
@@ -613,6 +631,7 @@ export default defineContentScript({
         cursor: pointer;
         user-select: none;
         touch-action: none;
+        -webkit-tap-highlight-color: transparent;
       }
       .fanyi-floating-btn:hover {
         background: #66b1ff;

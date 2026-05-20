@@ -15,6 +15,7 @@ export interface Config {
   deepseekApiKey: string;
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
+  touchGesture: string;
 }
 
 const defaultConfig: Config = {
@@ -29,6 +30,7 @@ const defaultConfig: Config = {
     restoreOriginal: 'Alt+R',
     toggleTranslation: 'Alt+V',
   },
+  touchGesture: 'DoubleTap',
 };
 
 export async function getConfig(): Promise<Config> {
