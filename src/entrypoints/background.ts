@@ -35,6 +35,8 @@ export default defineBackground({
 
     const isContextMenuSupported = !!browser.contextMenus;
 
+    // Service cache is in-memory; Firefox may suspend background scripts.
+    // Recreate service instances as needed; don't rely on persistence.
     const serviceCache = new Map<string, DeepSeekTranslationService>();
 
     function getService(apiKey: string): DeepSeekTranslationService {
@@ -110,25 +112,28 @@ export default defineBackground({
     }
 
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.action === 'translateChunk') {
-        handleTranslateChunk(message, sendResponse);
-        return true;
-      }
-
-      if (message.action === 'validateApiKey') {
-        handleValidateApiKey(message, sendResponse);
-        return true;
-      }
-
-      if (message.action === 'clearCache') {
-        handleClearCache(sendResponse);
-        return true;
-      }
-
-      if (message.action === 'checkConfig') {
-        handleCheckConfig(sendResponse);
-        return true;
-      }
+      // Handle messages asynchronously, ensuring config is loaded first
+      (async () => {
+        try {
+          if (message.action === 'translateChunk') {
+            await handleTranslateChunk(message, sendResponse);
+          } else if (message.action === 'validateApiKey') {
+            await handleValidateApiKey(message, sendResponse);
+          } else if (message.action === 'clearCache') {
+            await handleClearCache(sendResponse);
+          } else if (message.action === 'checkConfig') {
+            await handleCheckConfig(sendResponse);
+          } else {
+            // Unknown action, don't keep port open
+            return false;
+          }
+        } catch (error) {
+          console.error('[Background] Message handler error:', error);
+          sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+        }
+      })();
+      // Return true to keep the message channel open for async response
+      return true;
     });
 
     async function handleTranslateChunk(

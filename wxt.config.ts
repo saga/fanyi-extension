@@ -15,6 +15,9 @@ export default defineConfig({
     const manifest: any = {};
     if (env.browser === 'firefox') {
       manifest.permissions = ['storage', 'contextMenus'];
+      manifest.host_permissions = {
+        matches: ['https://api.deepseek.com/*'],
+      };
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
@@ -24,9 +27,7 @@ export default defineConfig({
           strict_min_version: '120.0',
         },
       };
-      manifest.browser_action = {
-        default_area: 'navbar',
-      };
+      // Note: default_area is not supported on Firefox Android, removed to avoid warnings
     } else {
       manifest.permissions = ['storage', 'contextMenus'];
     }

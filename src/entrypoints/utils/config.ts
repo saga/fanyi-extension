@@ -40,6 +40,7 @@ export async function getConfig(): Promise<Config> {
 
 export async function setConfig(config: Partial<Config>): Promise<void> {
   const currentConfig = await getConfig();
+  // Use JSON serialization to strip Proxy/reactive wrappers from Vue refs
   const cleanConfig = JSON.parse(JSON.stringify({ ...currentConfig, ...config }));
   await storage.setItem('local:config', cleanConfig);
 }
