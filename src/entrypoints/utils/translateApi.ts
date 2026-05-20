@@ -19,12 +19,25 @@ export function prepareDocument(root: Document | Element): {
   return { blocks, chunks, fullText };
 }
 
-export async function getCachedTranslation(cacheKey: string) {
-  return translationCache.get<Map<string, string>>(cacheKey);
+export async function getCachedTranslation(cacheKey: string): Promise<Map<string, string> | null> {
+  const raw = await translationCache.get<Record<string, string>>(cacheKey);
+  if (!raw) return null;
+  
+  // Convert plain object back to Map for compatibility
+  const map = new Map<string, string>();
+  for (const [key, value] of Object.entries(raw)) {
+    map.set(key, value);
+  }
+  return map;
 }
 
 export async function cacheTranslation(cacheKey: string, data: Map<string, string>) {
-  await translationCache.set(cacheKey, data, 7 * 24 * 60 * 60 * 1000);
+  // Convert Map to plain object for storage compatibility
+  const obj: Record<string, string> = {};
+  for (const [key, value] of data.entries()) {
+    obj[key] = value;
+  }
+  await translationCache.set(cacheKey, obj, 7 * 24 * 60 * 60 * 1000);
 }
 
 export function processTranslationResult(jsonResult: string): Map<string, string> {

@@ -646,15 +646,15 @@ export default defineContentScript({
         position: fixed;
         right: 16px;
         bottom: 80px;
-        width: 25px;
-        height: 25px;
+        width: 26px;
+        height: 26px;
         background: #409eff;
         color: white;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 10px;
+        font-size: 11px;
         font-weight: bold;
         opacity: 0.5;
         box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
