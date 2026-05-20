@@ -1,6 +1,6 @@
 <template>
   <div class="popup-container">
-    <h2>翻译插件</h2>
+    <h2>简简单单翻译</h2>
     <div class="settings">
       <label class="switch-item">
         <input type="checkbox" v-model="config.enabled" @change="saveConfig" />

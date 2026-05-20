@@ -417,12 +417,12 @@ export default defineContentScript({
       for (let i = 0; i < chunks.length; i++) {
         translateChunk(i);
         if (i < chunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 250));
         }
       }
 
       while (completedCount < chunks.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 250));
       }
 
       console.log('[ContentScript] translateChunksViaBackground complete');
@@ -609,13 +609,14 @@ export default defineContentScript({
         bottom: 20px;
         left: 50%;
         transform: translateX(-50%);
-        padding: 12px 20px;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.4);
+        border-radius: 6px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.1);
         z-index: 999999;
-        font-size: 14px;
+        font-size: 11px;
         display: none;
+        opacity: 0.4;
       }
       .fanyi-loading { border-left: 4px solid #409eff; }
       .fanyi-success { border-left: 4px solid #67c23a; }

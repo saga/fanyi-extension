@@ -61,25 +61,75 @@ async function callApi(
   apiKey: string,
   body: string
 ): Promise<string> {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: buildHeaders(apiKey),
-    body,
-  });
+  console.log('[DeepSeek] Calling API:', API_URL);
+  console.log('[DeepSeek] Request body length:', body.length, 'bytes');
+  console.log('[DeepSeek] API Key length:', apiKey.length);
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API error: ${response.status} ${errorText}`);
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: buildHeaders(apiKey),
+      body,
+    });
+
+    console.log('[DeepSeek] Response status:', response.status);
+    console.log('[DeepSeek] Response headers:', Object.fromEntries(response.headers.entries()));
+
+    const responseText = await response.text().catch(() => '');
+    console.log('[DeepSeek] Response body:', responseText.substring(0, 500));
+
+    if (!response.ok) {
+      let errorMessage = `HTTP ${response.status}`;
+      
+      // Try to parse error JSON for more details
+      try {
+        const errorJson = JSON.parse(responseText);
+        if (errorJson.error) {
+          errorMessage += ` - ${errorJson.error.message || errorJson.error}`;
+          if (errorJson.error.type) errorMessage += ` [${errorJson.error.type}]`;
+          if (errorJson.error.code) errorMessage += ` (code: ${errorJson.error.code})`;
+        } else if (errorJson.message) {
+          errorMessage += ` - ${errorJson.message}`;
+        } else {
+          errorMessage += ` - ${responseText.substring(0, 200)}`;
+        }
+      } catch {
+        errorMessage += ` - ${responseText.substring(0, 200)}`;
+      }
+
+      // Add common error code explanations
+      if (response.status === 401) {
+        errorMessage += '\n\n可能原因: API Key 无效或已过期';
+      } else if (response.status === 403) {
+        errorMessage += '\n\n可能原因: 账户余额不足或被封禁';
+      } else if (response.status === 429) {
+        errorMessage += '\n\n可能原因: 请求频率超限，请稍后重试';
+      } else if (response.status === 500 || response.status === 503) {
+        errorMessage += '\n\n可能原因: DeepSeek 服务暂时不可用';
+      }
+
+      throw new Error(`DeepSeek API error: ${errorMessage}`);
+    }
+
+    const data = JSON.parse(responseText);
+    console.log('[DeepSeek] Parsed response:', JSON.stringify(data).substring(0, 300));
+
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
+      console.error('[DeepSeek] Invalid response structure:', JSON.stringify(data).substring(0, 500));
+      throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
+    }
+
+    console.log('[DeepSeek] Response content length:', content.length);
+    return content;
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      console.error('[DeepSeek] Fetch error - possible network/CORS issue:', error);
+      throw new Error(`网络请求失败: ${error.message}\n\n可能原因:\n1. 网络连接问题\n2. Firefox 扩展权限不足\n3. 被防火墙/代理拦截`);
+    }
+    throw error;
   }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('No response from DeepSeek');
-  }
-
-  return content;
 }
 
 export class DeepSeekTranslationService implements TranslationService {

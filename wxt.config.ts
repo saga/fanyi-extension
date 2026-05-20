@@ -14,10 +14,8 @@ export default defineConfig({
   manifest: (env) => {
     const manifest: any = {};
     if (env.browser === 'firefox') {
-      manifest.permissions = ['storage', 'contextMenus'];
-      manifest.host_permissions = {
-        matches: ['https://api.deepseek.com/*'],
-      };
+      manifest.permissions = ['storage', 'contextMenus', 'https://api.deepseek.com/*'];
+      // Firefox MV2 doesn't support host_permissions, use permissions instead
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',

@@ -181,9 +181,19 @@ export default defineBackground({
 
         sendResponse({ success: true, result: Array.from(result.entries()) });
       } catch (error) {
+        console.error('[Background] translateChunk error:', error);
+        console.error('[Background] Full error details:', {
+          name: error instanceof Error ? error.name : 'unknown',
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack?.substring(0, 500) : null,
+        });
         sendResponse({
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
+          debugInfo: error instanceof Error ? {
+            name: error.name,
+            stack: error.stack?.substring(0, 300),
+          } : null,
         });
       }
     }
@@ -200,6 +210,7 @@ export default defineBackground({
         }
 
         console.log('[Background] Validating API Key, length:', apiKey.length);
+        console.log('[Background] API Key prefix:', apiKey.substring(0, 10));
 
         const service = new DeepSeekTranslationService(apiKey);
         const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
@@ -208,18 +219,25 @@ export default defineBackground({
           setTimeout(() => reject(new Error('请求超时（10秒）')), 10000);
         });
 
-        await Promise.race([
+        const result = await Promise.race([
           service.translate(testContent, 'en', 'zh', []),
           timeout
         ]);
         
-        console.log('[Background] API Key validation successful');
+        console.log('[Background] API Key validation successful, response length:', (result as string)?.length || 0);
         sendResponse({ success: true });
       } catch (error) {
         console.error('[Background] API Key validation failed:', error);
+        const errorMsg = error instanceof Error ? error.message : '验证失败';
+        console.error('[Background] Full error stack:', error);
         sendResponse({
           success: false,
-          error: error instanceof Error ? error.message : '验证失败',
+          error: errorMsg,
+          debugInfo: error instanceof Error ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack?.substring(0, 300),
+          } : null,
         });
       }
     }
