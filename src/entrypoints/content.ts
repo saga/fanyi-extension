@@ -703,17 +703,17 @@ export default defineContentScript({
         position: fixed;
         right: ${isMobile ? '12px' : '16px'};
         bottom: ${isMobile ? '80px' : '80px'};
-        width: ${isMobile ? '32px' : '32px'};
-        height: ${isMobile ? '32px' : '32px'};
+        width: ${isMobile ? '26px' : '36px'};
+        height: ${isMobile ? '26px' : '36px'};
         background: #409eff;
         color: white;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: ${isMobile ? '14px' : '13px'};
+        font-size: ${isMobile ? '12px' : '13px'};
         font-weight: bold;
-        opacity: 0.85;
+        opacity: 0.5;
         box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
         z-index: 999998;
         cursor: pointer;
@@ -736,8 +736,8 @@ export default defineContentScript({
         left: 50%;
         transform: translate(-50%, -50%);
         width: ${isMobile ? '92%' : '90%'};
-        max-width: ${isMobile ? '400px' : '340px'};
-        max-height: ${isMobile ? '88vh' : '85vh'};
+        max-width: ${isMobile ? '340px' : '400px'};
+        max-height: ${isMobile ? '80vh' : '85vh'};
         background: white;
         border-radius: 16px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.3);
@@ -745,36 +745,36 @@ export default defineContentScript({
         overflow: hidden;
         display: flex;
         flex-direction: column;
-        font-size: ${isMobile ? '15px' : '13px'};
+        font-size: ${isMobile ? '12px' : '13px'};
       }
       .fanyi-config-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: ${isMobile ? '16px 18px' : '12px 16px'};
+        padding: ${isMobile ? '10px 14px' : '12px 16px'};
         background: linear-gradient(135deg, #409eff, #66b1ff);
         color: white;
-        font-size: ${isMobile ? '17px' : '15px'};
+        font-size: ${isMobile ? '11px' : '15px'};
         font-weight: 600;
       }
       .fanyi-config-close {
         background: none;
         border: none;
-        font-size: ${isMobile ? '24px' : '20px'};
+        font-size: ${isMobile ? '16px' : '20px'};
         cursor: pointer;
         padding: 4px 10px;
         color: white;
-        opacity: 0.9;
+        opacity: 0.8;
       }
       .fanyi-config-close:hover {
         opacity: 1;
       }
       .fanyi-config-body {
-        padding: ${isMobile ? '18px' : '14px'};
+        padding: ${isMobile ? '12px' : '14px'};
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: ${isMobile ? '14px' : '12px'};
+        gap: ${isMobile ? '10px' : '12px'};
       }
       .fanyi-config-row {
         display: flex;
@@ -782,7 +782,7 @@ export default defineContentScript({
         gap: 6px;
       }
       .fanyi-config-row label {
-        font-size: ${isMobile ? '13px' : '12px'};
+        font-size: ${isMobile ? '11px' : '12px'};
         color: #606266;
         font-weight: 500;
       }
@@ -790,10 +790,10 @@ export default defineContentScript({
       .fanyi-source-lang,
       .fanyi-target-lang,
       .fanyi-touch-gesture {
-        padding: ${isMobile ? '12px 14px' : '10px 12px'};
+        padding: ${isMobile ? '8px 10px' : '10px 12px'};
         border: 1px solid #e0e0e0;
         border-radius: 10px;
-        font-size: ${isMobile ? '15px' : '14px'};
+        font-size: ${isMobile ? '13px' : '14px'};
         -webkit-appearance: none;
         appearance: none;
         background: #fafafa;
@@ -808,7 +808,7 @@ export default defineContentScript({
       }
       .fanyi-radio-group {
         display: flex;
-        gap: ${isMobile ? '20px' : '16px'};
+        gap: ${isMobile ? '12px' : '16px'};
         flex-wrap: wrap;
       }
       .fanyi-radio-group label {
@@ -816,31 +816,31 @@ export default defineContentScript({
         align-items: center;
         gap: 6px;
         cursor: pointer;
-        font-size: ${isMobile ? '14px' : '13px'};
+        font-size: ${isMobile ? '12px' : '13px'};
         color: #303133;
       }
       .fanyi-radio-group input[type="radio"] {
-        width: ${isMobile ? '20px' : '18px'};
-        height: ${isMobile ? '20px' : '18px'};
+        width: ${isMobile ? '16px' : '18px'};
+        height: ${isMobile ? '16px' : '18px'};
         margin: 0;
         accent-color: #409eff;
       }
       .fanyi-config-actions {
         display: flex;
-        gap: ${isMobile ? '10px' : '8px'};
-        padding-top: ${isMobile ? '10px' : '8px'};
+        gap: ${isMobile ? '6px' : '8px'};
+        padding-top: ${isMobile ? '6px' : '8px'};
         margin-top: auto;
       }
       .fanyi-btn-save,
       .fanyi-btn-translate,
       .fanyi-btn-restore {
         flex: 1;
-        padding: ${isMobile ? '12px 14px' : '10px 12px'};
+        padding: ${isMobile ? '8px 10px' : '10px 12px'};
         border: 1px solid #e0e0e0;
         border-radius: 10px;
         background: white;
         cursor: pointer;
-        font-size: ${isMobile ? '14px' : '13px'};
+        font-size: ${isMobile ? '12px' : '13px'};
         font-weight: 600;
         white-space: nowrap;
       }
