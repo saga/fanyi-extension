@@ -522,21 +522,27 @@ export default defineContentScript({
       const originalText = node.textContent || '';
 
       if (mode === 'bilingual') {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'fanyi-bilingual-block';
-        wrapper.innerHTML = `
-          <div class="fanyi-source">${escapeHtml(originalText)}</div>
+        const translationBlock = document.createElement('div');
+        translationBlock.className = 'fanyi-bilingual-block';
+        translationBlock.innerHTML = `
           <div class="fanyi-target">${escapeHtml(translatedText)}</div>
         `;
-
-        node.textContent = '';
-        node.appendChild(wrapper);
+        
+        node.insertAdjacentElement('afterend', translationBlock);
       } else {
-        node.textContent = translatedText;
+        const translationBlock = document.createElement('div');
+        translationBlock.className = 'fanyi-bilingual-block';
+        translationBlock.innerHTML = `
+          <div class="fanyi-target">${escapeHtml(translatedText)}</div>
+        `;
+        
+        node.insertAdjacentElement('afterend', translationBlock);
       }
 
       node.classList.add('fanyi-translated');
       node.dataset.originalText = originalText;
+      node.dataset.translationBlockId = 'fanyi-' + Date.now();
+      translationBlock.dataset.linkedTo = node.dataset.translationBlockId;
     }
 
     function setupDynamicContentObserver(mode: 'bilingual' | 'target') {
@@ -605,26 +611,17 @@ export default defineContentScript({
     }
 
     function restoreOriginal() {
-      for (const [blockId, originalText] of originalTexts) {
-        const nodes = document.querySelectorAll(`[data-original-text]`);
-        for (const node of Array.from(nodes)) {
-          const el = node as HTMLElement;
-          if (el.dataset.originalText === originalText) {
-            el.textContent = originalText;
-            el.classList.remove('fanyi-translated');
-            delete el.dataset.originalText;
-          }
-        }
-      }
-
       const translatedElements = document.querySelectorAll('.fanyi-bilingual-block');
       for (const el of Array.from(translatedElements)) {
-        const parent = el.parentElement;
-        if (parent && parent.dataset.originalText) {
-          parent.textContent = parent.dataset.originalText;
-          parent.classList.remove('fanyi-translated');
-          delete parent.dataset.originalText;
-        }
+        el.remove();
+      }
+      
+      const translatedNodes = document.querySelectorAll('.fanyi-translated');
+      for (const node of Array.from(translatedNodes)) {
+        const el = node as HTMLElement;
+        el.classList.remove('fanyi-translated');
+        delete el.dataset.originalText;
+        delete el.dataset.translationBlockId;
       }
 
       showStatus('已恢复原文', 'success');
@@ -632,7 +629,7 @@ export default defineContentScript({
     }
 
     function toggleTranslation() {
-      const translatedElements = document.querySelectorAll('.fanyi-target');
+      const translatedElements = document.querySelectorAll('.fanyi-bilingual-block');
       for (const el of Array.from(translatedElements)) {
         const isVisible = (el as HTMLElement).style.display !== 'none';
         (el as HTMLElement).style.display = isVisible ? 'none' : 'block';
@@ -686,25 +683,15 @@ export default defineContentScript({
       .fanyi-error { border: 1px solid #f56c6c; }
 
       .fanyi-bilingual-block {
-        margin: 6px 0;
-        padding: 10px;
-        border-radius: 6px;
-        background: rgba(64, 158, 255, 0.08);
-      }
-      .fanyi-source {
-        color: #606266;
-        margin-bottom: 8px;
-        line-height: 1.6;
-        font-size: 0.95em;
+        margin: 4px 0 8px 0;
+        padding: 4px 8px;
+        border-left: 2px solid rgba(64, 158, 255, 0.2);
       }
       .fanyi-target {
         color: #303133;
         font-weight: 500;
         line-height: 1.6;
-      }
-
-      .fanyi-translated {
-        position: relative;
+        font-size: 0.98em;
       }
 
       .fanyi-floating-btn {

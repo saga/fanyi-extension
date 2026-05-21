@@ -33,6 +33,11 @@ export const githubRule: SiteRule = {
     '[data-view-component="true"].d-flex',
     'code',
     'pre',
+    '.react-blob-view-header-sticky',
+    '[class*="stickyHeader"]',
+    '[class*="BlobViewHeader"]',
+    '[class*="FileNameStickyHeader"]',
+    '[class*="breadcrumbs"]',
   ],
   promptInstructions:
     'This is a GitHub page. Keep UI navigation terms, file extensions, and code-related vocabulary untranslated. Preserve brand names and technical terms.',

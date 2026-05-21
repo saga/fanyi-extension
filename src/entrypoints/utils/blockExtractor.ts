@@ -1,3 +1,5 @@
+import { matchSiteRule, type SiteRule } from '../../rules';
+
 export interface TextBlock {
   id: string;
   xpath: string;
@@ -33,6 +35,21 @@ const SKIP_CLASS_PATTERNS = [
   'notranslate'
 ];
 
+// 网站特定规则缓存
+let cachedRule: SiteRule | null = null;
+let cachedUrl: string | null = null;
+
+function getSiteRule(): SiteRule | null {
+  const currentUrl = window.location.href;
+  if (cachedUrl === currentUrl) {
+    return cachedRule;
+  }
+  const matched = matchSiteRule(currentUrl);
+  cachedUrl = currentUrl;
+  cachedRule = matched?.siteRule || null;
+  return cachedRule;
+}
+
 function shouldSkipByClass(el: Element): boolean {
   if (!el.className || typeof el.className !== 'string') return false;
   const className = el.className.toLowerCase();
@@ -41,6 +58,19 @@ function shouldSkipByClass(el: Element): boolean {
     classList.some(cls => cls === pattern || cls.startsWith(pattern + '-') || cls.startsWith(pattern + '_'))
   );
   return match;
+}
+
+function shouldSkipBySiteRules(el: Element): boolean {
+  const rule = getSiteRule();
+  if (!rule?.skipSelectors) return false;
+  
+  for (const selector of rule.skipSelectors) {
+    // 检查元素本身是否匹配
+    if (el.matches(selector)) return true;
+    // 检查祖先元素是否匹配
+    if (el.closest(selector)) return true;
+  }
+  return false;
 }
 
 function isInArticleContext(el: Element): boolean {
@@ -164,6 +194,7 @@ function grabNode(node: Node): Element | false {
   if (shouldSkipByClass(node) && !isInArticleContext(node)) return false;
   if (node.isContentEditable || node.getAttribute('contenteditable') === 'true') return false;
   if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') return false;
+  if (shouldSkipBySiteRules(node)) return false;
 
   if (DIRECT_SET.has(tag)) {
     const text = node.textContent?.trim();
