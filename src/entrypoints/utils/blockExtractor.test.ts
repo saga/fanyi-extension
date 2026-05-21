@@ -842,25 +842,35 @@ describe('extractBlocks - Google Blog Alternating Translation Issue', () => {
   });
 
   it('should NOT skip alternating paragraphs (fix for walker.currentNode bug)', () => {
+    // 模拟 Google Blog 实际页面结构：h3 标题也会被提取
+    // 关键：h3 和 p 都是 DIRECT_SET 成员，都会被 grabNode 接受
+    // 当 h3 被接受后，如果设置 walker.currentNode = nextSibling，会导致下一个 p 被跳过
     setupHTML(`
       <article>
         <div class="rich-text">
-          <h3>Section Title</h3>
-          <p><b>1.</b> First paragraph with bold start.</p>
-          <p>2. Second paragraph without bold.</p>
-          <p><b>3.</b> Third paragraph with bold start.</p>
-          <p>4. Fourth paragraph without bold.</p>
-          <p><b>5.</b> Fifth paragraph with bold start.</p>
-          <p>6. Sixth paragraph without bold.</p>
+          <h3>Gemini 3.5</h3>
+          <p><b>1.</b> We launched Gemini 3.5 Flash: the first in our latest series.</p>
+          <p>2. Gemini 3.5 Flash is generally available today.</p>
+          <p><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models.</p>
+          <p>4. Landing in the top-right quadrant of the Artificial Analysis index.</p>
+          <p><b>5.</b> Gemini 3.5 Flash is ideal for tackling long-horizon agentic tasks.</p>
+          <p>6. Building on the strong multimodal foundation of Gemini 3.</p>
+          <h3>Gemini Omni</h3>
+          <p><b>7.</b> Gemini Omni is our new model that can create anything from any input.</p>
+          <p>8. It combines Gemini's intelligence with the best of our generative media models.</p>
         </div>
       </article>
     `);
 
     const blocks = extractBlocks(document);
     const pBlocks = blocks.filter(b => b.tag === 'p');
+    const h3Blocks = blocks.filter(b => b.tag === 'h3');
     
-    // 关键测试：所有 6 个段落都应该被提取，不应该"隔一个跳过"
-    expect(pBlocks).toHaveLength(6);
+    // 验证 h3 也被提取
+    expect(h3Blocks).toHaveLength(2);
+    
+    // 关键测试：所有 8 个段落都应该被提取，不应该"隔一个跳过"
+    expect(pBlocks).toHaveLength(8);
     
     // 验证每个段落的编号都存在
     const extractedTexts = pBlocks.map(b => b.text);
@@ -870,6 +880,8 @@ describe('extractBlocks - Google Blog Alternating Translation Issue', () => {
     expect(extractedTexts.some(t => t.includes('4.'))).toBe(true);
     expect(extractedTexts.some(t => t.includes('5.'))).toBe(true);
     expect(extractedTexts.some(t => t.includes('6.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('7.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('8.'))).toBe(true);
   });
 
   it('should extract all paragraphs including those with inline b and a tags', () => {
@@ -1004,5 +1016,157 @@ describe('extractBlocks - Google Blog Alternating Translation Issue', () => {
     
     const geminiParagraph = pBlocks.find(b => b.text.includes('Gemini 3.5 Flash delivers intelligence'));
     expect(geminiParagraph).toBeTruthy();
+  });
+
+  // Regression test: TreeWalker's currentNode must NOT be manually modified.
+  //
+  // In real browsers (Chrome/Firefox), after walker.nextNode() returns a node,
+  // setting walker.currentNode = currentNode.nextSibling causes the NEXT call
+  // to nextNode() to skip the sibling element itself and only visit its
+  // children (text nodes / inline elements). Since grabNode rejects text
+  // nodes, sibling paragraphs alternatingly disappear — only every other <p>
+  // creates a block.
+  //
+  // Example (minified HTML, no whitespace text nodes between <p> siblings):
+  //   <h3>Title</h3><p><b>1.</b> text</p><p>2. text</p><p><b>3.</b> text</p>
+  //   → blocks for <p>2.</p> and following <p>4.</p>, etc. (odds skipped)
+  //
+  // NOTE: jsdom's TreeWalker handles currentNode assignment differently from
+  // real browsers, so this test CANNOT reproduce the bug in jsdom. It
+  // verifies the correct behaviour (all paragraphs extracted) using the
+  // structure that previously triggered the issue.
+  it('should extract ALL consecutive paragraphs without alternating skip (TreeWalker currentNode guard)', () => {
+    // Exact minified format from blog.google — no whitespace between tags
+    setupHTML(`<article><div class="rich-text"><h3>Section</h3><p><b>1.</b> First paragraph with bold lead-in has enough text length.</p><p><b>2.</b> Second paragraph also starts with bold and has enough text.</p><p><b>3.</b> Third paragraph follows the same bold pattern with enough text.</p><p><b>4.</b> Fourth paragraph here still following the bold pattern text.</p><p><b>5.</b> Fifth paragraph maintains the alternating bold start pattern.</p><p><b>6.</b> Sixth and final paragraph using the bold start pattern text.</p></div></article>`);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+
+    // ALL 6 paragraphs must be extracted, not just every other one
+    expect(pBlocks).toHaveLength(6);
+
+    const texts = pBlocks.map(b => b.text);
+    expect(texts.some(t => t.startsWith('1.'))).toBe(true);
+    expect(texts.some(t => t.startsWith('2.'))).toBe(true);
+    expect(texts.some(t => t.startsWith('3.'))).toBe(true);
+    expect(texts.some(t => t.startsWith('4.'))).toBe(true);
+    expect(texts.some(t => t.startsWith('5.'))).toBe(true);
+    expect(texts.some(t => t.startsWith('6.'))).toBe(true);
+  });
+
+  // Simulates the actual blog.google structure with module--text wrappers and
+  // multiple heading sections, verifying no paragraphs are skipped.
+  it('should extract all paragraphs in multi-section Google Blog structure', () => {
+    setupHTML(`
+      <article>
+        <div class="uni-content">
+          <div class="module--text module--text__article" role="presentation">
+            <div class="uni-paragraph article-paragraph">
+              <div class="rich-text">
+                <p class="drop-cap">This week at Google I/O 2026 we unveiled new models and tools. You can dig into our announcements for a TL;DR keep scrolling for our annual list of 100 highlights from the event.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="module--text module--text__article" role="presentation">
+            <div class="uni-paragraph article-paragraph">
+              <div class="rich-text"><h2>Create and build with our most advanced models</h2></div>
+            </div>
+          </div>
+
+          <div class="module--text module--text__article" role="presentation">
+            <div class="uni-paragraph article-paragraph">
+              <div class="rich-text"><h3>Gemini 3.5</h3><p><b>1.</b> We launched <a href="#">Gemini 3.5 Flash</a>: the first in our latest series of models combining frontier intelligence with action.</p><p><b>2.</b> Gemini 3.5 Flash is generally available today via our agent-first development platform.</p><p><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models at speeds you expect from the Flash series. It outperforms Gemini 3.1 Pro on challenging coding and agentic benchmarks.</p><p><b>4.</b> Landing in the top-right quadrant of the Artificial Analysis index 3.5 Flash delivers frontier-level intelligence at exceptional speed.</p></div>
+            </div>
+          </div>
+
+          <div class="module--text module--text__article" role="presentation">
+            <div class="uni-paragraph article-paragraph">
+              <div class="rich-text"><h3 data-block-key="w4ep3">AI Search</h3><p data-block-key="ak933"><b>17.</b> <a href="#">AI Mode</a> is our most powerful AI Search and it has surpassed more than 1 billion monthly users.</p><p data-block-key="fbafd"><b>18.</b> We are seeing incredible momentum with AI Mode queries more than doubling every quarter since launch.</p><p data-block-key="3o9av"><b>19.</b> Today we are launching the biggest upgrade to our Search box in over 25 years a new intelligent Search box.</p><p data-block-key="34i32"><b>20.</b> We are also making it even easier to continue the conversation with Search bringing AI Overviews and AI Mode into one seamless AI Search experience.</p></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+
+    // All 9 paragraphs across all sections must be extracted (including drop-cap intro)
+    expect(pBlocks).toHaveLength(9);
+
+    const texts = pBlocks.map(b => b.text);
+    expect(texts.some(t => t.includes('1. We launched'))).toBe(true);
+    expect(texts.some(t => t.includes('2. Gemini 3.5 Flash is generally'))).toBe(true);
+    expect(texts.some(t => t.includes('3. Gemini 3.5 Flash delivers intelligence'))).toBe(true);
+    expect(texts.some(t => t.includes('4. Landing in the top-right'))).toBe(true);
+    expect(texts.some(t => t.includes('17. AI Mode is our most powerful'))).toBe(true);
+    expect(texts.some(t => t.includes('18. We are seeing incredible momentum'))).toBe(true);
+    expect(texts.some(t => t.includes('19. Today we are launching the biggest'))).toBe(true);
+    expect(texts.some(t => t.includes('20. We are also making it even easier'))).toBe(true);
+  });
+});
+
+describe('extractBlocks - Google Blog Alternating Translation Issue (Real Structure)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract all paragraphs from sample.html exact structure', () => {
+    // 完全模拟 sample.html 中 Gemini 3.5 部分的实际 DOM 结构
+    setupHTML(`
+      <article>
+        <div class="uni-paragraph article-paragraph" data-component="uni-article-paragraph" data-component-initialized="true">
+          <div class="rich-text">
+            <h3 data-block-key="o63sw">Gemini 3.5</h3>
+            <p data-block-key="f5hj2"><b>1.</b> We launched <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-5/">Gemini 3.5 Flash</a>: the first in our latest series of models combining frontier intelligence with action.</p>
+            <p data-block-key="com71"><b>2.</b> Gemini 3.5 Flash is generally available today via our agent-first development platform <a href="https://antigravity.google/" rel="noopener" target="_blank">Google Antigravity</a> the Gemini API in <a href="https://aistudio.google.com/" rel="noopener" target="_blank">Google AI Studio</a> and <a href="https://developer.android.com/studio" rel="noopener" target="_blank">Android Studio</a>.</p>
+            <p data-block-key="ar1dc"><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models at speeds you expect from the Flash series. It outperforms Gemini 3.1 Pro on challenging coding and agentic benchmarks like Terminal-Bench 2.1 (76.2%), GDPval-AA (1656 Elo) and MCP Atlas (83.6%).</p>
+            <p data-block-key="2ugbm"><b>4.</b> Landing in the top-right quadrant of the Artificial Analysis index, 3.5 Flash delivers frontier-level intelligence at exceptional speed — proving you no longer have to trade quality for latency.</p>
+            <p data-block-key="61kma"><b>5.</b> Gemini 3.5 Flash is ideal for tackling long-horizon agentic tasks. What used to take a developer days or an auditor weeks, 3.5 Flash can now help complete in a fraction of the time, often at less than half the cost of other frontier models. It rapidly plans, builds and iterates to solve real-world problems, whether it’s developing new applications, maintaining codebases or helping to prepare financial documents.</p>
+            <p data-block-key="4u52g"><b>6.</b> Building on the strong multimodal foundation of Gemini 3, 3.5 Flash generates richer, more interactive web UIs and graphics.</p>
+            <p data-block-key="2mko"><b>7.</b> We’re also hard at work on Gemini 3.5 Pro. It’s already being used internally and we look forward to rolling it out next month.</p>
+            <h3 data-block-key="7tmnq">Gemini Omni</h3>
+            <p data-block-key="bo6h"><b>8.</b> <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-omni/">Gemini Omni</a> is our new model that can create anything from any input — starting with video. It combines Gemini's intelligence with the best of our generative media models for a new level of world understanding, multimodality and editing. We’re starting with video outputs now, but over time, Gemini Omni will be able to generate any output from any input.</p>
+            <p data-block-key="6qdvi"><b>9.</b> <a href="https://deepmind.google/models/gemini-omni/" rel="noopener" target="_blank">Gemini Omni</a> combines an intuitive understanding of physics with Gemini's knowledge of history, science and culture, bridging the gap from photorealism to meaningful storytelling. It has an improved understanding of forces like gravity, kinetic energy and fluid dynamics, allowing you to create more realistic scenes.</p>
+            <p data-block-key="1kof1"><b>10.</b> Videos created with Omni include our imperceptible <a href="https://blog.google/innovation-and-ai/products/identifying-ai-generated-media-online/">SynthID digital watermark</a>. You can easily verify content through the Gemini app, Gemini in Chrome and Search.</p>
+          </div>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    const h3Blocks = blocks.filter(b => b.tag === 'h3');
+    
+    // 验证 h3 标题被提取
+    expect(h3Blocks).toHaveLength(2);
+    expect(h3Blocks.some(b => b.text === 'Gemini 3.5')).toBe(true);
+    expect(h3Blocks.some(b => b.text === 'Gemini Omni')).toBe(true);
+    
+    // 关键测试：所有 10 个段落都应该被提取，不应该"隔一个跳过"
+    expect(pBlocks).toHaveLength(10);
+    
+    // 验证每个段落的编号都存在（包括之前未被翻译的第 3 段）
+    const extractedTexts = pBlocks.map(b => b.text);
+    expect(extractedTexts.some(t => t.includes('1. We launched'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('2. Gemini 3.5 Flash is generally'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('3. Gemini 3.5 Flash delivers intelligence'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('4. Landing in the top-right'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('5. Gemini 3.5 Flash is ideal'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('6. Building on the strong'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('7. We’re also hard at work'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('8. Gemini Omni'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('9. Gemini Omni'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('10. Videos created with Omni'))).toBe(true);
+    
+    // 特别验证之前未被翻译的第 3 段内容
+    const thirdParagraph = pBlocks.find(b => b.text.includes('Terminal-Bench 2.1'));
+    expect(thirdParagraph).toBeTruthy();
+    expect(thirdParagraph!.text).toContain('76.2%');
+    expect(thirdParagraph!.text).toContain('GDPval-AA');
+    expect(thirdParagraph!.text).toContain('1656 Elo');
+    expect(thirdParagraph!.text).toContain('MCP Atlas');
+    expect(thirdParagraph!.text).toContain('83.6%');
   });
 });
