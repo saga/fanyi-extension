@@ -142,6 +142,17 @@ function isInsideContentContainer(el: Element): boolean {
   return false;
 }
 
+function hasBlockLevelParent(el: Element): boolean {
+  let current: Element | null = el.parentElement;
+  while (current) {
+    const tag = current.tagName.toLowerCase();
+    if (DIRECT_SET.has(tag)) return true;
+    if (tag === 'body' || tag === 'html') return false;
+    current = current.parentElement;
+  }
+  return false;
+}
+
 function grabNode(node: Node): Element | false {
   if (!node || node instanceof Text) return false;
   if (!(node instanceof Element)) return false;
@@ -162,10 +173,16 @@ function grabNode(node: Node): Element | false {
     return false;
   }
 
+  // 内联元素：只有当它不在 DIRECT_SET 父元素内部时才单独提取
+  // 例如：<p><a>text</a></p> - <a> 不单独提取，因为 <p> 会提取完整文本
+  // 例如：<article><div><span>text</span></div></article> - <span> 需要提取
   if (INLINE_SET.has(tag) && isInsideContentContainer(node)) {
-    const text = node.textContent?.trim();
-    if (text && text.length >= 3 && text.length < 3072) {
-      return node;
+    // 检查是否有 DIRECT_SET 的父元素
+    if (!hasBlockLevelParent(node)) {
+      const text = node.textContent?.trim();
+      if (text && text.length >= 3 && text.length < 3072) {
+        return node;
+      }
     }
   }
 
@@ -314,11 +331,6 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
       // 跳过已确定要翻译的节点的所有子节点
       walker.currentNode = currentNode.nextSibling || currentNode;
     }
-  }
-
-  console.log(`[BlockExtractor] Extraction complete: accepted=${acceptedCount}, skipped=${skippedCount}, rejected=${rejectedCount}, totalBlocks=${blocks.length}`);
-  if (blocks.length > 0) {
-    console.log('[BlockExtractor] First 3 blocks:', blocks.slice(0, 3).map(b => ({ id: b.id, tag: b.tag, text: b.text.substring(0, 50) })));
   }
 
   return blocks;

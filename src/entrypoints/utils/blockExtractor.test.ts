@@ -782,6 +782,60 @@ describe('findBlockNode', () => {
   });
 });
 
+describe('extractBlocks - Paragraph with Inline Elements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract paragraph with inline b and a tags as single block', () => {
+    setupHTML(`
+      <article>
+        <p><b>1.</b> We launched <a href="#">Gemini 3.5 Flash</a>: the first in our latest series of models combining frontier intelligence with action.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    // 应该只提取一个段落块，而不是多个块
+    expect(pBlocks).toHaveLength(1);
+    expect(pBlocks[0].text).toBe('1. We launched Gemini 3.5 Flash: the first in our latest series of models combining frontier intelligence with action.');
+  });
+
+  it('should not extract inline elements separately from parent paragraph', () => {
+    setupHTML(`
+      <article>
+        <p><b>Bold text</b> and <a href="#">linked text</a> together in one paragraph.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    
+    // 不应该有单独的 <b> 或 <a> 块
+    const inlineBlocks = blocks.filter(b => ['b', 'strong', 'a', 'span'].includes(b.tag));
+    expect(inlineBlocks).toHaveLength(0);
+    
+    // 应该只有一个段落块
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(1);
+    expect(pBlocks[0].text).toBe('Bold text and linked text together in one paragraph.');
+  });
+
+  it('should handle complex inline structure in paragraph', () => {
+    setupHTML(`
+      <article>
+        <p><span><strong>Important:</strong></span> This is <em>emphasized</em> text with <a href="#">a link</a> inside.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    expect(pBlocks).toHaveLength(1);
+    expect(pBlocks[0].text).toBe('Important: This is emphasized text with a link inside.');
+  });
+});
+
 describe('extractBlocks - Google Blog Scenario', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
