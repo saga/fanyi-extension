@@ -782,24 +782,84 @@ describe('findBlockNode', () => {
   });
 });
 
-describe('buildNodeMap', () => {
+describe('extractBlocks - Google Blog Scenario', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('should build a map of block IDs to nodes', () => {
+  it('should extract all paragraphs in rich-text div inside article', () => {
     setupHTML(`
       <article>
-        <p>First paragraph content here.</p>
-        <p>Second paragraph content here.</p>
+        <div class="rich-text">
+          <h3>Gemini 3.5</h3>
+          <p><b>1.</b> We launched <a href="#">Gemini 3.5 Flash</a>: the first in our latest series of models.</p>
+          <p><b>2.</b> Gemini 3.5 Flash is generally available today via our agent-first development platform.</p>
+          <p><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models at speeds you expect from the Flash series. It outperforms Gemini 3.1 Pro on challenging coding and agentic benchmarks like Terminal-Bench 2.1 (76.2%), GDPval-AA (1656 Elo) and MCP Atlas (83.6%).</p>
+          <p><b>4.</b> Landing in the top-right quadrant of the Artificial Analysis index, 3.5 Flash delivers frontier-level intelligence.</p>
+        </div>
       </article>
     `);
 
     const blocks = extractBlocks(document);
-    const nodeMap = buildNodeMap(blocks, document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    // 应该提取所有 4 个段落
+    expect(pBlocks).toHaveLength(4);
+    
+    // 检查第 3 个段落是否被提取
+    const thirdParagraph = pBlocks.find(b => b.text.includes('Gemini 3.5 Flash delivers intelligence'));
+    expect(thirdParagraph).toBeTruthy();
+    expect(thirdParagraph!.text).toContain('Terminal-Bench 2.1');
+    expect(thirdParagraph!.text).toContain('GDPval-AA');
+    expect(thirdParagraph!.text).toContain('MCP Atlas');
+  });
 
-    expect(nodeMap.size).toBe(blocks.length);
-    expect(nodeMap.has('b1')).toBe(true);
-    expect(nodeMap.has('b2')).toBe(true);
+  it('should extract paragraphs with data-block-key attribute', () => {
+    setupHTML(`
+      <article>
+        <div class="rich-text">
+          <h3 data-block-key="o63sw">Gemini 3.5</h3>
+          <p data-block-key="f5hj2"><b>1.</b> We launched <a href="#">Gemini 3.5 Flash</a>: the first in our latest series.</p>
+          <p data-block-key="com71"><b>2.</b> Gemini 3.5 Flash is generally available today.</p>
+          <p data-block-key="ar1dc"><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models at speeds you expect from the Flash series.</p>
+          <p data-block-key="2ugbm"><b>4.</b> Landing in the top-right quadrant of the Artificial Analysis index.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    expect(pBlocks).toHaveLength(4);
+    
+    // 检查所有段落的文本都被提取
+    const extractedTexts = pBlocks.map(b => b.text);
+    expect(extractedTexts.some(t => t.includes('1. We launched'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('2. Gemini 3.5 Flash is generally'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('3. Gemini 3.5 Flash delivers intelligence'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('4. Landing in the top-right'))).toBe(true);
+  });
+
+  it('should handle uni-paragraph wrapper like Google Blog', () => {
+    setupHTML(`
+      <article>
+        <div class="uni-paragraph article-paragraph" data-component="uni-article-paragraph">
+          <div class="rich-text">
+            <h3 data-block-key="o63sw">Gemini 3.5</h3>
+            <p data-block-key="f5hj2"><b>1.</b> First paragraph content with enough text length here.</p>
+            <p data-block-key="ar1dc"><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models at speeds you expect from the Flash series. It outperforms Gemini 3.1 Pro on challenging coding and agentic benchmarks.</p>
+            <p data-block-key="2ugbm"><b>4.</b> Fourth paragraph content with enough text length here.</p>
+          </div>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    expect(pBlocks).toHaveLength(3);
+    
+    const geminiParagraph = pBlocks.find(b => b.text.includes('Gemini 3.5 Flash delivers intelligence'));
+    expect(geminiParagraph).toBeTruthy();
   });
 });

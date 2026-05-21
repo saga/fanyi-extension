@@ -3,6 +3,7 @@ export interface TextBlock {
   xpath: string;
   tag: string;
   text: string;
+  element?: WeakRef<Element>;  // 直接保存节点引用，避免 XPath 查询
   context?: {
     headingPath: string[];
     position: number;
@@ -36,9 +37,10 @@ function shouldSkipByClass(el: Element): boolean {
   if (!el.className || typeof el.className !== 'string') return false;
   const className = el.className.toLowerCase();
   const classList = className.split(/\s+/);
-  return SKIP_CLASS_PATTERNS.some(pattern =>
+  const match = SKIP_CLASS_PATTERNS.some(pattern =>
     classList.some(cls => cls === pattern || cls.startsWith(pattern + '-') || cls.startsWith(pattern + '_'))
   );
+  return match;
 }
 
 function isInArticleContext(el: Element): boolean {
@@ -218,7 +220,9 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           return NodeFilter.FILTER_ACCEPT;
         }
 
-        if (!(node instanceof Element)) return NodeFilter.FILTER_SKIP;
+        if (!(node instanceof Element)) {
+          return NodeFilter.FILTER_SKIP;
+        }
 
         const el = node as Element;
         const tag = el.tagName.toLowerCase();
@@ -227,6 +231,8 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
         }
+        // 只在非 article 上下文中检查 class-based skipping
+        // 在 article 内部，我们信任所有内容
         if (shouldSkipByClass(el) && !isInArticleContext(el)) {
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
@@ -236,7 +242,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           return NodeFilter.FILTER_REJECT;
         }
 
-        // DIRECT_SET 标签直接接受，不检查子元素类型
+  // DIRECT_SET 标签直接接受，不检查子元素类型
         if (DIRECT_SET.has(tag)) {
           const text = el.textContent?.trim();
           if (text && text.length >= 3 && text.length < 3072) {
