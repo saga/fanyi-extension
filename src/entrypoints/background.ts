@@ -33,7 +33,9 @@ export default defineBackground({
   main() {
     console.log('Background script loaded');
 
+    // Check which APIs are supported
     const isContextMenuSupported = !!browser.contextMenus;
+    const isCommandsSupported = !!browser.commands;
 
     // Service cache is in-memory; Firefox may suspend background scripts.
     // Recreate service instances as needed; don't rely on persistence.
@@ -76,39 +78,54 @@ export default defineBackground({
       registerCommands();
     });
 
-    browser.commands.onCommand.addListener(async (command) => {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) return;
+    // Only register command listener if commands API is supported
+    if (isCommandsSupported) {
+      try {
+        browser.commands.onCommand.addListener(async (command) => {
+          try {
+            const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id) return;
 
-      switch (command) {
-        case 'translate-page':
-          browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
-          break;
-        case 'restore-original':
-          browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
-          break;
-        case 'toggle-translation':
-          browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
-          break;
+            switch (command) {
+              case 'translate-page':
+                browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+                break;
+              case 'restore-original':
+                browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+                break;
+              case 'toggle-translation':
+                browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
+                break;
+            }
+          } catch (error) {
+            console.warn('Command handling failed:', error);
+          }
+        });
+      } catch (error) {
+        console.warn('Commands API not available:', error);
       }
-    });
+    }
 
     if (isContextMenuSupported) {
-      browser.contextMenus.onClicked.addListener(async (info, tab) => {
-        if (!tab?.id) return;
+      try {
+        browser.contextMenus.onClicked.addListener(async (info, tab) => {
+          if (!tab?.id) return;
 
-        switch (info.menuItemId) {
-          case 'translate-page':
-            browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
-            break;
-          case 'restore-original':
-            browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
-            break;
-          case 'toggle-translation':
-            browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
-            break;
-        }
-      });
+          switch (info.menuItemId) {
+            case 'translate-page':
+              browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+              break;
+            case 'restore-original':
+              browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+              break;
+            case 'toggle-translation':
+              browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
+              break;
+          }
+        });
+      } catch (error) {
+        console.warn('Context menu click listener failed:', error);
+      }
     }
 
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -125,7 +142,7 @@ export default defineBackground({
             await handleCheckConfig(sendResponse);
           } else {
             // Unknown action, don't keep port open
-            return false;
+            sendResponse({ success: false, error: 'Unknown action' });
           }
         } catch (error) {
           console.error('[Background] Message handler error:', error);
@@ -259,7 +276,7 @@ export default defineBackground({
         const config = await getConfig();
         const hasKey = !!config.deepseekApiKey;
         console.log('[Background] checkConfig: hasApiKey =', hasKey, ', key length =', config.deepseekApiKey?.length || 0);
-        sendResponse({ success: hasKey });
+        sendResponse({ success: hasKey, config });
       } catch (error) {
         console.error('[Background] checkConfig error:', error);
         sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
@@ -267,6 +284,7 @@ export default defineBackground({
     }
 
     async function registerCommands() {
+      if (!isCommandsSupported) return;
       try {
         const commands = await browser.commands.getAll();
         console.log('Registered commands:', commands);

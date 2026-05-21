@@ -10,10 +10,14 @@ import type { TextBlock } from './utils/blockExtractor';
 import { GESTURES } from './utils/constants';
 import { getCenterPoint } from './utils/common';
 
+// Detect if we're on mobile/Android Firefox
+const isAndroid = /Android/i.test(navigator.userAgent);
+const isMobile = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
 export default defineContentScript({
   matches: ['*://*/*'],
   main() {
-    console.log('Content script loaded');
+    console.log('Content script loaded, isAndroid:', isAndroid, 'isMobile:', isMobile);
 
     let isTranslating = false;
     let translationOverlay: HTMLElement | null = null;
@@ -39,6 +43,14 @@ export default defineContentScript({
       let tapTimer: number | undefined;
 
       document.body.addEventListener('touchstart', async (event: TouchEvent) => {
+        // Ignore if touching UI elements
+        const target = event.target as Element;
+        if (target.closest('.fanyi-config-panel') || 
+            target.closest('.fanyi-floating-btn') || 
+            target.closest('.fanyi-status-overlay')) {
+          return;
+        }
+
         const config = await getConfig();
         const gesture = config.touchGesture || 'DoubleTap';
 
@@ -50,7 +62,7 @@ export default defineContentScript({
           if (event.touches.length === requiredFingers) {
             const center = getCenterPoint(event.touches, requiredFingers);
             if (center && config.enabled) {
-              event.preventDefault();
+              try { event.preventDefault(); } catch(e) {}
               handleFullTranslation();
             }
           }
@@ -71,20 +83,21 @@ export default defineContentScript({
             if (tapTimer) clearTimeout(tapTimer);
             tapCount = 0;
             if (config.enabled) {
-              event.preventDefault();
+              try { event.preventDefault(); } catch(e) {}
               handleFullTranslation();
             }
           }
         }
-      }, { passive: false });
+      }, { passive: true });
     }
 
     function setupFloatingButton() {
       const btn = document.createElement('div');
       btn.className = 'fanyi-floating-btn';
       btn.innerHTML = '译';
-      btn.title = '点击翻译，长按设置';
+      btn.title = isMobile ? '点击翻译，长按设置' : '点击翻译，长按设置';
 
+      // Load saved position
       const savedPosition = localStorage.getItem('fanyi-btn-position');
       if (savedPosition) {
         try {
@@ -92,12 +105,13 @@ export default defineContentScript({
           btn.style.right = pos.right + 'px';
           btn.style.bottom = pos.bottom + 'px';
         } catch {
-          btn.style.right = '20px';
-          btn.style.bottom = '100px';
+          // Use defaults based on device
+          btn.style.right = isMobile ? '12px' : '20px';
+          btn.style.bottom = isMobile ? '100px' : '100px';
         }
       } else {
-        btn.style.right = '20px';
-        btn.style.bottom = '100px';
+        btn.style.right = isMobile ? '12px' : '20px';
+        btn.style.bottom = isMobile ? '100px' : '100px';
       }
 
       let isDragging = false;
@@ -110,7 +124,7 @@ export default defineContentScript({
       btn.addEventListener('touchstart', startDrag, { passive: false });
 
       function startDrag(e: MouseEvent | TouchEvent) {
-        e.preventDefault();
+        try { e.preventDefault(); } catch(err) {}
         hasMoved = false;
         isDragging = false;
 
@@ -118,7 +132,7 @@ export default defineContentScript({
           if (!hasMoved) {
             showConfigPanel();
           }
-        }, 600);
+        }, isMobile ? 500 : 600);
 
         if (e instanceof MouseEvent) {
           startX = e.clientX;
@@ -155,8 +169,9 @@ export default defineContentScript({
 
         const dx = Math.abs(clientX - startX);
         const dy = Math.abs(clientY - startY);
+        const moveThreshold = isMobile ? 10 : 5;
 
-        if (dx > 5 || dy > 5) {
+        if (dx > moveThreshold || dy > moveThreshold) {
           hasMoved = true;
           isDragging = true;
         }
@@ -168,7 +183,9 @@ export default defineContentScript({
           btn.style.bottom = Math.max(0, Math.min(newBottom, window.innerHeight - btn.offsetHeight)) + 'px';
         }
 
-        if (e instanceof TouchEvent) e.preventDefault();
+        if (e instanceof TouchEvent) {
+          try { e.preventDefault(); } catch(err) {}
+        }
       }
 
       function endDrag() {
@@ -185,7 +202,7 @@ export default defineContentScript({
         if (!hasMoved) {
           handleFullTranslation();
         } else {
-          const right = parseInt(btn.style.right) || 20;
+          const right = parseInt(btn.style.right) || (isMobile ? 12 : 20);
           const bottom = parseInt(btn.style.bottom) || 100;
           localStorage.setItem('fanyi-btn-position', JSON.stringify({ right, bottom }));
         }
@@ -212,7 +229,7 @@ export default defineContentScript({
         </div>
         <div class="fanyi-config-body">
           <div class="fanyi-config-row">
-            <label>API Key</label>
+            <label>DeepSeek API Key</label>
             <input type="password" class="fanyi-api-input" placeholder="输入 DeepSeek API Key" />
           </div>
           <div class="fanyi-config-row">
@@ -239,10 +256,22 @@ export default defineContentScript({
               <label><input type="radio" name="mode" value="target" /> 仅译文</label>
             </div>
           </div>
+          ${isMobile ? `
+          <div class="fanyi-config-row">
+            <label>触摸手势</label>
+            <select class="fanyi-touch-gesture">
+              <option value="DoubleTap">双击翻译</option>
+              <option value="TripleTap">三击翻译</option>
+              <option value="TwoFinger">双指翻译</option>
+              <option value="ThreeFinger">三指翻译</option>
+              <option value="FourFinger">四指翻译</option>
+            </select>
+          </div>
+          ` : ''}
           <div class="fanyi-config-actions">
             <button class="fanyi-btn-save">保存</button>
-            <button class="fanyi-btn-translate">翻译页面</button>
-            <button class="fanyi-btn-restore">恢复原文</button>
+            <button class="fanyi-btn-translate">翻译</button>
+            <button class="fanyi-btn-restore">恢复</button>
           </div>
         </div>
       `;
@@ -253,6 +282,11 @@ export default defineContentScript({
         (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
         const modeRadio = panel.querySelector(`input[name="mode"][value="${config.mode || 'bilingual'}"]`) as HTMLInputElement;
         if (modeRadio) modeRadio.checked = true;
+        
+        if (isMobile) {
+          const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
+          if (gestureSelect) gestureSelect.value = config.touchGesture || 'DoubleTap';
+        }
       });
 
       panel.querySelector('.fanyi-config-close')?.addEventListener('click', () => panel.remove());
@@ -282,8 +316,14 @@ export default defineContentScript({
             config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
             const modeRadio = panel.querySelector('input[name="mode"]:checked') as HTMLInputElement;
             config.mode = modeRadio?.value || 'bilingual';
+            
+            if (isMobile) {
+              const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
+              if (gestureSelect) config.touchGesture = gestureSelect.value;
+            }
+            
             await setConfig(config);
-            showStatus('API Key 验证成功，设置已保存', 'success');
+            showStatus('设置已保存', 'success');
             setTimeout(() => hideStatus(), 2000);
           } else {
             const errorMsg = response?.error || '未知错误';
@@ -309,6 +349,19 @@ export default defineContentScript({
         restoreOriginal();
       });
 
+      // Close when clicking outside (desktop only)
+      if (!isMobile) {
+        setTimeout(() => {
+          document.addEventListener('click', function closeOnOutside(ev: MouseEvent) {
+            if (!panel.contains(ev.target as Node) && 
+                !(ev.target as Element).closest('.fanyi-floating-btn')) {
+              panel.remove();
+              document.removeEventListener('click', closeOnOutside);
+            }
+          });
+        }, 0);
+      }
+
       document.body.appendChild(panel);
     }
 
@@ -326,17 +379,15 @@ export default defineContentScript({
         console.log('[ContentScript] Calling prepareDocument...');
         const { blocks, chunks, fullText } = prepareDocument(document);
         console.log('[ContentScript] prepareDocument result:', { blocksCount: blocks.length, chunksCount: chunks.length, fullTextLength: fullText.length });
-        console.log(`[ContentScript] API Request Estimate: ${chunks.length} requests (concurrent)`);
+        console.log(`[ContentScript] API Request Estimate: ${chunks.length} requests`);
 
         if (blocks.length === 0) {
-          console.warn('[ContentScript] No blocks found! Page structure:');
-          console.log('[ContentScript] document.body children:', Array.from(document.body.children).map(c => c.tagName));
-          console.log('[ContentScript] document.body innerText length:', document.body.innerText?.length);
-          throw new Error('No translatable content found');
+          console.warn('[ContentScript] No blocks found!');
+          throw new Error('没有找到可翻译的内容');
         }
 
         showStatus(
-          `共 ${blocks.length} 个文本块，${chunks.length} 个翻译块`,
+          `共 ${blocks.length} 个文本块`,
           'loading'
         );
 
@@ -389,40 +440,44 @@ export default defineContentScript({
         console.log(`[ContentScript] Translating chunk ${index + 1}/${chunks.length}, blocks: ${chunk.blocks.length}`);
 
         const startTime = Date.now();
-        const response = await browser.runtime.sendMessage({
-          action: 'translateChunk',
-          jsonContent: chunk.jsonContent,
-          sourceLang,
-          targetLang,
-          pageUrl: window.location.href,
-        });
-        const elapsed = Date.now() - startTime;
-        console.log(`[ContentScript] Chunk ${index + 1} response time: ${elapsed}ms, success: ${response.success}`);
+        
+        try {
+          const response = await browser.runtime.sendMessage({
+            action: 'translateChunk',
+            jsonContent: chunk.jsonContent,
+            sourceLang,
+            targetLang,
+            pageUrl: window.location.href,
+          });
+          
+          const elapsed = Date.now() - startTime;
+          console.log(`[ContentScript] Chunk ${index + 1} response time: ${elapsed}ms, success: ${response.success}`);
 
-        if (response.success) {
-          console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
-          const chunkMap = new Map<string, string>();
-          for (const [id, text] of response.result) {
-            chunkMap.set(id, text);
+          if (response.success) {
+            console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
+            const chunkMap = new Map<string, string>();
+            for (const [id, text] of response.result) {
+              chunkMap.set(id, text);
+            }
+            applyTranslations(chunkMap, nodeMap, mode);
+          } else {
+            console.error(`Chunk ${chunk.id} translation failed:`, response.error);
           }
-          applyTranslations(chunkMap, nodeMap, mode);
-        } else {
-          console.error(`Chunk ${chunk.id} translation failed:`, response.error);
+        } catch (error) {
+          console.error(`[ContentScript] Chunk ${index + 1} error:`, error);
         }
 
         completedCount++;
         onProgress?.(completedCount, chunks.length);
       }
 
+      // Process chunks sequentially for better mobile performance
       for (let i = 0; i < chunks.length; i++) {
-        translateChunk(i);
+        await translateChunk(i);
+        // Small delay between chunks
         if (i < chunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 250));
+          await new Promise(resolve => setTimeout(resolve, isMobile ? 200 : 100));
         }
-      }
-
-      while (completedCount < chunks.length) {
-        await new Promise(resolve => setTimeout(resolve, 250));
       }
 
       console.log('[ContentScript] translateChunksViaBackground complete');
@@ -503,8 +558,6 @@ export default defineContentScript({
                     applyBlockTranslation(node, response.result[0][1], config.mode);
                     translatedBlocks.add(block.id);
                     console.log('[ContentScript] Dynamic block translated:', block.id);
-                  } else {
-                    console.warn('[ContentScript] Could not find node for block:', block.id);
                   }
                 }
               } catch (error) {
@@ -514,7 +567,7 @@ export default defineContentScript({
           }
         },
         () => {},
-        1000
+        isMobile ? 1500 : 1000
       );
 
       domObserver.startMutationObserver();
@@ -606,32 +659,35 @@ export default defineContentScript({
     style.textContent = `
       .fanyi-status-overlay {
         position: fixed;
-        bottom: 20px;
+        bottom: ${isMobile ? '60px' : '20px'};
         left: 50%;
         transform: translateX(-50%);
-        padding: 6px 12px;
-        background: rgba(255, 255, 255, 0.4);
-        border-radius: 6px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        padding: 8px 14px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        border-radius: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         z-index: 999999;
-        font-size: 11px;
+        font-size: ${isMobile ? '12px' : '13px'};
         display: none;
-        opacity: 0.4;
+        max-width: 80%;
+        text-align: center;
       }
-      .fanyi-loading { border-left: 4px solid #409eff; }
-      .fanyi-success { border-left: 4px solid #67c23a; }
-      .fanyi-error { border-left: 4px solid #f56c6c; }
+      .fanyi-loading { border: 1px solid #409eff; }
+      .fanyi-success { border: 1px solid #67c23a; }
+      .fanyi-error { border: 1px solid #f56c6c; }
 
       .fanyi-bilingual-block {
-        margin: 4px 0;
-        padding: 8px;
-        border-radius: 4px;
-        background: rgba(64, 158, 255, 0.05);
+        margin: 6px 0;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(64, 158, 255, 0.08);
       }
       .fanyi-source {
         color: #606266;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
         line-height: 1.6;
+        font-size: 0.95em;
       }
       .fanyi-target {
         color: #303133;
@@ -645,32 +701,33 @@ export default defineContentScript({
 
       .fanyi-floating-btn {
         position: fixed;
-        right: 16px;
-        bottom: 80px;
-        width: 28px;
-        height: 28px;
+        right: ${isMobile ? '12px' : '16px'};
+        bottom: ${isMobile ? '80px' : '80px'};
+        width: ${isMobile ? '32px' : '32px'};
+        height: ${isMobile ? '32px' : '32px'};
         background: #409eff;
         color: white;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 12px;
+        font-size: ${isMobile ? '14px' : '13px'};
         font-weight: bold;
-        opacity: 0.5;
-        box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
+        opacity: 0.85;
+        box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
         z-index: 999998;
         cursor: pointer;
         user-select: none;
         touch-action: none;
         -webkit-tap-highlight-color: transparent;
+        transition: transform 0.2s ease, opacity 0.2s ease;
       }
       .fanyi-floating-btn:hover {
         background: #66b1ff;
-        transform: scale(1.05);
+        opacity: 1;
       }
       .fanyi-floating-btn:active {
-        transform: scale(0.95);
+        transform: scale(0.9);
       }
 
       .fanyi-config-panel {
@@ -678,120 +735,135 @@ export default defineContentScript({
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        width: 90%;
-        max-width: 320px;
-        max-height: 85vh;
+        width: ${isMobile ? '92%' : '90%'};
+        max-width: ${isMobile ? '400px' : '340px'};
+        max-height: ${isMobile ? '88vh' : '85vh'};
         background: white;
-        border-radius: 10px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         z-index: 999999;
         overflow: hidden;
         display: flex;
         flex-direction: column;
-        font-size: 13px;
+        font-size: ${isMobile ? '15px' : '13px'};
       }
       .fanyi-config-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 10px 14px;
-        background: #f5f7fa;
-        border-bottom: 1px solid #ebeef5;
-        font-size: 14px;
-        font-weight: 500;
+        padding: ${isMobile ? '16px 18px' : '12px 16px'};
+        background: linear-gradient(135deg, #409eff, #66b1ff);
+        color: white;
+        font-size: ${isMobile ? '17px' : '15px'};
+        font-weight: 600;
       }
       .fanyi-config-close {
         background: none;
         border: none;
-        font-size: 18px;
+        font-size: ${isMobile ? '24px' : '20px'};
         cursor: pointer;
-        padding: 2px 6px;
-        color: #666;
+        padding: 4px 10px;
+        color: white;
+        opacity: 0.9;
+      }
+      .fanyi-config-close:hover {
+        opacity: 1;
       }
       .fanyi-config-body {
-        padding: 12px;
+        padding: ${isMobile ? '18px' : '14px'};
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: ${isMobile ? '14px' : '12px'};
       }
       .fanyi-config-row {
         display: flex;
         flex-direction: column;
-        gap: 3px;
+        gap: 6px;
       }
       .fanyi-config-row label {
-        font-size: 11px;
-        color: #666;
+        font-size: ${isMobile ? '13px' : '12px'};
+        color: #606266;
+        font-weight: 500;
       }
       .fanyi-api-input,
       .fanyi-source-lang,
-      .fanyi-target-lang {
-        padding: 8px 10px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
-        font-size: 14px;
+      .fanyi-target-lang,
+      .fanyi-touch-gesture {
+        padding: ${isMobile ? '12px 14px' : '10px 12px'};
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        font-size: ${isMobile ? '15px' : '14px'};
         -webkit-appearance: none;
         appearance: none;
+        background: #fafafa;
+      }
+      .fanyi-api-input:focus,
+      .fanyi-source-lang:focus,
+      .fanyi-target-lang:focus,
+      .fanyi-touch-gesture:focus {
+        outline: none;
+        border-color: #409eff;
+        background: white;
       }
       .fanyi-radio-group {
         display: flex;
-        gap: 12px;
+        gap: ${isMobile ? '20px' : '16px'};
+        flex-wrap: wrap;
       }
       .fanyi-radio-group label {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         cursor: pointer;
-        font-size: 13px;
+        font-size: ${isMobile ? '14px' : '13px'};
+        color: #303133;
       }
       .fanyi-radio-group input[type="radio"] {
-        width: 16px;
-        height: 16px;
+        width: ${isMobile ? '20px' : '18px'};
+        height: ${isMobile ? '20px' : '18px'};
         margin: 0;
+        accent-color: #409eff;
       }
       .fanyi-config-actions {
         display: flex;
-        gap: 6px;
-        padding-top: 6px;
+        gap: ${isMobile ? '10px' : '8px'};
+        padding-top: ${isMobile ? '10px' : '8px'};
+        margin-top: auto;
       }
       .fanyi-btn-save,
       .fanyi-btn-translate,
       .fanyi-btn-restore {
         flex: 1;
-        padding: 8px 10px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
+        padding: ${isMobile ? '12px 14px' : '10px 12px'};
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
         background: white;
         cursor: pointer;
-        font-size: 12px;
-        font-weight: 500;
+        font-size: ${isMobile ? '14px' : '13px'};
+        font-weight: 600;
         white-space: nowrap;
       }
       .fanyi-btn-save {
-        background: #409eff;
+        background: linear-gradient(135deg, #409eff, #66b1ff);
         color: white;
-        border-color: #409eff;
+        border: none;
       }
       .fanyi-btn-translate {
-        background: #67c23a;
+        background: linear-gradient(135deg, #67c23a, #85ce61);
         color: white;
-        border-color: #67c23a;
+        border: none;
       }
       .fanyi-btn-restore {
-        background: #e6a23c;
+        background: linear-gradient(135deg, #e6a23c, #ebb563);
         color: white;
-        border-color: #e6a23c;
+        border: none;
       }
-
-      @-moz-document url-prefix() {
-        .fanyi-status-overlay {
-          animation: moz-fade-in 0.3s ease-in-out;
-        }
-        @keyframes moz-fade-in {
-          from { opacity: 0; transform: translateX(-50%) translateY(10px); }
-          to { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
+      .fanyi-btn-save:active,
+      .fanyi-btn-translate:active,
+      .fanyi-btn-restore:active {
+        opacity: 0.8;
+        transform: scale(0.98);
       }
     `;
     document.head.appendChild(style);
