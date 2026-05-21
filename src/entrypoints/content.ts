@@ -392,6 +392,14 @@ export default defineContentScript({
         );
 
         const nodeMap = buildNodeMap(blocks, document);
+        console.log('[ContentScript] nodeMap size:', nodeMap.size, 'blocks length:', blocks.length);
+        if (nodeMap.size !== blocks.length) {
+          console.warn('[ContentScript] Mismatch: some blocks not found in DOM!');
+          const blockIds = new Set(blocks.map(b => b.id));
+          const nodeMapIds = new Set(nodeMap.keys());
+          const missingIds = [...blockIds].filter(id => !nodeMapIds.has(id));
+          console.warn('[ContentScript] Missing block IDs:', missingIds);
+        }
         saveOriginalTexts(blocks, nodeMap);
 
         await translateChunksViaBackground(

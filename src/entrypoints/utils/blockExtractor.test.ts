@@ -836,9 +836,98 @@ describe('extractBlocks - Paragraph with Inline Elements', () => {
   });
 });
 
-describe('extractBlocks - Google Blog Scenario', () => {
+describe('extractBlocks - Google Blog Alternating Translation Issue', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+  });
+
+  it('should NOT skip alternating paragraphs (fix for walker.currentNode bug)', () => {
+    setupHTML(`
+      <article>
+        <div class="rich-text">
+          <h3>Section Title</h3>
+          <p><b>1.</b> First paragraph with bold start.</p>
+          <p>2. Second paragraph without bold.</p>
+          <p><b>3.</b> Third paragraph with bold start.</p>
+          <p>4. Fourth paragraph without bold.</p>
+          <p><b>5.</b> Fifth paragraph with bold start.</p>
+          <p>6. Sixth paragraph without bold.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    // 关键测试：所有 6 个段落都应该被提取，不应该"隔一个跳过"
+    expect(pBlocks).toHaveLength(6);
+    
+    // 验证每个段落的编号都存在
+    const extractedTexts = pBlocks.map(b => b.text);
+    expect(extractedTexts.some(t => t.includes('1.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('2.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('3.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('4.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('5.'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('6.'))).toBe(true);
+  });
+
+  it('should extract all paragraphs including those with inline b and a tags', () => {
+    setupHTML(`
+      <article>
+        <div class="rich-text">
+          <h3 data-block-key="o63sw">Gemini 3.5</h3>
+          <p data-block-key="f5hj2"><b>1.</b> We launched <a href="#">Gemini 3.5 Flash</a>: the first in our latest series of models combining frontier intelligence with action.</p>
+          <p data-block-key="com71">2. Gemini 3.5 Flash is generally available today via our agent-first development platform.</p>
+          <p data-block-key="ar1dc"><b>3.</b> Gemini 3.5 Flash delivers intelligence that rivals large flagship models at speeds you expect from the Flash series.</p>
+          <p data-block-key="2ugbm">4. Landing in the top-right quadrant of the Artificial Analysis index, 3.5 Flash delivers frontier-level intelligence.</p>
+          <p data-block-key="61kma"><b>5.</b> Gemini 3.5 Flash is ideal for tackling long-horizon agentic tasks, with <a href="#">new features</a>.</p>
+          <p data-block-key="4u52g">6. Building on the strong multimodal foundation of Gemini 3, 3.5 Flash generates richer, more interactive web UIs.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    // 应该提取所有 6 个段落，不管是否包含 <b> 或 <a> 标签
+    expect(pBlocks).toHaveLength(6);
+    
+    // 验证每个段落的文本都被正确提取
+    const extractedTexts = pBlocks.map(b => b.text);
+    
+    expect(extractedTexts.some(t => t.includes('1. We launched'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('2. Gemini 3.5 Flash is generally'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('3. Gemini 3.5 Flash delivers intelligence'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('4. Landing in the top-right'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('5. Gemini 3.5 Flash is ideal'))).toBe(true);
+    expect(extractedTexts.some(t => t.includes('6. Building on the strong'))).toBe(true);
+  });
+
+  it('should extract paragraphs with mixed inline elements', () => {
+    setupHTML(`
+      <article>
+        <div class="rich-text">
+          <p data-block-key="test1"><b>Bold</b> and <a href="#">link</a> in paragraph.</p>
+          <p data-block-key="test2">Plain text paragraph.</p>
+          <p data-block-key="test3"><strong>Strong</strong> text with <em>emphasis</em> inside.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    
+    expect(pBlocks).toHaveLength(3);
+    
+    // 验证包含内联元素的段落也被正确提取
+    const test1Block = pBlocks.find(b => b.text.includes('Bold'));
+    const test2Block = pBlocks.find(b => b.text.includes('Plain text'));
+    const test3Block = pBlocks.find(b => b.text.includes('Strong'));
+    
+    expect(test1Block).toBeTruthy();
+    expect(test2Block).toBeTruthy();
+    expect(test3Block).toBeTruthy();
   });
 
   it('should extract all paragraphs in rich-text div inside article', () => {

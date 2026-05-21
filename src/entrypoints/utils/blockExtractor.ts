@@ -203,15 +203,20 @@ function grabNode(node: Node): Element | false {
     }
   }
 
-  if (hasNonInlineChild) return false;
+  if (hasNonInlineChild) {
+    console.log('[BlockExtractor] grabNode REJECT (hasNonInlineChild):', tag, 'children:', Array.from(node.childNodes).map(c => c instanceof Element ? c.tagName : '#text').join(', '));
+    return false;
+  }
 
   if (hasDirectText) {
     const text = node.textContent?.trim();
     if (text && text.length >= 3 && text.length < 3072) {
+      console.log('[BlockExtractor] grabNode ACCEPT:', tag, 'text:', text.substring(0, 50));
       return node;
     }
   }
 
+  console.log('[BlockExtractor] grabNode REJECT (no direct text):', tag, 'hasDirectText:', hasDirectText, 'hasNonInlineChild:', hasNonInlineChild);
   return false;
 }
 
@@ -244,6 +249,11 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
         const el = node as Element;
         const tag = el.tagName.toLowerCase();
 
+        // 添加日志追踪 p 标签
+        if (tag === 'p') {
+          console.log('[BlockExtractor] acceptNode - Found P tag:', el.textContent?.substring(0, 30), 'class:', el.className, 'has parent article:', isInArticleContext(el));
+        }
+
         if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
@@ -251,6 +261,9 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
         // 只在非 article 上下文中检查 class-based skipping
         // 在 article 内部，我们信任所有内容
         if (shouldSkipByClass(el) && !isInArticleContext(el)) {
+          if (tag === 'p') {
+            console.log('[BlockExtractor] acceptNode - P tag REJECTED by shouldSkipByClass');
+          }
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
         }
@@ -328,8 +341,8 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           },
         });
       }
-      // 跳过已确定要翻译的节点的所有子节点
-      walker.currentNode = currentNode.nextSibling || currentNode;
+      // 不要手动修改 walker.currentNode
+      // TreeWalker 会自动处理遍历，我们只需要处理 acceptNode 返回值
     }
   }
 
