@@ -697,6 +697,44 @@ describe('extractBlocks - Real-world Scenarios', () => {
     expect(blockTexts.some(t => t.includes('Related stories'))).toBe(false);
     expect(blockTexts.some(t => t.includes('Footer copyright'))).toBe(false);
   });
+
+  it('should handle Substack article from sample2.html structure', () => {
+    setupHTML(`
+      <div id="entry">
+        <div id="main" class="main typography use-theme-bg">
+          <div class="single-post-container">
+            <div class="container">
+              <div class="single-post">
+                <div class="pencraft pc-display-contents pc-reset pubTheme-yiXxQA">
+                  <article class="typography newsletter-post post">
+                    <div class="post-header">
+                      <h3 class="subtitle subtitle-HEEcLo">From Gemma 4 to DeepSeek V4, How New Open-Weight LLMs Are Reducing Long-Context Costs</h3>
+                    </div>
+                    <div class="available-content">
+                      <div class="body markup">
+                        <p>After a short family break, I am excited to be back and catching up on a busy few weeks of open-weight LLM releases. The thing that stood out to me is how much newer architectures are focused on long-context efficiency.</p>
+                        <p>Here's another paragraph with enough text to be extracted.</p>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    console.log('Extracted blocks:', blocks.map(b => ({ tag: b.tag, text: b.text })));
+    
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts.some(t => t.includes('From Gemma 4 to DeepSeek V4'))).toBe(true);
+    expect(blockTexts.some(t => t.includes('After a short family break'))).toBe(true);
+    expect(blockTexts.some(t => t.includes('another paragraph'))).toBe(true);
+  });
 });
 
 describe('extractBlocks - XPath Generation', () => {
@@ -1168,5 +1206,174 @@ describe('extractBlocks - Google Blog Alternating Translation Issue (Real Struct
     expect(thirdParagraph!.text).toContain('1656 Elo');
     expect(thirdParagraph!.text).toContain('MCP Atlas');
     expect(thirdParagraph!.text).toContain('83.6%');
+  });
+});
+
+describe('extractBlocks - Substack Article Structure (sample2.html)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract subtitle h3 and all paragraphs from Substack article structure', () => {
+    // 模拟 sample2.html（Substack 文章）的 DOM 结构，包含 post-header、author info、available-content、body.markup 等
+    const html = `
+      <div id="entry">
+        <div id="main" class="main typography use-theme-bg">
+          <div aria-label="Post" role="main" class="single-post-container">
+            <div class="container">
+              <div class="single-post">
+                <div class="pencraft pc-display-contents pc-reset pubTheme-yiXxQA">
+                  <article class="typography newsletter-post post">
+                    <div role="region" aria-label="Post header" class="post-header">
+                      <h1 dir="auto" class="post-title published title-X77sOw">Recent Developments in LLM Architectures: KV Sharing, mHC, and Compressed Attention</h1>
+                      <h3 dir="auto" class="subtitle subtitle-HEEcLo">From Gemma 4 to DeepSeek V4, How New Open-Weight LLMs Are Reducing Long-Context Costs</h3>
+                      <div aria-label="Post UFI" role="region" class="pencraft pc-display-flex pc-flexDirection-column pc-paddingBottom-16 pc-reset">
+                        <div class="pencraft pc-display-flex pc-paddingTop-16 pc-paddingBottom-16 pc-justifyContent-space-between pc-alignItems-center pc-reset">
+                          <div class="pencraft pc-display-flex pc-gap-12 pc-alignItems-center pc-reset byline-wrapper">
+                            <div class="pencraft pc-display-flex pc-reset">
+                              <div class="pencraft pc-display-flex pc-flexDirection-row pc-gap-8 pc-alignItems-center pc-justifyContent-flex-start pc-reset">
+                                <div class="pencraft pc-display-flex pc-flexDirection-row pc-alignItems-center pc-justifyContent-flex-start pc-reset">
+                                  <div class="pencraft pc-display-flex pc-width-36 pc-height-36 pc-justifyContent-center pc-alignItems-center pc-position-relative pc-reset">Avatar</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="pencraft pc-display-flex pc-flexDirection-column pc-reset">
+                              <div class="pencraft pc-reset">Sebastian Raschka, PhD</div>
+                              <div class="pencraft pc-display-flex pc-gap-4 pc-reset">
+                                <div class="pencraft pc-reset">May 16, 2026</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="available-content">
+                      <div dir="auto" class="body markup">
+                        <p>After a short family break, I am excited to be back and catching up on a busy few weeks of open-weight LLM releases. The thing that stood out to me is how much newer architectures are focused on long-context efficiency.</p>
+                        <p>As reasoning models and agent workflows keep more tokens around (for longer), KV-cache size, memory traffic, and attention cost quickly become the main constraints, and LLM developers are adding a growing number of architecture tricks to reduce those costs.</p>
+                        <p>The main examples I want to look at are KV sharing and per-layer embeddings in Gemma 4, layer-wise attention budgeting in Laguna XS.2, compressed convolutional attention in ZAYA1-8B, and mHC plus compressed attention in DeepSeek V4.</p>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    setupHTML(html);
+    const blocks = extractBlocks(document);
+
+    const h3Blocks = blocks.filter(b => b.tag === 'h3');
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+
+    // 验证 subtitle h3 被提取
+    expect(h3Blocks.some(b => b.text.includes('From Gemma 4 to DeepSeek V4'))).toBe(true);
+
+    // 验证所有段落被提取
+    expect(pBlocks.some(b => b.text.includes('After a short family break'))).toBe(true);
+    expect(pBlocks.some(b => b.text.includes('As reasoning models'))).toBe(true);
+    expect(pBlocks.some(b => b.text.includes('KV sharing and per-layer embeddings'))).toBe(true);
+
+    // 总数：1 个 title h1 + 1 个 subtitle h3 + 3 个段落 + 3 个 byline divs（Avatar/name/date）
+    expect(blocks.filter(b => b.tag === 'h1')).toHaveLength(1);
+    expect(h3Blocks.filter(b => b.text.includes('From Gemma 4'))).toHaveLength(1);
+    expect(pBlocks).toHaveLength(3);
+  });
+
+  it('should correctly resolve XPath for subtitle h3 (no index collision)', () => {
+    // 验证 findBlockNode 能正确匹配 subtitle h3，
+    // 即使 document 中还有其他 h3 元素（例如 navbar 中的 h3）
+    const html = `
+      <div id="entry">
+        <div id="main" class="main typography use-theme-bg">
+          <div aria-label="Post" role="main" class="single-post-container">
+            <div class="container">
+              <div class="single-post">
+                <div class="pencraft pc-display-contents pc-reset pubTheme-yiXxQA">
+                  <article class="typography newsletter-post post">
+                    <div role="region" aria-label="Post header" class="post-header">
+                      <h3 dir="auto" class="subtitle subtitle-HEEcLo">From Gemma 4 to DeepSeek V4, How New Open-Weight LLMs Are Reducing Long-Context Costs</h3>
+                    </div>
+                    <div class="available-content">
+                      <div dir="auto" class="body markup">
+                        <p>After a short family break, I am excited to be back and catching up on a busy few weeks of open-weight LLM releases.</p>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    setupHTML(html);
+
+    const blocks = extractBlocks(document);
+    const subtitleBlock = blocks.find(b => b.tag === 'h3');
+    expect(subtitleBlock).toBeTruthy();
+
+    // buildNodeMap 验证 XPath 能正确匹配
+    const nodeMap = buildNodeMap(blocks, document);
+    const foundNode = nodeMap.get(subtitleBlock!.id);
+    expect(foundNode).toBeTruthy();
+    expect((foundNode as Element)?.tagName?.toLowerCase()).toBe('h3');
+  });
+
+  it('should resolve subtitle h3 XPath when distractor h3 elements exist outside article (navbar)', () => {
+    // 模拟真实 Substack 页面：navbar 中也有 h3 元素，
+    // 需要验证 subtitle h3 的 XPath 索引不受干扰
+    const html = `
+      <div id="entry">
+        <div class="main-menu">
+          <div style="position: fixed;">
+            <div class="pencraft pc-display-flex pc-reset">
+              <div class="logoContainer-p12gJb">
+                <h3 class="sidebarHeading">Navigation</h3>
+              </div>
+              <div class="titleContainer-DJYq5v">
+                <h3 class="sidebarHeading">Sections</h3>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="main" class="main typography use-theme-bg">
+          <div aria-label="Post" role="main" class="single-post-container">
+            <div class="container">
+              <div class="single-post">
+                <div class="pencraft pc-display-contents pc-reset">
+                  <article class="typography newsletter-post post">
+                    <div role="region" aria-label="Post header" class="post-header">
+                      <h1 class="post-title">Recent Developments in LLM Architectures</h1>
+                      <h3 class="subtitle subtitle-HEEcLo">From Gemma 4 to DeepSeek V4, How New Open-Weight LLMs Are Reducing Long-Context Costs</h3>
+                    </div>
+                    <div class="available-content">
+                      <div dir="auto" class="body markup">
+                        <p>After a short family break, I am excited to be back and catching up on a busy few weeks of open-weight LLM releases.</p>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    setupHTML(html);
+
+    const blocks = extractBlocks(document);
+    const subtitleBlock = blocks.find(b => b.tag === 'h3' && b.text.includes('From Gemma 4'));
+    expect(subtitleBlock).toBeTruthy();
+
+    const nodeMap = buildNodeMap(blocks, document);
+    const foundNode = nodeMap.get(subtitleBlock!.id);
+
+    // 即使有 2 个导航 h3 在前面, subtitle h3 也必须被正确匹配
+    expect(foundNode).toBeTruthy();
+    expect((foundNode as Element)?.tagName?.toLowerCase()).toBe('h3');
+    expect((foundNode as Element)?.textContent).toContain('From Gemma 4');
   });
 });

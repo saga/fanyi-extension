@@ -280,9 +280,9 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
         const el = node as Element;
         const tag = el.tagName.toLowerCase();
 
-        // 添加日志追踪 p 标签
-        if (tag === 'p') {
-          console.log('[BlockExtractor] acceptNode - Found P tag:', el.textContent?.substring(0, 30), 'class:', el.className, 'has parent article:', isInArticleContext(el));
+        // 日志：追踪所有 DIRECT_SET 元素（包括 h3 subtitle）
+        if (tag === 'p' || tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6' || tag === 'li') {
+          console.log('[BlockExtractor] acceptNode - Found', tag, 'tag:', el.textContent?.substring(0, 60), 'class:', el.className, 'parent:', el.parentElement?.tagName?.toLowerCase(), 'inArticle:', isInArticleContext(el));
         }
 
         if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
@@ -361,6 +361,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
       const text = translateNode.textContent?.trim();
       if (text) {
         const id = `b${++blockId}`;
+        console.log('[BlockExtractor] BLOCK CREATED:', id, 'tag:', translateNode.tagName.toLowerCase(), 'text preview:', text.substring(0, 60));
         blocks.push({
           id,
           xpath: getXPath(translateNode),

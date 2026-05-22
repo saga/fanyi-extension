@@ -16,6 +16,7 @@ export interface Config {
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
   touchGesture: string;
+  invertColors: boolean;
 }
 
 const defaultConfig: Config = {
@@ -31,6 +32,7 @@ const defaultConfig: Config = {
     toggleTranslation: 'Alt+V',
   },
   touchGesture: 'DoubleTap',
+  invertColors: false,
 };
 
 export async function getConfig(): Promise<Config> {

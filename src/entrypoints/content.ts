@@ -32,6 +32,11 @@ export default defineContentScript({
         restoreOriginal();
       } else if (message.action === 'toggleTranslation') {
         toggleTranslation();
+      } else if (message.action === 'toggleInvert') {
+        const config = await getConfig();
+        config.invertColors = message.invertColors;
+        await setConfig(config);
+        applyInvertToExistingBlocks(config.invertColors);
       }
     });
 
@@ -287,6 +292,7 @@ export default defineContentScript({
           const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
           if (gestureSelect) gestureSelect.value = config.touchGesture || 'DoubleTap';
         }
+
       });
 
       panel.querySelector('.fanyi-config-close')?.addEventListener('click', () => panel.remove());
@@ -321,8 +327,9 @@ export default defineContentScript({
               const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
               if (gestureSelect) config.touchGesture = gestureSelect.value;
             }
-            
+
             await setConfig(config);
+            applyInvertToExistingBlocks(config.invertColors);
             showStatus('设置已保存', 'success');
             setTimeout(() => hideStatus(), 2000);
           } else {
@@ -339,7 +346,7 @@ export default defineContentScript({
         }
       });
 
-      panel.querySelector('.fanyi-btn-translate')?.addEventListener('click', () => {
+      panel.querySelector('.fanyi-btn-translate')?.addEventListener('click', async () => {
         panel.remove();
         handleFullTranslation();
       });
@@ -399,7 +406,16 @@ export default defineContentScript({
           const nodeMapIds = new Set(nodeMap.keys());
           const missingIds = [...blockIds].filter(id => !nodeMapIds.has(id));
           console.warn('[ContentScript] Missing block IDs:', missingIds);
+          // 输出每个 missing block 的详情
+          for (const id of missingIds) {
+            const block = blocks.find(b => b.id === id);
+            if (block) {
+              console.warn('[ContentScript] Missing block detail:', id, 'tag:', block.tag, 'xpath:', block.xpath, 'text:', block.text.substring(0, 60));
+            }
+          }
         }
+        // 输出所有 blocks 的摘要，方便确认具体哪些 block 被提取
+        console.log('[ContentScript] All blocks summary:', blocks.map(b => `${b.id}(${b.tag}): ${b.text.substring(0, 50)}`).join(' | '));
         saveOriginalTexts(blocks, nodeMap);
 
         await translateChunksViaBackground(
@@ -408,6 +424,7 @@ export default defineContentScript({
           config.targetLang,
           nodeMap,
           config.mode,
+          config.invertColors,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
           }
@@ -438,6 +455,7 @@ export default defineContentScript({
       targetLang: string,
       nodeMap: Map<string, Node>,
       mode: 'bilingual' | 'target',
+      invertColors: boolean,
       onProgress?: (current: number, total: number) => void
     ): Promise<void> {
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
@@ -463,11 +481,15 @@ export default defineContentScript({
 
           if (response.success) {
             console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
+            if (response.result) {
+              console.log(`[ContentScript] Chunk ${index + 1} translated IDs:`, response.result.map(([id]: [string, string]) => id).join(','));
+            }
             const chunkMap = new Map<string, string>();
             for (const [id, text] of response.result) {
+              console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
               chunkMap.set(id, text);
             }
-            applyTranslations(chunkMap, nodeMap, mode);
+            applyTranslations(chunkMap, nodeMap, mode, invertColors);
           } else {
             console.error(`Chunk ${chunk.id} translation failed:`, response.error);
           }
@@ -492,52 +514,57 @@ export default defineContentScript({
     }
 
     function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
+      let saved = 0;
       for (const block of blocks) {
         const node = nodeMap.get(block.id);
         if (node && node instanceof HTMLElement) {
           originalTexts.set(block.id, node.textContent || '');
+          saved++;
         }
       }
+      console.log('[ContentScript] saveOriginalTexts saved:', saved, '/', blocks.length);
     }
 
     function applyTranslations(
       translationMap: Map<string, string>,
       nodeMap: Map<string, Node>,
-      mode: 'bilingual' | 'target'
+      mode: 'bilingual' | 'target',
+      invertColors: boolean
     ) {
+      console.log('[ContentScript] applyTranslations called, translationMap size:', translationMap.size, 'nodeMap size:', nodeMap.size);
       for (const [blockId, translatedText] of translationMap) {
         const node = nodeMap.get(blockId);
-        if (!node || !(node instanceof HTMLElement)) continue;
-        applyBlockTranslation(node, translatedText, mode);
+        if (!node || !(node instanceof HTMLElement)) {
+          console.warn('[ContentScript] applyTranslations SKIP:', blockId, 'node not found in nodeMap or not HTMLElement');
+          continue;
+        }
+        console.log('[ContentScript] applyTranslations APPLY:', blockId, 'tag:', node.tagName?.toLowerCase(), 'text:', node.textContent?.substring(0, 40));
+        applyBlockTranslation(node, translatedText, mode, invertColors);
       }
     }
 
     function applyBlockTranslation(
       node: HTMLElement,
       translatedText: string,
-      mode: 'bilingual' | 'target'
+      mode: 'bilingual' | 'target',
+      invertColors: boolean
     ) {
-      if (node.classList.contains('fanyi-translated')) return;
+      if (node.classList.contains('fanyi-translated')) {
+        console.log('[ContentScript] applyBlockTranslation SKIP (already translated):', node.tagName, node.textContent?.substring(0, 40));
+        return;
+      }
 
       const originalText = node.textContent || '';
 
-      if (mode === 'bilingual') {
-        const translationBlock = document.createElement('div');
-        translationBlock.className = 'fanyi-bilingual-block';
-        translationBlock.innerHTML = `
-          <div class="fanyi-target">${escapeHtml(translatedText)}</div>
-        `;
-        
-        node.insertAdjacentElement('afterend', translationBlock);
-      } else {
-        const translationBlock = document.createElement('div');
-        translationBlock.className = 'fanyi-bilingual-block';
-        translationBlock.innerHTML = `
-          <div class="fanyi-target">${escapeHtml(translatedText)}</div>
-        `;
-        
-        node.insertAdjacentElement('afterend', translationBlock);
+      const translationBlock = document.createElement('div');
+      translationBlock.className = 'fanyi-bilingual-block';
+      if (invertColors) {
+        translationBlock.classList.add('fanyi-inverted');
       }
+      translationBlock.innerHTML = `
+        <div class="fanyi-target">${escapeHtml(translatedText)}</div>
+      `;
+      node.insertAdjacentElement('afterend', translationBlock);
 
       node.classList.add('fanyi-translated');
       node.dataset.originalText = originalText;
@@ -569,7 +596,7 @@ export default defineContentScript({
                 if (response.success && response.result?.length > 0) {
                   const node = findNodeByText(block.text);
                   if (node) {
-                    applyBlockTranslation(node, response.result[0][1], config.mode);
+                    applyBlockTranslation(node, response.result[0][1], config.mode, !!config.invertColors);
                     translatedBlocks.add(block.id);
                     console.log('[ContentScript] Dynamic block translated:', block.id);
                   }
@@ -654,6 +681,17 @@ export default defineContentScript({
       }
     }
 
+    function applyInvertToExistingBlocks(invert: boolean) {
+      const blocks = document.querySelectorAll('.fanyi-bilingual-block');
+      for (const block of Array.from(blocks)) {
+        if (invert) {
+          (block as HTMLElement).classList.add('fanyi-inverted');
+        } else {
+          (block as HTMLElement).classList.remove('fanyi-inverted');
+        }
+      }
+    }
+
     function escapeHtml(text: string): string {
       const div = document.createElement('div');
       div.textContent = text;
@@ -693,138 +731,8 @@ export default defineContentScript({
         line-height: 1.6;
         font-size: 0.98em;
       }
-
-      .fanyi-floating-btn {
-        position: fixed;
-        right: ${isMobile ? '12px' : '16px'};
-        bottom: ${isMobile ? '80px' : '80px'};
-        width: ${isMobile ? '26px' : '36px'};
-        height: ${isMobile ? '26px' : '36px'};
-        background: #409eff;
-        color: white;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: ${isMobile ? '12px' : '13px'};
-        font-weight: bold;
-        opacity: 0.5;
-        box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
-        z-index: 999998;
-        cursor: pointer;
-        user-select: none;
-        touch-action: none;
-        -webkit-tap-highlight-color: transparent;
-        transition: transform 0.2s ease, opacity 0.2s ease;
-      }
-      .fanyi-floating-btn:hover {
-        background: #66b1ff;
-        opacity: 1;
-      }
-      .fanyi-floating-btn:active {
-        transform: scale(0.9);
-      }
-
-      .fanyi-config-panel {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: ${isMobile ? '92%' : '90%'};
-        max-width: ${isMobile ? '340px' : '400px'};
-        max-height: ${isMobile ? '80vh' : '85vh'};
-        background: white;
-        border-radius: 16px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-        z-index: 999999;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        font-size: ${isMobile ? '12px' : '13px'};
-      }
-      .fanyi-config-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: ${isMobile ? '10px 14px' : '12px 16px'};
-        background: linear-gradient(135deg, #409eff, #66b1ff);
-        color: white;
-        font-size: ${isMobile ? '11px' : '15px'};
-        font-weight: 600;
-      }
-      .fanyi-config-close {
-        background: none;
-        border: none;
-        font-size: ${isMobile ? '16px' : '20px'};
-        cursor: pointer;
-        padding: 4px 10px;
-        color: white;
-        opacity: 0.8;
-      }
-      .fanyi-config-close:hover {
-        opacity: 1;
-      }
-      .fanyi-config-body {
-        padding: ${isMobile ? '12px' : '14px'};
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: ${isMobile ? '10px' : '12px'};
-      }
-      .fanyi-config-row {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .fanyi-config-row label {
-        font-size: ${isMobile ? '11px' : '12px'};
-        color: #606266;
-        font-weight: 500;
-      }
-      .fanyi-api-input,
-      .fanyi-source-lang,
-      .fanyi-target-lang,
-      .fanyi-touch-gesture {
-        padding: ${isMobile ? '8px 10px' : '10px 12px'};
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        font-size: ${isMobile ? '13px' : '14px'};
-        -webkit-appearance: none;
-        appearance: none;
-        background: #fafafa;
-      }
-      .fanyi-api-input:focus,
-      .fanyi-source-lang:focus,
-      .fanyi-target-lang:focus,
-      .fanyi-touch-gesture:focus {
-        outline: none;
-        border-color: #409eff;
-        background: white;
-      }
-      .fanyi-radio-group {
-        display: flex;
-        gap: ${isMobile ? '12px' : '16px'};
-        flex-wrap: wrap;
-      }
-      .fanyi-radio-group label {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-        font-size: ${isMobile ? '12px' : '13px'};
-        color: #303133;
-      }
-      .fanyi-radio-group input[type="radio"] {
-        width: ${isMobile ? '16px' : '18px'};
-        height: ${isMobile ? '16px' : '18px'};
-        margin: 0;
-        accent-color: #409eff;
-      }
-      .fanyi-config-actions {
-        display: flex;
-        gap: ${isMobile ? '6px' : '8px'};
-        padding-top: ${isMobile ? '6px' : '8px'};
-        margin-top: auto;
+      .fanyi-bilingual-block.fanyi-inverted {
+        filter: invert(1);
       }
       .fanyi-btn-save,
       .fanyi-btn-translate,

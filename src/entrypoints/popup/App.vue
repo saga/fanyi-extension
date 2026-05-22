@@ -62,6 +62,7 @@
         <button @click="triggerTranslate" class="primary">翻译</button>
         <button @click="restoreOriginal">恢复</button>
         <button @click="clearCache">清除缓存</button>
+        <button @click="toggleInvert" :class="{ active: config.invertColors }" title="反转译文颜色">🌓</button>
       </div>
     </div>
   </div>
@@ -133,6 +134,19 @@ async function restoreOriginal() {
 
 async function clearCache() {
   await browser.runtime.sendMessage({ action: 'clearCache' });
+}
+
+async function toggleInvert() {
+  config.value.invertColors = !config.value.invertColors;
+  await setConfig(config.value);
+  // 通知 content script 立即更新现有译文块
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    browser.tabs.sendMessage(tab.id, {
+      action: 'toggleInvert',
+      invertColors: config.value.invertColors,
+    }).catch(() => {});
+  }
 }
 </script>
 
@@ -257,6 +271,12 @@ h2 {
   background: #f5f5f5;
   border-color: #409eff;
   color: #409eff;
+}
+
+.actions button.active {
+  background: #409eff;
+  color: white;
+  border-color: #409eff;
 }
 
 .actions button.success {
