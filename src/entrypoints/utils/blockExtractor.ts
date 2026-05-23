@@ -285,7 +285,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           console.log('[BlockExtractor] acceptNode - Found P tag:', el.textContent?.substring(0, 30), 'class:', el.className, 'has parent article:', isInArticleContext(el));
         }
 
-        if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+        if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.classList?.contains('fanyi-bilingual-block') || el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
           rejectedCount++;
           return NodeFilter.FILTER_REJECT;
         }

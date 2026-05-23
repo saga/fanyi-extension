@@ -25,6 +25,7 @@ export default defineContentScript({
     let translatedBlocks = new Set<string>();
     let domObserver: DOMObserverManager | null = null;
     let invertColors = false;
+    let translated = false;
 
     browser.runtime.onMessage.addListener(async (message) => {
       if (message.action === 'translatePage') {
@@ -204,7 +205,11 @@ export default defineContentScript({
         document.removeEventListener('touchend', endDrag);
 
         if (!hasMoved) {
-          handleFullTranslation();
+          if (isPageTranslated()) {
+            restoreOriginal();
+          } else {
+            handleFullTranslation();
+          }
         } else {
           const right = parseInt(btn.style.right) || (isMobile ? 12 : 20);
           const bottom = parseInt(btn.style.bottom) || 100;
@@ -215,6 +220,20 @@ export default defineContentScript({
       }
 
       document.body.appendChild(btn);
+    }
+
+    function updateButtonState(isTranslated: boolean) {
+      const btn = document.querySelector('.fanyi-floating-btn') as HTMLElement;
+      if (!btn) return;
+      if (isTranslated) {
+        btn.innerHTML = '原';
+        btn.title = isMobile ? '已翻译，点击恢复原文，长按设置' : '已翻译，点击恢复原文，长按设置';
+        btn.classList.add('fanyi-btn-translated');
+      } else {
+        btn.innerHTML = '译';
+        btn.title = isMobile ? '点击翻译，长按设置' : '点击翻译，长按设置';
+        btn.classList.remove('fanyi-btn-translated');
+      }
     }
 
     function showConfigPanel() {
@@ -370,8 +389,18 @@ export default defineContentScript({
       document.body.appendChild(panel);
     }
 
+    function isPageTranslated(): boolean {
+      return document.querySelector('.fanyi-translated') !== null;
+    }
+
     async function handleFullTranslation() {
       if (isTranslating) return;
+
+      if (translated || isPageTranslated()) {
+        showStatus('页面已翻译', 'success');
+        setTimeout(() => hideStatus(), 2000);
+        return;
+      }
 
       const config = await getConfig();
       console.log('[ContentScript] handleFullTranslation called, config:', { enabled: config.enabled, sourceLang: config.sourceLang, targetLang: config.targetLang });
@@ -416,7 +445,7 @@ export default defineContentScript({
         console.log('[ContentScript] All blocks summary:', blocks.map(b => `${b.id}(${b.tag}): ${b.text.substring(0, 50)}`).join(' | '));
         saveOriginalTexts(blocks, nodeMap);
 
-        await translateChunksViaBackground(
+        const allSucceeded = await translateChunksViaBackground(
           chunks,
           config.sourceLang,
           config.targetLang,
@@ -428,14 +457,18 @@ export default defineContentScript({
           }
         );
 
+        translated = true;
         translatedBlocks = new Set(nodeMap.keys());
+
+        updateButtonState(true);
 
         console.log(`[ContentScript] Translation applied: ${nodeMap.size} blocks translated`);
 
         setupDynamicContentObserver(config.mode);
 
-        showStatus('翻译完成', 'success');
-        setTimeout(() => hideStatus(), 2000);
+        const statusMsg = allSucceeded ? '翻译完成' : '翻译完成（部分失败）';
+        showStatus(statusMsg, allSucceeded ? 'success' : 'error');
+        setTimeout(() => hideStatus(), 3000);
       } catch (error) {
         console.error('Translation failed:', error);
         showStatus(
@@ -455,9 +488,10 @@ export default defineContentScript({
       mode: 'bilingual' | 'target',
       invertColors: boolean,
       onProgress?: (current: number, total: number) => void
-    ): Promise<void> {
+    ): Promise<boolean> {
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
       let completedCount = 0;
+      let hasFailure = false;
 
       async function translateChunk(index: number): Promise<void> {
         const chunk = chunks[index];
@@ -489,9 +523,11 @@ export default defineContentScript({
             }
             applyTranslations(chunkMap, nodeMap, mode, invertColors);
           } else {
+            hasFailure = true;
             console.error(`Chunk ${chunk.id} translation failed:`, response.error);
           }
         } catch (error) {
+          hasFailure = true;
           console.error(`[ContentScript] Chunk ${index + 1} error:`, error);
         }
 
@@ -508,7 +544,8 @@ export default defineContentScript({
         }
       }
 
-      console.log('[ContentScript] translateChunksViaBackground complete');
+      console.log('[ContentScript] translateChunksViaBackground complete, allSucceeded:', !hasFailure);
+      return !hasFailure;
     }
 
     function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
@@ -636,6 +673,7 @@ export default defineContentScript({
     }
 
     function restoreOriginal() {
+      translated = false;
       const translatedElements = document.querySelectorAll('.fanyi-bilingual-block');
       for (const el of Array.from(translatedElements)) {
         el.remove();
@@ -648,6 +686,8 @@ export default defineContentScript({
         delete el.dataset.originalText;
         delete el.dataset.translationBlockId;
       }
+
+      updateButtonState(false);
 
       showStatus('已恢复原文', 'success');
       setTimeout(() => hideStatus(), 2000);
@@ -766,6 +806,10 @@ export default defineContentScript({
       .fanyi-btn-restore:active {
         opacity: 0.8;
         transform: scale(0.98);
+      }
+      .fanyi-floating-btn.fanyi-btn-translated {
+        background: linear-gradient(135deg, #67c23a, #85ce61);
+        color: white;
       }
     `;
     document.head.appendChild(style);
