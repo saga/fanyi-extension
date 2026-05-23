@@ -62,7 +62,7 @@
         <button @click="triggerTranslate" class="primary">翻译</button>
         <button @click="restoreOriginal">恢复</button>
         <button @click="clearCache">清除缓存</button>
-        <button @click="toggleInvert" :class="{ active: config.invertColors }" title="反转译文颜色">🌓</button>
+        <button @click="toggleInvert" :class="{ active: inverted }" title="反转译文颜色">🌓</button>
       </div>
     </div>
   </div>
@@ -81,6 +81,7 @@ const config = ref<Config>({
   touchGesture: 'DoubleTap',
 });
 
+const inverted = ref(false);
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
 let checkTimer: number | null = null;
 
@@ -136,17 +137,16 @@ async function clearCache() {
   await browser.runtime.sendMessage({ action: 'clearCache' });
 }
 
-async function toggleInvert() {
-  config.value.invertColors = !config.value.invertColors;
-  await setConfig(config.value);
-  // 通知 content script 立即更新现有译文块
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
-    browser.tabs.sendMessage(tab.id, {
-      action: 'toggleInvert',
-      invertColors: config.value.invertColors,
-    }).catch(() => {});
-  }
+function toggleInvert() {
+  inverted.value = !inverted.value;
+  browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    if (tab?.id) {
+      browser.tabs.sendMessage(tab.id, {
+        action: 'toggleInvert',
+        invertColors: inverted.value,
+      }).catch(() => {});
+    }
+  });
 }
 </script>
 

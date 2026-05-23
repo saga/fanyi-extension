@@ -48,12 +48,10 @@ export default defineBackground({
       return serviceCache.get(apiKey)!;
     }
 
-    browser.runtime.onInstalled.addListener(async () => {
+    browser.runtime.onInstalled.addListener(() => {
       console.log('Extension installed');
 
       if (isContextMenuSupported) {
-        // 先清除所有旧菜单项，避免 "duplicate id" 错误
-        await browser.contextMenus.removeAll().catch(() => {});
         try {
           browser.contextMenus.create({
             id: 'translate-page',
@@ -88,21 +86,17 @@ export default defineBackground({
             const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
             if (!tab?.id) return;
 
-            const msg = { action: '' };
             switch (command) {
               case 'translate-page':
-                msg.action = 'translatePage';
+                browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
                 break;
               case 'restore-original':
-                msg.action = 'restoreOriginal';
+                browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
                 break;
               case 'toggle-translation':
-                msg.action = 'toggleTranslation';
+                browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
                 break;
-              default:
-                return;
             }
-            browser.tabs.sendMessage(tab.id, msg).catch(() => {});
           } catch (error) {
             console.warn('Command handling failed:', error);
           }
@@ -117,21 +111,17 @@ export default defineBackground({
         browser.contextMenus.onClicked.addListener(async (info, tab) => {
           if (!tab?.id) return;
 
-          const msg = { action: '' };
           switch (info.menuItemId) {
             case 'translate-page':
-              msg.action = 'translatePage';
+              browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
               break;
             case 'restore-original':
-              msg.action = 'restoreOriginal';
+              browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
               break;
             case 'toggle-translation':
-              msg.action = 'toggleTranslation';
+              browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
               break;
-            default:
-              return;
           }
-          browser.tabs.sendMessage(tab.id, msg).catch(() => {});
         });
       } catch (error) {
         console.warn('Context menu click listener failed:', error);

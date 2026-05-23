@@ -24,6 +24,7 @@ export default defineContentScript({
     let originalTexts = new Map<string, string>();
     let translatedBlocks = new Set<string>();
     let domObserver: DOMObserverManager | null = null;
+    let invertColors = false;
 
     browser.runtime.onMessage.addListener(async (message) => {
       if (message.action === 'translatePage') {
@@ -33,10 +34,8 @@ export default defineContentScript({
       } else if (message.action === 'toggleTranslation') {
         toggleTranslation();
       } else if (message.action === 'toggleInvert') {
-        const config = await getConfig();
-        config.invertColors = message.invertColors;
-        await setConfig(config);
-        applyInvertToExistingBlocks(config.invertColors);
+        invertColors = message.invertColors;
+        applyInvertToExistingBlocks(invertColors);
       }
     });
 
@@ -329,7 +328,6 @@ export default defineContentScript({
             }
 
             await setConfig(config);
-            applyInvertToExistingBlocks(config.invertColors);
             showStatus('设置已保存', 'success');
             setTimeout(() => hideStatus(), 2000);
           } else {
@@ -424,7 +422,7 @@ export default defineContentScript({
           config.targetLang,
           nodeMap,
           config.mode,
-          config.invertColors,
+          invertColors,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
           }
@@ -596,7 +594,7 @@ export default defineContentScript({
                 if (response.success && response.result?.length > 0) {
                   const node = findNodeByText(block.text);
                   if (node) {
-                    applyBlockTranslation(node, response.result[0][1], config.mode, !!config.invertColors);
+                    applyBlockTranslation(node, response.result[0][1], config.mode, invertColors);
                     translatedBlocks.add(block.id);
                     console.log('[ContentScript] Dynamic block translated:', block.id);
                   }
@@ -724,6 +722,7 @@ export default defineContentScript({
         margin: 4px 0 8px 0;
         padding: 4px 8px;
         border-left: 2px solid rgba(64, 158, 255, 0.2);
+        background: #f8f9fa;
       }
       .fanyi-target {
         color: #303133;
