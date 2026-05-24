@@ -1376,4 +1376,63 @@ describe('extractBlocks - Substack Article Structure (sample2.html)', () => {
     expect((foundNode as Element)?.tagName?.toLowerCase()).toBe('h3');
     expect((foundNode as Element)?.textContent).toContain('From Gemma 4');
   });
+
+  it('should not duplicate text when blockquote contains a single p', () => {
+    setupHTML(`
+      <article>
+        <blockquote>
+          <p>Do not trust analysis written in the issue. Independently verify behavior and derive your own analysis from the code and execution path.</p>
+        </blockquote>
+        <p>That is worse than no diagnosis.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    const targetText = 'Do not trust analysis written in the issue.';
+    const matches = texts.filter(t => t.includes(targetText));
+    expect(matches.length).toBe(1);
+  });
+
+  it('should handle blockquote with multiple p children', () => {
+    setupHTML(`
+      <article>
+        <blockquote>
+          <p>First paragraph inside blockquote.</p>
+          <p>Second paragraph inside blockquote.</p>
+          <p>Third paragraph inside blockquote.</p>
+        </blockquote>
+        <p>Content after blockquote.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts).toContain('First paragraph inside blockquote.');
+    expect(blockTexts).toContain('Second paragraph inside blockquote.');
+    expect(blockTexts).toContain('Third paragraph inside blockquote.');
+    expect(blockTexts).toContain('Content after blockquote.');
+
+    const blockquoteExtractions = blocks.filter(b => b.tag === 'blockquote');
+    expect(blockquoteExtractions.length).toBe(0);
+  });
+
+  it('should still extract blockquote when it has no block-level children', () => {
+    setupHTML(`
+      <article>
+        <blockquote>
+          A simple blockquote without any nested block elements.
+        </blockquote>
+        <p>Content after.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts).toContain('A simple blockquote without any nested block elements.');
+    expect(blockTexts).toContain('Content after.');
+  });
 });

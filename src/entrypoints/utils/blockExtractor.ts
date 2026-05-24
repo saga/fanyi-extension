@@ -197,6 +197,12 @@ function grabNode(node: Node): Element | false {
   if (shouldSkipBySiteRules(node)) return false;
 
   if (DIRECT_SET.has(tag)) {
+    const hasDirectSetChild = Array.from(node.children).some(
+      (child) => DIRECT_SET.has(child.tagName.toLowerCase())
+    );
+    if (hasDirectSetChild) {
+      return false;
+    }
     const text = node.textContent?.trim();
     if (text && text.length >= 3 && text.length < 3072) {
       return node;
@@ -303,8 +309,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           return NodeFilter.FILTER_REJECT;
         }
 
-  // DIRECT_SET 标签直接接受，不检查子元素类型
-        if (DIRECT_SET.has(tag)) {
+  if (DIRECT_SET.has(tag)) {
           const text = el.textContent?.trim();
           if (text && text.length >= 3 && text.length < 3072) {
             acceptedCount++;
