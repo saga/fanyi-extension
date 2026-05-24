@@ -44,7 +44,11 @@ const SKIP_CLASS_PATTERNS = [
   'content-column-post-footer', 'content-column-mobile-footer',
   'subscribe-widget', 'widget-area', 'subscribe-',
   'ad-container', 'ad-slot', 'ads-box', 'advertisement',
-  'cookie-consent', 'gdpr-banner', 'banner-ad',
+  'cookie-consent', 'cookie-banner', 'cookie-notice', 'cookie-policy', 'cookie-table', 'cookie-settings',
+  'ot-sdk', 'ot-pc', 'onetrust', 'ot-cookie', 'ot-policy', 'ot-category',
+  'gdpr-banner', 'gdpr-consent', 'privacy-policy', 'privacy-notice', 'privacy-pref',
+  'consent-banner', 'consent-container', 'consent-modal', 'consent-overlay',
+  'banner-ad',
   'popup-overlay', 'modal-dialog', 'modal-backdrop',
   'social-share', 'share-buttons',
   'breadcrumb', 'byline', 'post-meta', 'author-box',
@@ -92,6 +96,21 @@ function shouldSkipBySiteRules(el: Element): boolean {
   for (const selector of rule.skipSelectors) {
     if (el.matches(selector)) return true;
     if (el.closest(selector)) return true;
+  }
+  return false;
+}
+
+function isElementHidden(el: Element): boolean {
+  let current: Element | null = el;
+  while (current) {
+    if (current.tagName === 'HTML' || current.tagName === 'BODY') return false;
+    if (current.hasAttribute('hidden')) return true;
+    if (current.getAttribute('aria-hidden') === 'true') return true;
+    if (current instanceof HTMLElement) {
+      const s = current.style;
+      if (s.display === 'none' || s.visibility === 'hidden') return true;
+    }
+    current = current.parentElement;
   }
   return false;
 }
@@ -251,6 +270,7 @@ function grabNode(node: Node): Element | false {
   if (SEMANTIC_SKIP_TAGS.has(tag)) return false;
   if (hasTranslateBlockClass(el)) return false;
   if (isContentEditable(el)) return false;
+  if (isElementHidden(el)) return false;
   if (shouldSkipByClass(el)) return false;
   if (shouldSkipBySiteRules(el)) return false;
 
@@ -300,6 +320,11 @@ function acceptWalkerNode(
   }
 
   if (SKIP_SET.has(tag) || hasTranslateBlockClass(el) || isContentEditable(el)) {
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
+  if (isElementHidden(el)) {
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }

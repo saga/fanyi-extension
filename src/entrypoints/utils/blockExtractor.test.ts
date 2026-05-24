@@ -1971,34 +1971,202 @@ describe('extractBlocks - Hidden and non-visible content', () => {
     document.body.innerHTML = '';
   });
 
-  it('should still extract content inside display:none containers', () => {
+  it('should skip content inside display:none containers', () => {
     setupHTML(`
       <article>
         <p>Visible paragraph content that should be extracted here.</p>
         <div style="display: none;">
-          <p>Hidden paragraph content that is still extracted here.</p>
+          <p>Hidden paragraph content that should be skipped here.</p>
         </div>
       </article>
     `);
 
     const blocks = extractBlocks(document);
     expect(blocks.some(b => b.text.includes('Visible paragraph'))).toBe(true);
-    expect(blocks.some(b => b.text.includes('Hidden paragraph'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('Hidden paragraph'))).toBe(false);
   });
 
-  it('should still extract aria-hidden content', () => {
+  it('should skip aria-hidden content', () => {
     setupHTML(`
       <article>
         <p>Normal visible paragraph with enough text content here.</p>
         <div aria-hidden="true">
-          <p>This content is marked as aria-hidden but still extracted.</p>
+          <p>This content is marked as aria-hidden and should be skipped.</p>
         </div>
       </article>
     `);
 
     const blocks = extractBlocks(document);
     expect(blocks.some(b => b.text.includes('Normal visible'))).toBe(true);
-    expect(blocks.some(b => b.text.includes('aria-hidden'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('aria-hidden'))).toBe(false);
+  });
+
+  it('should skip visibility:hidden content', () => {
+    setupHTML(`
+      <article>
+        <p>Visible paragraph with enough text content here.</p>
+        <div style="visibility: hidden;">
+          <p>Hidden by visibility paragraph with enough text.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.text.includes('Hidden by visibility'))).toBe(false);
+  });
+
+  it('should skip content with hidden attribute', () => {
+    setupHTML(`
+      <article>
+        <p>Visible paragraph with enough text content here.</p>
+        <div hidden>
+          <p>Hidden attribute paragraph with enough text content.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.text.includes('Hidden attribute'))).toBe(false);
+  });
+
+  it('should skip content in deeply nested hidden ancestors', () => {
+    setupHTML(`
+      <article>
+        <p>Visible paragraph with enough text content here.</p>
+        <div class="wrapper">
+          <div class="inner" style="display: none;">
+            <div><div><p>Deeply nested hidden paragraph content here.</p></div></div>
+          </div>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.text.includes('Deeply nested hidden'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Cookie Consent and Privacy', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip OneTrust SDK cookie policy container', () => {
+    setupHTML(`
+      <article>
+        <p>Article paragraph content that should be extracted here.</p>
+      </article>
+      <div id="ot-sdk-cookie-policy">
+        <div class="ot-cookie-policy-content">
+          <ul>
+            <li>taboola_session_id</li>
+            <li>Duration</li>
+            <li>DescriptionThis cookie is owned by trc.taboola.com</li>
+            <li>Cookie_ga_*</li>
+            <li>Duration1 year 1 month 4 days</li>
+            <li>DescriptionGoogle Analytics sets this cookie</li>
+          </ul>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('taboola'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('DescriptionGoogle Analytics'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph content that should be extracted here.');
+  });
+
+  it('should skip OneTrust preference center (ot-pc-*)', () => {
+    setupHTML(`
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+      <div class="ot-pc-content">
+        <div class="ot-pc-header">
+          <h3>Cookie Settings</h3>
+        </div>
+        <div class="ot-pc-desc">This website uses cookies to ensure you get the best experience.</div>
+        <div class="ot-pc-footer">
+          <button>Allow All</button>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Cookie Settings'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('best experience'))).toBe(false);
+  });
+
+  it('should skip cookie banner with cookie-banner class', () => {
+    setupHTML(`
+      <div class="cookie-banner">
+        <p>We use cookies to improve your experience on our site.</p>
+        <button>Accept All Cookies</button>
+      </div>
+      <article>
+        <p>Article content that should be translated.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('use cookies'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated.');
+  });
+
+  it('should skip GDPR consent modal regions', () => {
+    setupHTML(`
+      <div class="consent-modal">
+        <h2>Your Privacy Choices</h2>
+        <p>Select your cookie preferences below.</p>
+        <div class="consent-container">
+          <label class="ot-category">Functional Cookies</label>
+          <p>These cookies are necessary for the website to function.</p>
+        </div>
+      </div>
+      <article>
+        <p>Real article text that must be extracted for translation here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Privacy Choices'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Functional Cookies'))).toBe(false);
+    expect(blockTexts).toContain('Real article text that must be extracted for translation here.');
+  });
+
+  it('should skip cookie policy and privacy notice containers', () => {
+    setupHTML(`
+      <div class="privacy-policy">
+        <h2>Privacy Policy</h2>
+        <p>Last updated: January 2026</p>
+        <div class="cookie-policy">
+          <h3>Cookie Declaration</h3>
+          <table class="cookie-table">
+            <tr><th>Cookie</th><th>Duration</th><th>Description</th></tr>
+            <tr><td>_ga</td><td>2 years</td><td>Google Analytics tracking cookie</td></tr>
+          </table>
+        </div>
+      </div>
+      <article>
+        <p>Actual article paragraph that should be extracted for translation.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Privacy Policy'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie Declaration'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('_ga'))).toBe(false);
+    expect(blockTexts).toContain('Actual article paragraph that should be extracted for translation.');
   });
 });
 
