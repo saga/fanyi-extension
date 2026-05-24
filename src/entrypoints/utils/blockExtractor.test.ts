@@ -308,16 +308,22 @@ describe('extractBlocks - Class-based Skipping', () => {
     expect(cookieBlocks).toHaveLength(0);
   });
 
-  it('should NOT skip elements inside article context', () => {
+  it('should skip sidebar/footer classes even inside article context', () => {
     setupHTML(`
       <article>
         <div class="sidebar"><p>Sidebar inside article context.</p></div>
         <div class="footer-wrap"><p>Footer inside article context.</p></div>
+        <p>Main article content that should be extracted.</p>
       </article>
     `);
 
     const blocks = extractBlocks(document);
-    expect(blocks).toHaveLength(2);
+    const sidebarBlocks = blocks.filter(b => b.text.includes('Sidebar'));
+    expect(sidebarBlocks).toHaveLength(0);
+    const footerBlocks = blocks.filter(b => b.text.includes('Footer'));
+    expect(footerBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toContain('Main article content');
   });
 
   it('should skip notranslate class', () => {
@@ -1651,7 +1657,7 @@ describe('extractBlocks - Tables', () => {
     expect(pBlocks[1].text).toBe('As shown above, Model A performs best overall.');
   });
 
-  it('should extract table caption and cells as separate blocks', () => {
+  it('should skip table caption and cell elements', () => {
     setupHTML(`
       <article>
         <table>
@@ -1664,8 +1670,11 @@ describe('extractBlocks - Tables', () => {
     `);
 
     const blocks = extractBlocks(document);
+    const captionBlocks = blocks.filter(b => b.tag === 'caption');
+    expect(captionBlocks).toHaveLength(0);
+    const cellBlocks = blocks.filter(b => b.tag === 'td' || b.tag === 'th');
+    expect(cellBlocks).toHaveLength(0);
     expect(blocks.some(b => b.tag === 'p')).toBe(true);
-    expect(blocks.some(b => b.tag === 'caption')).toBe(true);
   });
 });
 
@@ -2026,6 +2035,223 @@ describe('extractBlocks - Large documents', () => {
   });
 });
 
+describe('extractBlocks - WordPress/TNS style page (sample4.html)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip navigation divs, footers, sidebars on lang=en-US pages', () => {
+    document.documentElement.setAttribute('lang', 'en-US');
+
+    setupHTML(`
+      <div class="mobile-nav-dropdown">
+        <div class="mobile-nav-header">Topics</div>
+        <div class="mobile-nav-menu">
+          <a href="/ai/">AI and Machine Learning</a>
+          <a href="/cloud/">Cloud Native Computing</a>
+        </div>
+      </div>
+      <div class="channels-nav">
+        <a href="/podcasts/">Podcasts</a>
+        <a href="/ebooks/">eBooks</a>
+      </div>
+      <div class="topics-nav">
+        <a href="/architecture/">Architecture</a>
+        <a href="/engineering/">Engineering</a>
+      </div>
+      <div class="content-column content-column-post-body">
+        <div class="breadcrumb">
+          <a href="/category/ai-agents/">AI Agents</a>
+          <span> / </span>
+          <a href="/category/ai-strategy/">AI Strategy</a>
+        </div>
+        <h1 class="title">Forward deployed engineer is AI's hottest job</h1>
+        <div class="byline">
+          <span class="date">May 16th, 2026 6:00am by</span>
+          <span class="author">Matthew Burns</span>
+        </div>
+        <article>
+          <p>OpenAI launched the Deployment Company this week.</p>
+          <p>If you have been wondering which AI job is durable, the answer is becoming obvious.</p>
+        </article>
+      </div>
+      <div class="content-column content-column-post-footer">
+        <div class="related-posts">
+          <a href="/post1/">Related article number one about AI</a>
+          <a href="/post2/">Related article number two about cloud</a>
+        </div>
+      </div>
+      <div class="footer">
+        <p>Copyright 2026 The New Stack. All rights reserved.</p>
+      </div>
+      <div class="sidebar">
+        <div class="widget-area">
+          <h4>Subscribe to Our Newsletter</h4>
+          <p>Get the latest news delivered to your inbox.</p>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts).not.toContain('AI and Machine Learning');
+    expect(blockTexts).not.toContain('Podcasts');
+    expect(blockTexts).not.toContain('Architecture');
+    expect(blockTexts).not.toContain('AI Agents');
+    expect(blockTexts).not.toContain('Matthew Burns');
+    expect(blockTexts).not.toContain('Related article number one about AI');
+    expect(blockTexts).not.toContain('Copyright 2026 The New Stack. All rights reserved.');
+    expect(blockTexts).not.toContain('Get the latest news delivered to your inbox.');
+
+    expect(blockTexts).toContain('OpenAI launched the Deployment Company this week.');
+    expect(blockTexts).toContain('If you have been wondering which AI job is durable, the answer is becoming obvious.');
+  });
+
+  it('should skip subscribe forms and trending story widgets inside article body', () => {
+    setupHTML(`
+      <article>
+        <p>Main content paragraph that should definitely be translated here.</p>
+        <div class="tns-trending-stories-block inline">
+          <div class="section-heading">TRENDING STORIES</div>
+          <ol class="tns-trending-stories-ol">
+            <li><a href="/post1/">What Anthropic and OpenAI launched in 72 hours</a></li>
+            <li><a href="/post2/">Forward deployed engineer is AI's hottest job</a></li>
+          </ol>
+        </div>
+        <div class="subscribe-widget">
+          <h4>Subscribe for Updates</h4>
+          <p>Get notified about new articles and events.</p>
+          <input type="email" placeholder="Enter your email address here" />
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts).not.toContain('TRENDING STORIES');
+    expect(blockTexts).not.toContain('What Anthropic and OpenAI launched in 72 hours');
+    expect(blockTexts).not.toContain('Forward deployed engineer is AI\'s hottest job');
+    expect(blockTexts).not.toContain('Get notified about new articles and events.');
+    expect(blockTexts).toContain('Main content paragraph that should definitely be translated here.');
+  });
+
+  it('should only extract article body paragraphs from a complete WordPress page layout', () => {
+    setupHTML(`
+      <header class="header">
+        <div class="logo"><a href="/">The New Stack</a></div>
+        <nav class="main-menu">
+          <a href="/ai/">AI</a>
+          <a href="/cloud/">Cloud</a>
+        </nav>
+      </header>
+      <div class="content-column content-column-post-body">
+        <h1 class="title">The Future of AI Engineering Careers</h1>
+        <div class="byline">
+          <span class="date">May 2026</span>
+          <span class="author">By Jane Doe and John Smith</span>
+        </div>
+        <div class="social-share">
+          <button>Share on Twitter</button>
+          <button>Share on LinkedIn</button>
+        </div>
+        <div id="tns-post-body-content">
+          <p class="first-paragraph">The AI engineering field is rapidly evolving with new roles emerging.</p>
+          <h2 class="wp-block-heading">What Makes a Good AI Engineer</h2>
+          <p>Understanding both the technical and business aspects is crucial for success.</p>
+          <h2 class="wp-block-heading">Career Path and Growth Opportunities</h2>
+          <p>The career trajectory for AI engineers shows remarkable growth potential.</p>
+        </div>
+      </div>
+      <aside class="sidebar">
+        <div class="widget-area">
+          <h4>Popular Articles</h4>
+          <ul>
+            <li><a href="/post1/">How Kubernetes Changed Everything Forever</a></li>
+            <li><a href="/post2/">The Rise of Platform Engineering Teams</a></li>
+          </ul>
+        </div>
+      </aside>
+      <footer class="footer">
+        <div class="copyright">2026 The New Stack</div>
+      </footer>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('The New Stack'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Jane Doe'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Share on'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Kubernetes Changed'))).toBe(false);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBeGreaterThanOrEqual(3);
+
+    expect(blockTexts).toContain('The AI engineering field is rapidly evolving with new roles emerging.');
+    expect(blockTexts).toContain('Understanding both the technical and business aspects is crucial for success.');
+    expect(blockTexts).toContain('The career trajectory for AI engineers shows remarkable growth potential.');
+  });
+
+  it('should skip nav divs even when not using semantic nav tag (div-based nav)', () => {
+    setupHTML(`
+      <div class="mobile-nav-dropdown">
+        <div class="content-column">
+          <div class="row mobile-nav-row">
+            <div class="col-20 mobile-nav-col">
+              <div class="mobile-nav-header">Topics</div>
+              <div class="mobile-nav-menu">
+                <a href="/ai/">Artificial Intelligence and Machine Learning</a>
+                <a href="/cloud/">Cloud Native and Kubernetes Ecosystem</a>
+              </div>
+            </div>
+            <div class="col-20 mobile-nav-col">
+              <div class="mobile-nav-header">Resources</div>
+              <div class="mobile-nav-menu">
+                <a href="/ebooks/">Free eBooks and Guides for Developers</a>
+                <a href="/webinars/">Upcoming Webinars and Live Events</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Artificial Intelligence'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cloud Native'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Free eBooks'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Upcoming Webinars'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Topics'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Resources'))).toBe(false);
+  });
+
+  it('should handle compound class names like content-column-post-footer via endsWith matching', () => {
+    setupHTML(`
+      <div class="content-column content-column-post-footer">
+        <p>Footer paragraph that should be skipped entirely.</p>
+      </div>
+      <div class="content-column content-column-mobile-footer">
+        <p>Mobile footer paragraph that should also be skipped.</p>
+      </div>
+      <div class="content-column content-column-post-body">
+        <p>Actual article content that should be translated here.</p>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Footer paragraph'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Mobile footer'))).toBe(false);
+    expect(blockTexts).toContain('Actual article content that should be translated here.');
+    expect(blocks).toHaveLength(1);
+  });
+});
+
 describe('extractBlocks - Adjacent inline elements in article', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -2052,7 +2278,7 @@ describe('extractBlocks - Adjacent inline elements in article', () => {
       <article>
         <div class="content">
           Text content directly inside div <a href="#">with a link</a> and more text <strong>and bold</strong> at the end.
-        </div>
+          </div>
       </article>
     `);
 

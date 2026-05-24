@@ -25,7 +25,7 @@ const DIRECT_SET = new Set([
 const SKIP_SET = new Set([
   'html', 'body', 'script', 'style', 'noscript', 'iframe',
   'input', 'textarea', 'select', 'button', 'code', 'pre',
-  'dt'
+  'dt', 'td', 'th', 'caption'
 ]);
 
 const SEMANTIC_SKIP_TAGS = new Set(['header', 'footer', 'aside', 'nav']);
@@ -38,12 +38,17 @@ const INLINE_SET = new Set([
 
 const SKIP_CLASS_PATTERNS = [
   'sidebar', 'side-bar', 'sideBar',
-  'nav-menu', 'main-menu', 'navigation-menu',
-  'footer-wrap', 'post-footer', 'site-footer', 'footnote', 'copyright',
-  'subscribe-widget', 'widget-area',
+  'nav-menu', 'main-menu', 'navigation-menu', 'mobile-nav',
+  'channels-nav', 'topics-nav', 'nav-topics',
+  'footer-wrap', 'post-footer', 'site-footer', 'footer', 'footnote', 'copyright',
+  'content-column-post-footer', 'content-column-mobile-footer',
+  'subscribe-widget', 'widget-area', 'subscribe-',
   'ad-container', 'ad-slot', 'ads-box', 'advertisement',
   'cookie-consent', 'gdpr-banner', 'banner-ad',
   'popup-overlay', 'modal-dialog', 'modal-backdrop',
+  'social-share', 'share-buttons',
+  'breadcrumb', 'byline', 'post-meta', 'author-box',
+  'trending-stories', 'related-posts',
   'notranslate'
 ];
 
@@ -67,7 +72,15 @@ function shouldSkipByClass(el: Element): boolean {
   const className = el.className.toLowerCase();
   const classList = className.split(/\s+/);
   const match = SKIP_CLASS_PATTERNS.some(pattern =>
-    classList.some(cls => cls === pattern || cls.startsWith(pattern + '-') || cls.startsWith(pattern + '_'))
+    classList.some(cls =>
+      cls === pattern ||
+      cls.startsWith(pattern + '-') ||
+      cls.startsWith(pattern + '_') ||
+      cls.endsWith('-' + pattern) ||
+      cls.endsWith('_' + pattern) ||
+      cls.includes('-' + pattern + '-') ||
+      cls.includes('_' + pattern + '_')
+    )
   );
   return match;
 }
@@ -100,7 +113,7 @@ function isInsideArticle(el: Element): boolean {
     if (tag === 'article') return true;
     const role = current.getAttribute('role');
     if (role === 'article' || role === 'main') return true;
-    if (current.hasAttribute('lang')) return true;
+    if (current.hasAttribute('lang') && tag !== 'html' && tag !== 'body') return true;
     current = current.parentElement;
   }
   return false;
@@ -238,7 +251,7 @@ function grabNode(node: Node): Element | false {
   if (SEMANTIC_SKIP_TAGS.has(tag)) return false;
   if (hasTranslateBlockClass(el)) return false;
   if (isContentEditable(el)) return false;
-  if (shouldSkipByClass(el) && !isInsideArticle(el)) return false;
+  if (shouldSkipByClass(el)) return false;
   if (shouldSkipBySiteRules(el)) return false;
 
   if (DIRECT_SET.has(tag)) {
@@ -291,7 +304,7 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
 
-  if (shouldSkipByClass(el) && !isInsideArticle(el)) {
+  if (shouldSkipByClass(el)) {
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
