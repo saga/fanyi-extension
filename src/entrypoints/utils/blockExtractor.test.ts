@@ -1436,3 +1436,628 @@ describe('extractBlocks - Substack Article Structure (sample2.html)', () => {
     expect(blockTexts).toContain('Content after.');
   });
 });
+
+describe('extractBlocks - MathML/SVG namespace filtering', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip MathML elements inside paragraphs', () => {
+    setupHTML(`
+      <article>
+        <p>The speedup <math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mn>1</mn></mrow></math> of a program is limited.</p>
+        <p>Another paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const mathBlocks = blocks.filter(b => b.tag === 'math');
+    expect(mathBlocks).toHaveLength(0);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should skip MathML elements with nested mrow/mn', () => {
+    setupHTML(`
+      <article>
+        <p>Amdahl's law formula: <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <mrow>
+            <mi>S</mi>
+            <mo>=</mo>
+            <mfrac>
+              <mn>1</mn>
+              <mrow>
+                <mo>(</mo>
+                <mn>1</mn>
+                <mo>-</mo>
+                <mi>p</mi>
+                <mo>)</mo>
+                <mo>+</mo>
+                <mfrac><mi>p</mi><mi>n</mi></mfrac>
+              </mrow>
+            </mfrac>
+          </mrow>
+        </math></p>
+        <p>This paragraph is about Amdahl's law and has enough text.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const mathBlocks = blocks.filter(b => b.tag === 'math');
+    expect(mathBlocks).toHaveLength(0);
+
+    const mathChildBlocks = blocks.filter(b =>
+      ['mrow', 'mi', 'mo', 'mn', 'mfrac'].includes(b.tag)
+    );
+    expect(mathChildBlocks).toHaveLength(0);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should skip SVG elements', () => {
+    setupHTML(`
+      <article>
+        <p>Below is an icon: <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+          <circle cx="12" cy="12" r="10" />
+        </svg></p>
+        <p>Paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const svgBlocks = blocks.filter(b => b.tag === 'svg');
+    expect(svgBlocks).toHaveLength(0);
+
+    const svgChildBlocks = blocks.filter(b => ['circle', 'path', 'rect'].includes(b.tag));
+    expect(svgChildBlocks).toHaveLength(0);
+  });
+
+  it('should handle Wikipedia-style MathML in article content', () => {
+    setupHTML(`
+      <article>
+        <p>In computer architecture, <b>Amdahl's law</b> is a formula that gives the theoretical speedup in latency of the execution of a task at fixed workload that can be expected of a system whose resources are improved.</p>
+        <p>The speedup can be formulated as:</p>
+        <p><math xmlns="http://www.w3.org/1998/Math/MathML">
+          <mrow>
+            <mi>S</mi>
+            <mo>=</mo>
+            <mfrac>
+              <mn>1</mn>
+              <mrow>
+                <mo>(</mo>
+                <mn>1</mn>
+                <mo>-</mo>
+                <mi>p</mi>
+                <mo>)</mo>
+                <mo>+</mo>
+                <mfrac><mi>p</mi><mi>n</mi></mfrac>
+              </mrow>
+            </mfrac>
+          </mrow>
+        </math></p>
+        <p>Where <i>S</i> is the theoretical speedup, <i>p</i> is the proportion of the program that can be made parallel, and <i>n</i> is the number of processors.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+
+    const mathBlocks = blocks.filter(b => b.tag === 'math');
+    expect(mathBlocks).toHaveLength(0);
+
+    const mathChildBlocks = blocks.filter(b =>
+      ['mrow', 'mi', 'mo', 'mn', 'mfrac'].includes(b.tag)
+    );
+    expect(mathChildBlocks).toHaveLength(0);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBeGreaterThanOrEqual(3);
+
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts.some(t => t.includes("Amdahl's law"))).toBe(true);
+    expect(blockTexts.some(t => t.includes('theoretical speedup'))).toBe(true);
+  });
+
+  it('should skip inline SVG inside paragraph but still extract the paragraph text', () => {
+    setupHTML(`
+      <article>
+        <p>Click the <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M0 0h16v16H0z"/></svg> icon to save.</p>
+        <p>Another paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const svgBlocks = blocks.filter(b => b.tag === 'svg');
+    expect(svgBlocks).toHaveLength(0);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBe(2);
+  });
+});
+
+describe('extractBlocks - Nested lists', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract nested ul list items only', () => {
+    setupHTML(`
+      <article>
+        <ul>
+          <li>First level item with enough text content to be extracted.</li>
+          <li>Second level item parent with nested list.</li>
+          <ul>
+            <li>Nested first item with enough text content here.</li>
+            <li>Nested second item with enough text content here.</li>
+          </ul>
+          <li>Third level item with enough text content.</li>
+        </ul>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const liBlocks = blocks.filter(b => b.tag === 'li');
+    expect(liBlocks.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('should extract nested ol list items', () => {
+    setupHTML(`
+      <article>
+        <ol>
+          <li>Step one with comprehensive description text here.</li>
+          <li>Step two with detailed explanation of the process.</li>
+          <ol>
+            <li>Sub-step one with additional detailed text content.</li>
+            <li>Sub-step two with more explanatory information.</li>
+          </ol>
+          <li>Step three with final concluding description text.</li>
+        </ol>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const liBlocks = blocks.filter(b => b.tag === 'li');
+    expect(liBlocks.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('extractBlocks - Tables', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract table cells as text blocks', () => {
+    setupHTML(`
+      <article>
+        <p>Below is a comparison table showing the results.</p>
+        <table>
+          <thead>
+            <tr><th>Model Name</th><th>Accuracy Score</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Model A</td><td>95.2%</td></tr>
+            <tr><td>Model B</td><td>93.7%</td></tr>
+          </tbody>
+        </table>
+        <p>As shown above, Model A performs best overall.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(2);
+    expect(pBlocks[0].text).toBe('Below is a comparison table showing the results.');
+    expect(pBlocks[1].text).toBe('As shown above, Model A performs best overall.');
+  });
+
+  it('should extract table caption and cells as separate blocks', () => {
+    setupHTML(`
+      <article>
+        <table>
+          <caption>Table One: Performance Comparison of Different Models</caption>
+          <tr><th>Model</th><th>Score</th></tr>
+          <tr><td>GPT-5</td><td>98.7</td></tr>
+        </table>
+        <p>Regular paragraph after table with enough content.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.tag === 'p')).toBe(true);
+    expect(blocks.some(b => b.tag === 'caption')).toBe(true);
+  });
+});
+
+describe('extractBlocks - Details/Summary elements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should not extract summary as standalone block', () => {
+    setupHTML(`
+      <article>
+        <details>
+          <summary>Click to expand this section with detailed information</summary>
+          <p>Hidden content that becomes visible when expanded here.</p>
+        </details>
+        <p>Regular paragraph outside details element.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('extractBlocks - Reference/citation patterns', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip sup reference links (Wikipedia style)', () => {
+    setupHTML(`
+      <article>
+        <p>Amdahl's law is a formula in computer architecture<sup id="cite_ref-1"><a href="#cite_note-1">[1]</a></sup> that is widely cited.</p>
+        <p>Another paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const supBlocks = blocks.filter(b => b.tag === 'sup');
+    expect(supBlocks).toHaveLength(0);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBe(2);
+    expect(pBlocks.some(b => b.text.includes("Amdahl's law"))).toBe(true);
+  });
+
+  it('should skip ordered list in references section when outside article', () => {
+    setupHTML(`
+      <article>
+        <p>Main article content with enough text here.</p>
+      </article>
+      <div class="footnote">
+        <ol>
+          <li>Reference one citation details here.</li>
+          <li>Reference two citation details here.</li>
+        </ol>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts.some(t => t.includes('Reference one'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Reference two'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Main article'))).toBe(true);
+  });
+});
+
+describe('extractBlocks - Deeply nested structures', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract text from deeply nested divs in article', () => {
+    setupHTML(`
+      <article>
+        <div class="content-wrapper">
+          <div class="section">
+            <div class="block">
+              <div class="text-block">
+                <p>Deeply nested paragraph with enough text content to be extracted properly.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(blocks.some(b => b.text.includes('Deeply nested paragraph'))).toBe(true);
+  });
+
+  it('should handle multiple sections with same nesting depth', () => {
+    setupHTML(`
+      <article>
+        <section>
+          <div><div><p>First section paragraph with enough text.</p></div></div>
+        </section>
+        <section>
+          <div><div><p>Second section paragraph with enough text.</p></div></div>
+        </section>
+        <section>
+          <div><div><p>Third section paragraph with enough text.</p></div></div>
+        </section>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(3);
+  });
+});
+
+describe('extractBlocks - Mixed real-world article', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should handle a complete article with mixed content types', () => {
+    setupHTML(`
+      <article>
+        <h1>The Future of Artificial Intelligence Research</h1>
+        <p class="byline">By John Smith, Published on May 20, 2026</p>
+        <p>Artificial intelligence has transformed from a niche academic discipline into a fundamental technology driving innovation across every sector of the global economy.</p>
+        <h2>Recent Breakthroughs in Model Architecture</h2>
+        <p>The past year has witnessed remarkable advances in neural network design, particularly in the domain of transformer architectures and their successors.</p>
+        <blockquote>
+          <p>"The pace of innovation in AI has exceeded even our most optimistic projections from five years ago." — Dr. Sarah Chen, MIT</p>
+        </blockquote>
+        <p>These architectural innovations have led to substantial improvements in both training efficiency and inference performance.</p>
+        <h2>Key Research Areas</h2>
+        <ul>
+          <li>Mixture of Experts architectures are enabling more efficient model scaling without proportional compute increases.</li>
+          <li>Retrieval Augmented Generation continues to bridge the gap between parametric knowledge and external information sources.</li>
+          <li>Multimodal models that seamlessly integrate text, vision, and audio understanding are becoming the new standard.</li>
+        </ul>
+        <h2>Conclusion</h2>
+        <p>The trajectory of AI research suggests we are still in the early stages of understanding what these systems can achieve.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+
+    const h1Blocks = blocks.filter(b => b.tag === 'h1');
+    const h2Blocks = blocks.filter(b => b.tag === 'h2');
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    const liBlocks = blocks.filter(b => b.tag === 'li');
+
+    expect(h1Blocks.length).toBe(1);
+    expect(h2Blocks.length).toBe(3);
+    expect(liBlocks.length).toBe(3);
+    expect(pBlocks.length).toBeGreaterThanOrEqual(4);
+
+    const texts = blocks.map(b => b.text);
+    expect(texts.some(t => t.includes('Future of Artificial Intelligence'))).toBe(true);
+    expect(texts.some(t => t.includes('Mixture of Experts'))).toBe(true);
+    expect(texts.some(t => t.includes("Sarah Chen"))).toBe(true);
+  });
+
+  it('should handle article with figures interspersed', () => {
+    setupHTML(`
+      <article>
+        <h1>Visual Guide to Neural Networks</h1>
+        <p>Understanding neural network architectures requires both theoretical knowledge and visual intuition.</p>
+        <figure>
+          <img src="/network.png" alt="Neural network diagram" />
+          <figcaption>Figure 1: A standard feedforward neural network with three hidden layers showing connections.</figcaption>
+        </figure>
+        <p>The diagram above illustrates the basic structure of a multi-layer perceptron, where each node represents a neuron.</p>
+        <figure>
+          <img src="/cnn.png" alt="CNN diagram" />
+          <figcaption>Figure 2: Convolutional neural network architecture showing feature extraction layers.</figcaption>
+        </figure>
+        <p>Convolutional networks add specialized layers that excel at detecting spatial patterns in grid-like data.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const figcaptionBlocks = blocks.filter(b => b.tag === 'figcaption');
+    expect(figcaptionBlocks).toHaveLength(2);
+    expect(figcaptionBlocks.some(b => b.text.includes('Figure 1'))).toBe(true);
+    expect(figcaptionBlocks.some(b => b.text.includes('Figure 2'))).toBe(true);
+
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks.length).toBe(3);
+  });
+});
+
+describe('extractBlocks - Whitespace and empty elements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip elements with only whitespace text', () => {
+    setupHTML(`
+      <article>
+        <p>     </p>
+        <p>   \n  \t  </p>
+        <p>Valid paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(1);
+    expect(pBlocks[0].text).toBe('Valid paragraph with enough text content here.');
+  });
+
+  it('should skip empty elements', () => {
+    setupHTML(`
+      <article>
+        <p></p>
+        <div></div>
+        <span></span>
+        <p>Actual paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].tag).toBe('p');
+  });
+
+  it('should skip elements with only invisible children', () => {
+    setupHTML(`
+      <article>
+        <p><br><br></p>
+        <p><img src="/icon.png" alt="" /></p>
+        <p>Valid paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(1);
+  });
+});
+
+describe('extractBlocks - Malformed or unusual HTML', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should handle text directly inside article without wrapping tags', () => {
+    setupHTML(`
+      <article>
+        This is direct text content inside an article element without any wrapping paragraph tag.
+        <p>This is a proper paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(blocks.some(b => b.tag === 'p')).toBe(true);
+  });
+
+  it('should handle div with only text as a block', () => {
+    setupHTML(`
+      <article>
+        <div>This div contains direct text content that should be extracted as a translatable block since it has enough characters.</div>
+        <div><span>This span inside a div has enough text content to be extracted.</span></div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should handle mixed inline and block siblings', () => {
+    setupHTML(`
+      <article>
+        <p>First paragraph with enough text content here.</p>
+        <span>Inline span with enough text to be a standalone block here.</span>
+        <p>Second paragraph with enough text content here.</p>
+        <strong>Strong text that is also valid as standalone block content.</strong>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(2);
+
+    const spanBlocks = blocks.filter(b => b.tag === 'span');
+    expect(spanBlocks.length).toBeGreaterThanOrEqual(1);
+
+    const strongBlocks = blocks.filter(b => b.tag === 'strong');
+    expect(strongBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('extractBlocks - Hidden and non-visible content', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should still extract content inside display:none containers', () => {
+    setupHTML(`
+      <article>
+        <p>Visible paragraph content that should be extracted here.</p>
+        <div style="display: none;">
+          <p>Hidden paragraph content that is still extracted here.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.text.includes('Visible paragraph'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('Hidden paragraph'))).toBe(true);
+  });
+
+  it('should still extract aria-hidden content', () => {
+    setupHTML(`
+      <article>
+        <p>Normal visible paragraph with enough text content here.</p>
+        <div aria-hidden="true">
+          <p>This content is marked as aria-hidden but still extracted.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.text.includes('Normal visible'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('aria-hidden'))).toBe(true);
+  });
+});
+
+describe('extractBlocks - Large documents', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should handle article with many paragraphs efficiently', () => {
+    const paragraphs = Array.from({ length: 50 }, (_, i) =>
+      `<p>Paragraph number ${i + 1} with enough text content to be extracted as a translatable block for testing.</p>`
+    ).join('\n');
+
+    setupHTML(`<article>${paragraphs}</article>`);
+
+    const blocks = extractBlocks(document);
+    const pBlocks = blocks.filter(b => b.tag === 'p');
+    expect(pBlocks).toHaveLength(50);
+  });
+
+  it('should skip very long text blocks', () => {
+    const longText = 'Long text content. '.repeat(200);
+
+    setupHTML(`
+      <article>
+        <p>${longText}</p>
+        <p>Normal paragraph with enough text content here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toBe('Normal paragraph with enough text content here.');
+  });
+});
+
+describe('extractBlocks - Adjacent inline elements in article', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract multiple adjacent span elements as separate blocks', () => {
+    setupHTML(`
+      <article>
+        <div>
+          <span>First span with enough text content for a standalone block here.</span>
+          <span>Second span with enough text content for a standalone block here.</span>
+          <span>Third span with enough text content for a standalone block here.</span>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const spanBlocks = blocks.filter(b => b.tag === 'span');
+    expect(spanBlocks).toHaveLength(3);
+  });
+
+  it('should extract div with direct text and inline children as one block', () => {
+    setupHTML(`
+      <article>
+        <div class="content">
+          Text content directly inside div <a href="#">with a link</a> and more text <strong>and bold</strong> at the end.
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const divBlocks = blocks.filter(b => b.tag === 'div');
+    expect(divBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+});

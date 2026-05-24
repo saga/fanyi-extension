@@ -12,6 +12,10 @@ export interface TextBlock {
   };
 }
 
+const MIN_TEXT_LENGTH = 3;
+const MAX_TEXT_LENGTH = 3072;
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+
 const DIRECT_SET = new Set([
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'p', 'li', 'dd', 'blockquote',
@@ -22,6 +26,14 @@ const SKIP_SET = new Set([
   'html', 'body', 'script', 'style', 'noscript', 'iframe',
   'input', 'textarea', 'select', 'button', 'code', 'pre',
   'dt'
+]);
+
+const SEMANTIC_SKIP_TAGS = new Set(['header', 'footer', 'aside', 'nav']);
+
+const INLINE_SET = new Set([
+  'a', 'b', 'strong', 'span', 'em', 'i', 'u', 'small', 'sub', 'sup',
+  'font', 'mark', 'cite', 'q', 'abbr', 'time', 'ruby', 'bdi', 'bdo',
+  'img', 'br', 'wbr', 'svg'
 ]);
 
 const SKIP_CLASS_PATTERNS = [
@@ -65,30 +77,66 @@ function shouldSkipBySiteRules(el: Element): boolean {
   if (!rule?.skipSelectors) return false;
   
   for (const selector of rule.skipSelectors) {
-    // 检查元素本身是否匹配
     if (el.matches(selector)) return true;
-    // 检查祖先元素是否匹配
     if (el.closest(selector)) return true;
   }
   return false;
 }
 
-function isInArticleContext(el: Element): boolean {
+function isValidText(text: string | undefined | null): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return trimmed.length >= MIN_TEXT_LENGTH && trimmed.length < MAX_TEXT_LENGTH;
+}
+
+function isNonHTMLNamespace(el: Element): boolean {
+  return el.namespaceURI !== null && el.namespaceURI !== XHTML_NAMESPACE;
+}
+
+function isInsideArticle(el: Element): boolean {
   let current: Element | null = el;
   while (current) {
-    if (current.tagName.toLowerCase() === 'article') return true;
+    const tag = current.tagName.toLowerCase();
+    if (tag === 'article') return true;
     const role = current.getAttribute('role');
-    if (role === 'article') return true;
+    if (role === 'article' || role === 'main') return true;
+    if (current.hasAttribute('lang')) return true;
     current = current.parentElement;
   }
   return false;
 }
 
-const INLINE_SET = new Set([
-  'a', 'b', 'strong', 'span', 'em', 'i', 'u', 'small', 'sub', 'sup',
-  'font', 'mark', 'cite', 'q', 'abbr', 'time', 'ruby', 'bdi', 'bdo',
-  'img', 'br', 'wbr', 'svg'
-]);
+interface ChildClassification {
+  hasDirectText: boolean;
+  hasNonInlineChild: boolean;
+  hasNonEmptyElement: boolean;
+  hasOnlyInlineChildren: boolean;
+}
+
+function classifyChildren(el: Element): ChildClassification {
+  let hasDirectText = false;
+  let hasNonEmptyElement = false;
+  let hasOnlyInlineChildren = true;
+
+  for (const child of Array.from(el.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+      hasDirectText = true;
+    }
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const childTag = (child as Element).tagName.toLowerCase();
+      if ((child as Element).textContent?.trim()) {
+        hasNonEmptyElement = true;
+      }
+      if (!INLINE_SET.has(childTag)) {
+        hasOnlyInlineChildren = false;
+      }
+    }
+  }
+
+  const hasNonInlineChild = !hasOnlyInlineChildren;
+
+  return { hasDirectText, hasNonInlineChild, hasNonEmptyElement, hasOnlyInlineChildren };
+}
 
 function getXPath(node: Node): string {
   if (node.nodeType === Node.DOCUMENT_NODE) return '';
@@ -159,19 +207,6 @@ function findLastHeading(element: Element): Element | null {
   return null;
 }
 
-function isInsideContentContainer(el: Element): boolean {
-  let current: Element | null = el;
-  while (current) {
-    const tag = current.tagName.toLowerCase();
-    if (tag === 'article') return true;
-    const role = current.getAttribute('role');
-    if (role === 'article' || role === 'main') return true;
-    if (current.hasAttribute('lang')) return true;
-    current = current.parentElement;
-  }
-  return false;
-}
-
 function hasBlockLevelParent(el: Element): boolean {
   let current: Element | null = el.parentElement;
   while (current) {
@@ -183,86 +218,120 @@ function hasBlockLevelParent(el: Element): boolean {
   return false;
 }
 
+function isContentEditable(el: Element): boolean {
+  return !!(el as HTMLElement).isContentEditable || el.getAttribute('contenteditable') === 'true';
+}
+
+function hasTranslateBlockClass(el: Element): boolean {
+  return el.classList?.contains('fanyi-bilingual-block') || el.classList?.contains('notranslate');
+}
+
 function grabNode(node: Node): Element | false {
   if (!node || node instanceof Text) return false;
   if (!(node instanceof Element)) return false;
 
-  const tag = node.tagName.toLowerCase();
+  const el = node;
+  const tag = el.tagName.toLowerCase();
 
+  if (isNonHTMLNamespace(el)) return false;
   if (SKIP_SET.has(tag)) return false;
-  if (node.classList?.contains('notranslate')) return false;
-  if (shouldSkipByClass(node) && !isInArticleContext(node)) return false;
-  if (node.isContentEditable || node.getAttribute('contenteditable') === 'true') return false;
-  if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') return false;
-  if (shouldSkipBySiteRules(node)) return false;
+  if (SEMANTIC_SKIP_TAGS.has(tag)) return false;
+  if (hasTranslateBlockClass(el)) return false;
+  if (isContentEditable(el)) return false;
+  if (shouldSkipByClass(el) && !isInsideArticle(el)) return false;
+  if (shouldSkipBySiteRules(el)) return false;
 
   if (DIRECT_SET.has(tag)) {
-    const hasDirectSetChild = Array.from(node.children).some(
+    const hasDirectSetChild = Array.from(el.children).some(
       (child) => DIRECT_SET.has(child.tagName.toLowerCase())
     );
-    if (hasDirectSetChild) {
-      return false;
-    }
-    const text = node.textContent?.trim();
-    if (text && text.length >= 3 && text.length < 3072) {
-      return node;
-    }
-    return false;
+    if (hasDirectSetChild) return false;
+    return isValidText(el.textContent) ? el : false;
   }
 
-  // 内联元素：只有当它不在 DIRECT_SET 父元素内部时才单独提取
-  // 例如：<p><a>text</a></p> - <a> 不单独提取，因为 <p> 会提取完整文本
-  // 例如：<article><div><span>text</span></div></article> - <span> 需要提取
-  if (INLINE_SET.has(tag) && isInsideContentContainer(node)) {
-    // 检查是否有 DIRECT_SET 的父元素
-    if (!hasBlockLevelParent(node)) {
-      const text = node.textContent?.trim();
-      if (text && text.length >= 3 && text.length < 3072) {
-        return node;
-      }
-    }
+  if (INLINE_SET.has(tag) && isInsideArticle(el) && !hasBlockLevelParent(el)) {
+    return isValidText(el.textContent) ? el : false;
   }
 
   if (INLINE_SET.has(tag)) return false;
 
-  let hasDirectText = false;
-  let hasNonInlineChild = false;
-  
-  for (const child of Array.from(node.childNodes)) {
-    if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
-      hasDirectText = true;
-    }
-    if (child.nodeType === Node.ELEMENT_NODE) {
-      const childTag = (child as Element).tagName.toLowerCase();
-      if (!INLINE_SET.has(childTag)) {
-        hasNonInlineChild = true;
-      }
-    }
-  }
+  const { hasDirectText, hasNonInlineChild } = classifyChildren(el);
 
-  if (hasNonInlineChild) {
-    console.log('[BlockExtractor] grabNode REJECT (hasNonInlineChild):', tag, 'children:', Array.from(node.childNodes).map(c => c instanceof Element ? c.tagName : '#text').join(', '));
-    return false;
-  }
+  if (hasNonInlineChild) return false;
 
   if (hasDirectText) {
-    const text = node.textContent?.trim();
-    if (text && text.length >= 3 && text.length < 3072) {
-      console.log('[BlockExtractor] grabNode ACCEPT:', tag, 'text:', text.substring(0, 50));
-      return node;
+    return isValidText(el.textContent) ? el : false;
+  }
+
+  return false;
+}
+
+function acceptWalkerNode(
+  node: Node,
+  counters: { rejected: number; skipped: number; accepted: number }
+): number {
+  if (node instanceof Text) {
+    return NodeFilter.FILTER_ACCEPT;
+  }
+
+  if (!(node instanceof Element)) {
+    return NodeFilter.FILTER_SKIP;
+  }
+
+  const el = node;
+  const tag = el.tagName.toLowerCase();
+
+  if (isNonHTMLNamespace(el)) {
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
+  if (SKIP_SET.has(tag) || hasTranslateBlockClass(el) || isContentEditable(el)) {
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
+  if (shouldSkipByClass(el) && !isInsideArticle(el)) {
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
+  if (SEMANTIC_SKIP_TAGS.has(tag)) {
+    counters.skipped++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
+  if (DIRECT_SET.has(tag)) {
+    if (isValidText(el.textContent)) {
+      counters.accepted++;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+    counters.skipped++;
+    return NodeFilter.FILTER_SKIP;
+  }
+
+  const { hasDirectText, hasNonEmptyElement, hasOnlyInlineChildren } = classifyChildren(el);
+
+  if (!hasOnlyInlineChildren) {
+    counters.skipped++;
+    return NodeFilter.FILTER_SKIP;
+  }
+
+  if (hasDirectText || hasNonEmptyElement) {
+    if (isValidText(el.textContent)) {
+      counters.accepted++;
+      return NodeFilter.FILTER_ACCEPT;
     }
   }
 
-  console.log('[BlockExtractor] grabNode REJECT (no direct text):', tag, 'hasDirectText:', hasDirectText, 'hasNonInlineChild:', hasNonInlineChild);
-  return false;
+  counters.skipped++;
+  return NodeFilter.FILTER_SKIP;
 }
 
 export function extractBlocks(rootNode: Node): TextBlock[] {
   const blocks: TextBlock[] = [];
   let blockId = 0;
-  let skippedCount = 0;
-  let rejectedCount = 0;
-  let acceptedCount = 0;
+  const counters = { rejected: 0, skipped: 0, accepted: 0 };
 
   const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
   if (!startNode) {
@@ -273,90 +342,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   const walker = document.createTreeWalker(
     startNode,
     NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: (node: Node): number => {
-        if (node instanceof Text) {
-          return NodeFilter.FILTER_ACCEPT;
-        }
-
-        if (!(node instanceof Element)) {
-          return NodeFilter.FILTER_SKIP;
-        }
-
-        const el = node as Element;
-        const tag = el.tagName.toLowerCase();
-
-        // 添加日志追踪 p 标签
-        if (tag === 'p') {
-          console.log('[BlockExtractor] acceptNode - Found P tag:', el.textContent?.substring(0, 30), 'class:', el.className, 'has parent article:', isInArticleContext(el));
-        }
-
-        if (SKIP_SET.has(tag) || el.classList?.contains('notranslate') || el.classList?.contains('fanyi-bilingual-block') || el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
-          rejectedCount++;
-          return NodeFilter.FILTER_REJECT;
-        }
-        // 只在非 article 上下文中检查 class-based skipping
-        // 在 article 内部，我们信任所有内容
-        if (shouldSkipByClass(el) && !isInArticleContext(el)) {
-          if (tag === 'p') {
-            console.log('[BlockExtractor] acceptNode - P tag REJECTED by shouldSkipByClass');
-          }
-          rejectedCount++;
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (tag === 'header' || tag === 'footer' || tag === 'aside' || tag === 'nav') {
-          skippedCount++;
-          return NodeFilter.FILTER_REJECT;
-        }
-
-  if (DIRECT_SET.has(tag)) {
-          const text = el.textContent?.trim();
-          if (text && text.length >= 3 && text.length < 3072) {
-            acceptedCount++;
-            return NodeFilter.FILTER_ACCEPT;
-          }
-          skippedCount++;
-          return NodeFilter.FILTER_SKIP;
-        }
-
-        let hasDirectText = false;
-        let hasNonEmptyElement = false;
-        let hasOnlyInlineChildren = true;
-        
-        for (const child of Array.from(el.childNodes)) {
-          if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
-            hasDirectText = true;
-          }
-          if (child.nodeType === Node.ELEMENT_NODE) {
-            const childTag = (child as Element).tagName.toLowerCase();
-            if ((child as Element).textContent?.trim()) {
-              hasNonEmptyElement = true;
-            }
-            if (!INLINE_SET.has(childTag)) {
-              hasOnlyInlineChildren = false;
-            }
-          }
-        }
-
-        // 如果有块级子元素，跳过当前节点（让子元素被单独处理）
-        if (!hasOnlyInlineChildren) {
-          skippedCount++;
-          return NodeFilter.FILTER_SKIP;
-        }
-
-        // 如果有内联子元素且有文本，接受当前节点（获取完整段落文本）
-        if (hasDirectText || hasNonEmptyElement) {
-          const text = el.textContent?.trim();
-          if (text && text.length >= 3 && text.length < 3072) {
-            acceptedCount++;
-            return NodeFilter.FILTER_ACCEPT;
-          }
-        }
-
-        skippedCount++;
-        return NodeFilter.FILTER_SKIP;
-      }
-    }
+    { acceptNode: (node) => acceptWalkerNode(node, counters) }
   );
 
   let currentNode: Node | null;
@@ -377,8 +363,6 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           },
         });
       }
-      // 不要手动修改 walker.currentNode
-      // TreeWalker 会自动处理遍历，我们只需要处理 acceptNode 返回值
     }
   }
 
