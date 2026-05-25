@@ -2170,6 +2170,559 @@ describe('extractBlocks - Cookie Consent and Privacy', () => {
   });
 });
 
+describe('extractBlocks - Cookie Consent libraries (cc-*)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip Cookie Consent (cc-window, cc-banner, cc-overlay)', () => {
+    setupHTML(`
+      <div class="cc-window">
+        <div class="cc-banner">
+          <p>This website uses cookies to ensure you get the best experience.</p>
+          <button class="cc-btn cc-accept">Got it!</button>
+        </div>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('best experience'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+
+  it('should skip cc-floating and cc-container variants', () => {
+    setupHTML(`
+      <div class="cc-floating">
+        <p>Cookie consent floating banner text.</p>
+      </div>
+      <div class="cc-container">
+        <p>Cookie preferences container text.</p>
+      </div>
+      <article>
+        <p>Real article paragraph for translation here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('floating banner'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('preferences container'))).toBe(false);
+    expect(blockTexts).toContain('Real article paragraph for translation here.');
+  });
+});
+
+describe('extractBlocks - CMP platforms (ConsentManager, Klaro)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip ConsentManager (cmpbox, cmpwrapper)', () => {
+    setupHTML(`
+      <div class="cmpbox">
+        <div class="cmpbox-inner">
+          <div class="cmpbox-content">
+            <p>We use cookies and other technologies to provide our services.</p>
+          </div>
+          <div class="cmpbox-buttons">
+            <button class="cmpbox-btn">Accept All</button>
+            <button class="cmpbox-btn">Deny</button>
+          </div>
+        </div>
+      </div>
+      <article>
+        <p>Article content for translation purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('We use cookies'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation purposes here.');
+  });
+
+  it('should skip Klaro consent manager', () => {
+    setupHTML(`
+      <div class="klaro">
+        <div class="klaro-cookie-notice">
+          <p>Hello! Would you like to accept cookies for analytics?</p>
+        </div>
+        <div class="klaro-cookie-modal">
+          <p>Cookie settings and preferences.</p>
+        </div>
+      </div>
+      <article>
+        <p>Article text to be translated for testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('accept cookies'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie settings'))).toBe(false);
+    expect(blockTexts).toContain('Article text to be translated for testing here.');
+  });
+});
+
+describe('extractBlocks - WordPress GDPR/Cookie plugins', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip Borlabs Cookie (borlabs-cookie, brlbs)', () => {
+    setupHTML(`
+      <div class="borlabs-cookie">
+        <div class="brlbs-cmpnt-container">
+          <p>This website uses Borlabs Cookie to manage consent.</p>
+        </div>
+      </div>
+      <article>
+        <p>Article content that must be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Borlabs Cookie'))).toBe(false);
+    expect(blockTexts).toContain('Article content that must be translated here.');
+  });
+
+  it('should skip Complianz (cmplz, cmplz-cookie, cmplz-manage)', () => {
+    setupHTML(`
+      <div id="cmplz-cookiebanner">
+        <div class="cmplz-manage-consent">
+          <p>We use functional cookies to make our website work properly.</p>
+        </div>
+      </div>
+      <article>
+        <p>Article paragraph for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('functional cookies'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph for translation testing here.');
+  });
+
+  it('should skip Moove GDPR (moove-gdpr)', () => {
+    setupHTML(`
+      <div class="moove-gdpr-cookie-notice">
+        <p>Our website uses cookies to improve your browsing experience.</p>
+      </div>
+      <article>
+        <p>Article content for translation here please.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('browsing experience'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation here please.');
+  });
+
+  it('should skip Cookie Law Info / CookieYes (cli-, wt-cli, cky-)', () => {
+    setupHTML(`
+      <div class="wt-cli-cookie-bar">
+        <div class="cli-modal">
+          <div class="cli-popup">
+            <p>This website uses cookies to improve your experience.</p>
+          </div>
+        </div>
+      </div>
+      <div class="cky-banner">
+        <div class="cky-consent">
+          <p>CookieYes cookie consent banner content text.</p>
+        </div>
+      </div>
+      <article>
+        <p>Article paragraph for translation extraction here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('improve your experience'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('CookieYes'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph for translation extraction here.');
+  });
+
+  it('should skip wpfront-notification-bar', () => {
+    setupHTML(`
+      <div class="wpfront-notification-bar">
+        <p>Notification bar with cookie policy information.</p>
+      </div>
+      <article>
+        <p>Article paragraph to translate for testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Notification bar'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph to translate for testing here.');
+  });
+});
+
+describe('extractBlocks - Regional regulation and multilingual class names', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip CCPA, LGPD, EU Cookie, CNIL notices', () => {
+    setupHTML(`
+      <div class="ccpa-notice">
+        <p>Do not sell my personal information.</p>
+      </div>
+      <div class="lgpd-banner">
+        <p>Este site utiliza cookies para melhorar sua experiência.</p>
+      </div>
+      <div class="eucookie-banner">
+        <p>We use cookies in accordance with EU regulations.</p>
+      </div>
+      <div class="cnil-banner">
+        <p>En poursuivant votre navigation, vous acceptez les cookies.</p>
+      </div>
+      <article>
+        <p>Article content for translation purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('personal information'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('melhorar sua'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('EU regulations'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('acceptez les cookies'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation purposes here.');
+  });
+
+  it('should skip German (hinweis) and French (confidentialite) notices', () => {
+    setupHTML(`
+      <div class="hinweis-cookie">
+        <p>Diese Website verwendet Cookies zur Verbesserung des Angebots.</p>
+      </div>
+      <div class="confidentialite-popup">
+        <p>Politique de confidentialité et gestion des cookies.</p>
+      </div>
+      <article>
+        <p>Article content to translate for testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Verbesserung'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('confidentialité'))).toBe(false);
+    expect(blockTexts).toContain('Article content to translate for testing purposes here.');
+  });
+
+  it('should skip Polish (rodo) and short cookie forms (cbar, cono, coo, cook)', () => {
+    setupHTML(`
+      <div class="rodo-popup">
+        <p>Informacja o przetwarzaniu danych osobowych.</p>
+      </div>
+      <div class="cbar-container">
+        <p>Cookie bar short form notice text here.</p>
+      </div>
+      <div class="coo-modal">
+        <p>Short cookie modal content for testing.</p>
+      </div>
+      <div class="cook-modal">
+        <p>Another short cookie form for coverage testing.</p>
+      </div>
+      <article>
+        <p>Article paragraph for translation extraction here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('danych osobowych'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie bar short'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Short cookie modal'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Another short cookie'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph for translation extraction here.');
+  });
+});
+
+describe('extractBlocks - Generic cookie/consent variants', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip bare gdpr, consent, privacy, cookie-bar classes', () => {
+    setupHTML(`
+      <div class="gdpr">
+        <p>GDPR compliance notice about data processing.</p>
+      </div>
+      <div class="consent">
+        <p>Consent management panel for cookie preferences.</p>
+      </div>
+      <div class="privacy">
+        <p>Privacy information about data collection practices.</p>
+      </div>
+      <div class="cookie-bar">
+        <p>Cookie notice bar with accept and reject buttons here.</p>
+      </div>
+      <article>
+        <p>Article content for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('GDPR compliance'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Consent management'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Privacy information'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie notice bar'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation testing here.');
+  });
+
+  it('should skip data-protection, cookie-box, cookie-modal, cookie-container', () => {
+    setupHTML(`
+      <div class="data-protection">
+        <p>Data protection declaration and cookie information.</p>
+      </div>
+      <div class="cookie-box">
+        <p>Cookie box containing consent options for users.</p>
+      </div>
+      <div class="cookie-modal">
+        <p>Cookie preferences modal dialog content here.</p>
+      </div>
+      <div class="cookie-container">
+        <p>Container for cookie consent management tools.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Data protection'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie box'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie preferences'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Container for cookie'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction here.');
+  });
+
+  it('should skip cookie-disclaimer, lawdiv, opt-in, euc, disclaimer variants', () => {
+    setupHTML(`
+      <div class="cookie-disclaimer">
+        <p>Cookie disclaimer with important legal information.</p>
+      </div>
+      <div class="lawdiv">
+        <p>Legal division cookie compliance notice text here.</p>
+      </div>
+      <div class="opt-in">
+        <p>Opt-in banner for marketing cookie preferences.</p>
+      </div>
+      <div class="euc">
+        <p>EU cookie compliance directive notice banner.</p>
+      </div>
+      <div class="disclaimer">
+        <p>General disclaimer about cookies and tracking here.</p>
+      </div>
+      <article>
+        <p>Article content that should be extracted for translation.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Cookie disclaimer'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Legal division'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Opt-in banner'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('EU cookie'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('General disclaimer'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be extracted for translation.');
+  });
+
+  it('should skip cookies-modal, cookies-wrapper, cookie__wrap, coockies variants', () => {
+    setupHTML(`
+      <div class="cookies-modal">
+        <p>Modal dialog for managing multiple cookie categories here.</p>
+      </div>
+      <div class="cookies-wrapper">
+        <p>Wrapper container for cookie consent interface elements.</p>
+      </div>
+      <div class="cookie__wrap">
+        <p>BEM style cookie consent wrapper with configuration options.</p>
+      </div>
+      <div class="coockies-popup">
+        <p>Misspelled cookies popup with consent information text.</p>
+      </div>
+      <article>
+        <p>Article paragraph for translation extraction here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('managing multiple'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Wrapper container'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('BEM style'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Misspelled cookies'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph for translation extraction here.');
+  });
+
+  it('should skip data-privacy, data-consent, consent-popup, consent-wrapper, outer-consent', () => {
+    setupHTML(`
+      <div class="data-privacy">
+        <p>Data privacy statement regarding cookie usage and tracking.</p>
+      </div>
+      <div class="data-consent">
+        <p>Data consent management for analytics and marketing cookies.</p>
+      </div>
+      <div class="consent-popup">
+        <p>Consent popup asking users to accept cookie categories.</p>
+      </div>
+      <div class="consent-wrapper">
+        <p>Wrapper around the full consent management interface UI.</p>
+      </div>
+      <div class="outer-consent">
+        <p>Outer consent layer covering the full viewport for GDPR.</p>
+      </div>
+      <article>
+        <p>Article text for translation extraction purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Data privacy'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Data consent'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Consent popup'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Wrapper around'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Outer consent'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation extraction purposes here.');
+  });
+
+  it('should skip cookie-popup, cookie-overlay, cookie-wrapper, cookie-compliance, cookie-control', () => {
+    setupHTML(`
+      <div class="cookie-popup">
+        <p>Popup style cookie notification for first time visitors.</p>
+      </div>
+      <div class="cookie-overlay">
+        <p>Full screen overlay blocking until cookie choice is made.</p>
+      </div>
+      <div class="cookie-wrapper">
+        <p>Cookie consent wrapper with all configuration options.</p>
+      </div>
+      <div class="cookie-compliance">
+        <p>Cookie compliance information for regulatory requirements.</p>
+      </div>
+      <div class="cookie-control">
+        <p>Cookie control panel for managing user consent preferences.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Popup style'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Full screen'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie consent wrapper'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('compliance information'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie control'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing here.');
+  });
+
+  it('should skip cookie-management, cookieman, cookiemgmt, modal-cookie, modal-cookies', () => {
+    setupHTML(`
+      <div class="cookie-management">
+        <p>Advanced cookie management interface with category toggles.</p>
+      </div>
+      <div class="cookieman-modal">
+        <p>Cookie manager modal for detailed consent configuration.</p>
+      </div>
+      <div class="cookiemgmt-panel">
+        <p>Cookie management panel with granular consent controls.</p>
+      </div>
+      <div class="modal-cookie">
+        <p>Modal cookie dialog for consent collection purposes.</p>
+      </div>
+      <div class="modal-cookies">
+        <p>Modal cookies dialog with settings for all cookie types.</p>
+      </div>
+      <article>
+        <p>Article content to translate for testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Advanced cookie'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie manager'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('management panel'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Modal cookie dialog'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Modal cookies dialog'))).toBe(false);
+    expect(blockTexts).toContain('Article content to translate for testing purposes here.');
+  });
+
+  it('should skip cookie-div, cookie-law, cookie-accept, cookie-law-info, disclaimers', () => {
+    setupHTML(`
+      <div class="cookie-div">
+        <p>Simple cookie notice division element with accept button.</p>
+      </div>
+      <div class="cookie-law">
+        <p>EU cookie law compliance notice with information text.</p>
+      </div>
+      <div class="cookie-accept">
+        <p>Cookie accept banner for first time website visitors.</p>
+      </div>
+      <div class="cookie-law-info">
+        <p>Cookie law information bar at the bottom of the page.</p>
+      </div>
+      <div class="disclaimer-container">
+        <p>Disclaimer container for legal cookie information display.</p>
+      </div>
+      <div class="disclamer">
+        <p>Commonly misspelled disclaimer with cookie notice text.</p>
+      </div>
+      <article>
+        <p>Article text for translation extraction purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Simple cookie'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('EU cookie law'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Cookie accept'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('information bar'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Disclaimer container'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('misspelled disclaimer'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation extraction purposes here.');
+  });
+});
+
 describe('extractBlocks - Large documents', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
