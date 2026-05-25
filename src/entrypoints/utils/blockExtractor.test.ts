@@ -2723,6 +2723,503 @@ describe('extractBlocks - Generic cookie/consent variants', () => {
   });
 });
 
+describe('extractBlocks - Google Ad placements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip Google AdSense (adsbygoogle, google-ad, google-ads)', () => {
+    setupHTML(`
+      <div class="google-ad">
+        <ins class="adsbygoogle" data-ad-client="ca-pub-1234567890" data-ad-slot="1234567890">
+          <p>Advertisement content from Google AdSense network.</p>
+        </ins>
+      </div>
+      <article>
+        <p>Article content for translation testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Advertisement content'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation testing purposes here.');
+  });
+
+  it('should skip DFP/GPT ad units (dfp-ad, gpt-ad, div-gpt-ad, dfp-unit)', () => {
+    setupHTML(`
+      <div class="dfp-ad">
+        <div class="dfp-unit">
+          <p>DoubleClick for Publishers advertisement slot here.</p>
+        </div>
+      </div>
+      <div class="gpt-ad">
+        <p>Google Publisher Tags ad placement content here.</p>
+      </div>
+      <div class="div-gpt-ad">
+        <p>Another GPT ad unit with sponsored message text here.</p>
+      </div>
+      <article>
+        <p>Article paragraph for translation extraction testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('DoubleClick'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Publisher Tags'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('sponsored message'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph for translation extraction testing here.');
+  });
+
+  it('should skip Ezoic and Freestar ad platforms (ezoic-ad, freestar-ad)', () => {
+    setupHTML(`
+      <div class="ezoic-ad">
+        <p>Ezoic platform advertisement placement unit here.</p>
+      </div>
+      <div class="freestar-ad">
+        <p>Freestar ad network sponsored placement content.</p>
+      </div>
+      <div class="ezoic-pub">
+        <p>Ezoic publisher ad placeholder with tracking text.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Ezoic platform'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Freestar ad'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('publisher ad'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction purposes here.');
+  });
+});
+
+describe('extractBlocks - Native ad widgets (Taboola, Outbrain, MGID, RevContent, Zergnet)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip Taboola and Outbrain recommendation widgets', () => {
+    setupHTML(`
+      <div class="taboola-widget">
+        <div class="trc">
+          <p>You may like these sponsored stories from around the web.</p>
+          <a href="#">Sponsored link by Taboola network content here.</a>
+        </div>
+      </div>
+      <div class="outbrain-widget">
+        <div class="ob-widget">
+          <p>Recommended reading from Outbrain sponsored content platform.</p>
+        </div>
+      </div>
+      <article>
+        <p>Article content for translation testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('sponsored stories'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Recommended reading'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation testing purposes here.');
+  });
+
+  it('should skip MGID and MarketGid widgets', () => {
+    setupHTML(`
+      <div class="mgid-widget">
+        <div class="mgbox">
+          <p>Sponsored content from MGID native advertising network.</p>
+        </div>
+      </div>
+      <div class="marketgid-container">
+        <p>MarketGid native ad recommendation widget content here.</p>
+      </div>
+      <article>
+        <p>Article content to translate for testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('native advertising'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('MarketGid'))).toBe(false);
+    expect(blockTexts).toContain('Article content to translate for testing purposes here.');
+  });
+
+  it('should skip RevContent and Zergnet widgets', () => {
+    setupHTML(`
+      <div class="revcontent-widget">
+        <div class="rc-widget">
+          <p>RevContent native ad widget with sponsored links here.</p>
+        </div>
+      </div>
+      <div class="zergnet-widget">
+        <p>Zergnet content recommendation widget with ads text.</p>
+      </div>
+      <article>
+        <p>Article paragraph for translation extraction testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('RevContent'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Zergnet'))).toBe(false);
+    expect(blockTexts).toContain('Article paragraph for translation extraction testing here.');
+  });
+
+  it('should skip native-ad, native-ads, content-recommendation, recommended-content', () => {
+    setupHTML(`
+      <div class="native-ad">
+        <p>Native advertisement blending with editorial content on this page.</p>
+      </div>
+      <div class="content-recommendation">
+        <p>Content recommendations powered by third party ad networks here.</p>
+      </div>
+      <div class="recommended-content">
+        <p>Recommended articles sponsored by advertising partners text here.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Native advertisement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Content recommendations'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Recommended articles'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing purposes here.');
+  });
+});
+
+describe('extractBlocks - Ad formats and placements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip leaderboard, skyscraper, ad-banner, display-ad ad formats', () => {
+    setupHTML(`
+      <div class="leaderboard">
+        <p>728x90 leaderboard advertisement banner at the top of the page.</p>
+      </div>
+      <div class="skyscraper">
+        <p>160x600 skyscraper ad unit in the sidebar for testing here.</p>
+      </div>
+      <div class="ad-banner">
+        <p>Generic advertisement banner with promotional content text.</p>
+      </div>
+      <div class="display-ad">
+        <p>Display advertising unit with image and text for marketing.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('leaderboard advertisement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('skyscraper ad'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Generic advertisement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Display advertising'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing purposes here.');
+  });
+
+  it('should skip header-ad, footer-ad, sticky-ad placement ads', () => {
+    setupHTML(`
+      <div class="header-ad">
+        <p>Advertisement in header area above the main content section.</p>
+      </div>
+      <div class="footer-ad">
+        <p>Footer advertisement unit at the bottom of the page layout.</p>
+      </div>
+      <div class="sticky-ad">
+        <p>Sticky advertisement that follows user as they scroll content.</p>
+      </div>
+      <article>
+        <p>Article content for translation purposes and testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('header area'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Footer advertisement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Sticky advertisement'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation purposes and testing here.');
+  });
+
+  it('should skip in-article-ad, inline-ad, incontent-ad placements', () => {
+    setupHTML(`
+      <article>
+        <p>First paragraph of the article content that is genuine here.</p>
+        <div class="in-article-ad">
+          <p>Advertisement inserted between article paragraphs for revenue.</p>
+        </div>
+        <p>Second paragraph of article content after the ad placement here.</p>
+        <div class="inline-ad">
+          <p>Inline advertisement within the article body content area.</p>
+        </div>
+        <div class="incontent-ad">
+          <p>In-content advertisement placed between text paragraphs here.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('inserted between'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Inline advertisement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('In-content advertisement'))).toBe(false);
+    expect(blockTexts).toContain('First paragraph of the article content that is genuine here.');
+    expect(blockTexts).toContain('Second paragraph of article content after the ad placement here.');
+  });
+
+  it('should skip ad-wrapper, ad-panel, ad-frame, ad-box, adslot, adunit, adv, advertorial', () => {
+    setupHTML(`
+      <div class="ad-wrapper">
+        <div class="ad-panel">
+          <p>Wrapper container for advertisement placements on the website.</p>
+        </div>
+      </div>
+      <div class="ad-frame">
+        <div class="ad-box">
+          <p>Advertising frame with boxed content for monetization here.</p>
+        </div>
+      </div>
+      <div class="adslot">
+        <p>Ad slot placeholder for programmatic advertising content.</p>
+      </div>
+      <div class="adunit">
+        <p>Ad unit for display advertising served by ad network here.</p>
+      </div>
+      <div class="adv">
+        <p>Short advert class notice for quick ad placement integration.</p>
+      </div>
+      <div class="advertorial">
+        <p>Advertorial content that looks like editorial but is paid promotion.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Wrapper container'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Advertising frame'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad slot'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad unit'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Short advert'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Advertorial content'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing purposes here.');
+  });
+
+  it('should skip ad-label, ad-placeholder, ad-inner, ad-holder, ad-widget, ad-code, ad-content variants', () => {
+    setupHTML(`
+      <div class="ad-label">
+        <p>Advertisement label indicating paid content placement here.</p>
+      </div>
+      <div class="ad-placeholder">
+        <p>Ad placeholder waiting for programmatic fill from network.</p>
+      </div>
+      <div class="ad-inner">
+        <p>Inner ad container with nested advertisement elements here.</p>
+      </div>
+      <div class="ad-holder">
+        <p>Ad holder div for dynamic ad insertion during page load.</p>
+      </div>
+      <div class="ad-widget">
+        <p>Ad widget sidebar with sponsored content recommendations here.</p>
+      </div>
+      <div class="ad-code">
+        <p>Ad code injected dynamically with tracking pixels and content.</p>
+      </div>
+      <div class="ad-content">
+        <p>Ad content block with promotional messaging for products here.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Advertisement label'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad placeholder'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Inner ad container'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad holder div'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad widget sidebar'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad code injected'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad content block'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing purposes here.');
+  });
+});
+
+describe('extractBlocks - Sponsored, promoted and commercial content', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip sponsored-content, sponsored-post, sponsored-link(s)', () => {
+    setupHTML(`
+      <div class="sponsored-content">
+        <p>This is sponsored content from our advertising partners network.</p>
+      </div>
+      <div class="sponsored-post">
+        <p>Sponsored post with promotional content for products here.</p>
+      </div>
+      <div class="sponsored-links">
+        <ul>
+          <li class="sponsored-link"><a href="#">Paid link to external advertiser site here.</a></li>
+          <li class="sponsored-link"><a href="#">Another sponsored link for testing purposes here.</a></li>
+        </ul>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing purposes here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('sponsored content from'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Sponsored post'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Paid link'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing purposes here.');
+  });
+
+  it('should skip promoted-content, promoted-post, paid-content, paid-post', () => {
+    setupHTML(`
+      <div class="promoted-content">
+        <p>Promoted content placed by advertising platform for marketing.</p>
+      </div>
+      <div class="promoted-post">
+        <p>Promoted post with boosted visibility from paid promotion here.</p>
+      </div>
+      <div class="paid-content">
+        <p>Paid content placement with sponsored messaging for products.</p>
+      </div>
+      <div class="paid-post">
+        <p>Paid post sponsored by brand partners for advertising purposes.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing here please.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Promoted content'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Promoted post'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Paid content placement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Paid post'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing here please.');
+  });
+
+  it('should skip affiliate, affiliate-link, commercial, commercial-content, advertorial', () => {
+    setupHTML(`
+      <div class="affiliate-content">
+        <div class="affiliate-link">
+          <p>Affiliate marketing disclosure and product recommendation here.</p>
+        </div>
+      </div>
+      <div class="commercial-content">
+        <p>Commercial content featuring paid product placement advertising.</p>
+      </div>
+      <div class="advertorial">
+        <p>Advertorial style content presenting paid promotion as editorial.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing here please.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Affiliate marketing'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Commercial content'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Advertorial style'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing here please.');
+  });
+
+  it('should skip bare sponsored, promoted, commercial classes', () => {
+    setupHTML(`
+      <div class="sponsored">
+        <p>Generic sponsored section with paid promotional content here.</p>
+      </div>
+      <div class="promoted">
+        <p>Generic promoted section with advertiser messages for testing.</p>
+      </div>
+      <div class="commercial">
+        <p>Commercial section with paid advertising content placement here.</p>
+      </div>
+      <article>
+        <p>Article content for translation extraction testing here please.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Generic sponsored'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Generic promoted'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Commercial section'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation extraction testing here please.');
+  });
+
+  it('should skip ad-div, ad-area, ad-outer, ad-block, generic advert/adv', () => {
+    setupHTML(`
+      <div class="ad-div">
+        <p>Generic ad division container for advertisement placements here.</p>
+      </div>
+      <div class="ad-area">
+        <p>Ad area designation for programmatic ad slot placement here.</p>
+      </div>
+      <div class="ad-outer">
+        <p>Outer ad wrapper for responsive advertisement units on page.</p>
+      </div>
+      <div class="ad-block">
+        <p>Ad block extension detected advertisement container for removal.</p>
+      </div>
+      <div class="advert">
+        <p>Generic advertisement class with promotional content for testing.</p>
+      </div>
+      <article>
+        <p>Article content for translation purposes here for testing.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Generic ad division'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad area designation'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Outer ad wrapper'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Ad block extension'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Generic advertisement'))).toBe(false);
+    expect(blockTexts).toContain('Article content for translation purposes here for testing.');
+  });
+});
+
 describe('extractBlocks - Large documents', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
