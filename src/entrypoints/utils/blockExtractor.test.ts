@@ -3505,3 +3505,493 @@ describe('extractBlocks - Adjacent inline elements in article', () => {
     expect(divBlocks.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe('extractBlocks - Search forms', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip search form containers', () => {
+    setupHTML(`
+      <div class="search-form">
+        <input type="text" placeholder="Search..." />
+        <button class="search-btn">Search</button>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Search'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+
+  it('should skip search-bar, searchbar, search-wrapper, search-widget', () => {
+    setupHTML(`
+      <div class="search-bar">
+        <p>Search bar description that should not be translated.</p>
+      </div>
+      <div class="search-wrapper">
+        <p>Search wrapper content text to skip.</p>
+      </div>
+      <div class="search-widget">
+        <p>Search widget with recent searches list.</p>
+      </div>
+      <article>
+        <p>Article text for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Search bar'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Search wrapper'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Search widget'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation testing here.');
+  });
+});
+
+describe('extractBlocks - Login and authentication', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip login-form, login-box, login-bar', () => {
+    setupHTML(`
+      <div class="login-form">
+        <h3>Sign In</h3>
+        <input type="email" placeholder="Email address" />
+        <input type="password" placeholder="Password" />
+        <button>Login</button>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Sign In'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+
+  it('should skip signin-form, signup-form, register-form, registration', () => {
+    setupHTML(`
+      <div class="signin-form">
+        <p>Welcome back! Sign in to your account.</p>
+      </div>
+      <div class="signup-form">
+        <p>Create a new account to get started.</p>
+      </div>
+      <div class="register-form">
+        <p>Register now for exclusive content access.</p>
+      </div>
+      <div class="registration">
+        <p>Complete your registration below to continue.</p>
+      </div>
+      <article>
+        <p>Article text for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Welcome back'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Create a new account'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Register now'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Complete your registration'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation testing here.');
+  });
+
+  it('should skip auth-form, user-area, user-menu, user-profile, member-area', () => {
+    setupHTML(`
+      <div class="auth-form">
+        <p>Authentication form content that should be skipped.</p>
+      </div>
+      <div class="user-area">
+        <p>User dashboard with account settings and preferences.</p>
+      </div>
+      <div class="user-profile">
+        <p>Profile settings and customization options here.</p>
+      </div>
+      <div class="member-area">
+        <p>Member only content access panel and subscription info.</p>
+      </div>
+      <article>
+        <p>Article text for translation extraction here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Authentication form'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('User dashboard'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Profile settings'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Member only'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation extraction here.');
+  });
+});
+
+describe('extractBlocks - Newsletter subscription', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip newsletter-signup, newsletter-form, newsletter-subscribe', () => {
+    setupHTML(`
+      <div class="newsletter-signup">
+        <p>Subscribe to our newsletter for weekly updates.</p>
+        <input type="email" placeholder="Your email address" />
+        <button>Subscribe</button>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Subscribe to our newsletter'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+
+  it('should skip email-signup, email-subscribe, email-capture, signup-form', () => {
+    setupHTML(`
+      <div class="email-signup">
+        <p>Sign up for email updates and get notified.</p>
+      </div>
+      <div class="email-subscribe">
+        <p>Subscribe to our mailing list for daily digests.</p>
+      </div>
+      <div class="signup-form">
+        <p>Join thousands of readers. Sign up today for free.</p>
+      </div>
+      <article>
+        <p>Article text for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('email updates'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('mailing list'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Join thousands'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation testing here.');
+  });
+});
+
+describe('extractBlocks - Pagination', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip pagination, page-nav, page-numbers', () => {
+    setupHTML(`
+      <nav class="pagination">
+        <span class="page-numbers">Page 1 of 10</span>
+        <a class="page-nav" href="/page/2/">Next</a>
+      </nav>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Page 1'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+
+  it('should skip nav-links and post-navigation', () => {
+    setupHTML(`
+      <div class="post-navigation">
+        <div class="nav-links">
+          <a href="/previous-post/">Previous: Older Article Title Here</a>
+          <a href="/next-post/">Next: Newer Article Title Here</a>
+        </div>
+      </div>
+      <article>
+        <p>Article text for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Previous'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Next'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation testing here.');
+  });
+});
+
+describe('extractBlocks - Table of Contents', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip toc, table-of-contents, toc-container, toc-widget', () => {
+    setupHTML(`
+      <nav class="toc">
+        <h2>Table of Contents</h2>
+        <ol class="toc-list">
+          <li>Introduction to the topic at hand</li>
+          <li>Main analysis section with key findings</li>
+          <li>Conclusion and final thoughts summary</li>
+        </ol>
+      </nav>
+      <div class="table-of-contents">
+        <p>Quick navigation for this lengthy article page.</p>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Table of Contents'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Introduction to the topic'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Main analysis'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
+
+describe('extractBlocks - Language switchers', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip lang-switcher, language-switcher, language-selector', () => {
+    setupHTML(`
+      <div class="language-switcher">
+        <ul class="lang-select">
+          <li>English</li>
+          <li>中文</li>
+          <li>日本語</li>
+        </ul>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('English'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('中文'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
+
+describe('extractBlocks - Tags and taxonomy', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip tagcloud, tags-list, category-list, taxonomy-list', () => {
+    setupHTML(`
+      <div class="tagcloud">
+        <a href="/tag/ai/">Artificial Intelligence Technology</a>
+        <a href="/tag/ml/">Machine Learning Framework</a>
+      </div>
+      <div class="categories-list">
+        <ul class="category-list">
+          <li>Technology and Innovation</li>
+          <li>Science and Research</li>
+        </ul>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Artificial Intelligence'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Machine Learning'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Technology and Innovation'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
+
+describe('extractBlocks - Captcha', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip captcha, recaptcha, hcaptcha, turnstile', () => {
+    setupHTML(`
+      <div class="g-recaptcha">
+        <p>Please verify you are not a robot to continue.</p>
+      </div>
+      <div class="h-captcha">
+        <p>Human verification required for form submission.</p>
+      </div>
+      <div class="turnstile">
+        <p>Security check in progress for this page request.</p>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('verify you are not'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Human verification'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Security check'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
+
+describe('extractBlocks - Site header and branding', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip site-header, top-bar, masthead, site-branding', () => {
+    setupHTML(`
+      <header class="site-header">
+        <div class="top-bar">
+          <p>Breaking news alert: Important announcement header text.</p>
+        </div>
+        <div class="site-branding">
+          <p class="site-logo">Tech Blog Daily Newsletter Publication</p>
+        </div>
+      </header>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Breaking news'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Tech Blog'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
+
+describe('extractBlocks - Rating, polling and voting widgets', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip rating-widget, star-rating, review-widget, review-box', () => {
+    setupHTML(`
+      <div class="rating-widget">
+        <div class="star-rating">
+          <p>4.5 out of 5 stars based on user feedback content.</p>
+        </div>
+      </div>
+      <div class="review-widget">
+        <p>Customer reviews and testimonials for the product.</p>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('out of 5 stars'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Customer reviews'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+
+  it('should skip poll, voting, vote-widget, survey', () => {
+    setupHTML(`
+      <div class="poll">
+        <form class="poll-container">
+          <p>What is your favorite programming language for AI development?</p>
+          <label><input type="radio" name="poll" /> Python for AI and ML</label>
+          <label><input type="radio" name="poll" /> JavaScript for Web Apps</label>
+        </form>
+      </div>
+      <div class="survey">
+        <p>Please take our quick survey about website satisfaction rates.</p>
+      </div>
+      <article>
+        <p>Article text for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('favorite programming language'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Python for AI'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('quick survey'))).toBe(false);
+    expect(blockTexts).toContain('Article text for translation testing here.');
+  });
+});
+
+describe('extractBlocks - Exit intent and welcome popups', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip exit-popup, exit-intent, welcome-popup, welcome-mat', () => {
+    setupHTML(`
+      <div class="exit-popup">
+        <p>Wait! Before you leave, subscribe for a special discount offer.</p>
+      </div>
+      <div class="welcome-popup">
+        <p>Welcome to our site! Sign up for our newsletter to get started.</p>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('Before you leave'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Welcome to our site'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
+
+describe('extractBlocks - Print-only elements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip print-only and print-version elements', () => {
+    setupHTML(`
+      <div class="print-only">
+        <p>This content appears only in the printed version of the page.</p>
+      </div>
+      <div class="printable">
+        <p>Printable version of the article for offline reading purposes.</p>
+      </div>
+      <article>
+        <p>Article content that should be translated here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('printed version'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Printable version'))).toBe(false);
+    expect(blockTexts).toContain('Article content that should be translated here.');
+  });
+});
