@@ -99,7 +99,7 @@ const SKIP_CLASS_PATTERNS = [
   'popup-overlay', 'modal-dialog', 'modal-backdrop',
   'social-share', 'share-buttons',
   'breadcrumb', 'byline', 'post-meta', 'author-box',
-  'trending-stories', 'related-posts',
+  'trending-stories', 'tns-trending-stories-block', 'related-posts',
   'related-articles', 'related-content', 'more-stories', 'more-articles',
   'also-read', 'you-may-like', 'read-next',
   'comment-list', 'comment-section', 'comment-area', 'comment-module',
@@ -161,9 +161,7 @@ function shouldSkipByClass(el: Element): boolean {
       cls.startsWith(pattern + '-') ||
       cls.startsWith(pattern + '_') ||
       cls.endsWith('-' + pattern) ||
-      cls.endsWith('_' + pattern) ||
-      cls.includes('-' + pattern + '-') ||
-      cls.includes('_' + pattern + '_')
+      cls.endsWith('_' + pattern)
     )
   );
   return match;
@@ -205,6 +203,21 @@ function isNonHTMLNamespace(el: Element): boolean {
   return el.namespaceURI !== null && el.namespaceURI !== XHTML_NAMESPACE;
 }
 
+const ARTICLE_CONTAINER_CLASS_PATTERNS = [
+  'article-content',
+  'article-body',
+  'article-text',
+  'story-content',
+  'story-body',
+  'story-text',
+  'main-content',
+  'content-body',
+  'content-area',
+  'post-content',
+  'entry-content',
+  'page-content',
+];
+
 function isInsideArticle(el: Element): boolean {
   let current: Element | null = el;
   while (current) {
@@ -213,6 +226,22 @@ function isInsideArticle(el: Element): boolean {
     const role = current.getAttribute('role');
     if (role === 'article' || role === 'main') return true;
     if (current.hasAttribute('lang') && tag !== 'html' && tag !== 'body') return true;
+    
+    // 检查常见文章容器类名
+    const className = current.className.toLowerCase();
+    const classList = className.split(/\s+/);
+    for (const pattern of ARTICLE_CONTAINER_CLASS_PATTERNS) {
+      if (classList.some(cls => 
+        cls === pattern || 
+        cls.startsWith(pattern + '-') || 
+        cls.startsWith(pattern + '_') ||
+        cls.endsWith('-' + pattern) ||
+        cls.endsWith('_' + pattern)
+      )) {
+        return true;
+      }
+    }
+    
     current = current.parentElement;
   }
   return false;
@@ -470,6 +499,9 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
       const text = translateNode.textContent?.trim();
       if (text) {
         const id = `b${++blockId}`;
+        if (translateNode instanceof HTMLElement) {
+          translateNode.dataset.fanyiBlockId = id;
+        }
         blocks.push({
           id,
           xpath: getXPath(translateNode),
@@ -488,6 +520,12 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
 }
 
 export function findBlockNode(block: TextBlock, root: Document): Node | null {
+  // 优先通过临时的 data 属性查找，更健壮
+  const el = root.querySelector(`[data-fanyi-block-id="${block.id}"]`);
+  if (el) {
+    return el;
+  }
+  // 回退到 XPath 查找
   try {
     const result = root.evaluate(
       block.xpath,

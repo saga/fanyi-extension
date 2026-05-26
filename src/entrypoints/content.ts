@@ -466,6 +466,13 @@ export default defineContentScript({
 
         setupDynamicContentObserver(config.mode);
 
+        // 翻译完成后，清理临时的 data 属性
+        const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');
+        for (const node of Array.from(tempAttrNodes)) {
+          const el = node as HTMLElement;
+          delete el.dataset.fanyiBlockId;
+        }
+
         const statusMsg = allSucceeded ? '翻译完成' : '翻译完成（部分失败）';
         showStatus(statusMsg, allSucceeded ? 'success' : 'error');
         setTimeout(() => hideStatus(), 3000);
@@ -685,6 +692,13 @@ export default defineContentScript({
         el.classList.remove('fanyi-translated');
         delete el.dataset.originalText;
         delete el.dataset.translationBlockId;
+      }
+
+      // 清理临时的 data 属性
+      const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');
+      for (const node of Array.from(tempAttrNodes)) {
+        const el = node as HTMLElement;
+        delete el.dataset.fanyiBlockId;
       }
 
       updateButtonState(false);

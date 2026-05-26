@@ -1,12 +1,15 @@
 import type { SiteRule, MatchedRule } from './types';
+export type { SiteRule, MatchedRule } from './types';
 import { githubRule } from './github-rules';
 import { redditRule } from './reddit-rules';
 import { hackernewsRule } from './hackernews-rules';
+import { fortuneRule } from './fortune-rules';
 
 const RULES: SiteRule[] = [
   githubRule,
   redditRule,
   hackernewsRule,
+  fortuneRule,
 ];
 
 export function matchSiteRule(url: string): MatchedRule | null {

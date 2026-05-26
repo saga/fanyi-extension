@@ -3995,3 +3995,186 @@ describe('extractBlocks - Print-only elements', () => {
     expect(blockTexts).toContain('Article content that should be translated here.');
   });
 });
+
+describe('extractBlocks - Fortune website structure', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should handle Fortune-like article structure', () => {
+    setupHTML(`
+      <div id="main-content" class="content-wrapper">
+        <article class="article-body">
+          <header class="article-header">
+            <h1 class="article-title">Uber COO on AI Spending, Claude Code, and the Future of Autonomous Vehicles</h1>
+          </header>
+          <div class="article-content">
+            <p>Uber's chief operating officer sat down with Fortune to discuss the company's strategy in artificial intelligence, including investments in LLMs and autonomous driving technology.</p>
+            <p>The executive highlighted the importance of Claude Code for their internal development tools, which has helped streamline their coding workflows by 30%.</p>
+            <p>With billions in annual AI spending, Uber is betting big on automation to transform both their ride-sharing and delivery businesses.</p>
+          </div>
+        </article>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    console.log('Fortune test blocks:', blocks.map(b => ({ tag: b.tag, text: b.text.substring(0, 50) })));
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    expect(blocks.some(b => b.text.includes('chief operating officer sat down'))).toBe(true);
+  });
+
+  it('should extract simple h1 title', () => {
+    setupHTML(`
+      <article>
+        <h1>Simple test article title that should be extracted</h1>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    console.log('Simple h1 test blocks:', blocks.map(b => ({ tag: b.tag, text: b.text })));
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(blocks.some(b => b.tag === 'h1')).toBe(true);
+  });
+
+  it('should NOT skip content when article uses common content class names', () => {
+    setupHTML(`
+      <article>
+        <div class="article-content">
+          <p>Main article content that must be translated here.</p>
+        </div>
+        <div class="content-body">
+          <p>Another important paragraph to translate.</p>
+        </div>
+        <div class="story-content">
+          <p>Story content should also be available.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    expect(blocks.some(b => b.text.includes('Main article content'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('Another important paragraph'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('Story content should'))).toBe(true);
+  });
+
+  it('should detect isInsideArticle by common article container class names', () => {
+    // 测试各种文章容器类名
+    const testCases = [
+      { class: 'article-content', description: 'article-content' },
+      { class: 'article-body', description: 'article-body' },
+      { class: 'story-content', description: 'story-content' },
+      { class: 'story-body', description: 'story-body' },
+      { class: 'main-content', description: 'main-content' },
+      { class: 'content-body', description: 'content-body' },
+      { class: 'content-area', description: 'content-area' },
+      { class: 'post-content', description: 'post-content' },
+      { class: 'entry-content', description: 'entry-content' },
+      { class: 'page-content', description: 'page-content' },
+    ];
+    
+    for (const testCase of testCases) {
+      document.body.innerHTML = `
+        <div class="${testCase.class}">
+          <p>Test paragraph inside ${testCase.description}</p>
+        </div>
+      `;
+      
+      const blocks = extractBlocks(document);
+      expect(blocks.length, `${testCase.description} should find blocks`).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('should extract text from a deeply nested article p tag similar to the Fortune URL example', () => {
+    // 模拟用户提供的 XPath: /html/body/div[3]/div[1]/div[4]/div[1]/main/div/div[2]/div[1]/div/div[2]/div[1]/article/p
+    document.body.innerHTML = `
+      <div>
+        <div></div>
+        <div>
+          <div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div>
+              <main>
+                <div>
+                  <div></div>
+                  <div>
+                    <div>
+                      <div></div>
+                      <div>
+                        <div>
+                          <article>
+                            <p>Uber's chief operating officer sat down with Fortune to discuss the company's strategy in artificial intelligence, including investments in LLMs and autonomous driving technology.</p>
+                          </article>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    const blocks = extractBlocks(document);
+    console.log('Nested article test blocks found:', blocks.length, blocks);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(blocks.some(b => b.text.includes('Uber'))).toBe(true);
+  });
+
+  it('should extract paywall content inside article (Fortune.com structure)', () => {
+    document.body.innerHTML = `
+      <div class="flex flex-col layout-footer-gap">
+        <div class="flex flex-col not-has-[div]:layout-nav-gap">
+          <main>
+            <div class="article-page-wrapper">
+              <div class="group/article">
+                <div class="col-start-2">
+                  <div class="container-content">
+                    <article class="article-content max-md:[&_p]:text-lg">
+                      <p>Uber's business model is one of the most AI-forward in Silicon Valley.</p>
+                      <div class="paywall paywallActive">
+                        <p>In a recent interview on the Rapid Response podcast, Uber president and chief operating officer Andrew Macdonald discussed the company approach.</p>
+                        <p>That link is not there yet, he said.</p>
+                        <h2 class="wp-block-heading">Can firms justify their AI spending?</h2>
+                        <p>In an earnings call earlier this month, Uber CEO Dara Khosrowshahi said about 10 percent of the company code is AI generated.</p>
+                      </div>
+                    </article>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    `;
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts.some(t => t.includes('AI-forward in Silicon Valley'))).toBe(true);
+    expect(blockTexts.some(t => t.includes('Rapid Response podcast'))).toBe(true);
+    expect(blockTexts.some(t => t.includes('That link is not there yet'))).toBe(true);
+    expect(blockTexts.some(t => t.includes('Can firms justify their AI spending'))).toBe(true);
+    expect(blockTexts.some(t => t.includes('10 percent of the company code'))).toBe(true);
+  });
+
+  it('should NOT skip content due to layout-footer-gap class (Tailwind CSS layout)', () => {
+    document.body.innerHTML = `
+      <div class="flex flex-col layout-footer-gap">
+        <main>
+          <article>
+            <p>This content must be translated even though an ancestor has layout-footer-gap class.</p>
+          </article>
+        </main>
+      </div>
+    `;
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(blocks.some(b => b.text.includes('must be translated'))).toBe(true);
+  });
+});
