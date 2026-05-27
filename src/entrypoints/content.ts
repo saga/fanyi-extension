@@ -461,9 +461,10 @@ export default defineContentScript({
               }
             }
 
+            const glossarySample = fullText.substring(0, 10000);
             const glossaryResponse = await browser.runtime.sendMessage({
               action: 'extractGlossary',
-              fullText,
+              fullText: glossarySample,
               emphasizedTerms,
             });
             if (glossaryResponse.success && glossaryResponse.glossary?.length > 0) {
