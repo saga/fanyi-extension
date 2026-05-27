@@ -3,6 +3,12 @@ import {
   prepareDocument,
   type Chunk,
 } from './utils/contentHelper';
+import {
+  applyBlockTranslation,
+  restoreBlock,
+  toggleBlockTranslation,
+  type TranslationMode,
+} from './utils/translationDisplay';
 import { buildNodeMap } from './utils/blockExtractor';
 import { getConfig, setConfig } from './utils/config';
 import { DOMObserverManager } from './utils/domObserver';
@@ -24,7 +30,6 @@ export default defineContentScript({
     let originalTexts = new Map<string, string>();
     let translatedBlocks = new Set<string>();
     let domObserver: DOMObserverManager | null = null;
-    let invertColors = false;
     let translated = false;
 
     browser.runtime.onMessage.addListener(async (message) => {
@@ -34,9 +39,6 @@ export default defineContentScript({
         restoreOriginal();
       } else if (message.action === 'toggleTranslation') {
         toggleTranslation();
-      } else if (message.action === 'toggleInvert') {
-        invertColors = message.invertColors;
-        applyInvertToExistingBlocks(invertColors);
       }
     });
 
@@ -484,7 +486,6 @@ export default defineContentScript({
           config.targetLang,
           nodeMap,
           config.mode,
-          invertColors,
           glossary,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
@@ -527,7 +528,6 @@ export default defineContentScript({
       targetLang: string,
       nodeMap: Map<string, Node>,
       mode: 'bilingual' | 'target',
-      invertColors: boolean,
       glossary: Array<{ term: string; translation: string }>,
       onProgress?: (current: number, total: number) => void
     ): Promise<boolean> {
@@ -564,7 +564,7 @@ export default defineContentScript({
               console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
               chunkMap.set(id, text);
             }
-            applyTranslations(chunkMap, nodeMap, mode, invertColors);
+            applyTranslations(chunkMap, nodeMap, mode);
           } else {
             hasFailure = true;
             console.error(`Chunk ${chunk.id} translation failed:`, response.error);
@@ -606,8 +606,7 @@ export default defineContentScript({
     function applyTranslations(
       translationMap: Map<string, string>,
       nodeMap: Map<string, Node>,
-      mode: 'bilingual' | 'target',
-      invertColors: boolean
+      mode: 'bilingual' | 'target'
     ) {
       console.log('[ContentScript] applyTranslations called, translationMap size:', translationMap.size, 'nodeMap size:', nodeMap.size);
       for (const [blockId, translatedText] of translationMap) {
@@ -617,40 +616,11 @@ export default defineContentScript({
           continue;
         }
         console.log('[ContentScript] applyTranslations APPLY:', blockId, 'tag:', node.tagName?.toLowerCase(), 'text:', node.textContent?.substring(0, 40));
-        applyBlockTranslation(node, translatedText, mode, invertColors);
+        applyBlockTranslation(node, translatedText, mode);
       }
     }
 
-    function applyBlockTranslation(
-      node: HTMLElement,
-      translatedText: string,
-      mode: 'bilingual' | 'target',
-      invertColors: boolean
-    ) {
-      if (node.classList.contains('fanyi-translated')) {
-        console.log('[ContentScript] applyBlockTranslation SKIP (already translated):', node.tagName, node.textContent?.substring(0, 40));
-        return;
-      }
-
-      const originalText = node.textContent || '';
-
-      const translationBlock = document.createElement('div');
-      translationBlock.className = 'fanyi-bilingual-block';
-      if (invertColors) {
-        translationBlock.classList.add('fanyi-inverted');
-      }
-      translationBlock.innerHTML = `
-        <div class="fanyi-target">${escapeHtml(translatedText)}</div>
-      `;
-      node.insertAdjacentElement('afterend', translationBlock);
-
-      node.classList.add('fanyi-translated');
-      node.dataset.originalText = originalText;
-      node.dataset.translationBlockId = 'fanyi-' + Date.now();
-      translationBlock.dataset.linkedTo = node.dataset.translationBlockId;
-    }
-
-    function setupDynamicContentObserver(mode: 'bilingual' | 'target') {
+    function setupDynamicContentObserver(mode: TranslationMode) {
       if (domObserver) {
         domObserver.destroy();
       }
@@ -674,7 +644,7 @@ export default defineContentScript({
                 if (response.success && response.result?.length > 0) {
                   const node = findNodeByText(block.text);
                   if (node) {
-                    applyBlockTranslation(node, response.result[0][1], config.mode, invertColors);
+                    applyBlockTranslation(node, response.result[0][1], config.mode);
                     translatedBlocks.add(block.id);
                     console.log('[ContentScript] Dynamic block translated:', block.id);
                   }
@@ -717,20 +687,11 @@ export default defineContentScript({
 
     function restoreOriginal() {
       translated = false;
-      const translatedElements = document.querySelectorAll('.fanyi-bilingual-block');
-      for (const el of Array.from(translatedElements)) {
-        el.remove();
-      }
-      
       const translatedNodes = document.querySelectorAll('.fanyi-translated');
       for (const node of Array.from(translatedNodes)) {
-        const el = node as HTMLElement;
-        el.classList.remove('fanyi-translated');
-        delete el.dataset.originalText;
-        delete el.dataset.translationBlockId;
+        restoreBlock(node as HTMLElement);
       }
 
-      // 清理临时的 data 属性
       const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');
       for (const node of Array.from(tempAttrNodes)) {
         const el = node as HTMLElement;
@@ -744,10 +705,9 @@ export default defineContentScript({
     }
 
     function toggleTranslation() {
-      const translatedElements = document.querySelectorAll('.fanyi-bilingual-block');
-      for (const el of Array.from(translatedElements)) {
-        const isVisible = (el as HTMLElement).style.display !== 'none';
-        (el as HTMLElement).style.display = isVisible ? 'none' : 'block';
+      const translatedNodes = document.querySelectorAll('.fanyi-translated');
+      for (const node of Array.from(translatedNodes)) {
+        toggleBlockTranslation(node as HTMLElement);
       }
     }
 
@@ -766,17 +726,6 @@ export default defineContentScript({
     function hideStatus() {
       if (translationOverlay) {
         translationOverlay.style.display = 'none';
-      }
-    }
-
-    function applyInvertToExistingBlocks(invert: boolean) {
-      const blocks = document.querySelectorAll('.fanyi-bilingual-block');
-      for (const block of Array.from(blocks)) {
-        if (invert) {
-          (block as HTMLElement).classList.add('fanyi-inverted');
-        } else {
-          (block as HTMLElement).classList.remove('fanyi-inverted');
-        }
       }
     }
 
@@ -808,20 +757,12 @@ export default defineContentScript({
       .fanyi-success { border: 1px solid #67c23a; }
       .fanyi-error { border: 1px solid #f56c6c; }
 
-      .fanyi-bilingual-block {
-        margin: 4px 0 8px 0;
-        padding: 4px 8px;
-        border-left: 2px solid rgba(64, 158, 255, 0.2);
-        background: #f8f9fa;
+      .fanyi-original {
+        display: block;
+        opacity: 0.5;
       }
-      .fanyi-target {
-        color: #303133;
-        font-weight: 500;
-        line-height: 1.6;
-        font-size: 0.98em;
-      }
-      .fanyi-bilingual-block.fanyi-inverted {
-        filter: invert(1);
+      .fanyi-translation {
+        display: block;
       }
       .fanyi-btn-save,
       .fanyi-btn-translate,
