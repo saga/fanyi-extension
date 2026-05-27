@@ -4177,4 +4177,43 @@ describe('extractBlocks - Fortune website structure', () => {
     expect(blocks.length).toBeGreaterThanOrEqual(1);
     expect(blocks.some(b => b.text.includes('must be translated'))).toBe(true);
   });
+
+  it('should not extract li when it contains a nested p (arxiv structure)', () => {
+    document.body.innerHTML = `
+      <article>
+        <div class="ltx_para" id="S1.p7">
+          <ul class="ltx_itemize" id="S1.I1">
+            <li class="ltx_item" id="S1.I1.i1">
+              <span class="ltx_tag ltx_tag_item">•</span>
+              <div class="ltx_para" id="S1.I1.i1.p1">
+                <p class="ltx_p" id="S1.I1.i1.p1.1">We introduce workflow compilation, a compiler-inspired paradigm for optimizing structured LLM workflows before deployment.</p>
+              </div>
+            </li>
+            <li class="ltx_item" id="S1.I1.i2">
+              <span class="ltx_tag ltx_tag_item">•</span>
+              <div class="ltx_para" id="S1.I1.i2.p1">
+                <p class="ltx_p" id="S1.I1.i2.p1.1">We develop a structure-aware compositional proxy that lifts reusable sub-agent proxies.</p>
+              </div>
+            </li>
+            <li class="ltx_item" id="S1.I1.i3">
+              <span class="ltx_tag ltx_tag_item">•</span>
+              <div class="ltx_para" id="S1.I1.i3.p1">
+                <p class="ltx_p" id="S1.I1.i3.p1.1">We present FlowCompile, an optimizing compiler that performs a single compile-time search.</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </article>
+    `;
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blocks.some(b => b.text.includes('We introduce workflow compilation'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('We develop a structure-aware'))).toBe(true);
+    expect(blocks.some(b => b.text.includes('We present FlowCompile'))).toBe(true);
+
+    const workflowCount = blockTexts.filter(t => t.includes('We introduce workflow compilation')).length;
+    expect(workflowCount).toBe(1);
+  });
 });

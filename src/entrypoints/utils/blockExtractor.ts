@@ -384,10 +384,10 @@ function grabNode(node: Node): Element | false {
   if (shouldSkipBySiteRules(el)) return false;
 
   if (DIRECT_SET.has(tag)) {
-    const hasDirectSetChild = Array.from(el.children).some(
-      (child) => DIRECT_SET.has(child.tagName.toLowerCase())
-    );
-    if (hasDirectSetChild) return false;
+    const hasDirectSetDescendant = el.querySelector(
+      Array.from(DIRECT_SET).join(',')
+    ) !== null;
+    if (hasDirectSetDescendant) return false;
     return isValidText(el.textContent) ? el : false;
   }
 
