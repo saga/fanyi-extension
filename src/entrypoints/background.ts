@@ -8,6 +8,7 @@ import {
   clearAllCache,
 } from './utils/translateApi';
 import { globalQueue } from './utils/translationQueue';
+import { extractGlossaryLocal } from './utils/glossaryExtractor';
 import { matchSiteRule, buildSitePrompt } from '../rules';
 import type { SiteRule } from '../rules/types';
 
@@ -160,23 +161,18 @@ export default defineBackground({
       sendResponse: (response: any) => void
     ) {
       try {
-        const config = await getConfig();
-        if (!config.deepseekApiKey) {
-          sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
-          return;
-        }
-
-        const { fullText, sourceLang, targetLang } = message;
+        const { fullText, emphasizedTerms } = message;
         if (!fullText || fullText.trim().length < 50) {
           sendResponse({ success: true, glossary: [] });
           return;
         }
 
-        console.log('[Background] Extracting glossary, text length:', fullText.length);
-        const service = getService(config.deepseekApiKey);
-        const glossary = await globalQueue.add(() =>
-          service.extractGlossary(fullText, sourceLang, targetLang)
-        );
+        console.log('[Background] Extracting glossary locally, text length:', fullText.length);
+        const glossary = extractGlossaryLocal(fullText, emphasizedTerms || []);
+        console.log('[Background] Local glossary extracted:', glossary.length, 'terms');
+        for (const entry of glossary) {
+          console.log(`[Background]   "${entry.term}" → "${entry.translation}"`);
+        }
 
         sendResponse({ success: true, glossary });
       } catch (error) {

@@ -449,11 +449,20 @@ export default defineContentScript({
         if (fullText.length >= 50) {
           showStatus('正在提取术语表...', 'loading');
           try {
+            const emphasizedTerms: string[] = [];
+            for (const tag of ['em', 'strong', 'code']) {
+              for (const el of document.querySelectorAll(tag)) {
+                const text = el.textContent?.trim();
+                if (text && text.length > 1 && text.length < 80) {
+                  emphasizedTerms.push(text);
+                }
+              }
+            }
+
             const glossaryResponse = await browser.runtime.sendMessage({
               action: 'extractGlossary',
               fullText,
-              sourceLang: config.sourceLang,
-              targetLang: config.targetLang,
+              emphasizedTerms,
             });
             if (glossaryResponse.success && glossaryResponse.glossary?.length > 0) {
               glossary = glossaryResponse.glossary;
