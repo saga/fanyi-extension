@@ -445,6 +445,30 @@ export default defineContentScript({
         console.log('[ContentScript] All blocks summary:', blocks.map(b => `${b.id}(${b.tag}): ${b.text.substring(0, 50)}`).join(' | '));
         saveOriginalTexts(blocks, nodeMap);
 
+        let glossary: Array<{ term: string; translation: string }> = [];
+        if (fullText.length >= 50) {
+          showStatus('正在提取术语表...', 'loading');
+          try {
+            const glossaryResponse = await browser.runtime.sendMessage({
+              action: 'extractGlossary',
+              fullText,
+              sourceLang: config.sourceLang,
+              targetLang: config.targetLang,
+            });
+            if (glossaryResponse.success && glossaryResponse.glossary?.length > 0) {
+              glossary = glossaryResponse.glossary;
+              console.log('[ContentScript] Glossary extracted:', glossary.length, 'terms');
+              for (const entry of glossary) {
+                console.log(`[ContentScript]   "${entry.term}" → "${entry.translation}"`);
+              }
+            } else {
+              console.log('[ContentScript] No glossary extracted, proceeding without');
+            }
+          } catch (error) {
+            console.warn('[ContentScript] Glossary extraction failed, proceeding without:', error);
+          }
+        }
+
         const allSucceeded = await translateChunksViaBackground(
           chunks,
           config.sourceLang,
@@ -452,6 +476,7 @@ export default defineContentScript({
           nodeMap,
           config.mode,
           invertColors,
+          glossary,
           (current, total) => {
             showStatus(`翻译进度: ${current}/${total}`, 'loading');
           }
@@ -494,6 +519,7 @@ export default defineContentScript({
       nodeMap: Map<string, Node>,
       mode: 'bilingual' | 'target',
       invertColors: boolean,
+      glossary: Array<{ term: string; translation: string }>,
       onProgress?: (current: number, total: number) => void
     ): Promise<boolean> {
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
@@ -513,6 +539,7 @@ export default defineContentScript({
             sourceLang,
             targetLang,
             pageUrl: window.location.href,
+            glossary,
           });
           
           const elapsed = Date.now() - startTime;

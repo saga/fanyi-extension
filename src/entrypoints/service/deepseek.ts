@@ -14,11 +14,45 @@ function buildHeaders(apiKey: string): Record<string, string> {
   };
 }
 
+function buildGlossaryExtractionBody(
+  fullText: string,
+  sourceLang: string,
+  targetLang: string
+): string {
+  const targetLangName = targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
+  const truncatedText = fullText.length > 8000 ? fullText.substring(0, 8000) : fullText;
+
+  return JSON.stringify({
+    model: MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: `You are a terminology extraction expert. Given a text in ${sourceLang === 'en' ? 'English' : sourceLang}, extract key domain-specific terms, proper nouns, technical acronyms, and brand names that should be translated consistently.
+
+Rules:
+- Only extract terms that appear in the text
+- Focus on: technical terms, proper nouns, acronyms, brand names, domain jargon
+- For each term, provide the best ${targetLangName} translation
+- Mark terms that should NOT be translated (keep original) with "KEEP" as translation
+- Return JSON only`,
+      },
+      {
+        role: 'user',
+        content: `Extract terminology from this text and return {"glossary":[{"term":"original term","translation":"译文或KEEP"}]}:\n\n${truncatedText}`,
+      },
+    ],
+    response_format: { type: 'json_object' },
+    reasoning_effort: 'low',
+    stream: false,
+  });
+}
+
 function buildTranslationBody(
   blocks: Array<{ id: string; text: string }>,
   sourceLang: string,
   targetLang: string,
-  sitePrompt?: string
+  sitePrompt?: string,
+  glossary?: GlossaryEntry[]
 ) {
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
@@ -34,6 +68,13 @@ Rules:
 - Natural translation
 - No omissions
 - Return JSON only`;
+
+  if (glossary && glossary.length > 0) {
+    const glossaryLines = glossary
+      .map((g) => `- "${g.term}" → "${g.translation}"`)
+      .join('\n');
+    systemContent += `\n\nTerminology glossary (MUST follow these translations):\n${glossaryLines}`;
+  }
 
   if (sitePrompt) {
     systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
@@ -81,7 +122,6 @@ async function callApi(
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
       
-      // Try to parse error JSON for more details
       try {
         const errorJson = JSON.parse(responseText);
         if (errorJson.error) {
@@ -97,7 +137,6 @@ async function callApi(
         errorMessage += ` - ${responseText.substring(0, 200)}`;
       }
 
-      // Add common error code explanations
       if (response.status === 401) {
         errorMessage += '\n\n可能原因: API Key 无效或已过期';
       } else if (response.status === 403) {
@@ -132,11 +171,48 @@ async function callApi(
   }
 }
 
+function parseGlossaryResponse(content: string): GlossaryEntry[] {
+  try {
+    const parsed = JSON.parse(content);
+    const items = parsed.glossary || parsed.terms || [];
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .filter((item: any) => item.term && item.translation)
+      .map((item: any) => ({
+        term: String(item.term).trim(),
+        translation: String(item.translation).trim(),
+      }));
+  } catch (error) {
+    console.error('[DeepSeek] Failed to parse glossary response:', error);
+    return [];
+  }
+}
+
 export class DeepSeekTranslationService implements TranslationService {
   private apiKey: string;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
+  }
+
+  async extractGlossary(
+    fullText: string,
+    sourceLang: string,
+    targetLang: string
+  ): Promise<GlossaryEntry[]> {
+    console.log('[DeepSeek] Extracting glossary, text length:', fullText.length);
+
+    const body = buildGlossaryExtractionBody(fullText, sourceLang, targetLang);
+    const content = await callApi(this.apiKey, body);
+    const glossary = parseGlossaryResponse(content);
+
+    console.log('[DeepSeek] Extracted glossary:', glossary.length, 'terms');
+    for (const entry of glossary) {
+      console.log(`[DeepSeek]   "${entry.term}" → "${entry.translation}"`);
+    }
+
+    return glossary;
   }
 
   async analyzeDocument(
@@ -156,7 +232,7 @@ export class DeepSeekTranslationService implements TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    _glossary: GlossaryEntry[],
+    glossary: GlossaryEntry[],
     context?: string,
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
@@ -165,7 +241,8 @@ export class DeepSeekTranslationService implements TranslationService {
       blocks,
       sourceLang,
       targetLang,
-      context
+      context,
+      glossary.length > 0 ? glossary : undefined
     );
 
     return await callApi(this.apiKey, body);

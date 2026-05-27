@@ -134,6 +134,8 @@ export default defineBackground({
         try {
           if (message.action === 'translateChunk') {
             await handleTranslateChunk(message, sendResponse);
+          } else if (message.action === 'extractGlossary') {
+            await handleExtractGlossary(message, sendResponse);
           } else if (message.action === 'validateApiKey') {
             await handleValidateApiKey(message, sendResponse);
           } else if (message.action === 'clearCache') {
@@ -153,6 +155,40 @@ export default defineBackground({
       return true;
     });
 
+    async function handleExtractGlossary(
+      message: any,
+      sendResponse: (response: any) => void
+    ) {
+      try {
+        const config = await getConfig();
+        if (!config.deepseekApiKey) {
+          sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
+          return;
+        }
+
+        const { fullText, sourceLang, targetLang } = message;
+        if (!fullText || fullText.trim().length < 50) {
+          sendResponse({ success: true, glossary: [] });
+          return;
+        }
+
+        console.log('[Background] Extracting glossary, text length:', fullText.length);
+        const service = getService(config.deepseekApiKey);
+        const glossary = await globalQueue.add(() =>
+          service.extractGlossary(fullText, sourceLang, targetLang)
+        );
+
+        sendResponse({ success: true, glossary });
+      } catch (error) {
+        console.error('[Background] extractGlossary error:', error);
+        sendResponse({
+          success: false,
+          glossary: [],
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
     async function handleTranslateChunk(
       message: any,
       sendResponse: (response: any) => void
@@ -164,7 +200,7 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary } = message;
 
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
@@ -188,7 +224,7 @@ export default defineBackground({
         console.log('[Background] Calling DeepSeek API for translation...');
         const service = getService(config.deepseekApiKey);
         const jsonResult = await globalQueue.add(() =>
-          service.translate(jsonContent, sourceLang, targetLang, [], sitePrompt)
+          service.translate(jsonContent, sourceLang, targetLang, glossary || [], sitePrompt)
         );
         console.log('[Background] Translation API response length:', jsonResult?.length || 0);
 
