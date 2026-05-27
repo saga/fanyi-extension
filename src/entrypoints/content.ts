@@ -579,12 +579,10 @@ export default defineContentScript({
         onProgress?.(completedCount, chunks.length);
       }
 
-      // Process chunks sequentially for better mobile performance
       for (let i = 0; i < chunks.length; i++) {
         await translateChunk(i);
-        // Small delay between chunks
-        if (i < chunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, isMobile ? 200 : 100));
+        if (i < chunks.length - 1 && isMobile) {
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
 
