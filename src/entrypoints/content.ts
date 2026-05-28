@@ -535,6 +535,7 @@ export default defineContentScript({
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
       let completedCount = 0;
       let hasFailure = false;
+      const applyPromises: Promise<void>[] = [];
 
       async function translateChunk(index: number): Promise<void> {
         const chunk = chunks[index];
@@ -565,7 +566,12 @@ export default defineContentScript({
               console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
               chunkMap.set(id, text);
             }
-            applyTranslations(chunkMap, nodeMap, mode);
+            applyPromises.push(new Promise<void>(resolve => {
+              requestAnimationFrame(() => {
+                applyTranslations(chunkMap, nodeMap, mode);
+                resolve();
+              });
+            }));
           } else {
             hasFailure = true;
             console.error(`Chunk ${chunk.id} translation failed:`, response.error);
@@ -585,6 +591,8 @@ export default defineContentScript({
           await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
+
+      await Promise.all(applyPromises);
 
       console.log('[ContentScript] translateChunksViaBackground complete, allSucceeded:', !hasFailure);
       return !hasFailure;
