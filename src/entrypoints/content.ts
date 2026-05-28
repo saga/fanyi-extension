@@ -749,20 +749,20 @@ export default defineContentScript({
         bottom: ${isMobile ? '60px' : '20px'};
         left: 50%;
         transform: translateX(-50%);
-        padding: 8px 14px;
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        border-radius: 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        padding: 6px 12px;
+        background: rgba(0, 0, 0, 0.35);
+        color: rgba(255, 255, 255, 0.7);
+        border-radius: 16px;
         z-index: 999999;
-        font-size: ${isMobile ? '12px' : '13px'};
+        font-size: ${isMobile ? '11px' : '12px'};
         display: none;
         max-width: 80%;
         text-align: center;
+        pointer-events: none;
       }
-      .fanyi-loading { border: 1px solid #409eff; }
-      .fanyi-success { border: 1px solid #67c23a; }
-      .fanyi-error { border: 1px solid #f56c6c; }
+      .fanyi-loading { border: 1px solid rgba(64, 158, 255, 0.3); }
+      .fanyi-success { border: 1px solid rgba(103, 194, 58, 0.3); }
+      .fanyi-error { border: 1px solid rgba(245, 108, 108, 0.3); }
 
       .fanyi-original {
         display: block;
