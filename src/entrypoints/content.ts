@@ -766,7 +766,6 @@ export default defineContentScript({
 
       .fanyi-original {
         display: block;
-        opacity: 0.5;
       }
       .fanyi-translation {
         display: block;
