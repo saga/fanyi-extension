@@ -23,6 +23,68 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('FOR');
   });
 
+  it('filters out MUST DOER VS and other false-positive acronyms', () => {
+    const text = 'You MUST be a DOER not a VS Code user. GET SET PUT LET SEE SAY.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('MUST');
+    expect(terms).not.toContain('DOER');
+    expect(terms).not.toContain('VS');
+    expect(terms).not.toContain('GET');
+    expect(terms).not.toContain('SET');
+  });
+
+  it('strips trailing punctuation from named entities', () => {
+    const text = 'Brady went to Squad: and used TUI, for the project.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    for (const term of terms) {
+      expect(term).not.toMatch(/[,;:.!?]$/);
+      expect(term).not.toMatch(/^[,;:.!?]/);
+    }
+  });
+
+  it('extracts recurring CamelCase proper nouns', () => {
+    const text = 'We use Playwright for testing. Playwright runs end-to-end tests. The Playwright framework is great.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('Playwright');
+  });
+
+  it('extracts recurring single-word proper nouns appearing 3+ times', () => {
+    const text = 'Squad is great. Squad works well. Squad is the best tool. Squad helps teams.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('Squad');
+  });
+
+  it('does not extract single-word proper nouns appearing fewer than 3 times', () => {
+    const text = 'Squad is mentioned once here. Other things are discussed.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('Squad');
+  });
+
+  it('filters out common capitalized words like The That Then When', () => {
+    const text = 'The system works. That is clear. Then we proceed. When ready, we go. You can see Code here. Prompt is important. Work is done.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('The');
+    expect(terms).not.toContain('That');
+    expect(terms).not.toContain('Then');
+    expect(terms).not.toContain('When');
+    expect(terms).not.toContain('You');
+    expect(terms).not.toContain('Code');
+    expect(terms).not.toContain('Prompt');
+    expect(terms).not.toContain('Work');
+  });
+
   it('extracts named entities (people, organizations, places)', () => {
     const text = 'Chuang Gan and Maohao Shen from UMass Amherst and MIT published the paper.';
     const result = extractGlossaryLocal(text);

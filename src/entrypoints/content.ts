@@ -61,11 +61,11 @@ export default defineContentScript({
         const config = await getConfig();
         const gesture = config.touchGesture || 'DoubleTap';
 
-        const multiFingerGestures = [GESTURES.TwoFinger, GESTURES.ThreeFinger, GESTURES.FourFinger];
+        const multiFingerGestures = [GESTURES.ThreeFinger, GESTURES.FourFinger];
         const tapGestures = [GESTURES.DoubleTap, GESTURES.TripleTap];
 
         if (multiFingerGestures.includes(gesture)) {
-          const requiredFingers = gesture === GESTURES.TwoFinger ? 2 : gesture === GESTURES.ThreeFinger ? 3 : 4;
+          const requiredFingers = gesture === GESTURES.ThreeFinger ? 3 : 4;
           if (event.touches.length === requiredFingers) {
             const center = getCenterPoint(event.touches, requiredFingers);
             if (center && config.enabled) {
@@ -287,7 +287,6 @@ export default defineContentScript({
             <select class="fanyi-touch-gesture">
               <option value="DoubleTap">双击翻译</option>
               <option value="TripleTap">三击翻译</option>
-              <option value="TwoFinger">双指翻译</option>
               <option value="ThreeFinger">三指翻译</option>
               <option value="FourFinger">四指翻译</option>
             </select>

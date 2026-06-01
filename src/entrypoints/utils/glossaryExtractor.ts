@@ -14,10 +14,25 @@ const COMMON_ENGLISH_WORDS = new Set([
   'HERE', 'THERE', 'WHY', 'WHAT', 'NO', 'YES', 'OR', 'IF', 'SO', 'AS',
   'AT', 'BY', 'TO', 'UP', 'DO', 'AN', 'IN', 'ON', 'IT', 'IS', 'OF', 'WE',
   'HE', 'MY', 'ME', 'US', 'AM', 'BE', 'GO', 'HIGH', 'LES', 'PA', 'ISBN',
-  'ISBN', 'HTML', 'JSON', 'ACM', 'PA', 'MAE', 'BETA', 'MATH',
+  'HTML', 'JSON', 'ACM', 'PA', 'MAE', 'BETA', 'MATH',
+  'MUST', 'DOER', 'VS', 'GET', 'SET', 'PUT', 'LET', 'SEE', 'SAY', 'DAY',
+  'WAY', 'OWN', 'TOO', 'ANY', 'TRY', 'USE', 'RUN', 'ADD', 'END', 'TOP',
+  'BIG', 'BAD', 'RED', 'MAN', 'OLD', 'NEW', 'HOT', 'FAR', 'OFF', 'LOT',
+  'AGE', 'AGO', 'DUE', 'YET', 'NON', 'PER', 'SUB', 'PRE', 'PRO', 'POST',
+  'SELF', 'TRUE', 'NULL', 'VOID', 'TYPE', 'LIKE', 'EVEN', 'WELL', 'BACK',
+  'NEXT', 'LAST', 'BEST', 'DONE', 'MADE', 'GONE', 'TOLD', 'CAME', 'WENT',
+  'TOOK', 'MADE', 'SAID', 'KNEW', 'GOT', 'NEED', 'MAKE', 'HELP', 'WORK',
+  'PART', 'GOOD', 'LOOK', 'COME', 'THAN', 'OVER', 'CALL', 'KEEP', 'GIVE',
+  'TURN', 'MOVE', 'LIVE', 'SHOW', 'FIND', 'HAND', 'HEAD', 'SIDE', 'LINE',
+  'CASE', 'POINT', 'MEAN', 'USED', 'SEEM', 'WANT', 'FACT', 'FORM', 'SURE',
+  'ABLE', 'JUST', 'ALSO', 'ABLE', 'ELSE', 'EVER', 'SUCH', 'STILL', 'SINCE',
 ]);
 
 const ACRONYM_PATTERN = /\b[A-Z]{2,6}\b/g;
+
+function cleanTerm(term: string): string {
+  return term.replace(/[,;:.!?'"()\[\]{}]+$/, '').replace(/^[,;:.!?'"()\[\]{}]+/, '').trim();
+}
 
 function extractAcronyms(text: string): string[] {
   const found = new Set<string>();
@@ -36,24 +51,80 @@ function extractNamedEntities(text: string): string[] {
   const entities = new Set<string>();
 
   for (const person of doc.match('#Person+').out('array')) {
-    if (person.length > 2 && person.length < 60) {
-      entities.add(person);
+    const cleaned = cleanTerm(person);
+    if (cleaned.length > 2 && cleaned.length < 60) {
+      entities.add(cleaned);
     }
   }
 
   for (const org of doc.match('#Organization+').out('array')) {
-    if (org.length > 2 && org.length < 60) {
-      entities.add(org);
+    const cleaned = cleanTerm(org);
+    if (cleaned.length > 2 && cleaned.length < 60) {
+      entities.add(cleaned);
     }
   }
 
   for (const place of doc.match('#Place+').out('array')) {
-    if (place.length > 2 && place.length < 60) {
-      entities.add(place);
+    const cleaned = cleanTerm(place);
+    if (cleaned.length > 2 && cleaned.length < 60) {
+      entities.add(cleaned);
     }
   }
 
   return [...entities];
+}
+
+const CAMEL_CASE_PATTERN = /\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g;
+
+const COMMON_CAPITALIZED_WORDS = new Set([
+  'The', 'This', 'That', 'These', 'Those', 'Then', 'Than', 'They', 'Them',
+  'Their', 'There', 'When', 'Where', 'Which', 'While', 'What', 'Who',
+  'How', 'Why', 'Will', 'Would', 'Could', 'Should', 'Must', 'Have',
+  'Has', 'Had', 'Been', 'Being', 'Does', 'Did', 'Was', 'Were',
+  'And', 'But', 'For', 'Not', 'Nor', 'Yet', 'So', 'Or', 'If',
+  'From', 'Into', 'With', 'Over', 'Under', 'After', 'Before', 'Between',
+  'Through', 'During', 'Without', 'Within', 'Along', 'Across',
+  'Each', 'Every', 'Both', 'All', 'Some', 'Any', 'Many', 'Much',
+  'More', 'Most', 'Such', 'Other', 'Another', 'Only', 'Just',
+  'Also', 'Even', 'Still', 'Already', 'Never', 'Always',
+  'You', 'We', 'He', 'She', 'It', 'They', 'Who', 'What',
+  'Code', 'Prompt', 'Work', 'Team', 'File', 'Data', 'Time',
+  'Make', 'Keep', 'Give', 'Take', 'Come', 'Go', 'Get',
+  'One', 'Two', 'Three', 'Four', 'Five', 'First', 'Second',
+  'New', 'Old', 'Good', 'Bad', 'Great', 'Small', 'Large',
+  'Here', 'Now', 'Today', 'Next', 'Last', 'Back',
+]);
+
+function extractRecurringProperNouns(text: string): string[] {
+  const candidates = new Map<string, number>();
+  let match: RegExpExecArray | null;
+  while ((match = CAMEL_CASE_PATTERN.exec(text)) !== null) {
+    const word = match[0];
+    candidates.set(word, (candidates.get(word) || 0) + 1);
+  }
+
+  const SINGLE_WORD_CAP = /\b[A-Z][a-z]{2,}\b/g;
+  const wordCounts = new Map<string, number>();
+  while ((match = SINGLE_WORD_CAP.exec(text)) !== null) {
+    const word = match[0];
+    if (!COMMON_CAPITALIZED_WORDS.has(word)) {
+      wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+    }
+  }
+
+  const result: string[] = [];
+  for (const [word, count] of candidates) {
+    if (count >= 2) {
+      result.push(word);
+    }
+  }
+  for (const [word, count] of wordCounts) {
+    if (count >= 3) {
+      result.push(word);
+    }
+  }
+
+  return result;
 }
 
 function isSubsumedByLonger(term: string, allTerms: string[]): boolean {
@@ -79,6 +150,13 @@ export function extractGlossaryLocal(
   const namedEntities = extractNamedEntities(fullText);
   for (const entity of namedEntities) {
     glossaryMap.set(entity, 'KEEP');
+  }
+
+  const recurringNouns = extractRecurringProperNouns(fullText);
+  for (const noun of recurringNouns) {
+    if (!glossaryMap.has(noun)) {
+      glossaryMap.set(noun, 'KEEP');
+    }
   }
 
   for (const term of emphasizedTerms) {

@@ -1,5 +1,4 @@
 export const GESTURES = {
-  TwoFinger: 'TwoFinger',
   ThreeFinger: 'ThreeFinger',
   FourFinger: 'FourFinger',
   DoubleTap: 'DoubleTap',
