@@ -85,6 +85,22 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('Work');
   });
 
+  it('filters out words that also appear in lowercase in the text', () => {
+    const text = 'Squad is a tool. The squad helps teams. Squad works well. Another squad is here. Squad is great.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('Squad');
+  });
+
+  it('keeps words that only appear capitalized (true proper nouns)', () => {
+    const text = 'Playwright runs tests. Playwright is fast. Playwright supports Chrome. Playwright works well.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('Playwright');
+  });
+
   it('extracts named entities (people, organizations, places)', () => {
     const text = 'Chuang Gan and Maohao Shen from UMass Amherst and MIT published the paper.';
     const result = extractGlossaryLocal(text);

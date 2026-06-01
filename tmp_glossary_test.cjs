@@ -81,32 +81,44 @@ console.log('\n=== PLACES (cleaned) ===');
 console.log(places.join(', '));
 console.log('Count:', places.length);
 
-// 3. Recurring proper nouns
-const CAMEL_CASE_PATTERN = /\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g;
-const camelCandidates = new Map();
-while ((m = CAMEL_CASE_PATTERN.exec(text)) !== null) {
-  camelCandidates.set(m[0], (camelCandidates.get(m[0]) || 0) + 1);
-}
-const SINGLE_WORD_CAP = /\b[A-Z][a-z]{2,}\b/g;
-const wordCounts = new Map();
-while ((m = SINGLE_WORD_CAP.exec(text)) !== null) {
-  const word = m[0];
-  if (!COMMON_CAPITALIZED_WORDS.has(word)) {
-    wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+function extractRecurringProperNouns(text) {
+  const lowerWords = new Set();
+  const lowerMatch = text.match(/\b[a-z]+\b/g);
+  if (lowerMatch) {
+    for (const w of lowerMatch) {
+      lowerWords.add(w.toLowerCase());
+    }
   }
+
+  const CAMEL_CASE_PATTERN = /\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g;
+  const candidates = new Map();
+  let m;
+  while ((m = CAMEL_CASE_PATTERN.exec(text)) !== null) {
+    candidates.set(m[0], (candidates.get(m[0]) || 0) + 1);
+  }
+
+  const SINGLE_WORD_CAP = /\b[A-Z][a-z]{2,}\b/g;
+  const wordCounts = new Map();
+  while ((m = SINGLE_WORD_CAP.exec(text)) !== null) {
+    const word = m[0];
+    if (!COMMON_CAPITALIZED_WORDS.has(word) && !lowerWords.has(word.toLowerCase())) {
+      wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+    }
+  }
+
+  const result = [];
+  for (const [word, count] of candidates) {
+    if (count >= 2) result.push(word);
+  }
+  for (const [word, count] of wordCounts) {
+    if (count >= 3) result.push(word);
+  }
+  return result;
 }
 
-const recurringNouns = [];
-for (const [word, count] of camelCandidates) {
-  if (count >= 2) recurringNouns.push(word);
-}
-for (const [word, count] of wordCounts) {
-  if (count >= 3) recurringNouns.push(word);
-}
+const recurringNouns = extractRecurringProperNouns(text);
 
 console.log('\n=== RECURRING PROPER NOUNS ===');
-console.log(recurringNouns.join(', '));
-console.log('Count:', recurringNouns.length);
 
 // 4. Total
 const allTerms = new Set([...acronyms, ...people, ...orgs, ...places, ...recurringNouns]);

@@ -96,6 +96,14 @@ const COMMON_CAPITALIZED_WORDS = new Set([
 ]);
 
 function extractRecurringProperNouns(text: string): string[] {
+  const lowerWords = new Set<string>();
+  const lowerMatch = text.match(/\b[a-z]+\b/g);
+  if (lowerMatch) {
+    for (const w of lowerMatch) {
+      lowerWords.add(w.toLowerCase());
+    }
+  }
+
   const candidates = new Map<string, number>();
   let match: RegExpExecArray | null;
   while ((match = CAMEL_CASE_PATTERN.exec(text)) !== null) {
@@ -107,7 +115,7 @@ function extractRecurringProperNouns(text: string): string[] {
   const wordCounts = new Map<string, number>();
   while ((match = SINGLE_WORD_CAP.exec(text)) !== null) {
     const word = match[0];
-    if (!COMMON_CAPITALIZED_WORDS.has(word)) {
+    if (!COMMON_CAPITALIZED_WORDS.has(word) && !lowerWords.has(word.toLowerCase())) {
       wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
     }
   }
