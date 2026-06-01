@@ -59,10 +59,9 @@ export default defineContentScript({
         }
 
         const config = await getConfig();
-        const gesture = config.touchGesture || 'DoubleTap';
+        const gesture = config.touchGesture || 'TripleTap';
 
-        const multiFingerGestures = [GESTURES.ThreeFinger, GESTURES.FourFinger];
-        const tapGestures = [GESTURES.DoubleTap, GESTURES.TripleTap];
+        const multiFingerGestures: string[] = [GESTURES.ThreeFinger, GESTURES.FourFinger];
 
         if (multiFingerGestures.includes(gesture)) {
           const requiredFingers = gesture === GESTURES.ThreeFinger ? 3 : 4;
@@ -76,17 +75,16 @@ export default defineContentScript({
           return;
         }
 
-        if (tapGestures.includes(gesture)) {
+        if (gesture === GESTURES.TripleTap) {
           if (event.touches.length !== 1) return;
 
-          const requiredTaps = gesture === GESTURES.DoubleTap ? 2 : 3;
           tapCount++;
 
           if (tapCount === 1) {
             tapTimer = window.setTimeout(() => {
               tapCount = 0;
             }, 500);
-          } else if (tapCount === requiredTaps) {
+          } else if (tapCount === 3) {
             if (tapTimer) clearTimeout(tapTimer);
             tapCount = 0;
             if (config.enabled) {
@@ -285,7 +283,6 @@ export default defineContentScript({
           <div class="fanyi-config-row">
             <label>触摸手势</label>
             <select class="fanyi-touch-gesture">
-              <option value="DoubleTap">双击翻译</option>
               <option value="TripleTap">三击翻译</option>
               <option value="ThreeFinger">三指翻译</option>
               <option value="FourFinger">四指翻译</option>
@@ -309,7 +306,7 @@ export default defineContentScript({
         
         if (isMobile) {
           const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
-          if (gestureSelect) gestureSelect.value = config.touchGesture || 'DoubleTap';
+          if (gestureSelect) gestureSelect.value = config.touchGesture || 'TripleTap';
         }
 
       });

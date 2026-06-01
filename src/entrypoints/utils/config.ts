@@ -30,7 +30,7 @@ const defaultConfig: Config = {
     restoreOriginal: 'Alt+R',
     toggleTranslation: 'Alt+V',
   },
-  touchGesture: 'DoubleTap',
+  touchGesture: 'TripleTap',
 };
 
 export async function getConfig(): Promise<Config> {

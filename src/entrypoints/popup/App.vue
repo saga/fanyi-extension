@@ -50,7 +50,6 @@
       <div class="select-item">
         <label>触屏手势</label>
         <select v-model="config.touchGesture" @change="saveConfig">
-          <option value="DoubleTap">双击翻译</option>
           <option value="TripleTap">三击翻译</option>
           <option value="ThreeFinger">三指翻译</option>
           <option value="FourFinger">四指翻译</option>
@@ -76,7 +75,7 @@ const config = ref<Config>({
   targetLang: 'zh',
   mode: 'bilingual',
   deepseekApiKey: '',
-  touchGesture: 'DoubleTap',
+  touchGesture: 'TripleTap',
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
