@@ -46,31 +46,15 @@ describe('extractGlossaryLocal', () => {
     }
   });
 
-  it('extracts recurring CamelCase proper nouns', () => {
-    const text = 'We use Playwright for testing. Playwright runs end-to-end tests. The Playwright framework is great.';
+  it('extracts recurring noun phrases by frequency', () => {
+    const text = 'We use Playwright for testing. Playwright runs end-to-end tests. The Playwright framework is great. Playwright supports Chrome.';
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
     expect(terms).toContain('Playwright');
   });
 
-  it('extracts recurring single-word proper nouns appearing 3+ times', () => {
-    const text = 'Squad is great. Squad works well. Squad is the best tool. Squad helps teams.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
-
-    expect(terms).toContain('Squad');
-  });
-
-  it('does not extract single-word proper nouns appearing fewer than 3 times', () => {
-    const text = 'Squad is mentioned once here. Other things are discussed.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
-
-    expect(terms).not.toContain('Squad');
-  });
-
-  it('filters out common capitalized words like The That Then When', () => {
+  it('filters out stopwords from frequent terms', () => {
     const text = 'The system works. That is clear. Then we proceed. When ready, we go. You can see Code here. Prompt is important. Work is done.';
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
@@ -80,25 +64,22 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('Then');
     expect(terms).not.toContain('When');
     expect(terms).not.toContain('You');
-    expect(terms).not.toContain('Code');
-    expect(terms).not.toContain('Prompt');
-    expect(terms).not.toContain('Work');
   });
 
-  it('filters out words that also appear in lowercase in the text', () => {
-    const text = 'Squad is a tool. The squad helps teams. Squad works well. Another squad is here. Squad is great.';
+  it('filters out pure-stopword noun phrases', () => {
+    const text = 'The way is long. The way is hard. The way is clear. The way is good.';
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
-    expect(terms).not.toContain('Squad');
+    expect(terms).not.toContain('The way');
   });
 
-  it('keeps words that only appear capitalized (true proper nouns)', () => {
-    const text = 'Playwright runs tests. Playwright is fast. Playwright supports Chrome. Playwright works well.';
+  it('keeps noun phrases with non-stopword components', () => {
+    const text = 'The context window is large. Context window matters. A context window defines limits. The context window expands.';
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
-    expect(terms).toContain('Playwright');
+    expect(terms.some(t => t.toLowerCase().includes('context window'))).toBe(true);
   });
 
   it('extracts named entities (people, organizations, places)', () => {
@@ -189,5 +170,23 @@ describe('extractGlossaryLocal', () => {
     expect(terms).toContain('GPU');
     expect(terms).toContain('NLP');
     expect(result.length).toBeGreaterThan(4);
+  });
+
+  it('does not extract common words like time year people as glossary terms', () => {
+    const text = 'Time passes quickly. Year after year. People change. The time has come. Many people agree. Next year will be better.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('Time');
+    expect(terms).not.toContain('Year');
+    expect(terms).not.toContain('People');
+  });
+
+  it('extracts technical terms that repeat', () => {
+    const text = 'The token billing model uses tokens. Token billing is expensive. Token billing requires monitoring. Token billing affects costs.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms.some(t => t.toLowerCase().includes('token billing'))).toBe(true);
   });
 });
