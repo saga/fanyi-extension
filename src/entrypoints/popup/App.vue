@@ -52,7 +52,6 @@
         <select v-model="config.touchGesture" @change="saveConfig">
           <option value="TripleTap">三击翻译</option>
           <option value="ThreeFinger">三指翻译</option>
-          <option value="FourFinger">四指翻译</option>
         </select>
       </div>
 
