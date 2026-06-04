@@ -400,6 +400,11 @@ export default defineContentScript({
       }
 
       const config = await getConfig();
+      if (!config.deepseekApiKey) {
+        showStatus('API Key 没有配置', 'error');
+        setTimeout(() => hideStatus(), 3000);
+        return;
+      }
       console.log('[ContentScript] handleFullTranslation called, config:', { enabled: config.enabled, sourceLang: config.sourceLang, targetLang: config.targetLang });
       if (!config.enabled) return;
 

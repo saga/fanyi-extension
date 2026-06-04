@@ -189,4 +189,241 @@ describe('extractGlossaryLocal', () => {
 
     expect(terms.some(t => t.toLowerCase().includes('token billing'))).toBe(true);
   });
+
+  // --- Singular/plural merging ---
+
+  it('merges singular and plural forms of the same noun', () => {
+    const text = 'The agent processes data. Each agent handles requests. Multiple agents work together. The agent returns results. Agents are scalable. Agents coordinate well.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // Should have either "agent" or "agents", not both
+    const agentTerms = terms.filter(t => t.toLowerCase() === 'agent' || t.toLowerCase() === 'agents');
+    expect(agentTerms.length).toBe(1);
+  });
+
+  // --- #Noun #Gerund pattern ---
+
+  it('extracts noun+gerund phrases like token billing', () => {
+    const text = 'Token billing is used. Token billing costs money. Token billing requires monitoring. Token billing affects pricing.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms.some(t => t.toLowerCase().includes('token billing'))).toBe(true);
+  });
+
+  it('extracts noun+gerund phrases like data processing', () => {
+    const text = 'Data processing is fast. Data processing takes time. Data processing requires memory. Data processing is essential.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms.some(t => t.toLowerCase().includes('data processing'))).toBe(true);
+  });
+
+  // --- Stopword first-word filter ---
+
+  it('rejects phrases starting with a stopword even if they contain substantive words', () => {
+    const text = 'The architecture is modular. The architecture scales well. The architecture supports plugins. The architecture is extensible.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('The architecture');
+  });
+
+  it('keeps phrases starting with a non-stopword', () => {
+    const text = 'Memory management is crucial. Memory management affects performance. Memory management requires care. Memory management is complex.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms.some(t => t.toLowerCase().includes('memory management'))).toBe(true);
+  });
+
+  // --- Single word frequency threshold ---
+
+  it('requires single nouns to appear at least 3 times', () => {
+    const text = 'The governance model. Governance is important. Governance defines rules. Governance ensures compliance.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // "governance" appears 4+ times as noun — should be included
+    expect(terms.some(t => t.toLowerCase() === 'governance')).toBe(true);
+  });
+
+  it('excludes single nouns that appear fewer than 3 times', () => {
+    const text = 'The governance model is new. Governance matters here.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('Governance');
+    expect(terms).not.toContain('governance');
+  });
+
+  // --- Multi-word phrase frequency threshold ---
+
+  it('requires multi-word phrases to appear at least 2 times', () => {
+    const text = 'Context window is large. Context window defines limits.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms.some(t => t.toLowerCase().includes('context window'))).toBe(true);
+  });
+
+  it('excludes multi-word phrases that appear only once', () => {
+    const text = 'Context window is large and defines many limits for the model.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('Context window');
+  });
+
+  // --- Substring dedup edge cases ---
+
+  it('removes shorter term when fully contained in a longer term', () => {
+    const text = 'We use PII scrubbing for data. PII scrubbing removes personal info. PII scrubbing is required. PII scrubbing protects users.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    if (terms.some(t => t.toLowerCase().includes('pii scrubbing'))) {
+      expect(terms).not.toContain('PII');
+    }
+  });
+
+  it('keeps both terms when neither contains the other', () => {
+    const text = 'API calls are frequent. API calls are logged. SDK tools are useful. SDK tools help developers. API calls return data. SDK tools save time.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // "API calls" and "SDK tools" are both present and neither contains the other
+    expect(terms.some(t => t.toLowerCase().includes('api calls'))).toBe(true);
+    expect(terms.some(t => t.toLowerCase().includes('sdk tools'))).toBe(true);
+  });
+
+  // --- Emphasized terms edge cases ---
+
+  it('handles empty emphasized terms array', () => {
+    const text = 'We use LLM for natural language processing.';
+    const result = extractGlossaryLocal(text, []);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('LLM');
+  });
+
+  it('handles undefined emphasized terms', () => {
+    const text = 'We use LLM for natural language processing.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('LLM');
+  });
+
+  it('adds emphasized terms even if they appear only once', () => {
+    const text = 'Some random text here.';
+    const emphasized = ['unique technical term'];
+    const result = extractGlossaryLocal(text, emphasized);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('unique technical term');
+  });
+
+  // --- Length-based sorting ---
+
+  it('sorts longer terms before shorter ones', () => {
+    const text = 'We use CUDA and CUDA Toolkit for GPU programming with CUDA Toolkit support. CUDA Toolkit is great. CUDA Toolkit works well.';
+    const result = extractGlossaryLocal(text);
+
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i - 1].term.length).toBeGreaterThanOrEqual(result[i].term.length);
+    }
+  });
+
+  // --- Mixed acronym + frequent term + named entity ---
+
+  it('combines acronyms, named entities, and frequent terms without duplicates', () => {
+    const text = 'John Smith from MIT uses CUDA for GPU computing. CUDA accelerates workloads. CUDA is fast. CUDA is reliable. MIT published the research.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('CUDA');
+    expect(terms).toContain('GPU');
+    expect(terms).toContain('MIT');
+    // No duplicate entries
+    const cudaEntries = result.filter(r => r.term === 'CUDA');
+    expect(cudaEntries.length).toBe(1);
+  });
+
+  // --- Real-world technical article ---
+
+  it('extracts from a realistic technical blog post', () => {
+    const text = `Squad Places: A New Way to Coordinate Agents
+
+    In our latest release, we introduce Squad Places — a coordination mechanism
+    for disposable agents. Each Squad Place defines a coordination layer where
+    agents can share context and synchronize tasks.
+
+    PII scrubbing is built into every Squad Place. PII scrubbing removes sensitive
+    data before it reaches the coordination layer. PII scrubbing runs automatically.
+
+    The coordination mechanism supports UX suggestions. UX suggestions help
+    developers improve their workflow. UX suggestions are generated by the
+    coordination layer.
+
+    Brady leads the engineering team. Dina Berry manages product. Together they
+    built the TUI squad which ships features every sprint.`;
+
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // Key technical terms should be present
+    expect(terms.some(t => t.toLowerCase().includes('squad place'))).toBe(true);
+    expect(terms.some(t => t.toLowerCase().includes('pii scrubbing'))).toBe(true);
+    expect(terms.some(t => t.toLowerCase().includes('coordination layer'))).toBe(true);
+
+    // Common words should NOT be present
+    expect(terms).not.toContain('Code');
+    expect(terms).not.toContain('Work');
+    expect(terms).not.toContain('Things');
+  });
+
+  // --- Acronym edge cases ---
+
+  it('extracts 2-letter acronyms that are not in exclusion list', () => {
+    const text = 'We use ML and AI for NLP tasks.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('ML');
+    expect(terms).toContain('AI');
+    expect(terms).toContain('NLP');
+  });
+
+  it('excludes 2-letter acronyms that are in exclusion list', () => {
+    const text = 'VS is not an acronym. GET is a verb. DOER is not technical.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('VS');
+    expect(terms).not.toContain('GET');
+    expect(terms).not.toContain('DOER');
+  });
+
+  it('does not extract 7+ letter all-caps words as acronyms', () => {
+    const text = 'We use DEVELOPMENT for ENTERPRISE purposes.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('DEVELOPMENT');
+    expect(terms).not.toContain('ENTERPRISE');
+  });
+
+  // --- cleanTerm edge cases ---
+
+  it('handles terms with surrounding punctuation', () => {
+    const text = 'We use (CUDA) and "API" and GPT, for models.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('CUDA');
+    expect(terms).toContain('API');
+    expect(terms).toContain('GPT');
+  });
 });

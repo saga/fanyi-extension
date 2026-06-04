@@ -89,13 +89,13 @@ export default defineBackground({
 
             switch (command) {
               case 'translate-page':
-                browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+                browser.tabs.sendMessage(tab.id, { action: 'translatePage' }).catch(() => {});
                 break;
               case 'restore-original':
-                browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+                browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' }).catch(() => {});
                 break;
               case 'toggle-translation':
-                browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
+                browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
                 break;
             }
           } catch (error) {
@@ -114,13 +114,13 @@ export default defineBackground({
 
           switch (info.menuItemId) {
             case 'translate-page':
-              browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+              browser.tabs.sendMessage(tab.id, { action: 'translatePage' }).catch(() => {});
               break;
             case 'restore-original':
-              browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+              browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' }).catch(() => {});
               break;
             case 'toggle-translation':
-              browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' });
+              browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
               break;
           }
         });

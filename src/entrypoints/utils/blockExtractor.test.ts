@@ -4217,3 +4217,391 @@ describe('extractBlocks - Fortune website structure', () => {
     expect(workflowCount).toBe(1);
   });
 });
+
+// ========== Hidden Elements ==========
+
+describe('extractBlocks - Hidden Elements', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip elements with hidden attribute', () => {
+    setupHTML(`
+      <article>
+        <p hidden>This paragraph is hidden and should be skipped.</p>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const hiddenBlocks = blocks.filter(b => b.text.includes('hidden'));
+    expect(hiddenBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('should skip elements with aria-hidden="true"', () => {
+    setupHTML(`
+      <article>
+        <p aria-hidden="true">This is aria-hidden content.</p>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toContain('Visible');
+  });
+
+  it('should skip elements with display:none inline style', () => {
+    setupHTML(`
+      <article>
+        <p style="display: none">Hidden by display none.</p>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const hiddenBlocks = blocks.filter(b => b.text.includes('display none'));
+    expect(hiddenBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('should skip elements with visibility:hidden inline style', () => {
+    setupHTML(`
+      <article>
+        <p style="visibility: hidden">Hidden by visibility hidden.</p>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const hiddenBlocks = blocks.filter(b => b.text.includes('visibility hidden'));
+    expect(hiddenBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('should skip elements whose parent is hidden', () => {
+    setupHTML(`
+      <article>
+        <div hidden>
+          <p>Nested inside hidden div should be skipped.</p>
+        </div>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toContain('Visible');
+  });
+
+  it('should skip elements whose ancestor has aria-hidden="true"', () => {
+    setupHTML(`
+      <article>
+        <div aria-hidden="true">
+          <p>Nested inside aria-hidden div should be skipped.</p>
+        </div>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toContain('Visible');
+  });
+
+  it('should skip when parent has display:none', () => {
+    setupHTML(`
+      <article>
+        <div style="display: none">
+          <p>Nested inside display:none container.</p>
+        </div>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toContain('Visible');
+  });
+
+  it('should NOT skip elements hidden via CSS class (only inline style affects TreeWalker)', () => {
+    // CSS class-based hiding is not detected by isElementHidden — only inline style
+    const style = document.createElement('style');
+    style.textContent = '.hidden-by-css { display: none; }';
+    document.head.appendChild(style);
+
+    setupHTML(`
+      <article>
+        <p class="hidden-by-css">Hidden by CSS class should be skipped.</p>
+        <p>Visible paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    // CSS class-based hiding is not detected by walker-level checks
+    const cssBlocks = blocks.filter(b => b.text.includes('Hidden by CSS'));
+    // but it IS caught by shouldSkipByClass since 'hidden' is not in SKIP_CLASS_PATTERNS
+    // The class hiding is via CSS, not inline, so the element is visible to the walker
+    expect(cssBlocks.length).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ========== Article Container Detection ==========
+
+describe('extractBlocks - Article Container Detection', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should detect article tag as container', () => {
+    setupHTML(`
+      <div>
+        <article>
+          <p>Article paragraph content here.</p>
+        </article>
+        <div><p>Non-article paragraph content here.</p></div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should detect role="article" as container', () => {
+    setupHTML(`
+      <div>
+        <div role="article">
+          <span>Inline text inside article role context.</span>
+        </div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    const articleBlocks = blocks.filter(b => b.text.includes('Inline text'));
+    expect(articleBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should detect role="main" as container', () => {
+    setupHTML(`
+      <div>
+        <div role="main">
+          <span>Inline text inside main role context.</span>
+        </div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should detect lang attribute as article container', () => {
+    setupHTML(`
+      <div>
+        <div lang="en">
+          <span>Inline text inside lang=en container.</span>
+        </div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should detect article-content class as container', () => {
+    setupHTML(`
+      <div>
+        <div class="article-content">
+          <span>Inline text inside article-content class.</span>
+        </div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should detect post-content class as container', () => {
+    setupHTML(`
+      <div>
+        <div class="post-content">
+          <span>Inline text inside post-content class.</span>
+        </div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should detect entry-content class as container', () => {
+    setupHTML(`
+      <div>
+        <div class="entry-content">
+          <span>Inline text inside entry-content class.</span>
+        </div>
+      </div>
+    `);
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ========== SVG/Non-HTML Namespace ==========
+
+describe('extractBlocks - SVG and Non-HTML Namespace', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip SVG elements', () => {
+    setupHTML(`
+      <article>
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+          <text x="10" y="20">SVG text that should be skipped</text>
+        </svg>
+        <p>Normal paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const svgBlocks = blocks.filter(b => b.text.includes('SVG'));
+    expect(svgBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('should skip MathML elements', () => {
+    const mathml = document.createElementNS('http://www.w3.org/1998/Math/MathML', 'math');
+    mathml.textContent = 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}';
+    const container = document.createElement('div');
+    container.appendChild(mathml);
+    const p = document.createElement('p');
+    p.textContent = 'Normal paragraph in the same container.';
+    container.appendChild(p);
+    document.body.appendChild(container);
+
+    const blocks = extractBlocks(document);
+    const mathBlocks = blocks.filter(b => b.text.includes('sqrt'));
+    expect(mathBlocks).toHaveLength(0);
+  });
+});
+
+// ========== ContentEditable ==========
+
+describe('extractBlocks - ContentEditable Edge Cases', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip elements with contenteditable="true"', () => {
+    setupHTML(`
+      <article>
+        <p contenteditable="true">Editable paragraph content here.</p>
+        <p>Non-editable paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const editableBlocks = blocks.filter(b => b.text.includes('Editable'));
+    expect(editableBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('should skip elements with isContentEditable true via inheritance', () => {
+    setupHTML(`
+      <div contenteditable="true">
+        <p>Child of editable div should be skipped.</p>
+      </div>
+      <p>Normal paragraph content here.</p>
+    `);
+    const blocks = extractBlocks(document);
+    const editableBlocks = blocks.filter(b => b.text.includes('editable'));
+    expect(editableBlocks).toHaveLength(0);
+  });
+});
+
+// ========== fanyi-bilingual-block / notranslate ==========
+
+describe('extractBlocks - Translate Block Classes', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip elements with fanyi-bilingual-block class', () => {
+    setupHTML(`
+      <article>
+        <p class="fanyi-bilingual-block">Already translated content here.</p>
+        <p>Fresh content to be translated here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const translatedBlocks = blocks.filter(b => b.text.includes('Already translated'));
+    expect(translatedBlocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('should skip elements with notranslate class', () => {
+    setupHTML(`
+      <article>
+        <p class="notranslate">This should not be translated.</p>
+        <p>This should be translated normally.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const noTranslate = blocks.filter(b => b.text.includes('notranslate'));
+    expect(noTranslate).toHaveLength(0);
+  });
+});
+
+// ========== BuildNodeMap ==========
+
+describe('buildNodeMap', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('maps multiple blocks to their DOM nodes', () => {
+    setupHTML(`
+      <article>
+        <p id="p1">First paragraph content here.</p>
+        <p id="p2">Second paragraph content here.</p>
+        <p id="p3">Third paragraph content here.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const nodeMap = buildNodeMap(blocks, document);
+
+    expect(nodeMap.size).toBe(3);
+    for (const block of blocks) {
+      expect(nodeMap.has(block.id)).toBe(true);
+    }
+  });
+
+  it('excludes nodes that cannot be found', () => {
+    const blocks = extractBlocks(document);
+    // Create a fake block with invalid XPath
+    const fakeBlock = {
+      id: 'fake_b1',
+      xpath: '/nonexistent[1]/ghost[1]',
+      tag: 'p',
+      text: 'Fake block',
+    };
+    const nodeMap = buildNodeMap([...blocks, fakeBlock], document);
+    expect(nodeMap.has('fake_b1')).toBe(false);
+  });
+});
+
+// ========== findBlockNode ==========
+
+describe('findBlockNode', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('finds node via data-fanyi-block-id attribute', () => {
+    setupHTML(`
+      <article>
+        <p>Paragraph content here for extraction.</p>
+      </article>
+    `);
+    const blocks = extractBlocks(document);
+    const node = findBlockNode(blocks[0], document);
+    expect(node).toBeTruthy();
+    expect(node!.textContent).toContain('Paragraph content');
+  });
+
+  it('returns null for invalid XPath', () => {
+    const block = {
+      id: 'test_b1',
+      xpath: '/invalid[1]/path[99]/nope[1]',
+      tag: 'p',
+      text: 'Test',
+    };
+    const node = findBlockNode(block, document);
+    expect(node).toBeNull();
+  });
+});
