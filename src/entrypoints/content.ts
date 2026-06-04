@@ -456,7 +456,7 @@ export default defineContentScript({
               }
             }
 
-            const glossarySample = fullText.substring(0, 5000);
+            const glossarySample = fullText.substring(0, 4000);
             const glossaryResponse = await browser.runtime.sendMessage({
               action: 'extractGlossary',
               fullText: glossarySample,

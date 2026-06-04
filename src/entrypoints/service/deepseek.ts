@@ -20,7 +20,7 @@ function buildGlossaryExtractionBody(
   targetLang: string
 ): string {
   const targetLangName = targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
-  const truncatedText = fullText.length > 6000 ? fullText.substring(0, 6000) : fullText;
+  const truncatedText = fullText.length > 5000 ? fullText.substring(0, 5000) : fullText;
 
   return JSON.stringify({
     model: MODEL,
