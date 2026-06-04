@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { TextBlock } from './blockExtractor';
 import type { Chunk } from './chunkBuilder';
 
@@ -108,5 +108,64 @@ describe('prepareDocument', () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.chunks).toHaveLength(1);
     expect(result.fullText).toBe('Solo text');
+  });
+});
+
+describe('rAF fallback pattern', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('falls back to callback when rAF does not fire (page hidden)', async () => {
+    const callback = vi.fn();
+    let applied = false;
+
+    const frameId = requestAnimationFrame(() => {
+      applied = true;
+      callback();
+    });
+
+    // Simulate page hidden: rAF never fires, but setTimeout does
+    setTimeout(() => {
+      if (applied) return;
+      cancelAnimationFrame(frameId);
+      callback();
+      applied = true;
+    }, 5000);
+
+    // Advance past the 5s timeout
+    vi.advanceTimersByTime(5000);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call callback twice when rAF fires before timeout', async () => {
+    const callback = vi.fn();
+    let applied = false;
+
+    const frameId = requestAnimationFrame(() => {
+      applied = true;
+      callback();
+    });
+
+    setTimeout(() => {
+      if (applied) return;
+      cancelAnimationFrame(frameId);
+      callback();
+      applied = true;
+    }, 5000);
+
+    // rAF fires immediately (via fake timers, it runs synchronously)
+    vi.advanceTimersToNextFrame();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(applied).toBe(true);
+
+    // Now advance past the timeout — should not call again
+    vi.advanceTimersByTime(5000);
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 });

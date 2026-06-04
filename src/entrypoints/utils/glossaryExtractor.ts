@@ -89,8 +89,7 @@ function extractAcronyms(text: string): string[] {
   return [...found];
 }
 
-function extractNamedEntities(text: string): string[] {
-  const doc = nlp(text);
+function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
   const entities = new Set<string>();
 
   for (const person of doc.match('#Person+').out('array')) {
@@ -125,11 +124,10 @@ function hasSubstantiveWord(words: string[]): boolean {
   return words.some(w => !isStopword(w));
 }
 
-function extractFrequentTerms(text: string): string[] {
+function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
   const phraseCounts = new Map<string, number>();
   const phraseOriginals = new Map<string, string>();
 
-  const doc = nlp(text);
   const patterns = ['#Noun+', '#Noun #Gerund', '#Noun #Noun #Gerund'];
   for (const pattern of patterns) {
     for (const phrase of doc.match(pattern).out('array')) {
@@ -191,15 +189,6 @@ function extractFrequentTerms(text: string): string[] {
   return result;
 }
 
-function isSubsumedByLonger(term: string, allTerms: string[]): boolean {
-  for (const other of allTerms) {
-    if (other !== term && other.includes(term) && other.length > term.length) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export function extractGlossaryLocal(
   fullText: string,
   emphasizedTerms: string[] = []
@@ -211,12 +200,15 @@ export function extractGlossaryLocal(
     glossaryMap.set(acronym, 'KEEP');
   }
 
-  const namedEntities = extractNamedEntities(fullText);
+  // Parse NLP once and share the doc for both named entities and frequent terms
+  const doc = nlp(fullText);
+
+  const namedEntities = extractNamedEntities(doc);
   for (const entity of namedEntities) {
     glossaryMap.set(entity, 'KEEP');
   }
 
-  const frequentTerms = extractFrequentTerms(fullText);
+  const frequentTerms = extractFrequentTerms(doc);
   for (const term of frequentTerms) {
     if (!glossaryMap.has(term)) {
       glossaryMap.set(term, 'KEEP');
@@ -231,7 +223,15 @@ export function extractGlossaryLocal(
   }
 
   const allTerms = [...glossaryMap.keys()];
-  const filtered = allTerms.filter(term => !isSubsumedByLonger(term, allTerms));
+  // Sort by length descending: process longer terms first so shorter
+  // subsumed terms are naturally skipped during deduplication.
+  allTerms.sort((a, b) => b.length - a.length);
+
+  const filtered: string[] = [];
+  for (const term of allTerms) {
+    if (filtered.some(kept => kept.includes(term))) continue;
+    filtered.push(term);
+  }
 
   const result: GlossaryEntry[] = [];
   for (const term of filtered) {

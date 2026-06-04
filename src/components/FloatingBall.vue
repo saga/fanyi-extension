@@ -45,7 +45,7 @@ const startDrag = (e: MouseEvent) => {
 
 const handleClick = async () => {
   if (isDragging.value) return;
-  browser.runtime.sendMessage({ action: 'translatePage' });
+  browser.runtime.sendMessage({ action: 'translatePage' }).catch(() => {});
 };
 
 onMounted(async () => {

@@ -191,8 +191,13 @@ describe('clearAllCache', () => {
     vi.clearAllMocks();
   });
 
-  it('clears both analysis and translation caches', () => {
-    clearAllCache();
+  it('clears both analysis and translation caches', async () => {
+    await clearAllCache();
     expect(mockCache.clear).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws if cache clear fails', async () => {
+    mockCache.clear.mockRejectedValueOnce(new Error('Storage error'));
+    await expect(clearAllCache()).rejects.toThrow('Storage error');
   });
 });

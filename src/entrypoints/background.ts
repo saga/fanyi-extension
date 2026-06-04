@@ -22,9 +22,9 @@ function generateTranslationCacheKey(
   for (let i = 0; i < combined.length; i++) {
     const char = combined.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hash = hash & 0x7fffffff;
   }
-  return `translation_${Math.abs(hash)}`;
+  return `translation_${hash}`;
 }
 
 export default defineBackground({
@@ -204,14 +204,12 @@ export default defineBackground({
         const cacheKey = providedCacheKey || generateTranslationCacheKey(jsonContent, sourceLang, targetLang);
 
         const cached = await getCachedTranslation(cacheKey);
-        const hasValidCache = cached && (cached instanceof Map ? cached.size > 0 : Object.keys(cached).length > 0);
+        const hasValidCache = cached && cached.size > 0;
         
         console.log('[Background] translateChunk cache check:', { cacheKey, hasCache: !!cached, hasValidCache });
 
         if (hasValidCache) {
-          const resultArray = cached instanceof Map 
-            ? Array.from(cached.entries()) 
-            : Object.entries(cached);
+          const resultArray = Array.from(cached.entries());
           console.log('[Background] Using cached translation:', resultArray.length, 'blocks');
           sendResponse({ success: true, result: resultArray });
           return;
@@ -293,7 +291,7 @@ export default defineBackground({
 
     async function handleClearCache(sendResponse: (response: any) => void) {
       try {
-        clearAllCache();
+        await clearAllCache();
         sendResponse({ success: true });
       } catch (error) {
         sendResponse({

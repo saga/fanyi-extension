@@ -427,3 +427,87 @@ describe('extractGlossaryLocal', () => {
     expect(terms).toContain('GPT');
   });
 });
+
+// ============================================================
+// Performance tests
+// ============================================================
+
+function generateLargeText(sectionCount: number): string {
+  return Array.from({ length: sectionCount }, (_, i) =>
+    `Section ${i + 1}: We use LLM and API to build GPT models with CUDA support.
+     The workflow compilation approach optimizes structured LLM workflows before deployment.
+     Chuang Gan from MIT and Maohao Shen from UMass Amherst published this research paper.
+     The token billing model uses tokens for monitoring and cost analysis.
+     Machine learning systems require data processing and memory management.
+     Neural network architectures benefit from GPU acceleration and NLP techniques.
+     The governance model ensures compliance with regulatory requirements.
+     Research shows that agent systems can coordinate multiple tasks simultaneously.
+     End-to-end testing with Playwright and Selenium improves reliability.
+     PostgreSQL database management requires careful index optimization.
+   `.trim()).join('\n\n');
+}
+
+describe('extractGlossaryLocal - Performance', () => {
+  it('completes within 500ms for 50-section text (~10KB)', () => {
+    const largeText = generateLargeText(50);
+
+    const start = performance.now();
+    const result = extractGlossaryLocal(largeText);
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it('completes within 200ms for 20-section text (~4KB)', () => {
+    const largeText = generateLargeText(20);
+
+    const start = performance.now();
+    const result = extractGlossaryLocal(largeText);
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(200);
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it('extracts correct terms from large text', () => {
+    const largeText = generateLargeText(30);
+
+    const result = extractGlossaryLocal(largeText);
+    const terms = result.map(r => r.term);
+
+    // Should find common technical terms (acronyms may be subsumed by longer phrases)
+    expect(terms.some(t => t.includes('LLM'))).toBe(true);
+    expect(terms.some(t => t.includes('API'))).toBe(true);
+    expect(terms.some(t => t.includes('GPT'))).toBe(true);
+    expect(terms.some(t => t.includes('CUDA'))).toBe(true);
+    expect(terms.some(t => t.includes('GPU'))).toBe(true);
+    expect(terms.some(t => t.includes('NLP'))).toBe(true);
+    expect(terms.some(t => t.includes('MIT'))).toBe(true);
+  });
+
+  it('produces consistent results across repeated text', () => {
+    const base = 'We use LLM and API for GPT models with CUDA support.';
+    const repeated = Array.from({ length: 10 }, () => base).join('\n\n');
+
+    const singleResult = extractGlossaryLocal(base);
+    const repeatedResult = extractGlossaryLocal(repeated);
+
+    // Both should return non-empty results
+    expect(singleResult.length).toBeGreaterThan(0);
+    expect(repeatedResult.length).toBeGreaterThan(0);
+
+    // Both should be sorted by term length descending
+    for (let i = 1; i < singleResult.length; i++) {
+      expect(singleResult[i - 1].term.length).toBeGreaterThanOrEqual(singleResult[i].term.length);
+    }
+    for (let i = 1; i < repeatedResult.length; i++) {
+      expect(repeatedResult[i - 1].term.length).toBeGreaterThanOrEqual(repeatedResult[i].term.length);
+    }
+
+    // All entries should have KEEP translation
+    for (const entry of [...singleResult, ...repeatedResult]) {
+      expect(entry.translation).toBe('KEEP');
+    }
+  });
+});

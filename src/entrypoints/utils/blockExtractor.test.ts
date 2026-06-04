@@ -1,5 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { extractBlocks, findBlockNode, buildNodeMap } from './blockExtractor';
+
+// Mock matchSiteRule for shouldSkipBySiteRules tests
+vi.mock('../../rules', () => ({
+  matchSiteRule: vi.fn(),
+  buildSitePrompt: vi.fn(() => ''),
+}));
+
+import { matchSiteRule } from '../../rules';
 
 function setupHTML(html: string): Document {
   document.body.innerHTML = html;
@@ -1861,6 +1869,169 @@ describe('extractBlocks - Mixed real-world article', () => {
 
     const pBlocks = blocks.filter(b => b.tag === 'p');
     expect(pBlocks.length).toBe(3);
+  });
+});
+
+describe('extractBlocks - Site Rule Skip Selectors', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    // Reset module-level cache by using a unique URL each time
+    Object.defineProperty(window, 'location', {
+      value: { href: 'https://test-site-' + Math.random().toString(36).slice(2) + '.com/page' },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('should skip elements matching site rule skip selectors', () => {
+    vi.mocked(matchSiteRule).mockReturnValue({
+      siteRule: {
+        hostPattern: 'test-site-*.com',
+        skipSelectors: ['.skip-me'],
+      },
+      matchedPattern: 'test-site-*.com',
+    });
+
+    setupHTML(`
+      <article>
+        <p>This paragraph should be extracted normally.</p>
+        <div class="skip-me">
+          <p>This paragraph should be skipped entirely.</p>
+        </div>
+        <p>Another extractable paragraph with enough text.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('This paragraph should be extracted normally.');
+    expect(texts).toContain('Another extractable paragraph with enough text.');
+    expect(texts.some(t => t.includes('skipped entirely'))).toBe(false);
+  });
+
+  it('should skip elements matching nested skip selectors', () => {
+    vi.mocked(matchSiteRule).mockReturnValue({
+      siteRule: {
+        hostPattern: 'test-site-*.com',
+        skipSelectors: ['.sidebar'],
+      },
+      matchedPattern: 'test-site-*.com',
+    });
+
+    setupHTML(`
+      <article>
+        <p>Visible paragraph with enough text to extract.</p>
+        <aside class="sidebar">
+          <p>This sidebar content should be skipped.</p>
+        </aside>
+        <p>Another visible paragraph with sufficient text content.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts.some(t => t.includes('sidebar content'))).toBe(false);
+    expect(texts.some(t => t.includes('Visible paragraph'))).toBe(true);
+  });
+
+  it('should skip descendants of elements matching skip selectors', () => {
+    vi.mocked(matchSiteRule).mockReturnValue({
+      siteRule: {
+        hostPattern: 'test-site-*.com',
+        skipSelectors: ['.comments-section'],
+      },
+      matchedPattern: 'test-site-*.com',
+    });
+
+    setupHTML(`
+      <article>
+        <p>Main article text that should be extracted normally.</p>
+        <div class="comments-section">
+          <div class="comment">
+            <p>User comment that should be skipped completely.</p>
+          </div>
+          <div class="comment">
+            <p>Another user comment to skip with enough text.</p>
+          </div>
+        </div>
+        <p>Conclusion paragraph that should be extracted normally.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts.some(t => t.includes('User comment'))).toBe(false);
+    expect(texts.some(t => t.includes('Main article text'))).toBe(true);
+    expect(texts.some(t => t.includes('Conclusion paragraph'))).toBe(true);
+  });
+
+  it('should handle multiple skip selectors', () => {
+    vi.mocked(matchSiteRule).mockReturnValue({
+      siteRule: {
+        hostPattern: 'test-site-*.com',
+        skipSelectors: ['.header', '.footer', '.nav'],
+      },
+      matchedPattern: 'test-site-*.com',
+    });
+
+    setupHTML(`
+      <div class="header">
+        <p>Header content with enough text to test.</p>
+      </div>
+      <article>
+        <p>Main content that should be extracted normally.</p>
+      </article>
+      <div class="footer">
+        <p>Footer content with enough text to test.</p>
+      </div>
+      <div class="nav">
+        <p>Navigation content with enough text to test.</p>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts.some(t => t.includes('Header content'))).toBe(false);
+    expect(texts.some(t => t.includes('Footer content'))).toBe(false);
+    expect(texts.some(t => t.includes('Navigation content'))).toBe(false);
+    expect(texts.some(t => t.includes('Main content'))).toBe(true);
+  });
+
+  it('should not skip anything when no site rule matches', () => {
+    vi.mocked(matchSiteRule).mockReturnValue(null);
+
+    setupHTML(`
+      <article>
+        <p>First paragraph with enough text to extract.</p>
+        <p>Second paragraph with enough text to extract.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(2);
+  });
+
+  it('should not skip when site rule has no skipSelectors', () => {
+    vi.mocked(matchSiteRule).mockReturnValue({
+      siteRule: {
+        hostPattern: 'test-site-*.com',
+      },
+      matchedPattern: 'test-site-*.com',
+    });
+
+    setupHTML(`
+      <article>
+        <p>All paragraphs should be extracted normally.</p>
+        <p>Another paragraph with enough text content.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(2);
   });
 });
 

@@ -116,7 +116,7 @@ async function checkApiKey() {
 async function triggerTranslate() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
-    browser.tabs.sendMessage(tab.id, { action: 'translatePage' });
+    browser.tabs.sendMessage(tab.id, { action: 'translatePage' }).catch(() => {});
     window.close();
   }
 }
@@ -124,7 +124,7 @@ async function triggerTranslate() {
 async function restoreOriginal() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
-    browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' });
+    browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' }).catch(() => {});
   }
 }
 

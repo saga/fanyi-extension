@@ -54,7 +54,9 @@ export function prepareSelectionTask(text: string): string {
   return JSON.stringify([{ id: 'b1', text }]);
 }
 
-export function clearAllCache(): void {
-  analysisCache.clear();
-  translationCache.clear();
+export async function clearAllCache(): Promise<void> {
+  await Promise.all([
+    analysisCache.clear(),
+    translationCache.clear(),
+  ]);
 }

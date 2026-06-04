@@ -49,7 +49,7 @@ export default defineContentScript({
       let tapCount = 0;
       let tapTimer: number | undefined;
 
-      document.body.addEventListener('touchstart', async (event: TouchEvent) => {
+      const handleTouchStart = async (event: TouchEvent) => {
         // Ignore if touching UI elements
         const target = event.target as Element;
         if (target.closest('.fanyi-config-panel') || 
@@ -93,7 +93,9 @@ export default defineContentScript({
             }
           }
         }
-      }, { passive: true });
+      };
+
+      document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
     }
 
     function setupFloatingButton() {
@@ -567,10 +569,19 @@ export default defineContentScript({
               chunkMap.set(id, text);
             }
             applyPromises.push(new Promise<void>(resolve => {
-              requestAnimationFrame(() => {
+              let applied = false;
+              const frameId = requestAnimationFrame(() => {
+                applied = true;
                 applyTranslations(chunkMap, nodeMap, mode);
                 resolve();
               });
+              // Fallback: resolve after 5s if rAF never fires (hidden tab)
+              setTimeout(() => {
+                if (applied) return;
+                cancelAnimationFrame(frameId);
+                applyTranslations(chunkMap, nodeMap, mode);
+                resolve();
+              }, 5000);
             }));
           } else {
             hasFailure = true;

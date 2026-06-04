@@ -5,7 +5,6 @@ export interface TextBlock {
   xpath: string;
   tag: string;
   text: string;
-  element?: WeakRef<Element>;  // 直接保存节点引用，避免 XPath 查询
   context?: {
     headingPath: string[];
     position: number;
@@ -172,7 +171,6 @@ function shouldSkipBySiteRules(el: Element): boolean {
   if (!rule?.skipSelectors) return false;
   
   for (const selector of rule.skipSelectors) {
-    if (el.matches(selector)) return true;
     if (el.closest(selector)) return true;
   }
   return false;
