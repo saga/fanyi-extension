@@ -42,7 +42,7 @@ Rules:
       },
     ],
     response_format: { type: 'json_object' },
-    reasoning_effort: 'low',
+    thinking: { type: 'disabled' },
     stream: false,
   });
 }
@@ -93,7 +93,7 @@ Rules:
       },
     ],
     response_format: { type: 'json_object' },
-    reasoning_effort: 'low',
+    thinking: { type: 'disabled' },
     stream: false,
   });
 }
