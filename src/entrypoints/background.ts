@@ -8,23 +8,9 @@ import {
   clearAllCache,
 } from './utils/translateApi';
 import { globalQueue } from './utils/translationQueue';
+import { generateTranslationCacheKey } from './utils/cacheKey';
 import { matchSiteRule, buildSitePrompt } from '../rules';
 import type { SiteRule } from '../rules/types';
-
-function generateTranslationCacheKey(
-  jsonContent: string,
-  sourceLang: string,
-  targetLang: string
-): string {
-  let hash = 0;
-  const combined = `${jsonContent}_${sourceLang}_${targetLang}`;
-  for (let i = 0; i < combined.length; i++) {
-    const char = combined.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & 0x7fffffff;
-  }
-  return `translation_${hash}`;
-}
 
 export default defineBackground({
   persistent: {

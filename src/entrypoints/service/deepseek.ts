@@ -47,6 +47,30 @@ Rules:
   });
 }
 
+export function filterRelevantGlossary(
+  blocks: Array<{ id: string; text: string }>,
+  glossary?: GlossaryEntry[]
+): GlossaryEntry[] | undefined {
+  if (!glossary || glossary.length === 0) return undefined;
+
+  const chunkText = blocks.map((b) => b.text).join(' ').toLowerCase();
+  const relevant = glossary.filter((g) => {
+    const termLower = g.term.toLowerCase();
+    // 使用词边界匹配：术语前后必须是空白、标点或字符串边界
+    // 将术语中的特殊正则字符转义
+    const escaped = termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(
+      `(?:^|[\\s\\p{P}])${escaped}(?:$|[\\s\\p{P}])`,
+      'u'
+    );
+    return pattern.test(chunkText);
+  });
+
+  if (relevant.length === 0) return undefined;
+  console.log(`[DeepSeek] Filtered glossary: ${relevant.length}/${glossary.length} terms relevant to this chunk`);
+  return relevant;
+}
+
 function buildTranslationBody(
   blocks: Array<{ id: string; text: string }>,
   sourceLang: string,
@@ -69,8 +93,9 @@ Rules:
 - No omissions
 - Return JSON only`;
 
-  if (glossary && glossary.length > 0) {
-    const glossaryLines = glossary
+  const relevantGlossary = filterRelevantGlossary(blocks, glossary);
+  if (relevantGlossary && relevantGlossary.length > 0) {
+    const glossaryLines = relevantGlossary
       .map((g) => `- "${g.term}" → "${g.translation}"`)
       .join('\n');
     systemContent += `\n\nTerminology glossary (MUST follow these translations):\n${glossaryLines}`;

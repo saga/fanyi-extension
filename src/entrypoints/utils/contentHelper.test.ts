@@ -1,171 +1,127 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { TextBlock } from './blockExtractor';
-import type { Chunk } from './chunkBuilder';
-
-const mockExtractBlocks = vi.fn();
-const mockBuildChunks = vi.fn();
-
-vi.mock('./blockExtractor', () => ({
-  extractBlocks: (...args: any[]) => mockExtractBlocks(...args),
-}));
-
-vi.mock('./chunkBuilder', () => ({
-  buildChunks: (...args: any[]) => mockBuildChunks(...args),
-}));
-
+import { describe, it, expect, beforeEach } from 'vitest';
 import { prepareDocument } from './contentHelper';
 
 describe('prepareDocument', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    document.body.innerHTML = '';
   });
 
-  const makeBlock = (id: string, text: string): TextBlock => ({
-    id,
-    tag: 'p',
-    text,
-    xpath: `/${id}`,
+  it('should use article element as root when present', () => {
+    document.body.innerHTML = `
+      <nav>Navigation content</nav>
+      <article>
+        <h1>Article Title</h1>
+        <p>Article paragraph one.</p>
+        <p>Article paragraph two.</p>
+      </article>
+      <footer>Footer content</footer>
+    `;
+
+    const { blocks, fullText } = prepareDocument(document);
+
+    // 应该只提取 article 内的内容
+    expect(fullText).toContain('Article Title');
+    expect(fullText).toContain('Article paragraph one');
+    expect(fullText).toContain('Article paragraph two');
+    expect(fullText).not.toContain('Navigation content');
+    expect(fullText).not.toContain('Footer content');
+    expect(blocks.length).toBeGreaterThan(0);
   });
 
-  const makeChunk = (id: string, blocks: TextBlock[]): Chunk => ({
-    id,
-    blocks,
-    estimatedTokens: blocks.reduce((sum, b) => sum + Math.ceil(b.text.length / 4), 0),
-    jsonContent: JSON.stringify(blocks.map((b) => ({ id: b.id, text: b.text }))),
+  it('should use role="main" when article is not present', () => {
+    document.body.innerHTML = `
+      <nav>Navigation</nav>
+      <div role="main">
+        <h1>Main Content</h1>
+        <p>Main paragraph.</p>
+      </div>
+      <aside>Sidebar</aside>
+    `;
+
+    const { fullText } = prepareDocument(document);
+
+    expect(fullText).toContain('Main Content');
+    expect(fullText).toContain('Main paragraph');
+    expect(fullText).not.toContain('Navigation');
+    expect(fullText).not.toContain('Sidebar');
   });
 
-  it('calls extractBlocks with the root element', () => {
-    const root = document.createElement('div');
-    const blocks = [makeBlock('b1', 'Hello')];
-    mockExtractBlocks.mockReturnValue(blocks);
-    mockBuildChunks.mockReturnValue([makeChunk('chunk1', blocks)]);
+  it('should use main element when available', () => {
+    document.body.innerHTML = `
+      <header>Header</header>
+      <main>
+        <h1>Main Element Content</h1>
+        <p>Paragraph in main.</p>
+      </main>
+    `;
 
-    prepareDocument(root);
+    const { fullText } = prepareDocument(document);
 
-    expect(mockExtractBlocks).toHaveBeenCalledWith(root);
+    expect(fullText).toContain('Main Element Content');
+    expect(fullText).not.toContain('Header');
   });
 
-  it('calls buildChunks with extracted blocks', () => {
-    const root = document.createElement('div');
-    const blocks = [makeBlock('b1', 'Hello'), makeBlock('b2', 'World')];
-    mockExtractBlocks.mockReturnValue(blocks);
-    mockBuildChunks.mockReturnValue([makeChunk('chunk1', blocks)]);
+  it('should use class-based article container', () => {
+    document.body.innerHTML = `
+      <div class="article-content">
+        <h1>Class Article</h1>
+        <p>Content here.</p>
+      </div>
+    `;
 
-    prepareDocument(root);
+    const { fullText } = prepareDocument(document);
 
-    expect(mockBuildChunks).toHaveBeenCalledWith(blocks);
+    expect(fullText).toContain('Class Article');
+    expect(fullText).toContain('Content here');
   });
 
-  it('returns blocks, chunks, and fullText', () => {
-    const root = document.createElement('div');
-    const blocks = [
-      makeBlock('b1', 'Hello world'),
-      makeBlock('b2', 'Goodbye world'),
-    ];
-    const chunks = [makeChunk('chunk1', blocks)];
-    mockExtractBlocks.mockReturnValue(blocks);
-    mockBuildChunks.mockReturnValue(chunks);
+  it('should fallback to body when no article container found', () => {
+    document.body.innerHTML = `
+      <div>
+        <h1>Plain Page</h1>
+        <p>Some content.</p>
+      </div>
+    `;
 
-    const result = prepareDocument(root);
+    const { fullText } = prepareDocument(document);
 
-    expect(result.blocks).toEqual(blocks);
-    expect(result.chunks).toEqual(chunks);
-    expect(result.fullText).toBe('Hello world\n\nGoodbye world');
+    expect(fullText).toContain('Plain Page');
+    expect(fullText).toContain('Some content');
   });
 
-  it('joins block texts with double newline for fullText', () => {
-    const root = document.createElement('div');
-    const blocks = [
-      makeBlock('b1', 'Line 1'),
-      makeBlock('b2', 'Line 2'),
-      makeBlock('b3', 'Line 3'),
-    ];
-    mockExtractBlocks.mockReturnValue(blocks);
-    mockBuildChunks.mockReturnValue([makeChunk('chunk1', blocks)]);
+  it('should prefer article over role=main', () => {
+    document.body.innerHTML = `
+      <div role="main">
+        <p>Main role content</p>
+      </div>
+      <article>
+        <p>Article content</p>
+      </article>
+    `;
 
-    const result = prepareDocument(root);
+    const { fullText } = prepareDocument(document);
 
-    expect(result.fullText).toBe('Line 1\n\nLine 2\n\nLine 3');
+    // article 优先级更高，应该只提取 article 内容
+    expect(fullText).toContain('Article content');
+    expect(fullText).not.toContain('Main role content');
   });
 
-  it('throws when no blocks are extracted', () => {
-    const root = document.createElement('div');
-    mockExtractBlocks.mockReturnValue([]);
+  it('should work with Element root parameter', () => {
+    document.body.innerHTML = `
+      <div id="custom-root">
+        <p>Custom root content.</p>
+      </div>
+    `;
 
-    expect(() => prepareDocument(root)).toThrow('No translatable content found');
-    // buildChunks should not be called when blocks is empty
-    expect(mockBuildChunks).not.toHaveBeenCalled();
+    const customRoot = document.getElementById('custom-root')!;
+    const { fullText } = prepareDocument(customRoot);
+
+    expect(fullText).toContain('Custom root content');
   });
 
-  it('works with a single block', () => {
-    const root = document.createElement('div');
-    const blocks = [makeBlock('b1', 'Solo text')];
-    mockExtractBlocks.mockReturnValue(blocks);
-    mockBuildChunks.mockReturnValue([makeChunk('chunk1', blocks)]);
+  it('should throw when no translatable content found', () => {
+    document.body.innerHTML = '<div></div>';
 
-    const result = prepareDocument(root);
-
-    expect(result.blocks).toHaveLength(1);
-    expect(result.chunks).toHaveLength(1);
-    expect(result.fullText).toBe('Solo text');
-  });
-});
-
-describe('rAF fallback pattern', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('falls back to callback when rAF does not fire (page hidden)', async () => {
-    const callback = vi.fn();
-    let applied = false;
-
-    const frameId = requestAnimationFrame(() => {
-      applied = true;
-      callback();
-    });
-
-    // Simulate page hidden: rAF never fires, but setTimeout does
-    setTimeout(() => {
-      if (applied) return;
-      cancelAnimationFrame(frameId);
-      callback();
-      applied = true;
-    }, 5000);
-
-    // Advance past the 5s timeout
-    vi.advanceTimersByTime(5000);
-
-    expect(callback).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not call callback twice when rAF fires before timeout', async () => {
-    const callback = vi.fn();
-    let applied = false;
-
-    const frameId = requestAnimationFrame(() => {
-      applied = true;
-      callback();
-    });
-
-    setTimeout(() => {
-      if (applied) return;
-      cancelAnimationFrame(frameId);
-      callback();
-      applied = true;
-    }, 5000);
-
-    // rAF fires immediately (via fake timers, it runs synchronously)
-    vi.advanceTimersToNextFrame();
-    expect(callback).toHaveBeenCalledTimes(1);
-    expect(applied).toBe(true);
-
-    // Now advance past the timeout — should not call again
-    vi.advanceTimersByTime(5000);
-    expect(callback).toHaveBeenCalledTimes(1);
+    expect(() => prepareDocument(document)).toThrow('No translatable content found');
   });
 });
