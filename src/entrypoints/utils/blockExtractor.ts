@@ -194,7 +194,32 @@ function isElementHidden(el: Element): boolean {
 function isValidText(text: string | undefined | null): boolean {
   if (!text) return false;
   const trimmed = text.trim();
-  return trimmed.length >= MIN_TEXT_LENGTH && trimmed.length < MAX_TEXT_LENGTH;
+  if (trimmed.length < MIN_TEXT_LENGTH || trimmed.length >= MAX_TEXT_LENGTH) {
+    return false;
+  }
+  // Generic filters for non-user-readable noise that occasionally appears in
+  // the DOM (Sentry/Webpack chunk tables, minified JS, base64 blobs, etc.).
+  // These heuristic thresholds are deliberately loose to avoid false
+  // positives on normal text.
+  //   - ≥ 8 repeated ["x", 1234] tuples
+  //   - 200+ chars of base64-ish characters with no whitespace
+  const tupleMatches = trimmed.match(/\[\s*['"][^'"]+['"]\s*,\s*-?\d+(?:\.\d+)?\s*\]/g);
+  if (tupleMatches && tupleMatches.length >= 8) return false;
+  if (/^[A-Za-z0-9+/=_-]{200,}$/.test(trimmed)) return false;
+
+  // Site-specific text patterns declared in the active SiteRule
+  // (e.g. Reddit's Sentry SML.load chunk list).
+  const rule = getSiteRule();
+  if (rule?.skipTextPatterns) {
+    for (const pattern of rule.skipTextPatterns) {
+      try {
+        if (new RegExp(pattern, 'i').test(trimmed)) return false;
+      } catch {
+        // Invalid regex — ignore rather than crash extraction.
+      }
+    }
+  }
+  return true;
 }
 
 function isNonHTMLNamespace(el: Element): boolean {
@@ -473,17 +498,12 @@ function acceptWalkerNode(
   return NodeFilter.FILTER_SKIP;
 }
 
-export function extractBlocks(rootNode: Node): TextBlock[] {
-  const blocks: TextBlock[] = [];
-  let blockId = 0;
+function collectBlocksFromRoot(
+  startNode: Node,
+  blocks: TextBlock[],
+  blockIdRef: { value: number }
+): { rejected: number; skipped: number; accepted: number } {
   const counters = { rejected: 0, skipped: 0, accepted: 0 };
-
-  const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
-  if (!startNode) {
-    console.warn('[BlockExtractor] No valid start node found');
-    return [];
-  }
-
   const walker = document.createTreeWalker(
     startNode,
     NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
@@ -491,12 +511,12 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   );
 
   let currentNode: Node | null;
-  while (currentNode = walker.nextNode()) {
+  while ((currentNode = walker.nextNode()) !== null) {
     const translateNode = grabNode(currentNode);
     if (translateNode) {
       const text = translateNode.textContent?.trim();
       if (text) {
-        const id = `b${++blockId}`;
+        const id = `b${++blockIdRef.value}`;
         if (translateNode instanceof HTMLElement) {
           translateNode.dataset.fanyiBlockId = id;
         }
@@ -507,13 +527,59 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
           text,
           context: {
             headingPath: getHeadingPath(translateNode),
-            position: blockId,
+            position: blockIdRef.value,
           },
         });
       }
     }
   }
 
+  // TreeWalker doesn't cross shadow root boundaries. Walk open shadow roots
+  // explicitly so we can pick up text inside web components like Reddit's
+  // <shreddit-post>.
+  collectFromShadowHosts(startNode, blocks, blockIdRef);
+
+  return counters;
+}
+
+function collectFromShadowHosts(
+  root: Node,
+  blocks: TextBlock[],
+  blockIdRef: { value: number }
+): void {
+  // jsdom's TreeWalker skips nodes whose acceptNode returns FILTER_SKIP
+  // (it should still visit them per spec but does not). Use a permissive
+  // filter (FILTER_ACCEPT for everything) so the host element itself is
+  // returned and we can inspect its shadowRoot.
+  const treeWalker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode: () => NodeFilter.FILTER_ACCEPT,
+    }
+  );
+
+  let currentNode: Node | null;
+  while ((currentNode = treeWalker.nextNode()) !== null) {
+    if (!(currentNode instanceof Element)) continue;
+    const shadow = currentNode.shadowRoot;
+    if (shadow && shadow.mode === 'open') {
+      collectBlocksFromRoot(shadow, blocks, blockIdRef);
+    }
+  }
+}
+
+export function extractBlocks(rootNode: Node): TextBlock[] {
+  const blocks: TextBlock[] = [];
+  const blockIdRef = { value: 0 };
+
+  const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
+  if (!startNode) {
+    console.warn('[BlockExtractor] No valid start node found');
+    return [];
+  }
+
+  collectBlocksFromRoot(startNode, blocks, blockIdRef);
   return blocks;
 }
 

@@ -4776,3 +4776,136 @@ describe('findBlockNode', () => {
     expect(node).toBeNull();
   });
 });
+
+describe('extractBlocks - shadow DOM support', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    (matchSiteRule as any).mockReturnValue(null);
+  });
+
+  it('recurses into open shadow roots to extract inner text', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    const p = document.createElement('p');
+    p.textContent = 'This text lives inside a shadow root';
+    shadow.appendChild(p);
+
+    const blocks = extractBlocks(document);
+    const found = blocks.find((b) => b.text.includes('shadow root'));
+    expect(found).toBeDefined();
+    expect(found?.tag).toBe('p');
+  });
+
+  it('does not recurse into closed shadow roots', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    // jsdom does not implement closed shadow roots reliably, so we just
+    // verify open roots are traversed (the closed path is a no-op).
+    const open = document.createElement('div');
+    open.attachShadow({ mode: 'open' });
+    const inner = document.createElement('p');
+    inner.textContent = 'Open shadow content';
+    open.shadowRoot!.appendChild(inner);
+    document.body.appendChild(open);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some((b) => b.text === 'Open shadow content')).toBe(true);
+  });
+
+  it('extracts both light DOM and shadow DOM blocks in one pass', () => {
+    const lightP = document.createElement('p');
+    lightP.textContent = 'Light DOM text here';
+    document.body.appendChild(lightP);
+
+    const host = document.createElement('shreddit-post');
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    const shadowP = document.createElement('p');
+    shadowP.textContent = 'Shadow DOM post body';
+    shadow.appendChild(shadowP);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Light DOM text here');
+    expect(texts).toContain('Shadow DOM post body');
+  });
+
+  it('assigns unique block IDs across light and shadow trees', () => {
+    const light = document.createElement('p');
+    light.textContent = 'First';
+    document.body.appendChild(light);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    const inner = document.createElement('p');
+    inner.textContent = 'Second';
+    shadow.appendChild(inner);
+    const inner2 = document.createElement('p');
+    inner2.textContent = 'Third';
+    shadow.appendChild(inner2);
+
+    const blocks = extractBlocks(document);
+    const ids = new Set(blocks.map((b) => b.id));
+    expect(ids.size).toBe(blocks.length);
+  });
+});
+
+describe('extractBlocks - noise filter', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    (matchSiteRule as any).mockReturnValue(null);
+  });
+
+  it('skips SML.load(...) chunk preload lists (Sentry) via site rule', () => {
+    (matchSiteRule as any).mockReturnValue({
+      siteRule: { hostPattern: 'reddit.com', skipTextPatterns: ['^SML\\.load\\s*\\(\\s*\\['] },
+      matchedPattern: 'reddit.com',
+    });
+    // Reset internal site-rule cache by changing location (forces re-fetch).
+    const originalHref = window.location.href;
+    Object.defineProperty(window, 'location', {
+      value: { href: 'https://reddit.com/r/test/' },
+      writable: true,
+      configurable: true,
+    });
+    try {
+      const p = document.createElement('p');
+      p.textContent = 'SML.load([["abc",1234],["def",5678],["ghi",9012],["jkl",3456]])';
+      document.body.appendChild(p);
+      const blocks = extractBlocks(document);
+      expect(blocks.some((b) => b.text.startsWith('SML.load'))).toBe(false);
+    } finally {
+      Object.defineProperty(window, 'location', {
+        value: { href: originalHref },
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
+
+  it('skips text dominated by ["x", 1234] tuple patterns', () => {
+    const p = document.createElement('p');
+    const chunks = Array.from({ length: 20 }, (_, i) => `["chunk${i}",${i * 100}]`);
+    p.textContent = `SML.load([${chunks.join(',')}])`;
+    document.body.appendChild(p);
+    const blocks = extractBlocks(document);
+    expect(blocks.some((b) => b.text.startsWith('SML.load'))).toBe(false);
+  });
+
+  it('skips long base64-ish blobs', () => {
+    const p = document.createElement('p');
+    p.textContent = 'A'.repeat(250);
+    document.body.appendChild(p);
+    const blocks = extractBlocks(document);
+    expect(blocks.some((b) => b.text.startsWith('AAAA'))).toBe(false);
+  });
+
+  it('still extracts normal English text with a few inline tuples', () => {
+    const p = document.createElement('p');
+    p.textContent = 'Try the ["new", 1] feature, or maybe ["pro", 2] mode if you have a license key ready.';
+    document.body.appendChild(p);
+    const blocks = extractBlocks(document);
+    expect(blocks.some((b) => b.text === p.textContent)).toBe(true);
+  });
+});

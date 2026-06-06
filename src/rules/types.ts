@@ -16,6 +16,13 @@ export interface SiteRule {
   skipSelectors?: string[];
 
   /**
+   * Regex patterns (as strings) whose text content should be skipped entirely.
+   * Useful for filtering out site-specific noise like Sentry chunk preload
+   * lists injected into the DOM by a particular site.
+   */
+  skipTextPatterns?: string[];
+
+  /**
    * Additional prompt instructions for this site
    */
   promptInstructions?: string;

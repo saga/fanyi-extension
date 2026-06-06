@@ -31,6 +31,11 @@ export const redditRule: SiteRule = {
     'faceplate-blot',
     '[data-click-id="score"]',
   ],
+  // Sentry SDK injects its chunk preload list as a <p> in the DOM. Filter
+  // it out so we don't ship it to the translation model.
+  skipTextPatterns: [
+    '^SML\\.load\\s*\\(\\s*\\[',
+  ],
   promptInstructions:
     'This is a Reddit page. Keep community-specific terms, subreddit names, UI labels like "upvote/downvote/karma", and usernames untranslated.',
 };
