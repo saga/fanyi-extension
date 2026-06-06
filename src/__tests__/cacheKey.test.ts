@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { simpleHash, generateTranslationCacheKey } from './cacheKey';
+import { simpleHash, generateTranslationCacheKey } from '../entrypoints/utils/cacheKey';
 
 describe('simpleHash', () => {
   it('should return consistent hash for same string', () => {

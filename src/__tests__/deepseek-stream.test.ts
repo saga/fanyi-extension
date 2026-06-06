@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DeepSeekTranslationService } from './deepseek';
-
-// Mock streamParser to avoid jsdom ReadableStream issues
-const mockParseSSEStream = vi.fn();
-vi.mock('./streamParser', () => ({
-  parseSSEStream: (...args: any[]) => mockParseSSEStream(...args),
-}));
+import { DeepSeekTranslationService } from '../entrypoints/service/deepseek';
 
 // Mock global fetch
 const globalFetch = vi.fn();
@@ -19,37 +13,55 @@ describe('DeepSeekTranslationService.translateStream', () => {
     vi.clearAllMocks();
   });
 
+  function createMockReader(deltas: string[]) {
+    const encoder = new TextEncoder();
+    const events = deltas.map(d => `data: {"choices":[{"delta":{"content":"${d}"}}]}\n\n`);
+    events.push('data: [DONE]\n\n');
+
+    // Concatenate all events into a single Uint8Array to avoid jsdom ReadableStream issues
+    const fullData = events.join('');
+    const chunk = encoder.encode(fullData);
+    let consumed = false;
+
+    return {
+      read: vi.fn().mockImplementation(() => {
+        if (!consumed) {
+          consumed = true;
+          return Promise.resolve({ done: false, value: chunk });
+        }
+        return Promise.resolve({ done: true, value: undefined });
+      }),
+      releaseLock: vi.fn(),
+    };
+  }
+
+  function createMockResponse(deltas: string[], status = 200) {
+    return {
+      ok: status === 200,
+      status,
+      body: {
+        getReader: () => createMockReader(deltas),
+      },
+      text: vi.fn().mockResolvedValue(''),
+    };
+  }
+
   async function consumeStream(stream: AsyncGenerator<string, string, unknown>): Promise<{ values: string[]; returnValue: string }> {
     const values: string[] = [];
     let returnValue = '';
-    try {
-      while (true) {
-        const result = await stream.next();
-        if (result.done) {
-          returnValue = result.value as string;
-          break;
-        }
-        values.push(result.value);
+    while (true) {
+      const result = await stream.next();
+      if (result.done) {
+        returnValue = result.value as string;
+        break;
       }
-    } catch (e) {
-      throw e;
+      values.push(result.value);
     }
     return { values, returnValue };
   }
 
   it('should yield accumulated content for each delta', async () => {
-    mockParseSSEStream.mockImplementation(async function* () {
-      yield 'Hello';
-      yield ' world';
-      yield '!';
-    });
-
-    const mockResponse = {
-      ok: true,
-      status: 200,
-      body: { getReader: vi.fn() },
-      text: vi.fn().mockResolvedValue(''),
-    };
+    const mockResponse = createMockResponse(['Hello', ' world', '!']);
     globalFetch.mockResolvedValue(mockResponse);
 
     const stream = service.translateStream(
@@ -64,16 +76,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
   });
 
   it('should set stream=true in request body', async () => {
-    mockParseSSEStream.mockImplementation(async function* () {
-      yield 'test';
-    });
-
-    const mockResponse = {
-      ok: true,
-      status: 200,
-      body: { getReader: vi.fn() },
-      text: vi.fn().mockResolvedValue(''),
-    };
+    const mockResponse = createMockResponse(['test']);
     globalFetch.mockResolvedValue(mockResponse);
 
     const stream = service.translateStream(
@@ -91,16 +94,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
   });
 
   it('should include Authorization header', async () => {
-    mockParseSSEStream.mockImplementation(async function* () {
-      yield 'test';
-    });
-
-    const mockResponse = {
-      ok: true,
-      status: 200,
-      body: { getReader: vi.fn() },
-      text: vi.fn().mockResolvedValue(''),
-    };
+    const mockResponse = createMockResponse(['test']);
     globalFetch.mockResolvedValue(mockResponse);
 
     const stream = service.translateStream(
@@ -155,17 +149,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
   });
 
   it('should return final content as generator return value', async () => {
-    mockParseSSEStream.mockImplementation(async function* () {
-      yield 'Hello';
-      yield ' world';
-    });
-
-    const mockResponse = {
-      ok: true,
-      status: 200,
-      body: { getReader: vi.fn() },
-      text: vi.fn().mockResolvedValue(''),
-    };
+    const mockResponse = createMockResponse(['Hello', ' world']);
     globalFetch.mockResolvedValue(mockResponse);
 
     const stream = service.translateStream(
@@ -180,16 +164,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
   });
 
   it('should handle empty stream', async () => {
-    mockParseSSEStream.mockImplementation(async function* () {
-      // no yields
-    });
-
-    const mockResponse = {
-      ok: true,
-      status: 200,
-      body: { getReader: vi.fn() },
-      text: vi.fn().mockResolvedValue(''),
-    };
+    const mockResponse = createMockResponse([]);
     globalFetch.mockResolvedValue(mockResponse);
 
     const stream = service.translateStream(
@@ -204,16 +179,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
   });
 
   it('should handle glossary in request', async () => {
-    mockParseSSEStream.mockImplementation(async function* () {
-      yield 'test';
-    });
-
-    const mockResponse = {
-      ok: true,
-      status: 200,
-      body: { getReader: vi.fn() },
-      text: vi.fn().mockResolvedValue(''),
-    };
+    const mockResponse = createMockResponse(['test']);
     globalFetch.mockResolvedValue(mockResponse);
 
     const glossary = [{ term: 'React', translation: 'React' }];

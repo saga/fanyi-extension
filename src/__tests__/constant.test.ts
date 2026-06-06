@@ -6,7 +6,7 @@ import {
   TRANSLATION_MODES,
   STORAGE_KEYS,
   CHUNK_CONFIG,
-} from './constant';
+} from '../entrypoints/utils/constant';
 
 describe('constant', () => {
   describe('TRANSLATION_ENGINE', () => {

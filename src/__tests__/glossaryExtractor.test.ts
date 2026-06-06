@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractGlossaryLocal } from './glossaryExtractor';
+import { extractGlossaryLocal } from '../entrypoints/utils/glossaryExtractor';
 
 describe('extractGlossaryLocal', () => {
   it('extracts acronyms from text', () => {

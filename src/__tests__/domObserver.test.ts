@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { DOMObserverManager } from './domObserver';
-import type { TextBlock } from './blockExtractor';
+import { DOMObserverManager } from '../entrypoints/utils/domObserver';
+import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 
 // Mock IntersectionObserver (jsdom doesn't support it)
 const mockObserve = vi.fn();

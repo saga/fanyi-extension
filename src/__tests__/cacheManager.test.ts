@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CacheManager } from './cacheManager';
+import { CacheManager } from '../entrypoints/utils/cacheManager';
 
 // Mock @wxt-dev/storage
 const store: Record<string, any> = {};

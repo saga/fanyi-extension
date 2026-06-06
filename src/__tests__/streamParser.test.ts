@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSSELine, extractDeltaContent, parseSSEStream } from './streamParser';
+import { parseSSELine, extractDeltaContent, parseSSEStream } from '../entrypoints/service/streamParser';
 
 describe('parseSSELine', () => {
   it('should parse valid SSE data line', () => {

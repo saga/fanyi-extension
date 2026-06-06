@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getCenterPoint } from './common';
+import { getCenterPoint } from '../entrypoints/utils/common';
 
 function createTouchList(touches: Array<{ clientX: number; clientY: number }>): TouchList {
   return touches.map(t => ({

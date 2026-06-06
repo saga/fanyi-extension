@@ -13,8 +13,8 @@ vi.mock('@wxt-dev/storage', () => {
   };
 });
 
-import { getConfig, setConfig, resetConfig, hasApiKey } from './config';
-import type { Config } from './config';
+import { getConfig, setConfig, resetConfig, hasApiKey } from '../entrypoints/utils/config';
+import type { Config } from '../entrypoints/utils/config';
 
 const defaultConfig: Config = {
   enabled: true,

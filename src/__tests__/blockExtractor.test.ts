@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { extractBlocks, findBlockNode, buildNodeMap } from './blockExtractor';
+import { extractBlocks, findBlockNode, buildNodeMap } from '../entrypoints/utils/blockExtractor';
 
 // Mock matchSiteRule for shouldSkipBySiteRules tests
-vi.mock('../../rules', () => ({
+vi.mock('../rules', () => ({
   matchSiteRule: vi.fn(),
   buildSitePrompt: vi.fn(() => ''),
 }));
 
-import { matchSiteRule } from '../../rules';
+import { matchSiteRule } from '../rules';
 
 function setupHTML(html: string): Document {
   document.body.innerHTML = html;

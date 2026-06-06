@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildChunks } from './chunkBuilder';
-import type { TextBlock } from './blockExtractor';
+import { buildChunks } from '../entrypoints/utils/chunkBuilder';
+import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 
 function makeBlock(id: string, tag: string, text: string): TextBlock {
   return { id, tag, text, xpath: `/${id}` };

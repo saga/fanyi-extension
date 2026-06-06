@@ -7,7 +7,7 @@ const mockCache = {
   clear: vi.fn(),
 };
 
-vi.mock('./cacheManager', () => ({
+vi.mock('../entrypoints/utils/cacheManager', () => ({
   analysisCache: {
     get: (...args: any[]) => mockCache.get(...args),
     set: (...args: any[]) => mockCache.set(...args),
@@ -26,7 +26,7 @@ import {
   getCachedTranslation,
   cacheTranslation,
   clearAllCache,
-} from './translateApi';
+} from '../entrypoints/utils/translateApi';
 
 describe('processTranslationResult', () => {
   it('parses JSON with translations array', () => {

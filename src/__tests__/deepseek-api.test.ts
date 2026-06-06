@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DeepSeekTranslationService } from './deepseek';
+import { DeepSeekTranslationService } from '../entrypoints/service/deepseek';
 
 // Mock global fetch
 const globalFetch = vi.fn();

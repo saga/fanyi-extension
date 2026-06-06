@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { GESTURES } from './constants';
-import type { GestureType } from './constants';
+import { GESTURES } from '../entrypoints/utils/constants';
+import type { GestureType } from '../entrypoints/utils/constants';
 
 describe('constants', () => {
   describe('GESTURES', () => {

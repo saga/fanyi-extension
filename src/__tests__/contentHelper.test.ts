@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { prepareDocument } from './contentHelper';
+import { prepareDocument } from '../entrypoints/utils/contentHelper';
 
 describe('prepareDocument', () => {
   beforeEach(() => {

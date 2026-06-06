@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterRelevantGlossary } from './deepseek';
+import { filterRelevantGlossary } from '../entrypoints/service/deepseek';
 
 describe('filterRelevantGlossary', () => {
   it('should return undefined when glossary is empty', () => {

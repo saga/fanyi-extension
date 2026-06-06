@@ -3,7 +3,7 @@ import {
   applyBlockTranslation,
   restoreBlock,
   toggleBlockTranslation,
-} from './translationDisplay';
+} from '../entrypoints/utils/translationDisplay';
 
 function createP(text: string): HTMLParagraphElement {
   const p = document.createElement('p');
@@ -46,21 +46,80 @@ describe('applyBlockTranslation', () => {
   });
 
   describe('target mode', () => {
-    it('replaces text content with translation', () => {
+    it('hides original and shows translation in spans', () => {
       const p = createP('Hello world');
       applyBlockTranslation(p, '你好世界', 'target');
 
-      expect(p.textContent).toBe('你好世界');
       expect(p.classList.contains('fanyi-translated')).toBe(true);
       expect(p.dataset.originalText).toBe('Hello world');
+
+      const originalSpan = p.querySelector('.fanyi-original') as HTMLElement;
+      const translationSpan = p.querySelector('.fanyi-translation');
+
+      expect(originalSpan).not.toBeNull();
+      expect(translationSpan).not.toBeNull();
+      expect(originalSpan.style.display).toBe('none');
+      expect(originalSpan.textContent).toBe('Hello world');
+      expect(translationSpan?.textContent).toBe('你好世界');
+    });
+  });
+
+  describe('DOM preservation (regression for link/formatting breakage)', () => {
+    it('bilingual: preserves nested <a> links and keeps them clickable', () => {
+      const p = document.createElement('p');
+      p.innerHTML = 'Read <a href="https://example.com">this guide</a> please';
+      const originalLink = p.querySelector('a')!;
+
+      applyBlockTranslation(p, '请阅读本指南', 'bilingual');
+
+      // Original link must still exist and be the same element (preserved).
+      const linkAfter = p.querySelector('.fanyi-original a');
+      expect(linkAfter).not.toBeNull();
+      expect(linkAfter).toBe(originalLink);
+      expect(linkAfter?.getAttribute('href')).toBe('https://example.com');
+      expect(linkAfter?.textContent).toBe('this guide');
+
+      // Translation must live in its own span alongside.
+      const translation = p.querySelector('.fanyi-translation');
+      expect(translation?.textContent).toBe('请阅读本指南');
     });
 
-    it('does not create spans in target mode', () => {
-      const p = createP('Hello world');
+    it('target: preserves nested <a> links and hides the original span', () => {
+      const p = document.createElement('p');
+      p.innerHTML = 'Read <a href="https://example.com">this guide</a> please';
+      const originalLink = p.querySelector('a')!;
+
+      applyBlockTranslation(p, '请阅读本指南', 'target');
+
+      const linkAfter = p.querySelector('.fanyi-original a');
+      expect(linkAfter).not.toBeNull();
+      expect(linkAfter).toBe(originalLink);
+      // Original span is hidden in target mode; link lives inside it.
+      const originalSpan = p.querySelector('.fanyi-original') as HTMLElement;
+      expect(originalSpan.style.display).toBe('none');
+    });
+
+    it('bilingual: preserves <strong>, <em>, <code> children', () => {
+      const p = document.createElement('p');
+      p.innerHTML = 'Click <strong>here</strong> or <em>there</em> for <code>code</code>';
+
+      applyBlockTranslation(p, '点此或那里看代码', 'bilingual');
+
+      const original = p.querySelector('.fanyi-original')!;
+      expect(original.querySelector('strong')?.textContent).toBe('here');
+      expect(original.querySelector('em')?.textContent).toBe('there');
+      expect(original.querySelector('code')?.textContent).toBe('code');
+    });
+
+    it('target: original span is hidden but children still exist', () => {
+      const p = document.createElement('p');
+      p.innerHTML = 'Hello <strong>world</strong>';
+
       applyBlockTranslation(p, '你好世界', 'target');
 
-      expect(p.querySelector('.fanyi-original')).toBeNull();
-      expect(p.querySelector('.fanyi-translation')).toBeNull();
+      const original = p.querySelector('.fanyi-original') as HTMLElement;
+      expect(original.querySelector('strong')?.textContent).toBe('world');
+      expect(original.style.display).toBe('none');
     });
   });
 });
@@ -70,23 +129,26 @@ describe('restoreBlock', () => {
     document.body.innerHTML = '';
   });
 
-  it('restores original text from dataset in bilingual mode', () => {
+  it('restores original text and removes spans in bilingual mode', () => {
     const p = createP('Hello world');
     applyBlockTranslation(p, '你好世界', 'bilingual');
     restoreBlock(p);
 
     expect(p.textContent).toBe('Hello world');
     expect(p.classList.contains('fanyi-translated')).toBe(false);
-    expect(p.dataset.originalText).toBeUndefined();
+    expect(p.querySelector('.fanyi-translation')).toBeNull();
+    expect(p.querySelector('.fanyi-original')).toBeNull();
   });
 
-  it('restores original text from dataset in target mode', () => {
+  it('restores original text and removes spans in target mode', () => {
     const p = createP('Hello world');
     applyBlockTranslation(p, '你好世界', 'target');
     restoreBlock(p);
 
     expect(p.textContent).toBe('Hello world');
     expect(p.classList.contains('fanyi-translated')).toBe(false);
+    expect(p.querySelector('.fanyi-translation')).toBeNull();
+    expect(p.querySelector('.fanyi-original')).toBeNull();
   });
 
   it('handles element without originalText gracefully', () => {
@@ -96,6 +158,34 @@ describe('restoreBlock', () => {
 
     expect(p.textContent).toBe('Hello world');
     expect(p.classList.contains('fanyi-translated')).toBe(false);
+  });
+
+  it('bilingual: restores nested <a> links so they are clickable again', () => {
+    const p = document.createElement('p');
+    p.innerHTML = 'Read <a href="https://example.com">this guide</a> please';
+
+    applyBlockTranslation(p, '请阅读本指南', 'bilingual');
+    restoreBlock(p);
+
+    // After restore, the <a> should be a direct child of <p> again.
+    const link = p.querySelector('a');
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute('href')).toBe('https://example.com');
+    expect(link?.textContent).toBe('this guide');
+    expect(p.querySelector('.fanyi-original')).toBeNull();
+    expect(p.querySelector('.fanyi-translation')).toBeNull();
+  });
+
+  it('target: restores nested children after restore', () => {
+    const p = document.createElement('p');
+    p.innerHTML = 'Hello <strong>world</strong>';
+
+    applyBlockTranslation(p, '你好世界', 'target');
+    restoreBlock(p);
+
+    expect(p.querySelector('strong')?.textContent).toBe('world');
+    expect(p.children.length).toBe(1);
+    expect(p.children[0].tagName).toBe('STRONG');
   });
 });
 
@@ -162,10 +252,12 @@ describe('full workflow', () => {
     document.body.appendChild(p);
 
     applyBlockTranslation(p, '你好世界', 'target');
-    expect(p.textContent).toBe('你好世界');
+    expect(p.querySelector('.fanyi-translation')?.textContent).toBe('你好世界');
 
     restoreBlock(p);
     expect(p.textContent).toBe('Hello world');
+    expect(p.querySelector('.fanyi-original')).toBeNull();
+    expect(p.querySelector('.fanyi-translation')).toBeNull();
   });
 
   it('preserves element tag and inherits original styling', () => {

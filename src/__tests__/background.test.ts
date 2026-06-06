@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies before importing background logic
-const mockSendMessage = vi.fn();
 const mockTabsSendMessage = vi.fn();
 const mockContextMenusCreate = vi.fn();
 const mockCommandsGetAll = vi.fn();
@@ -38,7 +37,7 @@ vi.mock('webextension-polyfill', () => ({
 // Mock config
 const mockGetConfig = vi.fn();
 const mockSetConfig = vi.fn();
-vi.mock('./utils/config', () => ({
+vi.mock('../entrypoints/utils/config', () => ({
   getConfig: mockGetConfig,
   setConfig: mockSetConfig,
 }));
@@ -48,7 +47,7 @@ const mockGetCachedTranslation = vi.fn();
 const mockCacheTranslation = vi.fn();
 const mockProcessTranslationResult = vi.fn();
 const mockClearAllCache = vi.fn();
-vi.mock('./utils/translateApi', () => ({
+vi.mock('../entrypoints/utils/translateApi', () => ({
   getCachedTranslation: mockGetCachedTranslation,
   cacheTranslation: mockCacheTranslation,
   processTranslationResult: mockProcessTranslationResult,
@@ -57,13 +56,13 @@ vi.mock('./utils/translateApi', () => ({
 
 // Mock translationQueue
 const mockQueueAdd = vi.fn();
-vi.mock('./utils/translationQueue', () => ({
+vi.mock('../entrypoints/utils/translationQueue', () => ({
   globalQueue: { add: mockQueueAdd },
 }));
 
 // Mock cacheKey
 const mockGenerateCacheKey = vi.fn();
-vi.mock('./utils/cacheKey', () => ({
+vi.mock('../entrypoints/utils/cacheKey', () => ({
   generateTranslationCacheKey: mockGenerateCacheKey,
 }));
 
@@ -78,8 +77,8 @@ vi.mock('../rules', () => ({
 // Mock DeepSeekTranslationService
 const mockTranslate = vi.fn();
 const mockTranslateStream = vi.fn();
-vi.mock('./service/deepseek', () => ({
-  DeepSeekTranslationService: vi.fn().mockImplementation((apiKey: string) => ({
+vi.mock('../entrypoints/service/deepseek', () => ({
+  DeepSeekTranslationService: vi.fn().mockImplementation(() => ({
     translate: mockTranslate,
     translateStream: mockTranslateStream,
   })),
@@ -270,7 +269,7 @@ describe('background message handlers', () => {
           setTimeout(() => reject(new Error('请求超时（10秒）')), 10000);
         });
 
-        const result = await Promise.race([
+        await Promise.race([
           service.translate(testContent, 'en', 'zh', []),
           timeout,
         ]);
