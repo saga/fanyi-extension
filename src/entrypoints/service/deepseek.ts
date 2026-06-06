@@ -88,15 +88,10 @@ function buildTranslationBody(
 
   const targetLangName = targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
 
-  let systemContent = `You are a professional web page translator. Translate every text block from ${sourceLang === 'en' ? 'English' : sourceLang} to ${targetLangName}.
-
-CRITICAL RULES — violating any of these is a failure:
-1. TRANSLATE EVERY BLOCK. Every input block must produce an output entry — never skip, merge, or drop a block. If the input has N items, the output must have exactly N items.
-2. ALWAYS PRODUCE A TRANSLATION. For every block, write a translation in ${targetLangName}. The output must NOT be the same as the input. If the input appears to already be in ${targetLangName} (a rare edge case), still re-render it as natural ${targetLangName} (e.g. fix capitalization, normalize punctuation).
-3. PRESERVE IDs EXACTLY. Each output item's "id" must match the corresponding input "id" character-for-character.
-4. PRESERVE STRUCTURE. URLs, code, file names, version numbers, JSON keys, brand names, and proper nouns may be kept as-is, but the surrounding prose MUST be translated.
-5. OUTPUT FORMAT. Return a single JSON object of the form {"translations":[{"id":"<id>","translated_text":"<translation>"}]}. Do not include any other text, markdown fences, or commentary outside this JSON object.
-6. NO OMISSIONS, NO PLACEHOLDERS. Do not return empty strings, "...", or "(unchanged)". Every translated_text must be a real, complete translation.`;
+  let systemContent = `Translate ${sourceLang === 'en' ? 'English' : sourceLang} to ${targetLangName}. Rules:
+1. Return {"translations":[{"id":"x","translated_text":"y"}]}. One entry per input block, same ids. No extra text.
+2. translated_text must NOT equal input text. Never return empty, "...", or placeholder.
+3. Keep URLs, code, version numbers, brand names as-is. Translate everything else.`;
 
   const relevantGlossary = filterRelevantGlossary(blocks, glossary);
   if (relevantGlossary && relevantGlossary.length > 0) {
@@ -119,7 +114,7 @@ CRITICAL RULES — violating any of these is a failure:
       },
       {
         role: 'user',
-        content: `Translate ALL ${blocks.length} blocks below into ${targetLangName}. Every input block must appear in the output with the SAME id and a real translation in ${targetLangName} (the translated_text must NOT be identical to the input text). Return ONLY the JSON object, no markdown fences.
+        content: `Translate ${blocks.length} blocks to ${targetLangName}. Output JSON only.
 
 ${blocksJson}`,
       },

@@ -38,8 +38,8 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', []);
     const body = await captureRequestBody();
     const system = body.messages[0].content as string;
-    expect(system).toMatch(/TRANSLATE EVERY BLOCK/);
-    expect(system).toMatch(/NO OMISSIONS/i);
+    expect(system).toMatch(/Translate.*to/);
+    expect(system).toMatch(/One entry per input block/);
     expect(system).toMatch(/translated_text/);
   });
 
@@ -50,7 +50,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', []);
     const body = await captureRequestBody();
     const system = body.messages[0].content as string;
-    expect(system).toMatch(/NOT be the same as the input/i);
+    expect(system).toMatch(/NOT equal input text/i);
   });
 
   it('tells the user message how many blocks must appear in the output', async () => {
@@ -69,7 +69,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     await service.translate(JSON.stringify(blocks), 'en', 'zh', []);
     const body = await captureRequestBody();
     const user = body.messages[1].content as string;
-    expect(user).toContain('Translate ALL 2 blocks');
+    expect(user).toContain('Translate 2 blocks to');
     expect(user).toContain('Simplified Chinese');
   });
 
