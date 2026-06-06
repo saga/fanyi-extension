@@ -114,12 +114,14 @@ export default defineBackground({
       }
     }
 
-    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    browser.runtime.onMessage.addListener((message: any, sender: any, sendResponse: (response: any) => void) => {
       // Handle messages asynchronously, ensuring config is loaded first
       (async () => {
         try {
           if (message.action === 'translateChunk') {
             await handleTranslateChunk(message, sendResponse);
+          } else if (message.action === 'translateChunkStream') {
+            await handleTranslateChunkStream(message, sender, sendResponse);
           } else if (message.action === 'validateApiKey') {
             await handleValidateApiKey(message, sendResponse);
           } else if (message.action === 'clearCache') {
@@ -195,6 +197,61 @@ export default defineBackground({
             name: error.name,
             stack: error.stack?.substring(0, 300),
           } : null,
+        });
+      }
+    }
+
+    async function handleTranslateChunkStream(
+      message: any,
+      sender: any,
+      sendResponse: (response: any) => void
+    ) {
+      try {
+        const config = await getConfig();
+        if (!config.deepseekApiKey) {
+          sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
+          return;
+        }
+
+        const { jsonContent, sourceLang, targetLang, pageUrl, glossary } = message;
+
+        const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
+        const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
+
+        console.log('[Background] Calling DeepSeek streaming API for translation...');
+        const service = getService(config.deepseekApiKey);
+
+        const stream = service.translateStream(
+          jsonContent,
+          sourceLang,
+          targetLang,
+          glossary || [],
+          sitePrompt
+        );
+
+        let finalContent = '';
+        for await (const partial of stream) {
+          finalContent = partial;
+          // 发送中间结果到 content script
+          try {
+            await browser.tabs.sendMessage(message.tabId || sender.tab?.id, {
+              action: 'translationStreamUpdate',
+              partial,
+            });
+          } catch {
+            // tab 可能已关闭，忽略
+          }
+        }
+
+        const result = processTranslationResult(finalContent);
+        console.log('[Background] Stream translation parsed blocks:', result.size);
+
+        sendResponse({ success: true, result: Array.from(result.entries()) });
+      } catch (error) {
+        console.error('[Background] translateChunkStream error:', error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
         });
       }
     }

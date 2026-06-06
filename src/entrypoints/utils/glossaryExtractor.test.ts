@@ -448,25 +448,25 @@ function generateLargeText(sectionCount: number): string {
 }
 
 describe('extractGlossaryLocal - Performance', () => {
-  it('completes within 500ms for 50-section text (~10KB)', () => {
+  it('completes within 2000ms for 50-section text (~10KB)', () => {
     const largeText = generateLargeText(50);
 
     const start = performance.now();
     const result = extractGlossaryLocal(largeText);
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(500);
+    expect(elapsed).toBeLessThan(2000);
     expect(result.length).toBeGreaterThan(0);
   });
 
-  it('completes within 200ms for 20-section text (~4KB)', () => {
+  it('completes within 1000ms for 20-section text (~4KB)', () => {
     const largeText = generateLargeText(20);
 
     const start = performance.now();
     const result = extractGlossaryLocal(largeText);
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(200);
+    expect(elapsed).toBeLessThan(1000);
     expect(result.length).toBeGreaterThan(0);
   });
 

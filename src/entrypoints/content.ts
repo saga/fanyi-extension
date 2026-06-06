@@ -32,14 +32,18 @@ export default defineContentScript({
     let translatedBlocks = new Set<string>();
     let domObserver: DOMObserverManager | null = null;
     let translated = false;
+    let streamBuffer = '';
 
-    browser.runtime.onMessage.addListener(async (message) => {
+    browser.runtime.onMessage.addListener(async (message: any) => {
       if (message.action === 'translatePage') {
         await handleFullTranslation();
       } else if (message.action === 'restoreOriginal') {
         restoreOriginal();
       } else if (message.action === 'toggleTranslation') {
         toggleTranslation();
+      } else if (message.action === 'translationStreamUpdate') {
+        // 流式翻译中间结果，暂存到临时缓存
+        streamBuffer = message.partial;
       }
     });
 

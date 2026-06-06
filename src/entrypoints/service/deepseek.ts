@@ -3,6 +3,7 @@ import type {
   DocumentAnalysis,
   GlossaryEntry,
 } from './_service';
+import { parseSSEStream } from './streamParser';
 
 const API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
@@ -271,5 +272,52 @@ export class DeepSeekTranslationService implements TranslationService {
     );
 
     return await callApi(this.apiKey, body);
+  }
+
+  async *translateStream(
+    jsonContent: string,
+    sourceLang: string,
+    targetLang: string,
+    glossary: GlossaryEntry[],
+    context?: string,
+  ): AsyncGenerator<string, string, unknown> {
+    const blocks = JSON.parse(jsonContent);
+
+    const bodyObj = JSON.parse(buildTranslationBody(
+      blocks,
+      sourceLang,
+      targetLang,
+      context,
+      glossary.length > 0 ? glossary : undefined
+    ));
+    bodyObj.stream = true;
+    const body = JSON.stringify(bodyObj);
+
+    console.log('[DeepSeek] Calling streaming API:', API_URL);
+
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: buildHeaders(this.apiKey),
+      body,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`DeepSeek API error: HTTP ${response.status} - ${text.substring(0, 200)}`);
+    }
+
+    if (!response.body) {
+      throw new Error('DeepSeek API error: response body is null');
+    }
+
+    const reader = response.body.getReader();
+    let fullContent = '';
+
+    for await (const delta of parseSSEStream(reader)) {
+      fullContent += delta;
+      yield fullContent;
+    }
+
+    return fullContent;
   }
 }
