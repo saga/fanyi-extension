@@ -1,8 +1,13 @@
-# 🌐 Fanyi Extension
+# 🌐 简简单单中英文翻译 - 浏览器插件
 
-浏览器翻译插件 - 支持 Chrome, Firefox, Android Firefox
+支持 Chrome, Firefox, Android Firefox，基于 DeepSeek LLM 的文档级翻译，采用完整的上下文理解，提供高质量的翻译体验。
 
-基于 DeepSeek LLM 的文档级翻译，采用完整的上下文理解，提供高质量的翻译体验。
+Firefox安装（支持Android Firefox）：搜索”简简单单中英文翻译“， https://addons.mozilla.org/en-US/firefox/addon/简简单单中英文翻译/
+
+Chrome：需要自己build
+```
+  npm run build
+```
 
 ## ✨ 核心功能
 
@@ -27,11 +32,6 @@
 1. 打开 `about:debugging#/runtime/this-firefox`
 2. 点击"临时载入附加组件"
 3. 选择 `output/firefox-mv2/manifest.json`
-
-### Android Firefox
-1. 安装 Firefox Nightly 或 Firefox Beta
-2. 在 `about:config` 中启用 `xpinstall.signatures.required` 为 `false`
-3. 通过 `about:debugging` 侧载扩展
 
 ## ⚙️ 配置
 
@@ -66,54 +66,6 @@ src/rules/
 └── fortune-rules.ts      # Fortune 站点规则
 ```
 
-### 添加自定义规则
-
-创建新的规则文件，例如 `src/rules/stackoverflow-rules.ts`：
-
-```ts
-import type { SiteRule } from './types';
-
-export const stackoverflowRule: SiteRule = {
-  hostPattern: 'stackoverflow.com',
-  skipTerms: [
-    'Question',
-    'Answers',
-    'Tags',
-    'Votes',
-    'Accepted',
-    'Reputation',
-    'Badge',
-  ],
-  skipSelectors: [
-    '.vote',
-    '.badge',
-    'code',
-    'pre',
-  ],
-  promptInstructions:
-    'This is Stack Overflow. Keep programming terminology, code snippets, and technical terms untranslated.',
-};
-```
-
-然后在 `src/rules/index.ts` 中注册：
-
-```ts
-import { stackoverflowRule } from './stackoverflow-rules';
-
-const RULES: SiteRule[] = [
-  // ...existing rules
-  stackoverflowRule,
-];
-```
-
-### 规则字段说明
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `hostPattern` | `string` | 域名匹配，支持 `*.example.com` 通配符 |
-| `skipTerms` | `string[]` | 不翻译的词汇列表 |
-| `skipSelectors` | `string[]` | 完全跳过的 CSS 选择器 |
-| `promptInstructions` | `string` | 额外的 prompt 指令 |
 
 ### 最终 Prompt 组成
 
@@ -189,27 +141,6 @@ DeepSeekTranslationService
 
 ```
 src/
-├── __tests__/                  # 全部单元测试 (vitest, jsdom)
-│   ├── background.test.ts            # background.ts 处理器
-│   ├── background-stream.test.ts     # 流式翻译处理器
-│   ├── deepseek.test.ts              # glossary 过滤逻辑
-│   ├── deepseek-api.test.ts          # translate / extractGlossary / callApi
-│   ├── deepseek-stream.test.ts       # translateStream
-│   ├── streamParser.test.ts          # SSE 行解析
-│   ├── translationDisplay.test.ts    # DOM 包装/还原 (含链接保留)
-│   ├── blockExtractor.test.ts        # DOM 块提取
-│   ├── chunkBuilder.test.ts          # 分块策略
-│   ├── contentHelper.test.ts
-│   ├── domObserver.test.ts
-│   ├── glossaryExtractor.test.ts
-│   ├── translateApi.test.ts
-│   ├── translationQueue.test.ts
-│   ├── cacheKey.test.ts
-│   ├── cacheManager.test.ts
-│   ├── config.test.ts
-│   ├── common.test.ts
-│   ├── constant.test.ts
-│   └── constants.test.ts
 │
 ├── components/                 # Vue 3 组件
 │   ├── FloatingBall.vue              # 悬浮操作球
@@ -309,13 +240,6 @@ pnpm zip:firefox     # 打包 Firefox 为 .zip
 
 `pnpm compile` 必须通过后再 `pnpm build`。
 
-### 测试
-
-- 框架: Vitest + jsdom 环境
-- 文件: 20 个测试文件，集中在 [`src/__tests__/`](file:///Users/saga/code-repos/fanyi-extension/src/__tests__/)
-- 运行: `pnpm test` (单次) / `pnpm test:watch` (监听)
-- 注意: 拉到新代码后若 `.wxt/` 过期，先 `pnpm install` 触发 `wxt prepare` 再测试
-
 ### 调试 / Gotchas
 
 - **不要在 `entrypoints/` 下放 `.test.ts`** —— WXT 用 `picomatch` 扫描 entrypoint，basename 冲突会直接 build 失败。所有测试在 `src/__tests__/`。
@@ -330,7 +254,3 @@ pnpm zip:firefox     # 打包 Firefox 为 .zip
 1. 在 [`src/rules/`](file:///Users/saga/code-repos/fanyi-extension/src/rules/) 下新建 `xxx-rules.ts`，导出 `SiteRule`。
 2. 在 [`src/rules/index.ts`](file:///Users/saga/code-repos/fanyi-extension/src/rules/index.ts) 的 `RULES` 数组中注册。
 3. 运行 `pnpm compile` 验证类型，`pnpm test` 验证现有测试仍通过。
-
-## 📄 License
-
-ISC
