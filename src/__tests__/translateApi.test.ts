@@ -22,6 +22,7 @@ vi.mock('../entrypoints/utils/cacheManager', () => ({
 
 import {
   processTranslationResult,
+  logUnchangedBlocks,
   prepareSelectionTask,
   getCachedTranslation,
   cacheTranslation,
@@ -85,6 +86,87 @@ describe('processTranslationResult', () => {
 
   it('throws on invalid JSON', () => {
     expect(() => processTranslationResult('not json')).toThrow();
+  });
+});
+
+describe('logUnchangedBlocks', () => {
+  it('returns the original string untouched', () => {
+    const raw = JSON.stringify({ translations: [{ id: 'b1', translated_text: '你好' }] });
+    const out = logUnchangedBlocks(raw, [{ id: 'b1', text: 'hello' }]);
+    expect(out).toBe(raw);
+  });
+
+  it('does not throw on invalid JSON', () => {
+    expect(() => logUnchangedBlocks('not json', [{ id: 'b1', text: 'x' }])).not.toThrow();
+    expect(logUnchangedBlocks('not json', [{ id: 'b1', text: 'x' }])).toBe('not json');
+  });
+
+  it('warns when a block came back unchanged', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = JSON.stringify({ translations: [{ id: 'b1', translated_text: 'hello' }] });
+    logUnchangedBlocks(raw, [{ id: 'b1', text: 'hello' }]);
+    expect(warn).toHaveBeenCalled();
+    const allArgs = warn.mock.calls.flat().map(String).join(' | ');
+    expect(allArgs).toContain('b1');
+    warn.mockRestore();
+  });
+
+  it('errors when every block came back unchanged', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const raw = JSON.stringify({
+      translations: [
+        { id: 'b1', translated_text: 'hello' },
+        { id: 'b2', translated_text: 'world' },
+      ],
+    });
+    logUnchangedBlocks(raw, [
+      { id: 'b1', text: 'hello' },
+      { id: 'b2', text: 'world' },
+    ]);
+    expect(err).toHaveBeenCalled();
+    expect(String(err.mock.calls[0]?.[0])).toMatch(/ALL/);
+    warn.mockRestore();
+    err.mockRestore();
+  });
+
+  it('warns when response is missing blocks from the input', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = JSON.stringify({ translations: [{ id: 'b1', translated_text: '你好' }] });
+    logUnchangedBlocks(raw, [
+      { id: 'b1', text: 'hello' },
+      { id: 'b2', text: 'world' },
+    ]);
+    const allArgs = warn.mock.calls.flat().map(String).join(' | ');
+    expect(allArgs).toMatch(/missing/);
+    warn.mockRestore();
+  });
+
+  it('is silent when all blocks were translated', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const raw = JSON.stringify({
+      translations: [
+        { id: 'b1', translated_text: '你好' },
+        { id: 'b2', translated_text: '世界' },
+      ],
+    });
+    logUnchangedBlocks(raw, [
+      { id: 'b1', text: 'hello' },
+      { id: 'b2', text: 'world' },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+    expect(err).not.toHaveBeenCalled();
+    warn.mockRestore();
+    err.mockRestore();
+  });
+
+  it('accepts the bare-array form (no translations wrapper)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const raw = JSON.stringify([{ id: 'b1', translated_text: 'hello' }]);
+    logUnchangedBlocks(raw, [{ id: 'b1', text: 'hello' }]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
