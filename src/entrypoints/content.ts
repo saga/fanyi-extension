@@ -15,6 +15,7 @@ import { DOMObserverManager } from './utils/domObserver';
 import type { TextBlock } from './utils/blockExtractor';
 import { GESTURES } from './utils/constants';
 import { getCenterPoint } from './utils/common';
+import { extractGlossaryLocal } from './utils/glossaryExtractor';
 
 // Detect if we're on mobile/Android Firefox
 const isAndroid = /Android/i.test(navigator.userAgent);
@@ -464,19 +465,10 @@ export default defineContentScript({
             }
 
             const glossarySample = fullText.substring(0, 4000);
-            const glossaryResponse = await browser.runtime.sendMessage({
-              action: 'extractGlossary',
-              fullText: glossarySample,
-              emphasizedTerms,
-            });
-            if (glossaryResponse.success && glossaryResponse.glossary?.length > 0) {
-              glossary = glossaryResponse.glossary;
-              console.log('[ContentScript] Glossary extracted:', glossary.length, 'terms');
-              for (const entry of glossary) {
-                console.log(`[ContentScript]   "${entry.term}" → "${entry.translation}"`);
-              }
-            } else {
-              console.log('[ContentScript] No glossary extracted, proceeding without');
+            glossary = extractGlossaryLocal(glossarySample, emphasizedTerms);
+            console.log('[ContentScript] Glossary extracted:', glossary.length, 'terms');
+            for (const entry of glossary) {
+              console.log(`[ContentScript]   "${entry.term}" → "${entry.translation}"`);
             }
           } catch (error) {
             console.warn('[ContentScript] Glossary extraction failed, proceeding without:', error);

@@ -8,7 +8,6 @@ import {
   clearAllCache,
 } from './utils/translateApi';
 import { globalQueue } from './utils/translationQueue';
-import { extractGlossaryLocal } from './utils/glossaryExtractor';
 import { matchSiteRule, buildSitePrompt } from '../rules';
 import type { SiteRule } from '../rules/types';
 
@@ -135,8 +134,6 @@ export default defineBackground({
         try {
           if (message.action === 'translateChunk') {
             await handleTranslateChunk(message, sendResponse);
-          } else if (message.action === 'extractGlossary') {
-            await handleExtractGlossary(message, sendResponse);
           } else if (message.action === 'validateApiKey') {
             await handleValidateApiKey(message, sendResponse);
           } else if (message.action === 'clearCache') {
@@ -155,35 +152,6 @@ export default defineBackground({
       // Return true to keep the message channel open for async response
       return true;
     });
-
-    async function handleExtractGlossary(
-      message: any,
-      sendResponse: (response: any) => void
-    ) {
-      try {
-        const { fullText, emphasizedTerms } = message;
-        if (!fullText || fullText.trim().length < 50) {
-          sendResponse({ success: true, glossary: [] });
-          return;
-        }
-
-        console.log('[Background] Extracting glossary locally, text length:', fullText.length);
-        const glossary = extractGlossaryLocal(fullText, emphasizedTerms || []);
-        console.log('[Background] Local glossary extracted:', glossary.length, 'terms');
-        for (const entry of glossary) {
-          console.log(`[Background]   "${entry.term}" → "${entry.translation}"`);
-        }
-
-        sendResponse({ success: true, glossary });
-      } catch (error) {
-        console.error('[Background] extractGlossary error:', error);
-        sendResponse({
-          success: false,
-          glossary: [],
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-      }
-    }
 
     async function handleTranslateChunk(
       message: any,
