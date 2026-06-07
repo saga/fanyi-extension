@@ -331,9 +331,15 @@ describe('extractGlossaryLocal', () => {
     const text = 'We use CUDA and CUDA Toolkit for GPU programming with CUDA Toolkit support. CUDA Toolkit is great. CUDA Toolkit works well.';
     const result = extractGlossaryLocal(text);
 
-    for (let i = 1; i < result.length; i++) {
-      expect(result[i - 1].term.length).toBeGreaterThanOrEqual(result[i].term.length);
-    }
+    // Length-only ordering is no longer the contract; we use scoreTerm.
+    // Verify the natural long-phrase-wins-acronym behavior: when a phrase
+    // subsumes an acronym, the longer phrase survives dedup.
+    const terms = result.map((r) => r.term);
+    // "CUDA Toolkit" subsumes "CUDA", so only the longer phrase should remain
+    expect(terms).toContain('CUDA Toolkit');
+    expect(terms).not.toContain('CUDA');
+    // sanity: result is non-empty
+    expect(terms.length).toBeGreaterThan(0);
   });
 
   // --- Mixed acronym + frequent term + named entity ---
@@ -406,13 +412,16 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('DOER');
   });
 
-  it('does not extract 7+ letter all-caps words as acronyms', () => {
-    const text = 'We use DEVELOPMENT for ENTERPRISE purposes.';
+  it('extracts 7+ letter all-caps words as acronyms', () => {
+    // 7+ letter all-caps identifiers (POSTGRESQL, WEBSOCKET) are legitimate
+    // technical acronyms. The old 6-char limit was a heuristic that excluded
+    // them too aggressively.
+    const text = 'We use POSTGRESQL for storage and WEBSOCKET for streaming.';
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
-    expect(terms).not.toContain('DEVELOPMENT');
-    expect(terms).not.toContain('ENTERPRISE');
+    expect(terms).toContain('POSTGRESQL');
+    expect(terms).toContain('WEBSOCKET');
   });
 
   // --- cleanTerm edge cases ---
@@ -486,28 +495,77 @@ describe('extractGlossaryLocal - Performance', () => {
     expect(terms.some(t => t.includes('MIT'))).toBe(true);
   });
 
-  it('produces consistent results across repeated text', () => {
+  it('produces consistent results for the same input', () => {
     const base = 'We use LLM and API for GPT models with CUDA support.';
-    const repeated = Array.from({ length: 10 }, () => base).join('\n\n');
+    const result1 = extractGlossaryLocal(base);
+    const result2 = extractGlossaryLocal(base);
 
-    const singleResult = extractGlossaryLocal(base);
-    const repeatedResult = extractGlossaryLocal(repeated);
-
-    // Both should return non-empty results
-    expect(singleResult.length).toBeGreaterThan(0);
-    expect(repeatedResult.length).toBeGreaterThan(0);
-
-    // Both should be sorted by term length descending
-    for (let i = 1; i < singleResult.length; i++) {
-      expect(singleResult[i - 1].term.length).toBeGreaterThanOrEqual(singleResult[i].term.length);
-    }
-    for (let i = 1; i < repeatedResult.length; i++) {
-      expect(repeatedResult[i - 1].term.length).toBeGreaterThanOrEqual(repeatedResult[i].term.length);
-    }
+    // Same input must produce identical ordering (deterministic scoring).
+    expect(result2.map((r) => r.term)).toEqual(result1.map((r) => r.term));
 
     // All entries should have KEEP translation
-    for (const entry of [...singleResult, ...repeatedResult]) {
+    for (const entry of result1) {
       expect(entry.translation).toBe('KEEP');
     }
+  });
+
+  describe('priority scoring', () => {
+    it('ranks acronyms above proper nouns above generic terms', () => {
+      const text = 'The API for JavaScript framework handles data processing efficiently.';
+      const result = extractGlossaryLocal(text);
+      const terms = result.map((r) => r.term);
+
+      // Acronyms (API) should appear before proper nouns (JavaScript) which
+      // should appear before generic lowercase terms.
+      const acronymIdx = terms.findIndex((t) => /^[A-Z]{2,6}$/.test(t));
+      const properIdx = terms.findIndex((t) => /[A-Z]/.test(t) && /[a-z]/.test(t));
+      const genericIdx = terms.findIndex(
+        (t) => !/[A-Z]/.test(t) && t.split(' ').length === 1
+      );
+
+      // Whichever categories are present, the priority order must hold
+      if (acronymIdx !== -1 && properIdx !== -1) {
+        expect(acronymIdx).toBeLessThan(properIdx);
+      }
+      if (properIdx !== -1 && genericIdx !== -1) {
+        expect(properIdx).toBeLessThan(genericIdx);
+      }
+    });
+
+    it('caps result at MAX_GLOSSARY_TERMS (50)', () => {
+      // Generate a long text with many distinct frequent terms by repeating
+      // a long paragraph of varied vocabulary 5 times.
+      const vocab = Array.from({ length: 100 }, (_, i) => `term${i}`).join(' ');
+      const text = Array.from({ length: 5 }, () => vocab).join('. ');
+
+      const result = extractGlossaryLocal(text);
+      expect(result.length).toBeLessThanOrEqual(50);
+    });
+
+    it('keeps high-priority terms when truncating', () => {
+      // Build text with many low-priority distinct terms repeated so they
+      // qualify for the frequent-term bucket, plus a few high-priority
+      // acronyms and proper nouns that must survive the 50-term cap.
+      const filler = Array.from({ length: 300 }, (_, i) => `vocab${i} test${i}`).join(' ');
+      const text = `${filler}. The API for JavaScript uses GPT models and CUDA GPU acceleration. We also support TypeScript with Node.js runtime and PostgreSQL database queries.`;
+
+      const result = extractGlossaryLocal(text);
+      const terms = result.map((r) => r.term);
+
+      // Must not exceed the cap
+      expect(result.length).toBeLessThanOrEqual(50);
+
+      // High-priority terms should be present even if generic ones are truncated
+      const hasAcronym = terms.some((t) => /^[A-Z]{2,6}$/.test(t));
+      const hasProperNoun = terms.some((t) => /[A-Z]/.test(t) && /[a-z]/.test(t));
+      expect(hasAcronym || hasProperNoun).toBe(true);
+    });
+
+    it('is deterministic for the same input', () => {
+      const text = 'React JavaScript API for TypeScript developers using Node.js framework.';
+      const a = extractGlossaryLocal(text);
+      const b = extractGlossaryLocal(text);
+      expect(a.map((r) => r.term)).toEqual(b.map((r) => r.term));
+    });
   });
 });

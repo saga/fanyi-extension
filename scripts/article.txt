@@ -1,0 +1,21 @@
+How Netflix Maps Thousands of Microservices in Real-Time
+
+Netflix has shared details about Service Topology. This internal system creates and updates a live dependency graph for thousands of microservices. It helps engineers see how services connect and resolve issues more quickly. The system merges three separate data sources into a single, queryable graph. It updates almost in real-time as traffic patterns shift.
+
+The motivation came from a consistent pattern in engineering support requests over four years. Engineers fixing distributed systems often face the same questions. They need to know which services depend on each other. They also ask about the blast radius of a change or failure. Finally, they want to determine if a problem starts locally or comes from an upstream dependency. Existing observability tools, metrics, logs, and traces each captured part of the picture but provided no unified view of how services connected at runtime.
+
+The system ingests data from three sources, each stored in a separate graph partition. eBPF network flow logs capture data at the kernel level. This gives a complete view, even if services aren't instrumented. However, they lack application-level context, like which API endpoints are called. IPC metrics emitted by instrumented services provide that endpoint and protocol detail, but only for services that actively emit them. Aggregated distributed traces reveal real request paths, including conditional branches. This is subject to sampling limitations. Each layer compensates for the gaps in the others, and queries can target a single layer or merge all three in parallel.
+
+A three-stage aggregation pipeline solves a key problem with raw network flows. Logs track individual hops through intermediaries like load balancers and NAT gateways. However, they don't show the direct application-to-application connection that engineers need to understand. The second stage performs intermediary resolution, collapsing multi-hop paths into direct edges. This graduated method spreads the load. It helps prevent hot spots when some intermediaries handle too much traffic.
+
+The processing pipeline runs on Apache Pekko Streams across multi-region Kafka consumers. Graph storage is built on Netflix's internal distributed key-value system. It uses a graph database layer designed for fast traversal. A gRPC API exposes the topology with support for multi-hop queries, filtering by availability tier and business domain, and sub-second response times as a hard requirement.
+
+Historical queries use time-window aggregation instead of keeping separate snapshots. This lets engineers see the topology at a certain time in the past without high storage costs. The team describes this as useful for correlating dependency changes with the onset of an incident.
+
+The team notes that several design decisions emerged from earlier failed attempts. Static or delayed dependency maps proved useless in environments where services deploy multiple times per day. Solutions that worked at a smaller scale hit walls at Netflix's service count and traffic volume. And incomplete or incorrect dependency data, they found, was worse than no data at all because it led engineers to wrong conclusions during incidents.
+
+Future work will include adding deployment and configuration change events to the topology graph. In the long term, the team aims to use this graph as a basis for automated root cause analysis.
+
+The Netflix post lands in a space where public engineering writing is notably thin. Most recent work on service dependency mapping either stops at what OpenTelemetry's Service Graph Connector can derive from traces alone or treats the dependency graph as supporting infrastructure for something else, Cloudflare's AI agent context or Stripe's metrics migration.
+
+Nobody is publishing at the same level of detail about building a multi-source, graph-stored, real-time topology system at this scale. That's either because the problem is genuinely rare at Netflix's service count or because the teams that have solved it consider the solution a competitive asset worth keeping internal.
