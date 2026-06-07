@@ -1,8 +1,4 @@
-import type {
-  TranslationService,
-  DocumentAnalysis,
-  GlossaryEntry,
-} from './_service';
+import type { TranslationService, GlossaryEntry } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
 
@@ -28,65 +24,13 @@ function buildHeaders(apiKey: string): Record<string, string> {
   };
 }
 
-function buildGlossaryExtractionBody(
-  fullText: string,
-  sourceLang: string,
-  _targetLang: string
-): string {
-  const truncatedText = fullText.length > 5000 ? fullText.substring(0, 5000) : fullText;
-
-  return JSON.stringify({
-    model: MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: `Extract key technical terms, proper nouns, and acronyms from ${sourceLang === 'en' ? 'English' : sourceLang} text. Return {"glossary":[{"term":"x","translation":"y"}]}. Use "KEEP" for terms that should not be translated.`,
-      },
-      {
-        role: 'user',
-        content: `Extract terms. Output JSON only.\n\n${truncatedText}`,
-      },
-    ],
-    response_format: { type: 'json_object' },
-    temperature: TRANSLATION_TEMPERATURE,
-    max_tokens: 2048,
-    user_id: USER_ID,
-    thinking: { type: 'disabled' },
-    stream: false,
-  });
-}
-
-export function filterRelevantGlossary(
-  blocks: Array<{ id: string; text: string }>,
-  glossary?: GlossaryEntry[]
-): GlossaryEntry[] | undefined {
-  if (!glossary || glossary.length === 0) return undefined;
-
-  const chunkText = blocks.map((b) => b.text).join(' ').toLowerCase();
-  const relevant = glossary.filter((g) => {
-    const termLower = g.term.toLowerCase();
-    // 使用词边界匹配：术语前后必须是空白、标点或字符串边界
-    // 将术语中的特殊正则字符转义
-    const escaped = termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(
-      `(?:^|[\\s\\p{P}])${escaped}(?:$|[\\s\\p{P}])`,
-      'u'
-    );
-    return pattern.test(chunkText);
-  });
-
-  if (relevant.length === 0) return undefined;
-  console.log(`[DeepSeek] Filtered glossary: ${relevant.length}/${glossary.length} terms relevant to this chunk`);
-  return relevant;
-}
-
 function buildTranslationBody(
   blocks: Array<{ id: string; text: string }>,
   sourceLang: string,
   targetLang: string,
   sitePrompt?: string,
   glossary?: GlossaryEntry[]
-): Record<string, unknown> {
+) {
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
     null,
@@ -98,21 +42,28 @@ function buildTranslationBody(
   let systemContent = `Translate ${sourceLang === 'en' ? 'English' : sourceLang} to ${targetLangName}. Rules:
 1. Return {"translations":[{"id":"x","translated_text":"y"}]}. One entry per input block, same ids. No extra text.
 2. translated_text must NOT equal input text. Never return empty, "...", or placeholder.
-3. Keep URLs, code, version numbers, brand names as-is. Translate everything else.`;
+3. Keep URLs, code, version numbers, brand names as-is. Translate everything else.
+4. Treat every block as independent — do not skip, summarize, or merge any block. Each one is a separate text that must be translated in full.`;
 
-  const relevantGlossary = filterRelevantGlossary(blocks, glossary);
-  if (relevantGlossary && relevantGlossary.length > 0) {
-    const glossaryLines = relevantGlossary
-      .map((g) => `- "${g.term}" → "${g.translation}"`)
-      .join('\n');
-    systemContent += `\n\nTerminology glossary (MUST follow these translations):\n${glossaryLines}`;
-  }
+// Use the full glossary as-is. We do NOT per-chunk filter here because:
+// 1) the LLM will naturally ignore terms that don't appear in the current
+//    chunk's text, so filtering just costs CPU.
+// 2) per-chunk filtering breaks KV cache reuse — the glossary section
+//    would differ chunk-to-chunk, defeating the cache for everything
+//    after the glossary lines.
+const relevantGlossary = glossary && glossary.length > 0 ? glossary : undefined;
+if (relevantGlossary) {
+  const glossaryLines = relevantGlossary
+    .map((g: GlossaryEntry) => `- "${g.term}" → "${g.translation}"`)
+    .join('\n');
+  systemContent += `\n\nTerminology glossary (MUST follow these translations):\n${glossaryLines}`;
+}
 
-  if (sitePrompt) {
-    systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
-  }
+if (sitePrompt) {
+  systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
+}
 
-  return {
+return {
     model: MODEL,
     messages: [
       {
@@ -208,61 +159,11 @@ async function callApi(
   }
 }
 
-function parseGlossaryResponse(content: string): GlossaryEntry[] {
-  try {
-    const parsed = JSON.parse(content);
-    const items = parsed.glossary || parsed.terms || [];
-    if (!Array.isArray(items)) return [];
-
-    return items
-      .filter((item: any) => item.term && item.translation)
-      .map((item: any) => ({
-        term: String(item.term).trim(),
-        translation: String(item.translation).trim(),
-      }));
-  } catch (error) {
-    console.error('[DeepSeek] Failed to parse glossary response:', error);
-    return [];
-  }
-}
-
 export class DeepSeekTranslationService implements TranslationService {
   private apiKey: string;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-  }
-
-  async extractGlossary(
-    fullText: string,
-    sourceLang: string,
-    targetLang: string
-  ): Promise<GlossaryEntry[]> {
-    console.log('[DeepSeek] Extracting glossary, text length:', fullText.length);
-
-    const body = buildGlossaryExtractionBody(fullText, sourceLang, targetLang);
-    const content = await callApi(this.apiKey, body);
-    const glossary = parseGlossaryResponse(content);
-
-    console.log('[DeepSeek] Extracted glossary:', glossary.length, 'terms');
-    for (const entry of glossary) {
-      console.log(`[DeepSeek]   "${entry.term}" → "${entry.translation}"`);
-    }
-
-    return glossary;
-  }
-
-  async analyzeDocument(
-    _text: string,
-    _sourceLang: string,
-    _targetLang: string
-  ): Promise<DocumentAnalysis> {
-    return {
-      domain: '',
-      tone: '',
-      glossary: [],
-      summary: '',
-    };
   }
 
   async translate(

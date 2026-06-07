@@ -8,11 +8,6 @@ const mockCache = {
 };
 
 vi.mock('../entrypoints/utils/cacheManager', () => ({
-  analysisCache: {
-    get: (...args: any[]) => mockCache.get(...args),
-    set: (...args: any[]) => mockCache.set(...args),
-    clear: () => mockCache.clear(),
-  },
   translationCache: {
     get: (...args: any[]) => mockCache.get(...args),
     set: (...args: any[]) => mockCache.set(...args),
@@ -23,7 +18,6 @@ vi.mock('../entrypoints/utils/cacheManager', () => ({
 import {
   processTranslationResult,
   logUnchangedBlocks,
-  prepareSelectionTask,
   getCachedTranslation,
   cacheTranslation,
   clearAllCache,
@@ -170,38 +164,6 @@ describe('logUnchangedBlocks', () => {
   });
 });
 
-describe('prepareSelectionTask', () => {
-  it('wraps text in selection task format', () => {
-    const result = prepareSelectionTask('Hello world');
-    const parsed = JSON.parse(result);
-    expect(parsed).toEqual([{ id: 'b1', text: 'Hello world' }]);
-  });
-
-  it('handles empty string', () => {
-    const result = prepareSelectionTask('');
-    const parsed = JSON.parse(result);
-    expect(parsed).toEqual([{ id: 'b1', text: '' }]);
-  });
-
-  it('handles special characters', () => {
-    const result = prepareSelectionTask('Hello "world" & <friends>');
-    const parsed = JSON.parse(result);
-    expect(parsed[0].text).toBe('Hello "world" & <friends>');
-  });
-
-  it('handles multiline text', () => {
-    const result = prepareSelectionTask('Line 1\nLine 2\nLine 3');
-    const parsed = JSON.parse(result);
-    expect(parsed[0].text).toBe('Line 1\nLine 2\nLine 3');
-  });
-
-  it('handles unicode text', () => {
-    const result = prepareSelectionTask('こんにちは世界');
-    const parsed = JSON.parse(result);
-    expect(parsed[0].text).toBe('こんにちは世界');
-  });
-});
-
 describe('getCachedTranslation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -273,9 +235,9 @@ describe('clearAllCache', () => {
     vi.clearAllMocks();
   });
 
-  it('clears both analysis and translation caches', async () => {
+  it('clears the translation cache', async () => {
     await clearAllCache();
-    expect(mockCache.clear).toHaveBeenCalledTimes(2);
+    expect(mockCache.clear).toHaveBeenCalledTimes(1);
   });
 
   it('throws if cache clear fails', async () => {

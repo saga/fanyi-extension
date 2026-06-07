@@ -557,10 +557,23 @@ export default defineContentScript({
           if (response.success) {
             console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
             if (response.result) {
-              console.log(`[ContentScript] Chunk ${index + 1} translated IDs:`, response.result.map(([id]: [string, string]) => id).join(','));
+              const ids = response.result
+                .filter((e: unknown) => Array.isArray(e) && e.length === 2 && typeof e[0] === 'string')
+                .map((e: [string, string]) => e[0])
+                .join(',');
+              console.log(`[ContentScript] Chunk ${index + 1} translated IDs:`, ids);
             }
             const chunkMap = new Map<string, string>();
-            for (const [id, text] of response.result) {
+            for (const entry of response.result) {
+              if (!Array.isArray(entry) || entry.length !== 2) {
+                console.warn('[ContentScript]   Skipping malformed entry:', entry);
+                continue;
+              }
+              const [id, text] = entry;
+              if (typeof text !== 'string') {
+                console.warn(`[ContentScript]   Skipping block ${id}: translated_text is not a string (${typeof text})`);
+                continue;
+              }
               console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
               chunkMap.set(id, text);
             }

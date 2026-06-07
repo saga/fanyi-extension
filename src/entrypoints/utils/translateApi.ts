@@ -1,23 +1,4 @@
-import { extractBlocks, type TextBlock } from './blockExtractor';
-import { buildChunks, type Chunk } from './chunkBuilder';
-import { analysisCache, translationCache } from './cacheManager';
-
-export function prepareDocument(root: Document | Element): {
-  blocks: TextBlock[];
-  chunks: Chunk[];
-  fullText: string;
-} {
-  const blocks = extractBlocks(root);
-
-  if (blocks.length === 0) {
-    throw new Error('No translatable content found');
-  }
-
-  const fullText = blocks.map((b) => b.text).join('\n\n');
-  const chunks = buildChunks(blocks);
-
-  return { blocks, chunks, fullText };
-}
+import { translationCache } from './cacheManager';
 
 export async function getCachedTranslation(cacheKey: string): Promise<Map<string, string> | null> {
   const raw = await translationCache.get<Record<string, string>>(cacheKey);
@@ -45,6 +26,9 @@ export function processTranslationResult(jsonResult: string): Map<string, string
   const translations = parsed.translations || parsed;
   const result = new Map<string, string>();
   for (const item of translations) {
+    if (typeof item?.id !== 'string' || typeof item?.translated_text !== 'string') {
+      continue;
+    }
     result.set(item.id, item.translated_text);
   }
   return result;
@@ -123,13 +107,6 @@ export function logUnchangedBlocks(
   return rawJson;
 }
 
-export function prepareSelectionTask(text: string): string {
-  return JSON.stringify([{ id: 'b1', text }]);
-}
-
 export async function clearAllCache(): Promise<void> {
-  await Promise.all([
-    analysisCache.clear(),
-    translationCache.clear(),
-  ]);
+  await translationCache.clear();
 }

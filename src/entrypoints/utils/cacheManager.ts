@@ -103,4 +103,3 @@ export class CacheManager {
 
 export const analysisCache = new CacheManager('local:analysisCache');
 export const translationCache = new CacheManager('local:translationCache');
-export const glossaryCache = new CacheManager('local:glossaryCache');
