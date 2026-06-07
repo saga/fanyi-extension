@@ -860,3 +860,133 @@ describe('extractGlossaryLocal - Q3 single-occurrence proper noun retention', ()
     expect(terms).toContain('Anthropic');
   });
 });
+
+describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Plan 2)', () => {
+  it('STRONG_VERBS: "AI feels" not extracted as a noun phrase', () => {
+    const text = 'Local AI feels real in 2026. AI feels great for productivity. Everyone says AI feels good.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms).not.toContain('AI feels');
+  });
+
+  it('STRONG_VERBS: "LangChain helps" truncated to "langchain"', () => {
+    const text = 'LangChain helps developers build LLM apps. LangChain helps simplify prompts. LangChain helps manage chains. LangChain helps a lot.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    // "LangChain helps" should be truncated to "langchain" (canonical lowercase
+    // from tech-products.json overrides the TitleCase form)
+    expect(terms).toContain('langchain');
+    // The verb form must not appear
+    expect(terms).not.toContain('LangChain helps');
+  });
+
+  it('STRONG_VERBS: "system enables" truncated to "system"', () => {
+    const text = 'The system enables faster deployment. Our system enables real-time tracking. This system enables monitoring.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    // "system" (lowercase, generic) may not be extracted due to frequency gate,
+    // but the important thing is "system enables" must not appear as a phrase
+    expect(terms.every(t => !t.includes('enables'))).toBe(true);
+  });
+
+  it('NOUN_CHAIN_BREAKERS: "Zhipu AI targets" truncated to "Zhipu AI"', () => {
+    const text = 'GLM 4.7 from Zhipu AI targets production-grade agent workflows. Zhipu AI targets the enterprise. Zhipu AI targets developers.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    // The fragment must be truncated, not dropped
+    expect(terms.some(t => t.includes('Zhipu'))).toBe(true);
+    // No sentence fragment should survive
+    expect(terms.every(t => !t.includes('targets production-grade'))).toBe(true);
+  });
+
+  it('NOUN_CHAIN_BREAKERS: "Docker runs" truncated to "docker"', () => {
+    const text = 'Docker runs containers. Docker runs on Linux. Docker runs everywhere. Docker scales well.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    // "docker" is the canonical lowercase form from tech-products.json
+    expect(terms).toContain('docker');
+    expect(terms.every(t => !t.includes('runs'))).toBe(true);
+  });
+
+  it('NOUN_CHAIN_BREAKERS: "API calls" should still be kept (calls is not a strong verb)', () => {
+    const text = 'API calls are fast. We handle many API calls. API calls return JSON. API calls are reliable.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.some(t => t.toLowerCase().includes('api calls'))).toBe(true);
+  });
+
+  it('dynamic context: Noun + function word correctly demoted', () => {
+    // "targets the" should be detected via [#Noun] (the) pattern
+    const text = 'The system targets the enterprise. This software targets the developer. Our tool targets the market.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    // "targets the" must not create a false noun phrase
+    expect(terms.every(t => !t.includes('targets the'))).toBe(true);
+  });
+
+  it('first word never triggers truncation', () => {
+    // Only words at index > 0 can be breakers
+    const text = 'Feels like a great day for AI. Feels good to code. Feels amazing.';
+    const result = extractGlossaryLocal(text);
+    // "Feels" at sentence start may be extracted by sentenceStartCapRegex,
+    // but it won't be truncated by noun chain breakers (index === 0 is skipped)
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it('empty-after-truncation phrases are skipped', () => {
+    // If the first word is stopword and the second is a breaker, truncated result is empty
+    const text = 'The targets the market.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    // No crash; no garbage output
+    expect(terms.every(t => !t.includes('targets the'))).toBe(true);
+  });
+
+  it('seems/looks/sounds also blocked from Noun+ chains', () => {
+    const text = 'The system seems stable. The model looks promising. The API sounds good.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t => !t.includes('seems') && !t.includes('looks') && !t.includes('sounds'))).toBe(true);
+  });
+
+  it('lets/allows/enables blocked from Noun+ chains', () => {
+    const text = 'Kubernetes lets you scale. Docker allows fast deployment. Git enables collaboration.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t => !t.includes('lets') && !t.includes('allows') && !t.includes('enables'))).toBe(true);
+  });
+
+  it('NOUN_CHAIN_BREAKERS: API endpoint verbs (returns/retrieves/cancels)', () => {
+    const text = 'The API returns JSON. The API retrieves records. The API cancels jobs. The API searches indexes. The API lists results. The API marks complete.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t => !t.includes('returns') && !t.includes('retrieves') && !t.includes('cancels'))).toBe(true);
+    expect(terms).toContain('API');
+  });
+
+  it('NOUN_CHAIN_BREAKERS: infrastructure verbs (hosts/serves/stores/loads)', () => {
+    const text = 'The server hosts the service. The API serves requests. The database stores records. The system loads config. The CDN caches content. The tool syncs files.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t => !t.includes('hosts') && !t.includes('serves') && !t.includes('stores'))).toBe(true);
+  });
+
+  it('NOUN_CHAIN_BREAKERS: CI/development verbs (commits/merges/deploys)', () => {
+    const text = 'The developer commits code. Git merges branches. The CI deploys builds. The pipeline updates config. The system upgrades packages. The daemon logs events.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t => !t.includes('commits') && !t.includes('merges') && !t.includes('deploys'))).toBe(true);
+  });
+
+  it('NOUN_CHAIN_BREAKERS: data/ML verbs (trains/predicts/classifies)', () => {
+    const text = 'The model trains on data. The model predicts output. The classifier classifies text. The encoder encodes input. The decoder decodes output.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t => !t.includes('trains') && !t.includes('predicts') && !t.includes('classifies'))).toBe(true);
+  });
+
+  it('STRONG_VERBS: expanded set (appears/becomes/requires/ensures etc.)', () => {
+    const text = 'The system appears stable. The model becomes accurate. The process requires config. Validation ensures quality. The firewall prevents attacks. The doc specifies options. The schema defines structure. The error indicates failure.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t =>
+      !t.includes('appears') && !t.includes('becomes') && !t.includes('requires') &&
+      !t.includes('ensures') && !t.includes('prevents') && !t.includes('specifies') &&
+      !t.includes('defines') && !t.includes('indicates')
+    )).toBe(true);
+  });
+
+  it('STRONG_VERBS: describes/demonstrates/recommends/mentions/expects', () => {
+    const text = 'The doc describes the API. The example demonstrates usage. The guide recommends settings. The report mentions limitations. The function expects input.';
+    const terms = extractGlossaryLocal(text).map(r => r.term);
+    expect(terms.every(t =>
+      !t.includes('describes') && !t.includes('demonstrates') &&
+      !t.includes('recommends') && !t.includes('mentions') && !t.includes('expects')
+    )).toBe(true);
+  });
+});

@@ -310,7 +310,8 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
 }
 
 const COMMON_NOUN_FALSE_POSITIVES = new Set([
-  'How', 'Why', 'When', 'Where', 'What', 'Which', 'Who',
+  'Actually', 'Coding', 'Flash', 'How', 'Pro', 'Scout', 'Setup', 'Studio',
+  'Why', 'When', 'Where', 'What', 'Which', 'Who',
   'Today', 'Tomorrow', 'Yesterday', 'Nothing', 'Everything', 'Something',
   'Anything', 'Everyone', 'Anyone', 'Someone', 'Nobody', 'Everybody',
   'Each', 'Every', 'Other', 'Another', 'Either', 'Neither',
@@ -368,6 +369,49 @@ function hasSubstantiveWord(words: string[]): boolean {
   return words.some(w => !isStopword(w));
 }
 
+const NOUN_CHAIN_BREAKERS = new Set([
+  'targets', 'offers', 'provides', 'builds', 'uses', 'runs',
+  'manages', 'handles', 'supports', 'creates', 'includes',
+  'helps', 'makes', 'allows', 'enables', 'gives', 'takes',
+  'shows', 'works', 'ships', 'brings',
+  'sets', 'gets', 'needs', 'wants', 'starts', 'stops',
+  'finds', 'holds', 'sends', 'leaves', 'follows', 'removes',
+  'applies', 'produces', 'contains', 'represents', 'generates',
+  'delivers', 'executes', 'processes', 'publishes', 'schedules',
+  'configures', 'validates', 'transforms', 'converts', 'maps',
+  'tracks', 'monitors', 'alerts', 'fetches', 'queries',
+  // API / endpoint verbs (common in API docs: "endpoint returns data")
+  'returns', 'retrieves', 'cancels', 'lists', 'searches', 'marks',
+  // Infrastructure / operations
+  'hosts', 'serves', 'stores', 'loads', 'caches', 'syncs',
+  'routes', 'migrates', 'streams', 'batches',
+  // Development / CI / deployment
+  'commits', 'merges', 'deploys', 'refactors',
+  'installs', 'updates', 'upgrades', 'logs',
+  // Data / ML
+  'trains', 'predicts', 'classifies', 'embeds',
+  'encodes', 'decodes', 'normalizes',
+  'aggregates', 'indexes', 'replicates',
+  // General engineering
+  'evaluates', 'estimates', 'performs', 'implements',
+  'integrates', 'optimizes', 'simplifies', 'automates',
+  'analyzes', 'compiles', 'initializes',
+  'responds', 'notifies', 'subscribes', 'broadcasts',
+]);
+
+const STRONG_VERBS = new Set([
+  'feels', 'seems', 'looks', 'sounds',
+  'helps', 'lets', 'allows', 'enables',
+  // Sense-like / copula verbs (never nouns in tech writing)
+  'appears', 'becomes', 'remains',
+  // Modal-like / causative (almost never nouns)
+  'involves', 'requires', 'ensures', 'prevents',
+  // Meta-discourse verbs (describe documentation or code behavior)
+  'specifies', 'defines', 'describes', 'indicates',
+  'suggests', 'demonstrates', 'recommends', 'mentions',
+  'expects',
+]);
+
 function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
   const phraseCounts = new Map<string, number>();
   const phraseOriginals = new Map<string, string>();
@@ -381,22 +425,35 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
 
       const words = cleaned.split(/\s+/);
       if (!hasSubstantiveWord(words)) continue;
-      if (isStopword(words[0])) continue;
-      if (words.length === 1 && isCommonNoun(words[0])) continue;
-      if (words.length === 1) {
-        const w = words[0];
+
+      const breakIndex = words.findIndex((word, index) => {
+        if (index === 0) return false;
+        const wLower = word.toLowerCase();
+        return NOUN_CHAIN_BREAKERS.has(wLower) || STRONG_VERBS.has(wLower);
+      });
+      let finalWords = words;
+      if (breakIndex !== -1) {
+        finalWords = words.slice(0, breakIndex);
+        if (finalWords.length === 0 || !hasSubstantiveWord(finalWords)) continue;
+      }
+      const finalCleaned = finalWords.join(' ');
+
+      if (isStopword(finalWords[0])) continue;
+      if (finalWords.length === 1 && isCommonNoun(finalWords[0])) continue;
+      if (finalWords.length === 1) {
+        const w = finalWords[0];
         if (/^[A-Z][a-z]+(?:er|est|ing)$/.test(w) && !/^[A-Z]{2,}$/.test(w)) continue;
       }
 
-      if (/['']s\b/.test(cleaned)) continue;
-      if (words.every((w) => isCommonNoun(w))) continue;
-      if (words.length >= 2 && BLOCKED_TAIL_NOUNS.has(words[words.length - 1].toLowerCase())) continue;
-      if (words.length === 1 && cleaned.length < 4 && !/[A-Z]/.test(cleaned)) continue;
+      if (/['']s\b/.test(finalCleaned)) continue;
+      if (finalWords.every((w) => isCommonNoun(w))) continue;
+      if (finalWords.length >= 2 && BLOCKED_TAIL_NOUNS.has(finalWords[finalWords.length - 1].toLowerCase())) continue;
+      if (finalWords.length === 1 && finalCleaned.length < 4 && !/[A-Z]/.test(finalCleaned)) continue;
 
-      const key = cleaned.toLowerCase();
+      const key = finalCleaned.toLowerCase();
       phraseCounts.set(key, (phraseCounts.get(key) || 0) + 1);
       if (!phraseOriginals.has(key)) {
-        phraseOriginals.set(key, cleaned);
+        phraseOriginals.set(key, finalCleaned);
       }
     }
   }
@@ -494,11 +551,15 @@ export function extractGlossaryLocal(
 
   const doc = nlp(safeText);
 
-  // TAGGING INTERVENTION: Strip ProperNoun from sentence-leading
-  // function words. Use compromise's `^` anchor (matches the start of
-  // any phrase or sentence) instead of `.firstTerms()`, whose
-  // behavior varies between compromise versions and only reliably
-  // returns the very first term of the document, not every sentence.
+  // TAGGING INTERVENTION
+  // 1. Force-tag high-frequency pure verbs so they don't enter #Noun+ chains
+  doc.match('(feels|seems|looks|sounds|helps|lets|allows|enables)').tag('Verb').unTag('Noun');
+
+  // 2. Dynamic context: when a Noun is followed by a function word, it's
+  //    almost certainly a verb used as the predicate (e.g. "system targets the…")
+  doc.match('[#Noun] (the|a|an|to|with|for|by|its|their|our|us|them)').tag('Verb').unTag('Noun');
+
+  // 3. Strip ProperNoun from sentence-leading function words
   doc
     .match('^(#Adverb|#Conjunction|#Pronoun|#Preposition|#Determiner)')
     .unTag('ProperNoun');
