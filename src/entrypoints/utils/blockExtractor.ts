@@ -518,7 +518,8 @@ function acceptWalkerNode(
 function collectBlocksFromRoot(
   startNode: Node,
   blocks: TextBlock[],
-  blockIdRef: { value: number }
+  blockIdRef: { value: number },
+  seenTexts: Set<string>
 ): { rejected: number; skipped: number; accepted: number } {
   const counters = { rejected: 0, skipped: 0, accepted: 0 };
   const walker = document.createTreeWalker(
@@ -533,6 +534,16 @@ function collectBlocksFromRoot(
     if (translateNode) {
       const text = translateNode.textContent?.trim();
       if (text) {
+        // HBR-style pages repeat the same summary paragraph in multiple
+        // visible callouts (e.g. Summary box, social share preview,
+        // article body). Translating each instance wastes API calls and
+        // stacks the same translation vertically. Keep only the first
+        // occurrence per unique text.
+        if (seenTexts.has(text)) {
+          counters.skipped++;
+          continue;
+        }
+        seenTexts.add(text);
         const id = `b${++blockIdRef.value}`;
         if (translateNode instanceof HTMLElement) {
           translateNode.dataset.fanyiBlockId = id;
@@ -554,7 +565,7 @@ function collectBlocksFromRoot(
   // TreeWalker doesn't cross shadow root boundaries. Walk open shadow roots
   // explicitly so we can pick up text inside web components like Reddit's
   // <shreddit-post>.
-  collectFromShadowHosts(startNode, blocks, blockIdRef);
+  collectFromShadowHosts(startNode, blocks, blockIdRef, seenTexts);
 
   return counters;
 }
@@ -562,7 +573,8 @@ function collectBlocksFromRoot(
 function collectFromShadowHosts(
   root: Node,
   blocks: TextBlock[],
-  blockIdRef: { value: number }
+  blockIdRef: { value: number },
+  seenTexts: Set<string>
 ): void {
   // jsdom's TreeWalker skips nodes whose acceptNode returns FILTER_SKIP
   // (it should still visit them per spec but does not). Use a permissive
@@ -581,7 +593,7 @@ function collectFromShadowHosts(
     if (!(currentNode instanceof Element)) continue;
     const shadow = currentNode.shadowRoot;
     if (shadow && shadow.mode === 'open') {
-      collectBlocksFromRoot(shadow, blocks, blockIdRef);
+      collectBlocksFromRoot(shadow, blocks, blockIdRef, seenTexts);
     }
   }
 }
@@ -589,6 +601,10 @@ function collectFromShadowHosts(
 export function extractBlocks(rootNode: Node): TextBlock[] {
   const blocks: TextBlock[] = [];
   const blockIdRef = { value: 0 };
+  // Tracks text already extracted so duplicate paragraphs (e.g. HBR
+  // summary callout repeated in multiple sections) collapse to a single
+  // block. See collectBlocksFromRoot for the dedup policy.
+  const seenTexts = new Set<string>();
 
   const startNode = rootNode instanceof Document ? (rootNode.body || rootNode.documentElement) : rootNode;
   if (!startNode) {
@@ -596,7 +612,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
     return [];
   }
 
-  collectBlocksFromRoot(startNode, blocks, blockIdRef);
+  collectBlocksFromRoot(startNode, blocks, blockIdRef, seenTexts);
   return blocks;
 }
 

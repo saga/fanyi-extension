@@ -1751,6 +1751,30 @@ describe('extractBlocks - Reference/citation patterns', () => {
   });
 });
 
+describe('extractBlocks - Duplicate text dedup (HBR summary callout)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should collapse identical paragraphs to a single block', () => {
+    const shared = 'In the third edition of this study, the authors found that people are adopting generative AI for an ever-widening range of uses.';
+    setupHTML(`
+      <article>
+        <div class="summary-callout"><p>${shared}</p></div>
+        <div class="social-share-preview"><p>${shared}</p></div>
+        <div class="article-body"><p>${shared}</p></div>
+        <p>This paragraph is unique to the article body.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const occurrences = blocks.filter(b => b.text === shared).length;
+    expect(occurrences).toBe(1);
+    // The unique paragraph is still extracted.
+    expect(blocks.some(b => b.text.includes('unique to the article body'))).toBe(true);
+  });
+});
+
 describe('extractBlocks - Deeply nested structures', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
