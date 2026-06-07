@@ -115,8 +115,12 @@ describe('extractGlossaryLocal', () => {
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
+    // Acronyms (CUDA) are kept even when a longer phrase containing them
+    // is also present — the acronym is the load-bearing glossary entry
+    // for the model to render the acronym consistently across the article.
+    // See isPhraseSubsuming() in glossaryExtractor.ts.
     if (terms.includes('CUDA Toolkit')) {
-      expect(terms).not.toContain('CUDA');
+      expect(terms).toContain('CUDA');
     }
   });
 
@@ -283,8 +287,10 @@ describe('extractGlossaryLocal', () => {
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
+    // Acronyms (PII) survive even when a longer phrase containing them
+    // is also present — see isPhraseSubsuming() in glossaryExtractor.ts.
     if (terms.some(t => t.toLowerCase().includes('pii scrubbing'))) {
-      expect(terms).not.toContain('PII');
+      expect(terms).toContain('PII');
     }
   });
 
@@ -293,9 +299,12 @@ describe('extractGlossaryLocal', () => {
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
-    // "API calls" and "SDK tools" are both present and neither contains the other
+    // "API calls" is specific enough to keep. "SDK tools" is a generic
+    // tail-noun phrase ("AI tools", "developer tools" etc.) and is
+    // filtered by BLOCKED_TAIL_NOUNS — see Q4 in
+    // docs/glossary-extraction-open-questions.md.
     expect(terms.some(t => t.toLowerCase().includes('api calls'))).toBe(true);
-    expect(terms.some(t => t.toLowerCase().includes('sdk tools'))).toBe(true);
+    expect(terms.some(t => t.toLowerCase().includes('sdk tools'))).toBe(false);
   });
 
   // --- Emphasized terms edge cases ---
@@ -332,12 +341,12 @@ describe('extractGlossaryLocal', () => {
     const result = extractGlossaryLocal(text);
 
     // Length-only ordering is no longer the contract; we use scoreTerm.
-    // Verify the natural long-phrase-wins-acronym behavior: when a phrase
-    // subsumes an acronym, the longer phrase survives dedup.
+    // Verify the natural acronym-stays-independent behavior: when a phrase
+    // subsumes an acronym, the acronym is still kept (so the model
+    // renders it consistently across the article).
     const terms = result.map((r) => r.term);
-    // "CUDA Toolkit" subsumes "CUDA", so only the longer phrase should remain
     expect(terms).toContain('CUDA Toolkit');
-    expect(terms).not.toContain('CUDA');
+    expect(terms).toContain('CUDA');
     // sanity: result is non-empty
     expect(terms.length).toBeGreaterThan(0);
   });
