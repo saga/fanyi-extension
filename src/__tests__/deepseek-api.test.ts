@@ -221,7 +221,7 @@ describe('DeepSeekTranslationService API methods', () => {
 
       const fetchCall = globalFetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
-      expect(body.messages[0].content).toContain('Simplified Chinese');
+      expect(body.messages[0].content).toContain('Extract key technical terms');
     });
   });
 

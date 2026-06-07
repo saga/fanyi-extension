@@ -8,6 +8,18 @@ import { logUnchangedBlocks } from '../utils/translateApi';
 
 const API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
+const USER_ID = 'fanyi-extension';
+const TRANSLATION_TEMPERATURE = 0.1;
+
+/**
+ * Estimate max output tokens for translation. Output is typically 1-2x input.
+ * Add 20% buffer to avoid truncation. Minimum 256 tokens.
+ */
+function estimateMaxTokens(inputJson: string): number {
+  // Rough estimate: 1 char ≈ 0.3 tokens for English, 0.5 for CJK
+  const estimatedInputTokens = Math.ceil(inputJson.length * 0.5);
+  return Math.max(256, Math.ceil(estimatedInputTokens * 2 * 1.2));
+}
 
 function buildHeaders(apiKey: string): Record<string, string> {
   return {
@@ -19,9 +31,8 @@ function buildHeaders(apiKey: string): Record<string, string> {
 function buildGlossaryExtractionBody(
   fullText: string,
   sourceLang: string,
-  targetLang: string
+  _targetLang: string
 ): string {
-  const targetLangName = targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
   const truncatedText = fullText.length > 5000 ? fullText.substring(0, 5000) : fullText;
 
   return JSON.stringify({
@@ -29,21 +40,17 @@ function buildGlossaryExtractionBody(
     messages: [
       {
         role: 'system',
-        content: `You are a terminology extraction expert. Given a text in ${sourceLang === 'en' ? 'English' : sourceLang}, extract key domain-specific terms, proper nouns, technical acronyms, and brand names that should be translated consistently.
-
-Rules:
-- Only extract terms that appear in the text
-- Focus on: technical terms, proper nouns, acronyms, brand names, domain jargon
-- For each term, provide the best ${targetLangName} translation
-- Mark terms that should NOT be translated (keep original) with "KEEP" as translation
-- Return JSON only`,
+        content: `Extract key technical terms, proper nouns, and acronyms from ${sourceLang === 'en' ? 'English' : sourceLang} text. Return {"glossary":[{"term":"x","translation":"y"}]}. Use "KEEP" for terms that should not be translated.`,
       },
       {
         role: 'user',
-        content: `Extract terminology from this text and return {"glossary":[{"term":"original term","translation":"译文或KEEP"}]}:\n\n${truncatedText}`,
+        content: `Extract terms. Output JSON only.\n\n${truncatedText}`,
       },
     ],
     response_format: { type: 'json_object' },
+    temperature: TRANSLATION_TEMPERATURE,
+    max_tokens: 2048,
+    user_id: USER_ID,
     thinking: { type: 'disabled' },
     stream: false,
   });
@@ -79,7 +86,7 @@ function buildTranslationBody(
   targetLang: string,
   sitePrompt?: string,
   glossary?: GlossaryEntry[]
-) {
+): Record<string, unknown> {
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
     null,
@@ -105,7 +112,7 @@ function buildTranslationBody(
     systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
   }
 
-  return JSON.stringify({
+  return {
     model: MODEL,
     messages: [
       {
@@ -120,9 +127,12 @@ ${blocksJson}`,
       },
     ],
     response_format: { type: 'json_object' },
+    temperature: TRANSLATION_TEMPERATURE,
+    max_tokens: estimateMaxTokens(blocksJson),
+    user_id: USER_ID,
     thinking: { type: 'disabled' },
     stream: false,
-  });
+  };
 }
 
 async function callApi(
@@ -272,7 +282,7 @@ export class DeepSeekTranslationService implements TranslationService {
       glossary.length > 0 ? glossary : undefined
     );
 
-    const raw = await callApi(this.apiKey, body);
+    const raw = await callApi(this.apiKey, JSON.stringify(body));
     return logUnchangedBlocks(raw, blocks);
   }
 
@@ -285,13 +295,13 @@ export class DeepSeekTranslationService implements TranslationService {
   ): AsyncGenerator<string, string, unknown> {
     const blocks = JSON.parse(jsonContent);
 
-    const bodyObj = JSON.parse(buildTranslationBody(
+    const bodyObj = buildTranslationBody(
       blocks,
       sourceLang,
       targetLang,
       context,
       glossary.length > 0 ? glossary : undefined
-    ));
+    );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);
 
