@@ -124,9 +124,9 @@ const ACRONYM_EXCLUSIONS = new Set([
 // sentence words (The, It, How) which have only 1 uppercase letter.
 //
 //   [A-Z]{2,}                 — all-caps, 2+ chars: API, NAT, HTTP, POSTGRESQL
-//   [a-z][A-Z][A-Z][A-Za-z]*  — prefix-lower then 2 caps: eBPF, gRPC, iOS
+//   [a-z]+[A-Z]{2,}[A-Za-z0-9]* — prefix-lower then 2+ caps: macOS, tvOS, eBPF, gRPC, iOS
 //   [A-Z][a-z]+[A-Z][A-Za-z]* — inner-cap: GitHub, OpenAIs, NodeJs
-const ACRONYM_PATTERN = /\b(?:[A-Z]{2,}|[a-z][A-Z][A-Z][A-Za-z0-9]*|[A-Z][a-z]+[A-Z][A-Za-z0-9]*)\b/g;
+const ACRONYM_PATTERN = /\b(?:[A-Z]{2,}|[a-z]+[A-Z]{2,}[A-Za-z0-9]*|[A-Z][a-z]+[A-Z][A-Za-z0-9]*)\b/g;
 
 function cleanTerm(term: string): string {
   return term
@@ -184,18 +184,24 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     if (offset >= 0) possessiveRanges.push([offset, offset + text.length]);
   }
   const isPossessive = (word: string): boolean => {
-    let idx = fullText.indexOf(word);
-    if (idx < 0) return false;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?<=^|[^a-zA-Z0-9_])${escaped}(?=[^a-zA-Z0-9_]|$)`, 'g');
+    
     let allPossessive = true;
-    while (idx >= 0) {
+    let hasMatch = false;
+
+    for (const match of fullText.matchAll(regex)) {
+      hasMatch = true;
+      const idx = match.index;
+      if (idx === undefined) continue;
+      
       const inRange = possessiveRanges.some(([s, e]) => idx >= s && idx < e);
       if (!inRange) {
         allPossessive = false;
         break;
       }
-      idx = fullText.indexOf(word, idx + 1);
     }
-    return allPossessive;
+    return hasMatch ? allPossessive : false;
   };
 
   // (1) compromise's acronyms() method is the most accurate acronym source —
@@ -309,7 +315,9 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     // "Microsoft" in "Microsoft announced" + "...than Microsoft"),
     // the word is a real proper noun and we keep it.
     const startCount = sentenceStartCounts.get(word.toLowerCase()) || 0;
-    if (startCount >= count) continue;
+    // Fix: only filter if count > 1 AND all occurrences are at sentence start
+    // (i.e. the word appears multiple times but never mid-sentence)
+    if (count > 1 && startCount >= count) continue;
     // Q3: keep brand names that appear only once, because a single
     // mention of "Microsoft" / "Anthropic" / "Databricks" is still
     // worth pinning in the glossary. Without this, Q3's
@@ -555,12 +563,14 @@ export function extractGlossaryLocal(
       const escaped = validProducts
         .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
         .sort((a, b) => b.length - a.length); // longest first to avoid prefix shadowing
+      // Fix: use lookaround assertions to avoid consuming boundary chars
       const productRe = new RegExp(
-        `(^|[^A-Za-z0-9])(?:${escaped.join('|')})([^A-Za-z0-9]|$)`,
+        `(?<=^|[^A-Za-z0-9_])(?:${escaped.join('|')})(?=[^A-Za-z0-9_]|$)`,
         'gi'
       );
       for (const m of fullText.matchAll(productRe)) {
-        const product = m[0].replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9]+$/, '');
+        // m[0] is the clean product name (no surrounding boundary chars consumed)
+        const product = m[0];
         const exists = [...glossaryMap.keys()].some(
           (k) => k.toLowerCase() === product.toLowerCase()
         );
@@ -644,6 +654,9 @@ export function extractGlossaryLocal(
     if (!uniqueTerms.has(lower)) {
       uniqueTerms.set(lower, term);
     } else {
+      // Fix: protect known lowercase tech products from being overwritten by TitleCase
+      if (TECH_PRODUCTS.has(lower)) continue;
+
       const existing = uniqueTerms.get(lower)!;
       if (term !== term.toUpperCase() && /[a-z]/.test(term) && /^[A-Z]/.test(term)) {
         uniqueTerms.set(lower, term);
@@ -700,13 +713,12 @@ const GENERIC_NOISE = new Set([
 function isGenericNoise(term: string): boolean {
   const normalized = term.toLowerCase().trim();
   if (GENERIC_NOISE.has(normalized)) return true;
-  // Drop lowercase plural-form generic nouns. We only do this for
-  // single-word plurals (no spaces) since proper nouns like "Apache Pekko
-  // Streams" need their trailing 's' preserved.
+  // Fix: protect TECH_PRODUCTS (redis, k8s, etc.) and only filter fully-lowercase plurals
   if (
     !term.includes(' ') &&
-    /^[a-z]+s$/.test(normalized) &&
-    normalized.length <= 10
+    /^[a-z]+s$/.test(term) && // Use original term to ensure fully lowercase
+    term.length <= 10 &&
+    !TECH_PRODUCTS.has(normalized)
   ) {
     return true;
   }
@@ -729,7 +741,8 @@ function isPhraseSubsuming(kept: string, term: string): boolean {
     // from the LLM entry alone, but losing LLM entirely would let the
     // model mistranslate every other LLM mention in the article.
     if (/^[A-Z]{2,}$/.test(term)) return false;
-    const re = new RegExp(`\\b${escapeRegExp(term)}\\b`, 'i');
+    // Fix: use lookaround instead of \b to support symbols like C++
+    const re = new RegExp(`(?<=^|[^a-zA-Z0-9_])${escapeRegExp(term)}(?=[^a-zA-Z0-9_]|$)`, 'i');
     return re.test(kept);
   }
 
@@ -767,6 +780,8 @@ function scoreTerm(term: string, fullText: string): number {
 
   // 3. Lowercase / generic term — fall back to frequency + length
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const occurrences = (fullText.match(new RegExp(`\\b${escaped}\\b`, 'gi')) || []).length;
+  // Fix: use lookaround instead of \b to support symbols like C++, Vue.js
+  const regex = new RegExp(`(?<=^|[^a-zA-Z0-9_])${escaped}(?=[^a-zA-Z0-9_]|$)`, 'gi');
+  const occurrences = (fullText.match(regex) || []).length;
   return occurrences * FREQUENCY_WEIGHT + term.length * LENGTH_WEIGHT * 0.1;
 }
