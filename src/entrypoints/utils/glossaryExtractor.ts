@@ -3,15 +3,21 @@ import type { GlossaryEntry } from '../service/_service';
 import techProductsData from './tech-products.json';
 
 const TECH_PRODUCTS = new Set<string>(techProductsData.products as string[]);
+// Canonical casing map for known products: lowercased key → official spelling
+// (e.g. "github" -> "GitHub", "dbt" -> "dbt"). Used at the end of
+// extractGlossaryLocal to force a known product's casing regardless of
+// which form the article happens to surface first ("DBT" vs "dbt" vs
+// "Dbt"). Without this, a race between the article's first occurrence
+// and the canonical form can leave the wrong casing in the glossary.
+const CANONICAL_PRODUCTS = new Map(
+  [...TECH_PRODUCTS].map((p) => [p.toLowerCase(), p])
+);
 const KNOWN_PUBLICATIONS = new Set<string>(
   (techProductsData.publications as string[]).flatMap((p) => p.toLowerCase().split(/\s+/))
 );
 const FULL_PUBLICATIONS = techProductsData.publications as string[];
 
-// Tech-domain anchors — when a frequent-phrase candidate contains one of
-// these, it gets promoted into the glossary even with a single occurrence
-// (the normal threshold is >= 2 for multi-word phrases). Example: "agentic
-// AI" contains the anchor "AI" and should not be filtered out for low freq.
+// Tech-domain anchors
 const TECH_ANCHORS = new Set([
   'AI', 'ML', 'LLM', 'RAG', 'NLP', 'GPU', 'CPU', 'TPU', 'NPU', 'FPGA', 'ASIC',
   'API', 'REST', 'GraphQL', 'gRPC', 'SQL', 'NoSQL', 'MCP', 'RBAC', 'PII',
@@ -24,19 +30,10 @@ const TECH_ANCHORS = new Set([
   'TimesFM', 'PyTorch', 'TensorFlow', 'LangChain', 'LangGraph', 'Ollama',
 ]);
 
-// Phrase keys in extractFrequentTerms() are lowercased before comparison.
-// Use a parallel lowercased set so anchor checks (TECH_ANCHORS.has(...)) work
-// against lowercased tokens, not the canonical-case form. Without this, "AI"
-// in the anchor set would never match the lowercased "ai" extracted from
-// text — see "agentic AI" / "Flink SQL" false negatives.
 const TECH_ANCHORS_LOWER = new Set(
   [...TECH_ANCHORS].map((w) => w.toLowerCase())
 );
 
-// Tail nouns that, when they appear as the last word in a multi-word phrase,
-// indicate generic phrasing rather than a glossary-worthy term. "AI apps",
-// "AI services", "developer tools" all fall in this bucket — they're
-// "AI stuff" rather than a specific product or concept.
 const BLOCKED_TAIL_NOUNS = new Set([
   'apps', 'services', 'tools', 'users', 'systems', 'solutions', 'platforms',
   'products', 'projects', 'features', 'components', 'modules',
@@ -86,8 +83,6 @@ const STOPWORDS = new Set([
   'health', 'person', 'art', 'war', 'history', 'party', 'result',
   'customer', 'server', 'database', 'network', 'process', 'model', 'tool',
   'feature', 'platform', 'product', 'project', 'team', 'user',
-  // Contraction leftovers: cleanTerm() strips apostrophes so "I've" becomes
-  // "Ive", "don't" becomes "dont", etc. These aren't real glossary terms.
   'ive', 'dont', 'youre', 'were', 'theyre', 'im', 'id', 'ill', 'hes', 'shes',
   'morning', 'reason', 'research', 'girl', 'guy', 'moment', 'air',
   'teacher', 'force', 'education', 'foot', 'boy', 'age', 'policy',
@@ -118,43 +113,20 @@ const ACRONYM_EXCLUSIONS = new Set([
   'ISBN', 'HTML', 'JSON', 'ACM', 'BETA', 'MATH',
 ]);
 
-// Match "obvious" acronyms — must contain at least 2 uppercase letters
-// (or be all-caps). This is restrictive on purpose: it catches API, NAT,
-// eBPF, gRPC, iOS, NaN, POSTGRESQL, and skips ordinary capitalized
-// sentence words (The, It, How) which have only 1 uppercase letter.
-//
-//   [A-Z]{2,}                 — all-caps, 2+ chars: API, NAT, HTTP, POSTGRESQL
-//   [a-z]+[A-Z]{2,}[A-Za-z0-9]* — prefix-lower then 2+ caps: macOS, tvOS, eBPF, gRPC, iOS
-//   [A-Z][a-z]+[A-Z][A-Za-z]* — inner-cap: GitHub, OpenAIs, NodeJs
 const ACRONYM_PATTERN = /\b(?:[A-Z]{2,}|[a-z]+[A-Z]{2,}[A-Za-z0-9]*|[A-Z][a-z]+[A-Z][A-Za-z0-9]*)\b/g;
 
 function cleanTerm(term: string): string {
   return term
-    // Strip common punctuation from both ends, including trailing dashes
-    // (so "API-" in "API-first" doesn't sneak through as a glossary entry).
     .replace(/^[,;:.!?'"“”‘’()\[\]{}\-–—#*_/\\|<>~`\s]+/, '')
     .replace(/[,;:.!?'"“”‘’()\[\]{}\-–—#*_/\\|<>~`\s]+$/, '')
-    // Strip possessive 's and standalone "I've"/"we've" contractions — these
-    // are sentence fillers, not glossary terms. Match both straight and
-    // smart (typographic) apostrophes since real-world text uses both.
     .replace(/['’]s$/i, '')
-    // Split on glued periods from bad formatting (e.g. "Falconer.The")
     .split(/\.[A-Z]/)[0]
-    // If a contraction remains, the whole token is one (e.g. "I've", "we're").
-    // Drop it by replacing the apostrophe with an empty string AFTER we've
-    // pulled the rest — but easier: if it still contains an apostrophe,
-    // blank it. Compromise tags these as nouns surprisingly often.
     .replace(/['’]/g, '')
     .trim();
 }
 
 function extractAcronyms(text: string): string[] {
   const found = new Map<string, number>();
-  // Use matchAll rather than .exec() on a global regex — matchAll
-  // creates a fresh internal regex copy per call so the
-  // ACRONYM_PATTERN's `lastIndex` is never shared across calls
-  // (which would otherwise silently skip matches on the second
-  // invocation in the same context).
   for (const match of text.matchAll(ACRONYM_PATTERN)) {
     const word = match[0];
     if (!ACRONYM_EXCLUSIONS.has(word)) {
@@ -175,18 +147,27 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
   const entities = new Set<string>();
   const fullText = doc.text();
 
-  // Build a set of token-offset ranges that are possessives (e.g. "Netflix's"),
-  // so we can drop the bare brand token rather than the fragmented phrase
-  // ("Netflix's service count") that compromise sometimes emits.
   const possessiveRanges: Array<[number, number]> = [];
-  for (const text of doc.match('#Possessive+').out('array')) {
-    const offset = fullText.indexOf(text);
-    if (offset >= 0) possessiveRanges.push([offset, offset + text.length]);
+  {
+    // Build [start, end) ranges for every possessive match. We use
+    // sequential indexOf to handle repeated phrases (e.g. "Netflix's ...
+    // Netflix's ... Netflix's") — using fullText.indexOf(text) without
+    // a fromIndex would collapse every match to the first occurrence and
+    // make later occurrences look non-possessive, so isPossessive would
+    // return false and the name would leak into the glossary.
+    let searchFrom = 0;
+    for (const t of doc.match('#Possessive+').out('array')) {
+      const idx = fullText.indexOf(t, searchFrom);
+      if (idx >= 0) {
+        possessiveRanges.push([idx, idx + t.length]);
+        searchFrom = idx + t.length;
+      }
+    }
   }
   const isPossessive = (word: string): boolean => {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(?<=^|[^a-zA-Z0-9_])${escaped}(?=[^a-zA-Z0-9_]|$)`, 'g');
-    
+
     let allPossessive = true;
     let hasMatch = false;
 
@@ -194,7 +175,7 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
       hasMatch = true;
       const idx = match.index;
       if (idx === undefined) continue;
-      
+
       const inRange = possessiveRanges.some(([s, e]) => idx >= s && idx < e);
       if (!inRange) {
         allPossessive = false;
@@ -204,13 +185,6 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     return hasMatch ? allPossessive : false;
   };
 
-  // (1) compromise's acronyms() method is the most accurate acronym source —
-  // it correctly tags "API", "POSTGRESQL" and skips ordinary all-caps words
-  // (DOER, MUST) that the regex / #Acronym+ naively match. We also apply
-  // ACRONYM_EXCLUSIONS as a defensive belt-and-suspenders pass.
-  // The `acronyms` / `people` methods are declared on `three`'s View but
-  // not on `two`'s; module augmentation in src/types/compromise-two.d.ts
-  // extends the `two` View so we can call them without `as unknown as`.
   if (typeof doc.acronyms === 'function') {
     for (const ac of doc.acronyms().out('array')) {
       const cleaned = cleanTerm(ac);
@@ -219,22 +193,18 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
       if (ACRONYM_EXCLUSIONS.has(cleaned.toUpperCase())) continue;
       if (isCommonNoun(cleaned)) continue;
       if (/^[A-Z]{5,}$/.test(cleaned) && !/\d/.test(cleaned)) {
-        const occurrences = (fullText.match(new RegExp(`\\b${cleaned}\\b`, 'g')) || []).length;
+        const occurrences = (fullText.match(new RegExp(`(?<=^|[^a-zA-Z0-9_])${cleaned}(?=[^a-zA-Z0-9_]|$)`, 'g')) || []).length;
         if (occurrences < 2) continue;
       }
       entities.add(cleaned);
     }
   }
 
-  // (2) People — compromise's .people() returns full names like "Sean
-  // Falconer". We accept these and also strip the bare first/last tokens so
-  // translations can match either form.
   if (typeof doc.people === 'function') {
     for (const person of doc.people().out('array')) {
       const cleaned = cleanTerm(person);
       if (cleaned.length < 2) continue;
       if (cleaned.includes(' ')) {
-        // Full multi-token name → also add individual tokens.
         for (const tok of cleaned.split(/\s+/)) {
           if (tok.length >= 2 && !isCommonNoun(tok) && !isStopword(tok)) {
             entities.add(tok);
@@ -246,9 +216,6 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     }
   }
 
-  // (3) CamelCase identifiers (NOT at sentence start). Skips all-caps words
-  // which are already handled by acronyms(). We want mixed-case identifiers
-  // like GitHub, Apache, eBPF, gRPC.
   const brandRegex = /(?:^|[^a-zA-Z0-9])([A-Z][a-z]+[A-Z][A-Za-z0-9]*)\b/g;
   for (const m of fullText.matchAll(brandRegex)) {
     const word = m[1];
@@ -257,47 +224,51 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     entities.add(word);
   }
 
-  // (4) Single-cap brand names — when NOT at sentence start.
   const singleCapRegex = /(?<=[a-z,;:] )([A-Z][a-z]{2,})\b/g;
   for (const m of fullText.matchAll(singleCapRegex)) {
     const word = m[1];
     if (isCommonNoun(word)) continue;
     if (STOPWORDS.has(word.toLowerCase())) continue;
     if (isPossessive(word)) continue;
-    // Drop single-word pieces of known publications. "Stack" is ambiguous
-    // ("LAMP stack", "tech stack") — only the full form "The New Stack" is
-    // worth translating as a publication name.
     if (KNOWN_PUBLICATIONS.has(word.toLowerCase())) continue;
     entities.add(word);
   }
 
-  // (5) Known publications: scan for full multi-word publication names
-  // (e.g. "The New Stack", "The Register") and add the canonical form. This
-  // ensures the brand + qualifiers stick together in the glossary.
+  // Sentence-initial capitalized words: compromise's PoS tagger often
+  // fails to label a single capitalized word at the start of a sentence
+  // (or after a newline) as #ProperNoun, so #ProperNoun+ misses
+  // brands like "Anthropic" or "Microsoft" when they appear in isolation.
+  // We backstop this with a regex that captures `[A-Z][a-z]{2,}` at
+  // sentence start, filtered through the same noise gates
+  // (isCommonNoun / isStopword / KNOWN_PUBLICATIONS / isPossessive).
+  // Grammar words at sentence start ("However", "When", "Then", "The")
+  // are dropped by the same gates that the in-doc ProperNoun pipeline
+  // uses, so we don't need a separate hand-rolled list.
+  const sentenceStartCapRegex = /(?<=^|[.!?]\s+|\n)([A-Z][a-z]{2,})\b/g;
+  for (const m of fullText.matchAll(sentenceStartCapRegex)) {
+    const word = m[1];
+    if (isCommonNoun(word)) continue;
+    if (STOPWORDS.has(word.toLowerCase())) continue;
+    if (isPossessive(word)) continue;
+    if (KNOWN_PUBLICATIONS.has(word.toLowerCase())) continue;
+    if (entities.has(word)) continue;
+    entities.add(word);
+  }
+
   for (const pub of FULL_PUBLICATIONS) {
     if (fullText.toLowerCase().includes(pub.toLowerCase())) {
       entities.add(pub);
     }
   }
 
-  // (6) ProperNouns — compromise's #ProperNoun+ catches single-word brand
-  // names (Microsoft, Google) that the brandRegex/singleCapRegex miss. We
-  // filter aggressively: drop stopwords, short tokens, and common nouns.
-  //
-  // The earlier "exclude any word that ever appears at sentence start"
-  // heuristic was wrong: a brand mentioned both as sentence-initial
-  // ("Microsoft announced...") and mid-sentence ("...than Microsoft") got
-  // wrongly filtered. Instead, exclude a word only when EVERY occurrence
-  // is sentence-initial — i.e. we have no evidence that it's used as a
-  // proper noun mid-sentence. compromise/two's .sentences() isn't typed,
-  // so we extract sentence starts by regex against the original text.
   const sentenceStartCounts = new Map<string, number>();
   for (const m of fullText.matchAll(/(?:^|[.!?]\s+|\n)([A-Z][A-Za-z]+)/g)) {
     const w = m[1].toLowerCase();
     sentenceStartCounts.set(w, (sentenceStartCounts.get(w) || 0) + 1);
   }
   const properNounCounts = new Map<string, number>();
-  for (const pn of doc.match('#ProperNoun+').out('array')) {
+
+  for (const pn of doc.match('#ProperNoun+').not('(#Pronoun|#Conjunction|#Preposition|#Determiner|#Adverb)').out('array')) {
     const cleaned = cleanTerm(pn);
     if (cleaned.includes(' ')) continue;
     if (cleaned.length < 3) continue;
@@ -308,33 +279,16 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     properNounCounts.set(cleaned, (properNounCounts.get(cleaned) || 0) + 1);
   }
   for (const [word, count] of properNounCounts) {
-    // Drop only when every observed occurrence of this word is at a
-    // sentence boundary — i.e. compromise has no evidence the word is
-    // ever used as a mid-sentence proper noun. If it appears at the
-    // start of a sentence even once but also mid-sentence (e.g.
-    // "Microsoft" in "Microsoft announced" + "...than Microsoft"),
-    // the word is a real proper noun and we keep it.
     const startCount = sentenceStartCounts.get(word.toLowerCase()) || 0;
-    // Fix: only filter if count > 1 AND all occurrences are at sentence start
-    // (i.e. the word appears multiple times but never mid-sentence)
     if (count > 1 && startCount >= count) continue;
-    // Q3: keep brand names that appear only once, because a single
-    // mention of "Microsoft" / "Anthropic" / "Databricks" is still
-    // worth pinning in the glossary. Without this, Q3's
-    // ProperNoun fallback path is a no-op for one-shot brand mentions.
     entities.add(word);
   }
 
   return [...entities];
 }
 
-// Mid-sentence capitalized words that aren't product/brand names. This is
-// shorter than the full stopword list because proper-noun grammar in
-// English is much narrower than what we have to filter.
 const COMMON_NOUN_FALSE_POSITIVES = new Set([
-  // sentence-initial words that survived lookbehind filtering
   'How', 'Why', 'When', 'Where', 'What', 'Which', 'Who',
-  // common nouns that look like brand names
   'Today', 'Tomorrow', 'Yesterday', 'Nothing', 'Everything', 'Something',
   'Anything', 'Everyone', 'Anyone', 'Someone', 'Nobody', 'Everybody',
   'Each', 'Every', 'Other', 'Another', 'Either', 'Neither',
@@ -352,7 +306,6 @@ const COMMON_NOUN_FALSE_POSITIVES = new Set([
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
   'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
-  // domain-generic tech terms that look brand-ish
   'Microservices', 'Microservice', 'Services', 'Service', 'Topology', 'Connector',
   'Architecture', 'Pipeline', 'Aggregator', 'Stream', 'Streams',
   'Consumer', 'Producer', 'Broker', 'Cluster', 'Node', 'Nodes',
@@ -370,11 +323,8 @@ const COMMON_NOUN_FALSE_POSITIVES = new Set([
   'Service', 'Services', 'Process', 'Process', 'Thread', 'Threads',
   'Context', 'Scope', 'Token', 'Tokens', 'Session', 'Sessions',
   'Pipeline', 'Pipelines', 'Job', 'Jobs', 'Task', 'Tasks', 'Batch', 'Batches',
-  // Generic nouns that repeat a lot in tech writing but aren't glossary-worthy.
   'Customer', 'Server', 'Database', 'Network', 'Process', 'Model', 'Tool',
   'Feature', 'Platform', 'Product', 'Project', 'User', 'Customer',
-  // Fragments from hyphenated compounds (e.g. "high-stakes" → "stakes")
-  // and other common domain words that aren't glossary-worthy on their own.
   'Stakes', 'Controls', 'Tooling', 'Industries', 'Agencies', 'Vendors',
   'Practices', 'Patterns', 'Concerns', 'Requirements', 'Constraints',
   'Security', 'Privacy', 'Latency', 'Throughput', 'Compliance',
@@ -382,9 +332,6 @@ const COMMON_NOUN_FALSE_POSITIVES = new Set([
 ]);
 
 function isCommonNoun(word: string): boolean {
-  // The list stores Title-case forms (e.g. "Service", "Pipeline"). Match
-  // case-insensitively so "service"/"pipeline" mid-sentence are also
-  // recognized as common nouns, not proper-noun candidates.
   if (COMMON_NOUN_FALSE_POSITIVES.has(word)) return true;
   return COMMON_NOUN_FALSE_POSITIVES.has(
     word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
@@ -405,51 +352,23 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
 
   const patterns = ['#Noun+', '#Noun #Gerund', '#Noun #Noun #Gerund'];
   for (const pattern of patterns) {
-    for (const phrase of doc.match(pattern).out('array')) {
+    for (const phrase of doc.match(pattern).not('(#Pronoun|#Preposition|#Conjunction)').out('array')) {
       const cleaned = cleanTerm(phrase);
       if (cleaned.length < 3 || cleaned.length > 60) continue;
-      // Phrases that contain internal punctuation (`:`, `;`, `,`, `—`)
-      // are usually sentence fragments compromise mis-tagged as noun
-      // phrases — e.g. "AI development: experimentation", "leap: AI
-      // agents", "AI systems; it". These are NOT glossary terms.
       if (/[,;:—–]/.test(cleaned)) continue;
 
       const words = cleaned.split(/\s+/);
       if (!hasSubstantiveWord(words)) continue;
       if (isStopword(words[0])) continue;
-      // For single-word entries, also reject common nouns like "customer",
-      // "server", "database" — they appear repeatedly in tech writing but
-      // aren't glossary-worthy translation targets.
       if (words.length === 1 && isCommonNoun(words[0])) continue;
-      // Drop single-word frequent candidates that look like English
-      // comparative/superlative adjectives (Easier, Faster, Better) or
-      // present participles used as adjectives (Building, Growing, Going).
-      // compromise mis-tags these as nouns and they pollute the glossary
-      // with sentence-filler words. Words ending in -ing / -er / -est with
-      // a capitalized first letter are typically "Running Example: ..."
-      // sentence starts, not glossary entries.
       if (words.length === 1) {
         const w = words[0];
         if (/^[A-Z][a-z]+(?:er|est|ing)$/.test(w) && !/^[A-Z]{2,}$/.test(w)) continue;
       }
 
-      // Reject phrases that contain a possessive suffix. "Netflix's service
-      // count" is a fragment; the brand token is "Netflix" (handled by the
-      // proper-noun extractor). Allowing possessives in frequent terms just
-      // creates phrase-shaped noise in the glossary.
       if (/['']s\b/.test(cleaned)) continue;
-      // Reject phrases where every word is generic English (Topology, Stream,
-      // Architecture etc.). These appear repeatedly but aren't translation-
-      // worthy glossary entries.
       if (words.every((w) => isCommonNoun(w))) continue;
-      // Reject phrases that end in a generic tail noun ("AI apps", "AI
-      // services", "developer tools"). These are vague "X-stuff" phrasings
-      // — not specific product or concept names worth pinning in glossary.
-      // The translation model already knows how to render these.
       if (words.length >= 2 && BLOCKED_TAIL_NOUNS.has(words[words.length - 1].toLowerCase())) continue;
-      // Reject single-word entries that are short and all-lowercase — these
-      // are usually leftover contractions like "Ive"/"dont" rather than
-      // glossary-worthy terms.
       if (words.length === 1 && cleaned.length < 4 && !/[A-Z]/.test(cleaned)) continue;
 
       const key = cleaned.toLowerCase();
@@ -464,10 +383,6 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
   const mergedOriginals = new Map<string, string>();
   const processed = new Set<string>();
 
-  // Track per-token word counts so the plural-merge step below can guard
-  // against bad regex truncation ("k8s" → "k8", "graphqls" → "graphql",
-  // "timeseries" → "timeserie"). We only do the simple "drop trailing s"
-  // fold for genuinely English-style single words.
   const tokenWordCount = new Map<string, number>();
   for (const phrase of phraseCounts.keys()) {
     const ws = phrase.split(/\s+/);
@@ -480,10 +395,6 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
     if (processed.has(key)) continue;
 
     let totalCount = count;
-    // Only merge `keys` -> `key` for single-word English-like tokens
-    // (length >= 4, not all-digits). Multi-word phrases don't have a
-    // meaningful singular/plural fold, and short tokens like "k8s" or
-    // acronyms like "RAGs" must not be truncated to "k8" / "RAG".
     const words = key.split(/\s+/);
     if (words.length === 1 && key.length >= 4 && !/^\d+$/.test(key)) {
       const singular = key.replace(/s$/, '');
@@ -510,13 +421,6 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
 
   for (const [key, count] of sorted) {
     const isSingleWord = !key.includes(' ');
-    // Q8: phrases that contain a tech anchor (AI, SQL, Kafka, Flink, ...)
-    // are kept even with count == 1. "agentic AI", "Flink SQL", "AI agents"
-    // are core concepts that the translation model needs to render
-    // consistently — they shouldn't be filtered out just because the
-    // article doesn't repeat them. The anchor acts as a domain-trust
-    // signal: the phrase is worth pinning. Look up against the lowercased
-    // anchor set since `key` here is already lowercased.
     const hasAnchor = key.split(/\s+/).some((w) => TECH_ANCHORS_LOWER.has(w));
     if (isSingleWord && count < 3 && !hasAnchor) continue;
     if (!isSingleWord && count < 2 && !hasAnchor) continue;
@@ -536,40 +440,27 @@ export function extractGlossaryLocal(
 ): GlossaryEntry[] {
   const glossaryMap = new Map<string, string>();
 
-  const acronyms = extractAcronyms(fullText);
+  const safeText = fullText
+    .replace(/```[\s\S]*?```/g, (m) => ' '.repeat(m.length))
+    .replace(/`[^`]+`/g, (m) => ' '.repeat(m.length))
+    .replace(/https?:\/\/[^\s]+/g, (m) => ' '.repeat(m.length));
+
+  const acronyms = extractAcronyms(safeText);
   for (const acronym of acronyms) {
     glossaryMap.set(acronym, 'KEEP');
   }
 
-  // Q7: small tech product names (dbt, redis, nginx, git, ...). These are
-  // all-lowercase identifiers that no regex/Capitalization heuristic would
-  // catch. They appear in tech writing without context clues, and once
-  // translated literally ("dbt" → "数据库构建工具" or similar) the
-  // translation is wrong. Pin them in the glossary on first appearance
-  // (no count threshold — even one mention is enough).
-  // Use a non-ASCII-letter boundary to avoid partial matches inside larger
-  // identifiers (e.g. "git" inside "github" via adjacent word boundary, or
-  // "k8s" inside "k8scluster").
-  // Skip when a Title-case brand ("Terraform", "Flink", "Kafka") is already
-  // in the glossary — adding a lowercase duplicate creates token waste and
-  // an inconsistent glossary appearance.
-  // Build one alternation regex from the whole TECH_PRODUCTS list and
-  // test it against the full text once, instead of compiling + testing
-  // one regex per product. With ~1000 products this is a ~1000x scan
-  // speedup.
   {
     const validProducts = [...TECH_PRODUCTS].filter((p) => p.length >= 2);
     if (validProducts.length > 0) {
       const escaped = validProducts
         .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-        .sort((a, b) => b.length - a.length); // longest first to avoid prefix shadowing
-      // Fix: use lookaround assertions to avoid consuming boundary chars
+        .sort((a, b) => b.length - a.length);
       const productRe = new RegExp(
         `(?<=^|[^A-Za-z0-9_])(?:${escaped.join('|')})(?=[^A-Za-z0-9_]|$)`,
         'gi'
       );
-      for (const m of fullText.matchAll(productRe)) {
-        // m[0] is the clean product name (no surrounding boundary chars consumed)
+      for (const m of safeText.matchAll(productRe)) {
         const product = m[0];
         const exists = [...glossaryMap.keys()].some(
           (k) => k.toLowerCase() === product.toLowerCase()
@@ -579,8 +470,16 @@ export function extractGlossaryLocal(
     }
   }
 
-  // Parse NLP once and share the doc for both named entities and frequent terms
-  const doc = nlp(fullText);
+  const doc = nlp(safeText);
+
+  // TAGGING INTERVENTION: Strip ProperNoun from sentence-leading
+  // function words. Use compromise's `^` anchor (matches the start of
+  // any phrase or sentence) instead of `.firstTerms()`, whose
+  // behavior varies between compromise versions and only reliably
+  // returns the very first term of the document, not every sentence.
+  doc
+    .match('^(#Adverb|#Conjunction|#Pronoun|#Preposition|#Determiner)')
+    .unTag('ProperNoun');
 
   const namedEntities = extractNamedEntities(doc);
   for (const entity of namedEntities) {
@@ -603,27 +502,13 @@ export function extractGlossaryLocal(
 
   const allTerms = [...glossaryMap.keys()];
 
-  // Q1: merge [Brand] + [CapitalizedWord] pairs that co-occur >= 2 times.
-  // e.g. "Confluent" + "Intelligence" appearing next to each other in the
-  // text repeatedly means "Confluent Intelligence" is the product name.
-  // Without this, glossary would have both "Confluent" and "Intelligence"
-  // as standalone entries and the translation model would render
-  // "Intelligence" as the plain word "intelligence" rather than the
-  // product name. This pattern generalizes to "Google Cloud",
-  // "Azure OpenAI", "Amazon Bedrock", etc.
-  // Q1 brand-merge heuristic: detect "Brand Capitalized" pairs that
-  // appear ≥ 2 times in the article (e.g. "Confluent Intelligence",
-  // "Microsoft Azure"). The previous implementation built a fresh
-  // regex per brand and ran fullText.matchAll for each one. Instead,
-  // we passively scan the text for any "CapitalizedWord CapitalizedWord"
-  // pair once, then bucket counts by leading brand, so a 2000-brand
-  // article takes O(N) text scans instead of O(B × N).
   const brandSet = new Set(
     allTerms.filter((t) => /^[A-Z][a-zA-Z0-9]+$/.test(t) && !isCommonNoun(t))
   );
   const pairPattern = /\b([A-Z][a-zA-Z0-9]+)\s+([A-Z][a-zA-Z]+)\b/g;
-  const pairCounts = new Map<string, Map<string, number>>(); // brand -> {word -> count}
-  for (const m of fullText.matchAll(pairPattern)) {
+  const pairCounts = new Map<string, Map<string, number>>();
+
+  for (const m of safeText.matchAll(pairPattern)) {
     const brand = m[1];
     if (!brandSet.has(brand)) continue;
     const word = m[2];
@@ -643,24 +528,29 @@ export function extractGlossaryLocal(
       glossaryMap.set(`${brand} ${word}`, 'KEEP');
     }
   }
+
   const allTerms2 = [...glossaryMap.keys()];
-  // Sort by length descending: process longer terms first so shorter
-  // subsumed terms are naturally skipped during deduplication.
   allTerms2.sort((a, b) => b.length - a.length);
 
   const uniqueTerms = new Map<string, string>();
   for (const term of allTerms2) {
     const lower = term.toLowerCase();
+
+    // Race-free canonicalization for known products: if this lowercased
+    // form is in our TECH_PRODUCTS whitelist, lock the spelling to
+    // the official form regardless of which casing the article
+    // surfaced first (e.g. "DBT" / "Dbt" / "dbt" all collapse to "dbt").
+    if (CANONICAL_PRODUCTS.has(lower)) {
+      uniqueTerms.set(lower, CANONICAL_PRODUCTS.get(lower)!);
+      continue;
+    }
+
+    // First-seen wins for ordinary terms, with a soft preference for
+    // TitleCase over ALL-CAPS when both are seen.
     if (!uniqueTerms.has(lower)) {
       uniqueTerms.set(lower, term);
-    } else {
-      // Fix: protect known lowercase tech products from being overwritten by TitleCase
-      if (TECH_PRODUCTS.has(lower)) continue;
-
-      const existing = uniqueTerms.get(lower)!;
-      if (term !== term.toUpperCase() && /[a-z]/.test(term) && /^[A-Z]/.test(term)) {
-        uniqueTerms.set(lower, term);
-      }
+    } else if (term !== term.toUpperCase() && /[a-z]/.test(term) && /^[A-Z]/.test(term)) {
+      uniqueTerms.set(lower, term);
     }
   }
 
@@ -675,9 +565,6 @@ export function extractGlossaryLocal(
     result.push({ term, translation: glossaryMap.get(term)! });
   }
 
-  // Score each term: higher = more important to keep. We cap at MAX_GLOSSARY_TERMS
-  // to bound the per-chunk cost — longer prefix in the system prompt directly
-  // translates to more tokens across all chunks of a page.
   const scored = result
     .map((entry) => ({ entry, score: scoreTerm(entry.term, fullText) }))
     .filter((s) => !isGenericNoise(s.entry.term))
@@ -686,9 +573,6 @@ export function extractGlossaryLocal(
   return scored.slice(0, MAX_GLOSSARY_TERMS).map((s) => s.entry);
 }
 
-// Common technical/abstract nouns that compromise's NER surfaces as
-// "named entities" but are actually domain-generic and not worth translating
-// in a glossary. They get filtered before scoring.
 const GENERIC_NOISE = new Set([
   'services', 'service', 'systems', 'system', 'traces', 'trace',
   'tools', 'tool', 'logs', 'log', 'metrics', 'metric', 'data',
@@ -713,10 +597,9 @@ const GENERIC_NOISE = new Set([
 function isGenericNoise(term: string): boolean {
   const normalized = term.toLowerCase().trim();
   if (GENERIC_NOISE.has(normalized)) return true;
-  // Fix: protect TECH_PRODUCTS (redis, k8s, etc.) and only filter fully-lowercase plurals
   if (
     !term.includes(' ') &&
-    /^[a-z]+s$/.test(term) && // Use original term to ensure fully lowercase
+    /^[a-z]+s$/.test(term) &&
     term.length <= 10 &&
     !TECH_PRODUCTS.has(normalized)
   ) {
@@ -725,28 +608,19 @@ function isGenericNoise(term: string): boolean {
   return false;
 }
 
-// Decide whether `kept` should subsume (eat) `term` during dedup.
-// Only multi-word phrases swallow a single word — we never drop a bare
-// acronym like "eBPF" just because "eBPF network flow logs" was seen first.
 function isPhraseSubsuming(kept: string, term: string): boolean {
-  // Don't subsume one single word with another single word
   if (!kept.includes(' ') && !term.includes(' ')) return false;
 
-  // Multi-word phrase subsumes a single word it contains (with word boundary)
   if (kept.includes(' ') && !term.includes(' ')) {
-    // Acronyms (LLM, GPU, SQL, CUDA, PII) are kept independently even
-    // when a longer phrase like "LLM workflows" / "CUDA Toolkit" /
-    // "PII scrubbing" is also present. The acronym is the load-bearing
-    // glossary entry — the model can render "LLM workflows" correctly
-    // from the LLM entry alone, but losing LLM entirely would let the
-    // model mistranslate every other LLM mention in the article.
     if (/^[A-Z]{2,}$/.test(term)) return false;
-    // Fix: use lookaround instead of \b to support symbols like C++
+    // Don't let a longer phrase swallow a known tech product whose
+    // canonical form would otherwise be the most useful glossary entry
+    // (e.g. "Dbt helps" / "dbt project" must not subsume "dbt").
+    if (TECH_PRODUCTS.has(term.toLowerCase())) return false;
     const re = new RegExp(`(?<=^|[^a-zA-Z0-9_])${escapeRegExp(term)}(?=[^a-zA-Z0-9_]|$)`, 'i');
     return re.test(kept);
   }
 
-  // Multi-word phrase subsumes a sub-phrase it contains
   if (kept.includes(' ') && term.includes(' ')) {
     return kept.toLowerCase().includes(term.toLowerCase());
   }
@@ -758,29 +632,22 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Priority order — the order itself is the contract. Tweak the weights
-// below rather than reordering this list.
 const ACRONYM_BONUS = 1000;
 const PROPER_NOUN_BONUS = 500;
-const LENGTH_WEIGHT = 10;        // longer term = rarer = more important
-const FREQUENCY_WEIGHT = 1;      // more occurrences = more important
+const LENGTH_WEIGHT = 10;
+const FREQUENCY_WEIGHT = 1;
 const MAX_GLOSSARY_TERMS = 50;
 
 function scoreTerm(term: string, fullText: string): number {
-  // 1. Acronym (ALL CAPS, 2-6 letters) — almost always a real product/standard
   if (/^[A-Z]{2,6}$/.test(term)) return ACRONYM_BONUS + term.length * LENGTH_WEIGHT;
 
-  // 2. Proper noun or CamelCase identifier — product/feature/tech names
-  //    ("React", "JavaScript", "GitHub", "Node.js" all match one of these)
   const hasUpper = /[A-Z]/.test(term);
   const startsUpper = /^[A-Z]/.test(term);
   if (hasUpper && (startsUpper || /[a-z]/.test(term))) {
     return PROPER_NOUN_BONUS + term.length * LENGTH_WEIGHT;
   }
 
-  // 3. Lowercase / generic term — fall back to frequency + length
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Fix: use lookaround instead of \b to support symbols like C++, Vue.js
   const regex = new RegExp(`(?<=^|[^a-zA-Z0-9_])${escaped}(?=[^a-zA-Z0-9_]|$)`, 'gi');
   const occurrences = (fullText.match(regex) || []).length;
   return occurrences * FREQUENCY_WEIGHT + term.length * LENGTH_WEIGHT * 0.1;

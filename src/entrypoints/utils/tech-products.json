@@ -5,7 +5,7 @@
     "redis",
     "nginx",
     "postgres",
-    "postgresql",
+    "POSTGRESQL",
     "mongodb",
     "mysql",
     "sqlite",

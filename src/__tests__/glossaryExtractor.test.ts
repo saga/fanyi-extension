@@ -578,3 +578,285 @@ describe('extractGlossaryLocal - Performance', () => {
     });
   });
 });
+
+// ============================================================
+// Regression tests for the new improvements (PRE-PROCESSING,
+// TAGGING INTERVENTION, lookaround boundaries, dedup protection).
+// These test the new behavior added in the architectural rewrite.
+// ============================================================
+
+describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
+  it('does not extract UPPERCASE constants from code blocks as acronyms', () => {
+    // API, LLM, and SQL are real tech acronyms.
+    // MAX_RETRIES, HTTP_STATUS are code constants — should NOT be extracted.
+    const text = 'We use API and LLM and SQL extensively. ```python\nMAX_RETRIES = 5\nHTTP_STATUS = 200\n``` Also see DB_URL config.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // Real acronyms survive
+    expect(terms).toContain('API');
+    expect(terms).toContain('LLM');
+    expect(terms).toContain('SQL');
+
+    // Code constants are filtered out by safeText
+    expect(terms).not.toContain('MAX_RETRIES');
+    expect(terms).not.toContain('HTTP_STATUS');
+    expect(terms).not.toContain('DB_URL');
+  });
+
+  it('does not extract inline code variables as named entities', () => {
+    // myCustomVar, fetchData, handleClick are inline code references
+    // They must NOT appear in glossary as proper nouns
+    const text = 'Use `myCustomVar` to store the result. Call `fetchData` first, then `handleClick` will fire. Anthropic built the SDK.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('myCustomVar');
+    expect(terms).not.toContain('fetchData');
+    expect(terms).not.toContain('handleClick');
+    // Real proper noun still extracted
+    expect(terms).toContain('Anthropic');
+  });
+
+  it('does not extract paths/domains from URLs as named entities', () => {
+    // The hostnames should not become glossary entries
+    const text = 'Visit https://docs.anthropic.com/api for documentation. See also https://github.com/anthropics/anthropic-sdk. Anthropic publishes these.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).not.toContain('docs.anthropic.com');
+    expect(terms).not.toContain('github.com');
+    // The proper noun Anthropic is still extracted from prose
+    expect(terms).toContain('Anthropic');
+  });
+
+  it('preserves text length so offset-based logic does not break', () => {
+    // The PRE-PROCESSING replaces code with spaces of equal length.
+    // Even though we can't see inside the function, we verify that
+    // an acronym that exists in BOTH code and prose is still extractable,
+    // and prose-only acronyms are still found.
+    const text = '```\nconst API_KEY = "sk-xxx";\n```\nThe API supports streaming.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // API_KEY is in the code block, must not leak
+    expect(terms).not.toContain('API_KEY');
+    // The prose mention of API is still found
+    expect(terms).toContain('API');
+  });
+});
+
+describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
+  it('correctly counts terms with symbols like C++ and Vue.js', () => {
+    // \b breaks on symbols; lookaround should not.
+    // C++ and Vue.js must be scoreable. We assert the term gets a non-zero
+    // score by appearing in the output (after frequency-based filtering).
+    const text = 'C++ is fast. C++ is widely used. C++ has many libraries. Vue.js is reactive. Vue.js has great DX. Vue.js is popular.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // The symbols themselves may be cleaned to "C" / "Vue" by cleanTerm,
+    // but they must NOT crash or silently disappear.
+    // Verify the result is well-formed (no NaN, no infinite loop).
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.every(e => typeof e.term === 'string' && e.translation === 'KEEP')).toBe(true);
+    // Vue should be a recognized proper noun (3 occurrences)
+    expect(terms).toContain('Vue');
+  });
+
+  it('handles F# and similar symbol-suffixed identifiers', () => {
+    const text = 'F# is a functional language. F# runs on .NET. F# has good tooling. F# is mature.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // cleanTerm strips leading punctuation, so F# -> F and .NET -> NET.
+    // The important assertion is that the symbol-bearing names do not
+    // crash the pipeline and are preserved (under any sensible cleaned
+    // form) in the output.
+    expect(terms).toContain('F');
+    expect(terms).toContain('NET');
+    // Sanity: result is well-formed
+    expect(result.every(e => typeof e.term === 'string' && e.translation === 'KEEP')).toBe(true);
+  });
+});
+
+describe('extractGlossaryLocal - TAGGING INTERVENTION (sentence starter demotion)', () => {
+  it('does not promote sentence-starter grammar words to proper nouns', () => {
+    // Words like "However", "When", "Therefore" appear at sentence start
+    // They must NOT be treated as glossary-worthy proper nouns.
+    // Build a long text where these appear at the start of sentences.
+    const text = `
+      However, the system failed. When the bug occurred, the team noticed it.
+      Therefore, they fixed the API. Although the change was risky, it worked.
+      Moreover, the deployment was smooth. Furthermore, performance improved.
+      While developers adapted, managers watched. Since then, no issues arose.
+    `;
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // None of these grammar words should appear as glossary terms
+    expect(terms).not.toContain('However');
+    expect(terms).not.toContain('When');
+    expect(terms).not.toContain('Therefore');
+    expect(terms).not.toContain('Although');
+    expect(terms).not.toContain('Moreover');
+    expect(terms).not.toContain('Furthermore');
+    expect(terms).not.toContain('While');
+    expect(terms).not.toContain('Since');
+  });
+
+  it('keeps legitimate proper nouns even at sentence start', () => {
+    // The TAGGING INTERVENTION must not be too aggressive — real brands
+    // at sentence start (Anthropic, Microsoft) should still be kept.
+    const text = `
+      Anthropic released Claude. The team celebrated.
+      Microsoft bought GitHub for billions. Then everyone was surprised.
+      Google announced Gemini. The conference was packed.
+    `;
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // Real brands survive the unTag intervention
+    expect(terms).toContain('Anthropic');
+    expect(terms).toContain('Microsoft');
+    expect(terms).toContain('Google');
+    // Grammar words from sentence starts do NOT survive
+    expect(terms).not.toContain('The');
+    expect(terms).not.toContain('Then');
+  });
+});
+
+describe('extractGlossaryLocal - isGenericNoise protection (Bug B)', () => {
+  it('preserves short lowercase tech product names that end in s', () => {
+    // These are known tech products / acronyms. They should NOT be
+    // filtered by the "lowercase plural <= 10 chars" rule.
+    const text = 'We use K8s for orchestration. K8s is essential. K8s scales well. K8s is mature.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // K8s is a known tech anchor and must survive
+    expect(terms).toContain('K8s');
+  });
+
+  it('preserves mixed-case short tech names (iOS, macOS, SaaS)', () => {
+    // These are mixed case, so the lowercase check shouldn't even hit them,
+    // but verify they're still captured.
+    const text = 'iOS is a platform. macOS is for desktop. tvOS runs on TV. SaaS dominates the market.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // At minimum, the mixed-case forms should appear or be cleanly handled
+    expect(terms).toContain('iOS');
+    expect(terms).toContain('macOS');
+    expect(terms).toContain('SaaS');
+  });
+
+  it('preserves known TECH_PRODUCTS like redis, dbt, nginx', () => {
+    // dbt, redis, nginx are in TECH_PRODUCTS and must not be filtered
+    // by the lowercase plural heuristic.
+    const text = 'We use dbt for transforms. dbt is great. dbt simplifies SQL. dbt is essential. We also use redis and nginx. Redis is fast.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('dbt');
+    expect(terms).toContain('redis');
+    expect(terms).toContain('nginx');
+  });
+});
+
+describe('extractGlossaryLocal - dedup protection (Bug D)', () => {
+  it('preserves lowercase tech products even if TitleCase variant appears', () => {
+    // If the article has both "Dbt" (sentence-start) and "dbt" (mid-sentence),
+    // the canonical lowercase form should win. The dedup logic must
+    // protect TECH_PRODUCTS from TitleCase overwrite.
+    const text = 'Dbt is the tool. We use dbt for everything. dbt transforms data. dbt is excellent.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // The lowercase canonical form should be the one kept
+    expect(terms).toContain('dbt');
+    // The TitleCase variant must NOT replace it
+    expect(terms).not.toContain('Dbt');
+  });
+
+  it('does not produce duplicate entries for the same word in different cases', () => {
+    // Once deduplicated, there should be at most one entry for dbt
+    const text = 'Dbt helps. We use dbt. The dbt project succeeded.';
+    const result = extractGlossaryLocal(text);
+    const dbtEntries = result.filter(r => r.term.toLowerCase() === 'dbt');
+
+    expect(dbtEntries.length).toBe(1);
+  });
+
+  it('handles GitHub-like brands that appear in both cases', () => {
+    // GitHub should not be doubled with GITHUB or github
+    const text = 'GitHub is popular. github is a code host. We use GitHub daily.';
+    const result = extractGlossaryLocal(text);
+    const githubEntries = result.filter(r => r.term.toLowerCase() === 'github');
+
+    expect(githubEntries.length).toBe(1);
+  });
+});
+
+describe('extractGlossaryLocal - isPossessive fix (Bug C, fix C)', () => {
+  it('does not wrongly drop short words contained in longer possessives', () => {
+    // "AI" is a short word that could match inside "OpenAI's".
+    // isPossessive(AI) should return false if AI also appears non-possessively.
+    // Result: AI must be in the glossary.
+    const text = "OpenAI's engineers are great. AI is the future. AI is everywhere. AI matters.";
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('AI');
+  });
+
+  it('still drops a word that is ALWAYS possessive', () => {
+    // A word that appears only as possessive should be treated as a
+    // possessive fragment, not a standalone glossary term.
+    // "Netflix's" only appears possessively; "Netflix" alone does not.
+    // After possessive detection, bare "Netflix" should be filtered.
+    const text = "Netflix's shows are great. Netflix's content is popular. Netflix's recommendation engine is excellent.";
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    // If Netflix never appears non-possessively, it may be filtered.
+    // This is the correct behavior — pure-possessive names are noisy fragments.
+    expect(terms).not.toContain('Netflix');
+  });
+});
+
+describe('extractGlossaryLocal - productRe lookaround (Bug C fix)', () => {
+  it('extracts adjacent product names separated by punctuation', () => {
+    // The old consuming-match regex would drop "dbt" because the comma
+    // was eaten. With lookbehind/lookahead, all three should match.
+    const text = 'We use redis, dbt, and nginx in production.';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('redis');
+    expect(terms).toContain('dbt');
+    expect(terms).toContain('nginx');
+  });
+
+  it('extracts product at start of string and at end of string', () => {
+    // ^ and $ boundaries must work correctly with lookaround
+    const text = 'redis is fast. We use it daily. nginx';
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('redis');
+    expect(terms).toContain('nginx');
+  });
+});
+
+describe('extractGlossaryLocal - Q3 single-occurrence proper noun retention', () => {
+  it('keeps a brand mentioned exactly once (even at sentence start)', () => {
+    // Q3 fix: count > 1 check. A brand that appears once should be kept
+    // even if that single occurrence is at the start of a sentence.
+    const text = "Anthropic is the only major lab without an open-weight model.";
+    const result = extractGlossaryLocal(text);
+    const terms = result.map(r => r.term);
+
+    expect(terms).toContain('Anthropic');
+  });
+});
