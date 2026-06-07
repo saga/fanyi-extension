@@ -28,6 +28,7 @@ const TECH_ANCHORS = new Set([
   'dbt', 'Postgres', 'Redis', 'MongoDB', 'Elasticsearch', 'ClickHouse',
   'Docker', 'Kubernetes', 'Nomad', 'Consul', 'Vault',
   'TimesFM', 'PyTorch', 'TensorFlow', 'LangChain', 'LangGraph', 'Ollama',
+  'Anthropic',
 ]);
 
 const TECH_ANCHORS_LOWER = new Set(
@@ -241,18 +242,39 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
   // We backstop this with a regex that captures `[A-Z][a-z]{2,}` at
   // sentence start, filtered through the same noise gates
   // (isCommonNoun / isStopword / KNOWN_PUBLICATIONS / isPossessive).
-  // Grammar words at sentence start ("However", "When", "Then", "The")
-  // are dropped by the same gates that the in-doc ProperNoun pipeline
-  // uses, so we don't need a separate hand-rolled list.
-  const sentenceStartCapRegex = /(?<=^|[.!?]\s+|\n)([A-Z][a-z]{2,})\b/g;
-  for (const m of fullText.matchAll(sentenceStartCapRegex)) {
-    const word = m[1];
-    if (isCommonNoun(word)) continue;
-    if (STOPWORDS.has(word.toLowerCase())) continue;
-    if (isPossessive(word)) continue;
-    if (KNOWN_PUBLICATIONS.has(word.toLowerCase())) continue;
-    if (entities.has(word)) continue;
-    entities.add(word);
+  //
+  // Frequency gate: words that appear fewer than 3 times total are only
+  // kept if they are known tech anchors (e.g. "Anthropic", "Kubernetes").
+  // This prevents generic words like "Governance" or "Multiple" from
+  // sneaking in on a single sentence-start mention.
+  //
+  // NOTE: lookbehind-based pattern `(?<=^|[.!?]\\s+|\n)` would fail when
+  // whitespace (spaces/tabs) follows the newline before the capital word
+  // (e.g. "\n  Anthropic").  Instead we use a non-escaped capturing
+  // group so \n + optional spaces are consumed as part of the match.
+  const sentenceStartCapRegex = /(?:^|[.!?]\s+|\n\s*)([A-Z][a-z]{2,})\b/g;
+  const sentenceStartWords = [...fullText.matchAll(sentenceStartCapRegex)].map(m => m[1]);
+  if (sentenceStartWords.length > 0) {
+    // Count every capitalized occurrence in the full text (sentence-initial
+    // or mid-sentence) so we know the total frequency.
+    const totalCounts = new Map<string, number>();
+    for (const m of fullText.matchAll(/(?<![A-Za-z0-9_])([A-Z][a-z]{2,})\b/g)) {
+      const w = m[1];
+      totalCounts.set(w, (totalCounts.get(w) || 0) + 1);
+    }
+
+    for (const word of sentenceStartWords) {
+      if (entities.has(word)) continue;
+      if (isCommonNoun(word)) continue;
+      if (STOPWORDS.has(word.toLowerCase())) continue;
+      if (isPossessive(word)) continue;
+      if (KNOWN_PUBLICATIONS.has(word.toLowerCase())) continue;
+
+      const total = totalCounts.get(word) || 0;
+      if (total < 3 && !TECH_ANCHORS.has(word)) continue;
+
+      entities.add(word);
+    }
   }
 
   for (const pub of FULL_PUBLICATIONS) {
@@ -554,8 +576,45 @@ export function extractGlossaryLocal(
     }
   }
 
+  // Second pass: collapse singular/plural pairs. The first pass only
+  // merges case variants ("agent" + "Agent"), but a sentence-initial
+  // "Agents" gets keyed as "agents" — a different key from "agent" —
+  // so they would otherwise both survive. We union each (singular,
+  // plural) pair into a single representative key, so the values
+  // iterator produces one entry per pair instead of two.
+  const singularPluralMerged = new Map<string, string>();
+  for (const [key, term] of uniqueTerms) {
+    if (singularPluralMerged.has(key)) continue;
+
+    const singular = key.replace(/s$/, '');
+    const plural = key + 's';
+    const twinKey = singular !== key && uniqueTerms.has(singular)
+      ? singular
+      : plural !== key && uniqueTerms.has(plural)
+        ? plural
+        : null;
+
+    if (twinKey) {
+      const twinTerm = uniqueTerms.get(twinKey)!;
+      const preferTitleCase = (a: string, b: string): string => {
+        const aTitle = /^[A-Z]/.test(a) && a !== a.toUpperCase();
+        const bTitle = /^[A-Z]/.test(b) && b !== b.toUpperCase();
+        if (aTitle && !bTitle) return a;
+        if (bTitle && !aTitle) return b;
+        return a;
+      };
+      const winner = preferTitleCase(term, twinTerm);
+      // Pick the shorter key as the canonical one (it's almost always
+      // the singular form, which reads better in a glossary entry).
+      const canonicalKey = key.length <= twinKey.length ? key : twinKey;
+      singularPluralMerged.set(canonicalKey, winner);
+    } else {
+      singularPluralMerged.set(key, term);
+    }
+  }
+
   const filtered: string[] = [];
-  for (const term of uniqueTerms.values()) {
+  for (const term of singularPluralMerged.values()) {
     if (filtered.some(kept => isPhraseSubsuming(kept, term))) continue;
     filtered.push(term);
   }

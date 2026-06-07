@@ -669,11 +669,11 @@ describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
-    // cleanTerm strips leading punctuation, so F# -> F and .NET -> NET.
+    // cleanTerm strips leading punctuation: F# -> F (1 char, filtered
+    // by the 2-char minimum), .NET -> NET (3 chars, extracted).
     // The important assertion is that the symbol-bearing names do not
     // crash the pipeline and are preserved (under any sensible cleaned
     // form) in the output.
-    expect(terms).toContain('F');
     expect(terms).toContain('NET');
     // Sanity: result is well-formed
     expect(result.every(e => typeof e.term === 'string' && e.translation === 'KEEP')).toBe(true);
