@@ -132,12 +132,14 @@ function cleanTerm(term: string): string {
   return term
     // Strip common punctuation from both ends, including trailing dashes
     // (so "API-" in "API-first" doesn't sneak through as a glossary entry).
-    .replace(/^[,;:.!?'"()\[\]{}\-–—#*_/\\|<>~`]+/, '')
-    .replace(/[,;:.!?'"()\[\]{}\-–—#*_/\\|<>~`]+$/, '')
+    .replace(/^[,;:.!?'"“”‘’()\[\]{}\-–—#*_/\\|<>~`\s]+/, '')
+    .replace(/[,;:.!?'"“”‘’()\[\]{}\-–—#*_/\\|<>~`\s]+$/, '')
     // Strip possessive 's and standalone "I've"/"we've" contractions — these
     // are sentence fillers, not glossary terms. Match both straight and
     // smart (typographic) apostrophes since real-world text uses both.
     .replace(/['’]s$/i, '')
+    // Split on glued periods from bad formatting (e.g. "Falconer.The")
+    .split(/\.[A-Z]/)[0]
     // If a contraction remains, the whole token is one (e.g. "I've", "we're").
     // Drop it by replacing the apostrophe with an empty string AFTER we've
     // pulled the rest — but easier: if it still contains an apostrophe,
@@ -147,7 +149,7 @@ function cleanTerm(term: string): string {
 }
 
 function extractAcronyms(text: string): string[] {
-  const found = new Set<string>();
+  const found = new Map<string, number>();
   // Use matchAll rather than .exec() on a global regex — matchAll
   // creates a fresh internal regex copy per call so the
   // ACRONYM_PATTERN's `lastIndex` is never shared across calls
@@ -156,10 +158,17 @@ function extractAcronyms(text: string): string[] {
   for (const match of text.matchAll(ACRONYM_PATTERN)) {
     const word = match[0];
     if (!ACRONYM_EXCLUSIONS.has(word)) {
-      found.add(word);
+      found.set(word, (found.get(word) || 0) + 1);
     }
   }
-  return [...found];
+  const result: string[] = [];
+  for (const [word, count] of found) {
+    if (/^[A-Z]{5,}$/.test(word) && !/\d/.test(word) && count < 2) {
+      continue;
+    }
+    result.push(word);
+  }
+  return result;
 }
 
 function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
@@ -175,9 +184,18 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     if (offset >= 0) possessiveRanges.push([offset, offset + text.length]);
   }
   const isPossessive = (word: string): boolean => {
-    const idx = fullText.indexOf(word);
+    let idx = fullText.indexOf(word);
     if (idx < 0) return false;
-    return possessiveRanges.some(([s, e]) => idx >= s && idx < e);
+    let allPossessive = true;
+    while (idx >= 0) {
+      const inRange = possessiveRanges.some(([s, e]) => idx >= s && idx < e);
+      if (!inRange) {
+        allPossessive = false;
+        break;
+      }
+      idx = fullText.indexOf(word, idx + 1);
+    }
+    return allPossessive;
   };
 
   // (1) compromise's acronyms() method is the most accurate acronym source —
@@ -194,6 +212,10 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
       if (cleaned.includes(' ')) continue;
       if (ACRONYM_EXCLUSIONS.has(cleaned.toUpperCase())) continue;
       if (isCommonNoun(cleaned)) continue;
+      if (/^[A-Z]{5,}$/.test(cleaned) && !/\d/.test(cleaned)) {
+        const occurrences = (fullText.match(new RegExp(`\\b${cleaned}\\b`, 'g')) || []).length;
+        if (occurrences < 2) continue;
+      }
       entities.add(cleaned);
     }
   }
@@ -221,7 +243,7 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
   // (3) CamelCase identifiers (NOT at sentence start). Skips all-caps words
   // which are already handled by acronyms(). We want mixed-case identifiers
   // like GitHub, Apache, eBPF, gRPC.
-  const brandRegex = /(?<=\s)([A-Z][a-z]+[A-Z][A-Za-z0-9]*)\b/g;
+  const brandRegex = /(?:^|[^a-zA-Z0-9])([A-Z][a-z]+[A-Z][A-Za-z0-9]*)\b/g;
   for (const m of fullText.matchAll(brandRegex)) {
     const word = m[1];
     if (isCommonNoun(word)) continue;
@@ -292,7 +314,6 @@ function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
     // mention of "Microsoft" / "Anthropic" / "Databricks" is still
     // worth pinning in the glossary. Without this, Q3's
     // ProperNoun fallback path is a no-op for one-shot brand mentions.
-    if (count < 1) continue;
     entities.add(word);
   }
 
@@ -465,7 +486,7 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
     }
 
     const plural = key + 's';
-    if (plural !== key && phraseCounts.has(plural)) {
+    if (plural !== key && !processed.has(plural) && phraseCounts.has(plural)) {
       totalCount += phraseCounts.get(plural)!;
       processed.add(plural);
     }
@@ -617,8 +638,21 @@ export function extractGlossaryLocal(
   // subsumed terms are naturally skipped during deduplication.
   allTerms2.sort((a, b) => b.length - a.length);
 
-  const filtered: string[] = [];
+  const uniqueTerms = new Map<string, string>();
   for (const term of allTerms2) {
+    const lower = term.toLowerCase();
+    if (!uniqueTerms.has(lower)) {
+      uniqueTerms.set(lower, term);
+    } else {
+      const existing = uniqueTerms.get(lower)!;
+      if (term !== term.toUpperCase() && /[a-z]/.test(term) && /^[A-Z]/.test(term)) {
+        uniqueTerms.set(lower, term);
+      }
+    }
+  }
+
+  const filtered: string[] = [];
+  for (const term of uniqueTerms.values()) {
     if (filtered.some(kept => isPhraseSubsuming(kept, term))) continue;
     filtered.push(term);
   }

@@ -185,6 +185,12 @@ function isElementHidden(el: Element): boolean {
     if (current instanceof HTMLElement) {
       const s = current.style;
       if (s.display === 'none' || s.visibility === 'hidden') return true;
+      try {
+        const computed = window.getComputedStyle(current);
+        if (computed.display === 'none' || computed.visibility === 'hidden') return true;
+      } catch (e) {
+        // Ignore environments where getComputedStyle fails
+      }
     }
     current = current.parentElement;
   }
@@ -195,6 +201,11 @@ function isValidText(text: string | undefined | null): boolean {
   if (!text) return false;
   const trimmed = text.trim();
   if (trimmed.length < MIN_TEXT_LENGTH || trimmed.length >= MAX_TEXT_LENGTH) {
+    return false;
+  }
+
+  // Intercept all-uppercase short UI text (e.g. "EMAIL", "SUBSCRIBE TO NEWSLETTER")
+  if (trimmed.length < 25 && /^[A-Z0-9\s]+$/.test(trimmed) && !/^[0-9\s]+$/.test(trimmed)) {
     return false;
   }
   // Generic filters for non-user-readable noise that occasionally appears in
@@ -248,7 +259,6 @@ function isInsideArticle(el: Element): boolean {
     if (tag === 'article') return true;
     const role = current.getAttribute('role');
     if (role === 'article' || role === 'main') return true;
-    if (current.hasAttribute('lang') && tag !== 'html' && tag !== 'body') return true;
     
     // 检查常见文章容器类名
     const className = current.className.toLowerCase();
@@ -387,7 +397,7 @@ function isContentEditable(el: Element): boolean {
 }
 
 function hasTranslateBlockClass(el: Element): boolean {
-  return el.classList?.contains('fanyi-bilingual-block') || el.classList?.contains('notranslate');
+  return el.classList.contains('fanyi-bilingual-block') || el.classList.contains('notranslate');
 }
 
 function grabNode(node: Node): Element | false {
@@ -472,6 +482,13 @@ function acceptWalkerNode(
   }
 
   if (DIRECT_SET.has(tag)) {
+    const hasDirectSetDescendant = el.querySelector(
+      Array.from(DIRECT_SET).join(',')
+    ) !== null;
+    if (hasDirectSetDescendant) {
+      counters.skipped++;
+      return NodeFilter.FILTER_SKIP;
+    }
     if (isValidText(el.textContent)) {
       counters.accepted++;
       return NodeFilter.FILTER_ACCEPT;

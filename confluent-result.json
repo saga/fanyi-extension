@@ -1,0 +1,170 @@
+[
+  {
+    "term": "RBAC",
+    "translation": "KEEP"
+  },
+  {
+    "term": "MCP",
+    "translation": "KEEP"
+  },
+  {
+    "term": "PII",
+    "translation": "KEEP"
+  },
+  {
+    "term": "SQL",
+    "translation": "KEEP"
+  },
+  {
+    "term": "ATM",
+    "translation": "KEEP"
+  },
+  {
+    "term": "API",
+    "translation": "KEEP"
+  },
+  {
+    "term": "BBC",
+    "translation": "KEEP"
+  },
+  {
+    "term": "AI",
+    "translation": "KEEP"
+  },
+  {
+    "term": "enterprise AI agents",
+    "translation": "KEEP"
+  },
+  {
+    "term": "AI applications",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Confluents aim",
+    "translation": "KEEP"
+  },
+  {
+    "term": "The New Stack",
+    "translation": "KEEP"
+  },
+  {
+    "term": "PII detection",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Intelligence",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Apache Kafka",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Drawchicken",
+    "translation": "KEEP"
+  },
+  {
+    "term": "MCP server",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Terraform",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Confluent",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Flink SQL",
+    "translation": "KEEP"
+  },
+  {
+    "term": "AI models",
+    "translation": "KEEP"
+  },
+  {
+    "term": "McKinsey",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Unsplash",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Falconer",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Carnegie",
+    "translation": "KEEP"
+  },
+  {
+    "term": "AI needs",
+    "translation": "KEEP"
+  },
+  {
+    "term": "TimesFM",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Insight",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Studio",
+    "translation": "KEEP"
+  },
+  {
+    "term": "London",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Google",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Cloud",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Azure",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Megan",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Wired",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Sean",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Fast",
+    "translation": "KEEP"
+  },
+  {
+    "term": "Tech",
+    "translation": "KEEP"
+  },
+  {
+    "term": "data streaming",
+    "translation": "KEEP"
+  },
+  {
+    "term": "foundation",
+    "translation": "KEEP"
+  },
+  {
+    "term": "dbt adapter",
+    "translation": "KEEP"
+  },
+  {
+    "term": "data layer",
+    "translation": "KEEP"
+  }
+]

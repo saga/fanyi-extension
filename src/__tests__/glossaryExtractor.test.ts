@@ -421,11 +421,11 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('DOER');
   });
 
-  it('extracts 7+ letter all-caps words as acronyms', () => {
+  it('extracts 7+ letter all-caps words as acronyms when frequency >= 2', () => {
     // 7+ letter all-caps identifiers (POSTGRESQL, WEBSOCKET) are legitimate
-    // technical acronyms. The old 6-char limit was a heuristic that excluded
-    // them too aggressively.
-    const text = 'We use POSTGRESQL for storage and WEBSOCKET for streaming.';
+    // technical acronyms. With our new noise suppression rule, words >= 5 chars
+    // must appear >= 2 times to be extracted (unless they contain digits).
+    const text = 'We use POSTGRESQL for storage and WEBSOCKET for streaming. WEBSOCKET is fast, POSTGRESQL is robust.';
     const result = extractGlossaryLocal(text);
     const terms = result.map(r => r.term);
 
