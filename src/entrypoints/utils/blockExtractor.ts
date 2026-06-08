@@ -15,6 +15,14 @@ const MIN_TEXT_LENGTH = 3;
 const MAX_TEXT_LENGTH = 3072;
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
+// 静态正则：避免每次 isValidText 调用时实例化 RegExp 触发 V8 GC。
+// 这些正则只读不写，模块加载时实例化一次即可。
+const TUPLE_REGEX = /\[\s*['"][^'"]+['"]\s*,\s*-?\d+(?:\.\d+)?\s*\]/g;
+const BASE64_REGEX = /^[A-Za-z0-9+/=_-]{200,}$/;
+const UI_TEXT_REGEX = /^[A-Z0-9\s]+$/;
+const DIGIT_SPACE_REGEX = /^[0-9\s]+$/;
+const HEADING_REGEX = /^H[1-6]$/;
+
 const DIRECT_SET = new Set([
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'p', 'li', 'dd', 'blockquote',
@@ -96,7 +104,8 @@ const SKIP_CLASS_PATTERNS = [
   'lawdiv', 'cookie-law-info',
   'banner-ad',
   'popup-overlay', 'modal-dialog', 'modal-backdrop',
-  'social-share', 'share-buttons',
+  'social-share', 'share-buttons', 'share-menu', 'share-list', 'share-icons',
+  'social-icons', 'social-icon-list', 'social-share-list', 'share-toolbar',
   'breadcrumb', 'byline', 'post-meta', 'author-box',
   'trending-stories', 'tns-trending-stories-block', 'related-posts',
   'related-articles', 'related-content', 'more-stories', 'more-articles',
@@ -166,6 +175,27 @@ function shouldSkipByClass(el: Element): boolean {
   return match;
 }
 
+/**
+ * 一些站点把噪声包在非 DIRECT_SET 的容器里（典型：<ul class="social-icon-list">
+ *   <li>Copy link</li>...</ul>）。TreeWalker 走到 <li> 时
+ * shouldSkipByClass() 看的是 <li> 自身 class（没有），会误放过 li。
+ *
+ * 历史上这里手写向上 parentElement 遍历（深度限制 12），每节点 O(D)。
+ * 改用 WeakSet 缓存：在 DFS 遍历中，一旦某个祖先被 acceptWalkerNode
+ * 拒绝（class 命中、隐藏、SEMANTIC_SKIP 等），就把它丢进 rejectedCache；
+ * 它的子孙节点下次走到时只需要 O(1) 检查父级是否在 cache 里。
+ * 遍历结束时 WeakSet 引用随 DOM 一起 GC，无内存泄漏。
+ *
+ * 误伤防护：shouldSkipByClass 已经要求"精确匹配"或"连字符/下划线
+ * 边界"，所以 "social-shareholder-list" 不会被 "social-share" 误匹配。
+ *
+ * 不能用 el.closest('.ot-cookie')：CSS 类选择器是精确匹配，
+ * 漏掉 "ot-cookie-policy-content" 这类带后缀的 class。
+ * 也不能用 [class*="ot-cookie"]，那会误伤正文里含 "ot-cookie" 字样
+ * 的 class。所以 shouldSkipByClass 本身保留手写逻辑，WeakSet 只
+ * 是把"向上找祖先"变成"查表"。
+ */
+
 function shouldSkipBySiteRules(el: Element): boolean {
   const rule = getSiteRule();
   if (!rule?.skipSelectors) return false;
@@ -205,7 +235,7 @@ function isValidText(text: string | undefined | null): boolean {
   }
 
   // Intercept all-uppercase short UI text (e.g. "EMAIL", "SUBSCRIBE TO NEWSLETTER")
-  if (trimmed.length < 25 && /^[A-Z0-9\s]+$/.test(trimmed) && !/^[0-9\s]+$/.test(trimmed)) {
+  if (trimmed.length < 25 && UI_TEXT_REGEX.test(trimmed) && !DIGIT_SPACE_REGEX.test(trimmed)) {
     return false;
   }
   // Generic filters for non-user-readable noise that occasionally appears in
@@ -214,9 +244,9 @@ function isValidText(text: string | undefined | null): boolean {
   // positives on normal text.
   //   - ≥ 8 repeated ["x", 1234] tuples
   //   - 200+ chars of base64-ish characters with no whitespace
-  const tupleMatches = trimmed.match(/\[\s*['"][^'"]+['"]\s*,\s*-?\d+(?:\.\d+)?\s*\]/g);
+  const tupleMatches = trimmed.match(TUPLE_REGEX);
   if (tupleMatches && tupleMatches.length >= 8) return false;
-  if (/^[A-Za-z0-9+/=_-]{200,}$/.test(trimmed)) return false;
+  if (BASE64_REGEX.test(trimmed)) return false;
 
   // Site-specific text patterns declared in the active SiteRule
   // (e.g. Reddit's Sentry SML.load chunk list).
@@ -360,7 +390,7 @@ function findPreviousHeading(element: Element): Element | null {
       current = current.previousSibling;
       if (current.nodeType === Node.ELEMENT_NODE) {
         const el = current as Element;
-        if (/^H[1-6]$/.test(el.tagName)) return el;
+        if (HEADING_REGEX.test(el.tagName)) return el;
         const found = findLastHeading(el);
         if (found) return found;
       }
@@ -374,7 +404,7 @@ function findPreviousHeading(element: Element): Element | null {
 function findLastHeading(element: Element): Element | null {
   const children = Array.from(element.children).reverse();
   for (const child of children) {
-    if (/^H[1-6]$/.test(child.tagName)) return child;
+    if (HEADING_REGEX.test(child.tagName)) return child;
     const found = findLastHeading(child);
     if (found) return found;
   }
@@ -443,9 +473,14 @@ function grabNode(node: Node): Element | false {
 
 function acceptWalkerNode(
   node: Node,
-  counters: { rejected: number; skipped: number; accepted: number }
+  counters: { rejected: number; skipped: number; accepted: number },
+  rejectedCache: WeakSet<Element>
 ): number {
   if (node instanceof Text) {
+    // 父元素被拒 → 文本节点连坐拒绝，避免外层 hide 容器里散落合法文本
+    if (node.parentElement && rejectedCache.has(node.parentElement)) {
+      return NodeFilter.FILTER_REJECT;
+    }
     return NodeFilter.FILTER_ACCEPT;
   }
 
@@ -456,27 +491,40 @@ function acceptWalkerNode(
   const el = node;
   const tag = el.tagName.toLowerCase();
 
+  // 0. 祖先已被拒：连坐拒绝，O(1) 查表，避免回溯
+  if (el.parentElement && rejectedCache.has(el.parentElement)) {
+    rejectedCache.add(el);
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
   if (isNonHTMLNamespace(el)) {
+    rejectedCache.add(el);
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
 
   if (SKIP_SET.has(tag) || hasTranslateBlockClass(el) || isContentEditable(el)) {
+    rejectedCache.add(el);
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
 
   if (isElementHidden(el)) {
+    rejectedCache.add(el);
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
 
-  if (shouldSkipByClass(el)) {
+  if (shouldSkipByClass(el) || shouldSkipBySiteRules(el)) {
+    rejectedCache.add(el);
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
 
   if (SEMANTIC_SKIP_TAGS.has(tag)) {
+    // 语义噪声容器（header/footer/nav）整棵子树全部丢弃
+    rejectedCache.add(el);
     counters.skipped++;
     return NodeFilter.FILTER_REJECT;
   }
@@ -522,10 +570,14 @@ function collectBlocksFromRoot(
   seenTexts: Set<string>
 ): { rejected: number; skipped: number; accepted: number } {
   const counters = { rejected: 0, skipped: 0, accepted: 0 };
+  // Per-walker WeakSet：所有被 acceptWalkerNode 拒掉的元素入表，
+  // 它的子孙节点下次走到时 O(1) 查表拒绝，避免每节点回溯父链。
+  // 随 DOM 节点一起 GC，无内存泄漏。
+  const rejectedCache = new WeakSet<Element>();
   const walker = document.createTreeWalker(
     startNode,
     NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
-    { acceptNode: (node) => acceptWalkerNode(node, counters) }
+    { acceptNode: (node) => acceptWalkerNode(node, counters, rejectedCache) }
   );
 
   let currentNode: Node | null;

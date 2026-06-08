@@ -106,6 +106,60 @@ describe('prepareDocument', () => {
     expect(fullText).not.toContain('Main role content');
   });
 
+  it('should keep <article> root when heading lives outside .article-body (bankingdive-style)', () => {
+    // bankingdive.com 用 <article> 包裹整页：标题在 .first-page-pdf，
+    // 正文在 .article-body。如果直接用 .article-body 作为范围，会把
+    // 标题丢掉；如果直接用 <article>，分享菜单/署名等噪声又会污染
+    // chunk。当前策略：保留 <article>，但 SKIP_CLASS_PATTERNS 会
+    // 过滤掉 share-menu / byline / branding 等，标题和正文都进翻译。
+    document.body.innerHTML = `
+      <article>
+        <div class="first-page-pdf">
+          <h1>Page wrapper title (should be translated)</h1>
+          <ul class="social-icon-list--inner">
+            <li>Copy link (should be filtered)</li>
+            <li>Email (should be filtered)</li>
+          </ul>
+        </div>
+        <div class="row">
+          <div class="article-body">
+            <p>Real article body paragraph one.</p>
+            <p>Real article body paragraph two.</p>
+          </div>
+        </div>
+      </article>
+    `;
+
+    const { fullText } = prepareDocument(document);
+
+    expect(fullText).toContain('Page wrapper title (should be translated)');
+    expect(fullText).toContain('Real article body paragraph one');
+    expect(fullText).toContain('Real article body paragraph two');
+    expect(fullText).not.toContain('Copy link (should be filtered)');
+    expect(fullText).not.toContain('Email (should be filtered)');
+  });
+
+  it('should refine to .article-body when heading is inside it (generic CMS)', () => {
+    // Generic CMS 把 <article> 标题和正文都放在 .article-body 内时，
+    // 仍然下钻到 .article-body 减少噪声。
+    document.body.innerHTML = `
+      <article>
+        <div class="row">
+          <div class="article-body">
+            <h1>Real article heading</h1>
+            <p>Real article body paragraph one.</p>
+            <p>Real article body paragraph two.</p>
+          </div>
+        </div>
+      </article>
+    `;
+
+    const { fullText } = prepareDocument(document);
+
+    expect(fullText).toContain('Real article heading');
+    expect(fullText).toContain('Real article body paragraph one');
+  });
+
   it('should work with Element root parameter', () => {
     document.body.innerHTML = `
       <div id="custom-root">
