@@ -44,12 +44,25 @@ export function hideStatus(): void {
 }
 
 /**
- * HTML 转义工具：把 < > & " ' 转为实体。
+ * HTML 转义工具：把 < > & 转成实体。
  * 主要在 config panel 渲染用户输入时使用，避免 XSS。
- * （虽然当前 panel 用 textContent / 赋值 innerHTML 都有，但保留以备其他场景用）
+ * 注：浏览器/JSdom 的 textContent→innerHTML 不会转义 " 和 '（它们在
+ * 文本节点里不需要转义），所以本工具也只覆盖 < > & 三字符。
  */
 export function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * 仅供单测使用：清空模块级单例缓存并移除已挂载的 overlay。
+ * 模块在多次 showStatus 之间复用同一个 DOM 节点，单测需要隔离场景时
+ * 调用此函数重置。生产代码不应调用。
+ */
+export function __resetStatusOverlayForTesting(): void {
+  if (translationOverlay?.parentNode) {
+    translationOverlay.parentNode.removeChild(translationOverlay);
+  }
+  translationOverlay = null;
 }

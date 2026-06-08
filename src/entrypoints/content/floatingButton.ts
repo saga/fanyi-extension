@@ -31,7 +31,11 @@ interface ButtonPosition {
   bottom: number;
 }
 
-function loadButtonPosition(isMobile: boolean): ButtonPosition {
+/**
+ * 读取浮动按钮上次保存的位置；localStorage 没有或解析失败时回退默认值。
+ * 单测：src/__tests__/floatingButton.test.ts
+ */
+export function loadButtonPosition(isMobile: boolean): ButtonPosition {
   const defaults = { right: isMobile ? 12 : 20, bottom: 100 };
   const saved = localStorage.getItem(BTN_POSITION_KEY);
   if (!saved) return defaults;
@@ -43,7 +47,8 @@ function loadButtonPosition(isMobile: boolean): ButtonPosition {
   }
 }
 
-function saveButtonPosition(pos: ButtonPosition): void {
+/** 持久化按钮位置到 localStorage。 */
+export function saveButtonPosition(pos: ButtonPosition): void {
   localStorage.setItem(BTN_POSITION_KEY, JSON.stringify(pos));
 }
 
