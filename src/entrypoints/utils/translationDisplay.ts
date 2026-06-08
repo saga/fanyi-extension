@@ -62,6 +62,8 @@ export function restoreBlock(node: HTMLElement): void {
     node.textContent = originalText;
   }
   node.classList.remove('fanyi-translated');
+  node.classList.remove('fanyi-missing');
+  node.removeAttribute('title');
   delete node.dataset.originalText;
 }
 

@@ -1775,6 +1775,34 @@ describe('extractBlocks - Duplicate text dedup (HBR summary callout)', () => {
   });
 });
 
+describe('extractBlocks - HBR article layout (h3 inside content div, p following)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should extract h3 with CSS-modules class containing "subheader" and a following p', () => {
+    // Real HBR class names (CSS-modules generated, contains "subheader"
+    // as a substring). The previous SKIP_CLASS_PATTERNS check uses exact
+    // token boundary matching so this should not match.
+    setupHTML(`
+      <article>
+        <div class="Standard-module__content">
+          <h3 class="Subheader-module__subheader Subheader-module__h3 undefined">
+            <strong>Efficiencies</strong>
+          </h3>
+          <p class="Paragraph-module__text">
+            Many individuals and teams are using AI to make current business processes more efficient.
+          </p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.some(b => b.tag === 'h3' && b.text === 'Efficiencies')).toBe(true);
+    expect(blocks.some(b => b.tag === 'p' && b.text.startsWith('Many individuals'))).toBe(true);
+  });
+});
+
 describe('extractBlocks - Deeply nested structures', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

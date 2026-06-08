@@ -479,7 +479,7 @@ export default defineContentScript({
           }
         }
 
-        const allSucceeded = await translateChunksViaBackground(
+        const { allSucceeded, translatedIds } = await translateChunksViaBackground(
           chunks,
           config.sourceLang,
           config.targetLang,
@@ -494,9 +494,30 @@ export default defineContentScript({
         translated = true;
         translatedBlocks = new Set(nodeMap.keys());
 
+        // Mark blocks that the API never returned a translation for. These
+        // are usually chunks that the model truncated, refused, or
+        // failed-parse. Surfacing them with a visible class lets the user
+        // see exactly which sections need a re-translate and gives us
+        // a concrete signal when debugging missing-translation reports.
+        const missingIds: string[] = [];
+        for (const [id, node] of nodeMap) {
+          if (translatedIds.has(id)) continue;
+          missingIds.push(id);
+          if (node instanceof HTMLElement) {
+            node.classList.add('fanyi-missing');
+            node.title = '翻译响应中缺少该段落，点击扩展图标重新翻译';
+          }
+        }
+        if (missingIds.length > 0) {
+          console.warn(
+            `[ContentScript] ${missingIds.length} block(s) had no translation in the API response:`,
+            missingIds,
+          );
+        }
+
         updateButtonState(true);
 
-        console.log(`[ContentScript] Translation applied: ${nodeMap.size} blocks translated`);
+        console.log(`[ContentScript] Translation applied: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`);
 
         setupDynamicContentObserver(config.mode);
 
@@ -507,7 +528,11 @@ export default defineContentScript({
           delete el.dataset.fanyiBlockId;
         }
 
-        const statusMsg = allSucceeded ? '翻译完成' : '翻译完成（部分失败）';
+        const statusMsg = missingIds.length > 0
+          ? `翻译完成（${missingIds.length} 段未返回，可重试）`
+          : allSucceeded
+            ? '翻译完成'
+            : '翻译完成（部分失败）';
         showStatus(statusMsg, allSucceeded ? 'success' : 'error');
         setTimeout(() => hideStatus(), 3000);
       } catch (error) {
@@ -529,11 +554,12 @@ export default defineContentScript({
       mode: 'bilingual' | 'target',
       glossary: Array<{ term: string; translation: string }>,
       onProgress?: (current: number, total: number) => void
-    ): Promise<boolean> {
+    ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
       console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
       let completedCount = 0;
       let hasFailure = false;
       const applyPromises: Promise<void>[] = [];
+      const translatedIds = new Set<string>();
 
       async function translateChunk(index: number): Promise<void> {
         const chunk = chunks[index];
@@ -576,6 +602,7 @@ export default defineContentScript({
               }
               console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
               chunkMap.set(id, text);
+              translatedIds.add(id);
             }
             applyPromises.push(new Promise<void>(resolve => {
               let applied = false;
@@ -614,8 +641,8 @@ export default defineContentScript({
 
       await Promise.all(applyPromises);
 
-      console.log('[ContentScript] translateChunksViaBackground complete, allSucceeded:', !hasFailure);
-      return !hasFailure;
+      console.log('[ContentScript] translateChunksViaBackground complete, allSucceeded:', !hasFailure, 'translatedIds:', translatedIds.size);
+      return { allSucceeded: !hasFailure, translatedIds };
     }
 
     function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
@@ -719,6 +746,13 @@ export default defineContentScript({
         restoreBlock(node as HTMLElement);
       }
 
+      const missingNodes = document.querySelectorAll('.fanyi-missing');
+      for (const node of Array.from(missingNodes)) {
+        const el = node as HTMLElement;
+        el.classList.remove('fanyi-missing');
+        el.removeAttribute('title');
+      }
+
       const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');
       for (const node of Array.from(tempAttrNodes)) {
         const el = node as HTMLElement;
@@ -789,6 +823,10 @@ export default defineContentScript({
       }
       .fanyi-translation {
         display: block;
+      }
+      .fanyi-missing {
+        background: linear-gradient(transparent 60%, rgba(255, 215, 0, 0.35) 60%);
+        cursor: help;
       }
       .fanyi-btn-save,
       .fanyi-btn-translate,
