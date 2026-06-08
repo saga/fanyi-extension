@@ -36,7 +36,7 @@ const TRANSLATION_TEMPERATURE = 0.1;
 function estimateMaxTokens(inputJson: string): number {
   // Rough estimate: 1 char ≈ 0.3 tokens for English, 0.5 for CJK
   const estimatedInputTokens = Math.ceil(inputJson.length * 0.5);
-  return Math.max(1024, Math.ceil(estimatedInputTokens * 5 * 2));
+  return Math.max(1024, Math.ceil(estimatedInputTokens * 8 * 2));
 }
 
 function buildHeaders(apiKey: string): Record<string, string> {
