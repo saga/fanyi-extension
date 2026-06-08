@@ -1,946 +1,131 @@
+/**
+ * Content Script 入口
+ *
+ * 职责（精简后只做"接线"，业务逻辑已拆分到 ./content/*）：
+ *   1. 注入样式（getStyles）
+ *   2. 创建浮动按钮 + 触屏手势
+ *   3. 创建翻译控制器（lazily，首次 translate 动作时实例化）
+ *   4. 路由来自 background / popup / keyboard shortcut 的消息
+ *   5. 维护"是否已翻译"的小型状态（originalTexts / translatedBlocks / isTranslated）
+ *
+ * 文件结构（见 ./content/）：
+ *   styles.ts        CSS 模板字符串
+ *   statusOverlay.ts 状态条 + HTML 转义
+ *   floatingButton.ts 浮动按钮 + 触屏手势
+ *   configPanel.ts   配置面板（API Key / 语言 / 模式 / 手势）
+ *   translation.ts   翻译编排（核心：handleFullTranslation / translateChunkPayload / 动态监听）
+ */
 import browser from 'webextension-polyfill';
+import { getConfig } from './utils/config';
+import { getStyles } from './content/styles';
+import { showStatus, hideStatus } from './content/statusOverlay';
 import {
-  prepareDocument,
-  type Chunk,
-} from './utils/contentHelper';
+  setupFloatingButton,
+  updateButtonState,
+  setupTouchEvents,
+} from './content/floatingButton';
+import { showConfigPanel } from './content/configPanel';
 import {
-  applyBlockTranslation,
-  restoreBlock,
-  toggleBlockTranslation,
-  type TranslationMode,
-} from './utils/translationDisplay';
-import { buildNodeMap } from './utils/blockExtractor';
-import { getConfig, setConfig } from './utils/config';
-import { DOMObserverManager } from './utils/domObserver';
-import type { TextBlock } from './utils/blockExtractor';
-import { buildChunks } from './utils/chunkBuilder';
-import { GESTURES } from './utils/constants';
-import { getCenterPoint } from './utils/common';
-import { extractGlossaryLocal } from './utils/glossaryExtractor';
+  createTranslationController,
+  type TranslationController,
+  type TranslationState,
+} from './content/translation';
 
-// Detect if we're on mobile/Android Firefox
+// ============================================================
+// 设备检测
+// ============================================================
+
+/**
+ * 仅在 Android 上启用移动端布局（iOS 没浏览器扩展所以不考虑）。
+ * iPad 用 desktop UA 也走 desktop 分支。
+ */
 const isAndroid = /Android/i.test(navigator.userAgent);
 const isMobile = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+// ============================================================
+// 入口
+// ============================================================
 
 export default defineContentScript({
   matches: ['*://*/*'],
   main() {
-    console.log('Content script loaded, isAndroid:', isAndroid, 'isMobile:', isMobile);
+    console.log('[ContentScript] Initializing on:', window.location.href, 'isMobile:', isMobile);
 
-    let isTranslating = false;
-    let translationOverlay: HTMLElement | null = null;
-    let originalTexts = new Map<string, string>();
-    let translatedBlocks = new Set<string>();
-    let domObserver: DOMObserverManager | null = null;
-    let translated = false;
-    let streamBuffer = '';
+    // === 共享状态 ===
+    // - originalTexts: 块 id → 原文（恢复时用）
+    // - translatedBlocks: 动态内容已翻译的 block id 集合
+    const state: TranslationState = {
+      originalTexts: new Map<string, string>(),
+      translatedBlocks: new Set<string>(),
+    };
+    // 翻译控制器懒加载：第一次收到翻译消息才创建
+    let translation: TranslationController | null = null;
 
-    browser.runtime.onMessage.addListener(async (message: any) => {
-      if (message.action === 'translatePage') {
-        await handleFullTranslation();
-      } else if (message.action === 'restoreOriginal') {
-        restoreOriginal();
-      } else if (message.action === 'toggleTranslation') {
-        toggleTranslation();
-      } else if (message.action === 'translationStreamUpdate') {
-        // 流式翻译中间结果，暂存到临时缓存
-        streamBuffer = message.partial;
+    // === 注入样式 ===
+    const style = document.createElement('style');
+    style.textContent = getStyles(isMobile);
+    (document.head || document.documentElement).appendChild(style);
+
+    // === 浮动按钮 + 触屏手势 ===
+    setupFloatingButton(
+      isMobile,
+      () => translation?.isTranslated() ?? false,
+      () => handleAction('translate'),
+      () => handleAction('restore'),
+    );
+    setupTouchEvents(() => handleAction('translate'));
+
+    // === 消息路由：来自 background、popup、keyboard shortcut ===
+    browser.runtime.onMessage.addListener((message: any) => {
+      switch (message.action) {
+        case 'translatePage':
+          void handleAction('translate');
+          return undefined;
+        case 'restoreOriginal':
+          handleAction('restore');
+          return undefined;
+        case 'toggleTranslation':
+          handleAction('toggle');
+          return undefined;
+        case 'translationStreamUpdate':
+          // 预留：流式翻译当前未启用，保留接口以便后续接入
+          return undefined;
       }
     });
 
-    setupTouchEvents();
-    setupFloatingButton();
-
-    function setupTouchEvents() {
-      let tapCount = 0;
-      let tapTimer: number | undefined;
-
-      const handleTouchStart = async (event: TouchEvent) => {
-        // Ignore if touching UI elements
-        const target = event.target as Element;
-        if (target.closest('.fanyi-config-panel') || 
-            target.closest('.fanyi-floating-btn') || 
-            target.closest('.fanyi-status-overlay')) {
-          return;
-        }
-
-        const config = await getConfig();
-        const gesture = config.touchGesture || 'TripleTap';
-
-        const multiFingerGestures: string[] = [GESTURES.ThreeFinger, GESTURES.FourFinger];
-
-        if (multiFingerGestures.includes(gesture)) {
-          const requiredFingers = gesture === GESTURES.ThreeFinger ? 3 : 4;
-          if (event.touches.length === requiredFingers) {
-            const center = getCenterPoint(event.touches, requiredFingers);
-            if (center && config.enabled) {
-              try { event.preventDefault(); } catch(e) {}
-              handleFullTranslation();
-            }
-          }
-          return;
-        }
-
-        if (gesture === GESTURES.TripleTap) {
-          if (event.touches.length !== 1) return;
-
-          tapCount++;
-
-          if (tapCount === 1) {
-            tapTimer = window.setTimeout(() => {
-              tapCount = 0;
-            }, 500);
-          } else if (tapCount === 3) {
-            if (tapTimer) clearTimeout(tapTimer);
-            tapCount = 0;
-            if (config.enabled) {
-              try { event.preventDefault(); } catch(e) {}
-              handleFullTranslation();
-            }
-          }
-        }
-      };
-
-      document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
-    }
-
-    function setupFloatingButton() {
-      const btn = document.createElement('div');
-      btn.className = 'fanyi-floating-btn';
-      btn.innerHTML = '译';
-      btn.title = isMobile ? '点击翻译，长按设置' : '点击翻译，长按设置';
-
-      // Load saved position
-      const savedPosition = localStorage.getItem('fanyi-btn-position');
-      if (savedPosition) {
-        try {
-          const pos = JSON.parse(savedPosition);
-          btn.style.right = pos.right + 'px';
-          btn.style.bottom = pos.bottom + 'px';
-        } catch {
-          // Use defaults based on device
-          btn.style.right = isMobile ? '12px' : '20px';
-          btn.style.bottom = isMobile ? '100px' : '100px';
-        }
-      } else {
-        btn.style.right = isMobile ? '12px' : '20px';
-        btn.style.bottom = isMobile ? '100px' : '100px';
-      }
-
-      let isDragging = false;
-      let startX = 0, startY = 0;
-      let startRight = 0, startBottom = 0;
-      let longPressTimer: number | null = null;
-      let hasMoved = false;
-
-      btn.addEventListener('mousedown', startDrag);
-      btn.addEventListener('touchstart', startDrag, { passive: false });
-
-      function startDrag(e: MouseEvent | TouchEvent) {
-        try { e.preventDefault(); } catch(err) {}
-        hasMoved = false;
-        isDragging = false;
-
-        longPressTimer = window.setTimeout(() => {
-          if (!hasMoved) {
-            showConfigPanel();
-          }
-        }, isMobile ? 500 : 600);
-
-        if (e instanceof MouseEvent) {
-          startX = e.clientX;
-          startY = e.clientY;
+    /**
+     * 统一处理三种动作（translate / restore / toggle）。
+     *
+     * translate 用 start()（异步），restore/toggle 同步即可。
+     * 第一次调用会懒加载控制器 + 检查 config.enabled / deepseekApiKey，
+     * 与 start() 内部的检查是双保险（防止消息路由绕过 UI）。
+     */
+    function handleAction(action: 'translate' | 'restore' | 'toggle'): void {
+      void ensureController().then((ctrl) => {
+        if (action === 'translate') {
+          void ctrl.start();
+        } else if (action === 'restore') {
+          ctrl.restore();
+          updateButtonState(false);
         } else {
-          startX = e.touches[0].clientX;
-          startY = e.touches[0].clientY;
-        }
-
-        const rect = btn.getBoundingClientRect();
-        startRight = window.innerWidth - rect.right;
-        startBottom = window.innerHeight - rect.bottom;
-
-        document.addEventListener('mousemove', onDrag);
-        document.addEventListener('mouseup', endDrag);
-        document.addEventListener('touchmove', onDrag, { passive: false });
-        document.addEventListener('touchend', endDrag);
-      }
-
-      function onDrag(e: MouseEvent | TouchEvent) {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-
-        let clientX: number, clientY: number;
-        if (e instanceof MouseEvent) {
-          clientX = e.clientX;
-          clientY = e.clientY;
-        } else {
-          clientX = e.touches[0].clientX;
-          clientY = e.touches[0].clientY;
-        }
-
-        const dx = Math.abs(clientX - startX);
-        const dy = Math.abs(clientY - startY);
-        const moveThreshold = isMobile ? 10 : 5;
-
-        if (dx > moveThreshold || dy > moveThreshold) {
-          hasMoved = true;
-          isDragging = true;
-        }
-
-        if (isDragging) {
-          const newRight = window.innerWidth - clientX - btn.offsetWidth / 2;
-          const newBottom = window.innerHeight - clientY - btn.offsetHeight / 2;
-          btn.style.right = Math.max(0, Math.min(newRight, window.innerWidth - btn.offsetWidth)) + 'px';
-          btn.style.bottom = Math.max(0, Math.min(newBottom, window.innerHeight - btn.offsetHeight)) + 'px';
-        }
-
-        if (e instanceof TouchEvent) {
-          try { e.preventDefault(); } catch(err) {}
-        }
-      }
-
-      function endDrag() {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-
-        document.removeEventListener('mousemove', onDrag);
-        document.removeEventListener('mouseup', endDrag);
-        document.removeEventListener('touchmove', onDrag);
-        document.removeEventListener('touchend', endDrag);
-
-        if (!hasMoved) {
-          if (isPageTranslated()) {
-            restoreOriginal();
-          } else {
-            handleFullTranslation();
-          }
-        } else {
-          const right = parseInt(btn.style.right) || (isMobile ? 12 : 20);
-          const bottom = parseInt(btn.style.bottom) || 100;
-          localStorage.setItem('fanyi-btn-position', JSON.stringify({ right, bottom }));
-        }
-
-        isDragging = false;
-      }
-
-      document.body.appendChild(btn);
-    }
-
-    function updateButtonState(isTranslated: boolean) {
-      const btn = document.querySelector('.fanyi-floating-btn') as HTMLElement;
-      if (!btn) return;
-      if (isTranslated) {
-        btn.innerHTML = '原';
-        btn.title = isMobile ? '已翻译，点击恢复原文，长按设置' : '已翻译，点击恢复原文，长按设置';
-        btn.classList.add('fanyi-btn-translated');
-      } else {
-        btn.innerHTML = '译';
-        btn.title = isMobile ? '点击翻译，长按设置' : '点击翻译，长按设置';
-        btn.classList.remove('fanyi-btn-translated');
-      }
-    }
-
-    function showConfigPanel() {
-      const existing = document.querySelector('.fanyi-config-panel');
-      if (existing) {
-        existing.remove();
-        return;
-      }
-
-      const panel = document.createElement('div');
-      panel.className = 'fanyi-config-panel';
-      panel.innerHTML = `
-        <div class="fanyi-config-header">
-          <span>翻译设置</span>
-          <button class="fanyi-config-close">&times;</button>
-        </div>
-        <div class="fanyi-config-body">
-          <div class="fanyi-config-row">
-            <label>DeepSeek API Key</label>
-            <input type="password" class="fanyi-api-input" placeholder="输入 DeepSeek API Key" />
-          </div>
-          <div class="fanyi-config-row">
-            <label>源语言</label>
-            <select class="fanyi-source-lang">
-              <option value="auto">自动检测</option>
-              <option value="en">英语</option>
-              <option value="zh">中文</option>
-              <option value="ja">日语</option>
-            </select>
-          </div>
-          <div class="fanyi-config-row">
-            <label>目标语言</label>
-            <select class="fanyi-target-lang">
-              <option value="zh">中文</option>
-              <option value="en">英语</option>
-              <option value="ja">日语</option>
-            </select>
-          </div>
-          <div class="fanyi-config-row">
-            <label>翻译模式</label>
-            <div class="fanyi-radio-group">
-              <label><input type="radio" name="mode" value="bilingual" /> 双语对照</label>
-              <label><input type="radio" name="mode" value="target" /> 仅译文</label>
-            </div>
-          </div>
-          ${isMobile ? `
-          <div class="fanyi-config-row">
-            <label>触摸手势</label>
-            <select class="fanyi-touch-gesture">
-              <option value="TripleTap">三击翻译</option>
-              <option value="ThreeFinger">三指翻译</option>
-            </select>
-          </div>
-          ` : ''}
-          <div class="fanyi-config-actions">
-            <button class="fanyi-btn-save">保存</button>
-            <button class="fanyi-btn-translate">翻译</button>
-            <button class="fanyi-btn-restore">恢复</button>
-          </div>
-        </div>
-      `;
-
-      getConfig().then(config => {
-        (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value = config.deepseekApiKey || '';
-        (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value = config.sourceLang || 'auto';
-        (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
-        const modeRadio = panel.querySelector(`input[name="mode"][value="${config.mode || 'bilingual'}"]`) as HTMLInputElement;
-        if (modeRadio) modeRadio.checked = true;
-        
-        if (isMobile) {
-          const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
-          if (gestureSelect) gestureSelect.value = config.touchGesture || 'TripleTap';
-        }
-
-      });
-
-      panel.querySelector('.fanyi-config-close')?.addEventListener('click', () => panel.remove());
-
-      panel.querySelector('.fanyi-btn-save')?.addEventListener('click', async () => {
-        const apiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value.trim();
-        if (!apiKey) {
-          showStatus('API Key 不能为空', 'error');
-          setTimeout(() => hideStatus(), 2000);
-          return;
-        }
-
-        showStatus('正在验证 API Key...', 'loading');
-
-        try {
-          const response = await browser.runtime.sendMessage({
-            action: 'validateApiKey',
-            apiKey,
-          });
-
-          console.log('[ContentScript] Validation response:', response);
-
-          if (response && response.success) {
-            const config = await getConfig();
-            config.deepseekApiKey = apiKey;
-            config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
-            config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
-            const modeRadio = panel.querySelector('input[name="mode"]:checked') as HTMLInputElement;
-            config.mode = modeRadio?.value || 'bilingual';
-            
-            if (isMobile) {
-              const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement;
-              if (gestureSelect) config.touchGesture = gestureSelect.value;
-            }
-
-            await setConfig(config);
-            showStatus('设置已保存', 'success');
-            setTimeout(() => hideStatus(), 2000);
-          } else {
-            const errorMsg = response?.error || '未知错误';
-            console.error('[ContentScript] Validation failed:', errorMsg);
-            showStatus('API Key 无效: ' + errorMsg, 'error');
-            setTimeout(() => hideStatus(), 5000);
-          }
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : '网络错误';
-          console.error('[ContentScript] Validation error:', error);
-          showStatus('验证失败: ' + errorMsg, 'error');
-          setTimeout(() => hideStatus(), 5000);
+          ctrl.toggle();
         }
       });
-
-      panel.querySelector('.fanyi-btn-translate')?.addEventListener('click', async () => {
-        panel.remove();
-        handleFullTranslation();
-      });
-
-      panel.querySelector('.fanyi-btn-restore')?.addEventListener('click', () => {
-        panel.remove();
-        restoreOriginal();
-      });
-
-      // Close when clicking outside (desktop only)
-      if (!isMobile) {
-        setTimeout(() => {
-          document.addEventListener('click', function closeOnOutside(ev: MouseEvent) {
-            if (!panel.contains(ev.target as Node) && 
-                !(ev.target as Element).closest('.fanyi-floating-btn')) {
-              panel.remove();
-              document.removeEventListener('click', closeOnOutside);
-            }
-          });
-        }, 0);
-      }
-
-      document.body.appendChild(panel);
     }
 
-    function isPageTranslated(): boolean {
-      return document.querySelector('.fanyi-translated') !== null;
-    }
-
-    async function handleFullTranslation() {
-      if (isTranslating) return;
-
-      if (translated || isPageTranslated()) {
-        showStatus('页面已翻译', 'success');
-        setTimeout(() => hideStatus(), 2000);
-        return;
-      }
-
+    /** 懒加载控制器，首次创建前先检查扩展是否启用。 */
+    async function ensureController(): Promise<TranslationController> {
+      if (translation) return translation;
       const config = await getConfig();
-      if (!config.deepseekApiKey) {
-        showStatus('API Key 没有配置', 'error');
-        setTimeout(() => hideStatus(), 3000);
-        return;
+      if (!config.enabled) {
+        showStatus('扩展未启用，请在 popup 中启用', 'error');
+        setTimeout(hideStatus, 3000);
+        // 仍然返回一个空 controller，调用方执行空操作；避免 throw 污染 onMessage
+        translation = createTranslationController(isMobile, state);
+        return translation;
       }
-      console.log('[ContentScript] handleFullTranslation called, config:', { enabled: config.enabled, sourceLang: config.sourceLang, targetLang: config.targetLang });
-      if (!config.enabled) return;
-
-      isTranslating = true;
-      showStatus('正在提取文本...', 'loading');
-
-      try {
-        console.log('[ContentScript] Calling prepareDocument...');
-        const { blocks, chunks, fullText } = prepareDocument(document);
-        console.log('[ContentScript] prepareDocument result:', { blocksCount: blocks.length, chunksCount: chunks.length, fullTextLength: fullText.length });
-        console.log(`[ContentScript] API Request Estimate: ${chunks.length} requests`);
-
-        if (blocks.length === 0) {
-          console.warn('[ContentScript] No blocks found!');
-          throw new Error('没有找到可翻译的内容');
-        }
-
-        showStatus(
-          `共 ${blocks.length} 个文本块`,
-          'loading'
-        );
-
-        const nodeMap = buildNodeMap(blocks, document);
-        console.log('[ContentScript] nodeMap size:', nodeMap.size, 'blocks length:', blocks.length);
-        if (nodeMap.size !== blocks.length) {
-          console.warn('[ContentScript] Mismatch: some blocks not found in DOM!');
-          const blockIds = new Set(blocks.map(b => b.id));
-          const nodeMapIds = new Set(nodeMap.keys());
-          const missingIds = [...blockIds].filter(id => !nodeMapIds.has(id));
-          console.warn('[ContentScript] Missing block IDs:', missingIds);
-          // 输出每个 missing block 的详情
-          for (const id of missingIds) {
-            const block = blocks.find(b => b.id === id);
-            if (block) {
-              console.warn('[ContentScript] Missing block detail:', id, 'tag:', block.tag, 'xpath:', block.xpath, 'text:', block.text.substring(0, 60));
-            }
-          }
-        }
-        // 输出所有 blocks 的摘要，方便确认具体哪些 block 被提取
-        console.log('[ContentScript] All blocks summary:', blocks.map(b => `${b.id}(${b.tag}): ${b.text.substring(0, 50)}`).join(' | '));
-        saveOriginalTexts(blocks, nodeMap);
-
-        let glossary: Array<{ term: string; translation: string }> = [];
-        if (fullText.length >= 50) {
-          showStatus('正在提取术语表...', 'loading');
-          try {
-            const emphasizedTerms: string[] = [];
-            for (const tag of ['em', 'strong', 'code']) {
-              for (const el of document.querySelectorAll(tag)) {
-                const text = el.textContent?.trim();
-                if (text && text.length > 1 && text.length < 80) {
-                  emphasizedTerms.push(text);
-                }
-              }
-            }
-
-            const glossarySample = fullText.substring(0, 4000);
-            glossary = extractGlossaryLocal(glossarySample, emphasizedTerms);
-            console.log('[ContentScript] Glossary extracted:', glossary.length, 'terms');
-            for (const entry of glossary) {
-              console.log(`[ContentScript]   "${entry.term}" → "${entry.translation}"`);
-            }
-          } catch (error) {
-            console.warn('[ContentScript] Glossary extraction failed, proceeding without:', error);
-          }
-        }
-
-        const { allSucceeded, translatedIds } = await translateChunksViaBackground(
-          chunks,
-          config.sourceLang,
-          config.targetLang,
-          nodeMap,
-          config.mode,
-          glossary,
-          (current, total) => {
-            showStatus(`翻译进度: ${current}/${total}`, 'loading');
-          }
-        );
-
-        // Per-block retry for entries the model truncated or silently
-        // skipped. Rationale + data: MISSING_TRANSLATION_ANALYSIS.md §5 方案 A.
-        // - missing >= 50% of total → API is broken, no point retrying
-        // - missing = 0 → no work to do
-        // - otherwise → build new tiny chunks from missing blocks only and
-        //   call the same translator; new cache key (different jsonContent)
-        //   so we get a fresh API call; truncated re-truncation is unlikely
-        //   because per-block chunks are 1-3 blocks ≈ tiny max_tokens budget.
-        const stillMissingIds: string[] = [];
-        for (const [id] of nodeMap) {
-          if (!translatedIds.has(id)) stillMissingIds.push(id);
-        }
-        if (
-          stillMissingIds.length > 0 &&
-          stillMissingIds.length < nodeMap.size / 2
-        ) {
-          showStatus(
-            `补译 ${stillMissingIds.length} 段...`,
-            'loading',
-          );
-          console.log(
-            `[ContentScript] Retrying ${stillMissingIds.length} missing block(s):`,
-            stillMissingIds,
-          );
-          const missingBlockSet = new Set(stillMissingIds);
-          const retryBlocks = blocks.filter((b) => missingBlockSet.has(b.id));
-          // Re-chunk with smaller target — first chunk cap is 12 but for
-          // 1-3 missing blocks we want a single chunk to minimize round-trips.
-          const retryChunks = buildChunks(retryBlocks);
-          console.log(
-            `[ContentScript] Retry built ${retryChunks.length} chunk(s) from ${retryBlocks.length} block(s)`,
-          );
-          const { translatedIds: retryTranslatedIds } = await translateChunksViaBackground(
-            retryChunks,
-            config.sourceLang,
-            config.targetLang,
-            nodeMap,
-            config.mode,
-            glossary,
-          );
-          let recoveredCount = 0;
-          for (const id of retryTranslatedIds) {
-            if (!translatedIds.has(id)) {
-              translatedIds.add(id);
-              recoveredCount++;
-            }
-          }
-          console.log(
-            `[ContentScript] Retry recovered ${recoveredCount}/${stillMissingIds.length} block(s)`,
-          );
-        }
-
-        translated = true;
-        translatedBlocks = new Set(nodeMap.keys());
-
-        // Mark blocks that the API never returned a translation for. These
-        // are usually chunks that the model truncated, refused, or
-        // failed-parse. Surfacing them with a visible class lets the user
-        // see exactly which sections need a re-translate and gives us
-        // a concrete signal when debugging missing-translation reports.
-        const missingIds: string[] = [];
-        for (const [id, node] of nodeMap) {
-          if (translatedIds.has(id)) continue;
-          missingIds.push(id);
-          if (node instanceof HTMLElement) {
-            node.classList.add('fanyi-missing');
-            node.title = '翻译响应中缺少该段落，点击扩展图标重新翻译';
-          }
-        }
-        if (missingIds.length > 0) {
-          console.warn(
-            `[ContentScript] ${missingIds.length} block(s) had no translation in the API response:`,
-            missingIds,
-          );
-        }
-
-        updateButtonState(true);
-
-        console.log(`[ContentScript] Translation applied: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`);
-
-        setupDynamicContentObserver(config.mode);
-
-        // 翻译完成后，清理临时的 data 属性
-        const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');
-        for (const node of Array.from(tempAttrNodes)) {
-          const el = node as HTMLElement;
-          delete el.dataset.fanyiBlockId;
-        }
-
-        const statusMsg = missingIds.length > 0
-          ? `翻译完成（${missingIds.length} 段未返回，可重试）`
-          : allSucceeded
-            ? '翻译完成'
-            : '翻译完成（部分失败）';
-        showStatus(statusMsg, allSucceeded ? 'success' : 'error');
-        setTimeout(() => hideStatus(), 3000);
-      } catch (error) {
-        console.error('Translation failed:', error);
-        showStatus(
-          error instanceof Error ? error.message : '翻译失败',
-          'error'
-        );
-      } finally {
-        isTranslating = false;
-      }
+      translation = createTranslationController(isMobile, state);
+      return translation;
     }
-
-    async function translateChunksViaBackground(
-      chunks: Chunk[],
-      sourceLang: string,
-      targetLang: string,
-      nodeMap: Map<string, Node>,
-      mode: 'bilingual' | 'target',
-      glossary: Array<{ term: string; translation: string }>,
-      onProgress?: (current: number, total: number) => void
-    ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
-      console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
-      let completedCount = 0;
-      let hasFailure = false;
-      const applyPromises: Promise<void>[] = [];
-      const translatedIds = new Set<string>();
-
-      async function translateChunk(index: number): Promise<void> {
-        const chunk = chunks[index];
-        console.log(`[ContentScript] Translating chunk ${index + 1}/${chunks.length}, blocks: ${chunk.blocks.length}`);
-
-        const startTime = Date.now();
-        
-        try {
-          const response = await browser.runtime.sendMessage({
-            action: 'translateChunk',
-            jsonContent: chunk.jsonContent,
-            sourceLang,
-            targetLang,
-            pageUrl: window.location.href,
-            glossary,
-          });
-          
-          const elapsed = Date.now() - startTime;
-          console.log(`[ContentScript] Chunk ${index + 1} response time: ${elapsed}ms, success: ${response.success}`);
-
-          if (response.success) {
-            console.log(`[ContentScript] Chunk ${index + 1} result blocks:`, response.result?.length || 0);
-            if (response.result) {
-              const ids = response.result
-                .filter((e: unknown) => Array.isArray(e) && e.length === 2 && typeof e[0] === 'string')
-                .map((e: [string, string]) => e[0])
-                .join(',');
-              console.log(`[ContentScript] Chunk ${index + 1} translated IDs:`, ids);
-            }
-            const chunkMap = new Map<string, string>();
-            for (const entry of response.result) {
-              if (!Array.isArray(entry) || entry.length !== 2) {
-                console.warn('[ContentScript]   Skipping malformed entry:', entry);
-                continue;
-              }
-              const [id, text] = entry;
-              if (typeof text !== 'string') {
-                console.warn(`[ContentScript]   Skipping block ${id}: translated_text is not a string (${typeof text})`);
-                continue;
-              }
-              console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
-              chunkMap.set(id, text);
-              translatedIds.add(id);
-            }
-            // [ChunkTrace] chunk 维度的 input/output 对比。配合
-            // background.ts 的 [ChunkTrace] 一旦出 missing 能直接定位
-            // 是哪个 chunk 的哪些 id 没回来。
-            const inputIds = chunk.blocks.map((b) => b.id);
-            const outputIds = [...chunkMap.keys()];
-            const chunkMissing = inputIds.filter((id) => !chunkMap.has(id));
-            console.log(
-              `[ContentScript][ChunkTrace] chunk=${chunk.id}`,
-              `inputIds=[${inputIds.join(',')}]`,
-              `outputIds=[${outputIds.join(',')}]`,
-              `missing=[${chunkMissing.join(',')}]`,
-            );
-            if (chunkMissing.length > 0) {
-              console.warn(
-                `[ContentScript][ChunkTrace] chunk=${chunk.id} missing ${chunkMissing.length} blocks — see [Background][ChunkTrace] for max_tokens / response details`,
-                chunkMissing.map((id) => {
-                  const b = chunk.blocks.find((x) => x.id === id);
-                  return `${id}(${b?.tag},${b?.text.length}ch):${b?.text.slice(0, 50)}`;
-                }),
-              );
-            }
-            applyPromises.push(new Promise<void>(resolve => {
-              let applied = false;
-              const frameId = requestAnimationFrame(() => {
-                applied = true;
-                applyTranslations(chunkMap, nodeMap, mode);
-                resolve();
-              });
-              // Fallback: resolve after 5s if rAF never fires (hidden tab)
-              setTimeout(() => {
-                if (applied) return;
-                cancelAnimationFrame(frameId);
-                applyTranslations(chunkMap, nodeMap, mode);
-                resolve();
-              }, 5000);
-            }));
-          } else {
-            hasFailure = true;
-            console.error(`Chunk ${chunk.id} translation failed:`, response.error);
-          }
-        } catch (error) {
-          hasFailure = true;
-          console.error(`[ContentScript] Chunk ${index + 1} error:`, error);
-        }
-
-        completedCount++;
-        onProgress?.(completedCount, chunks.length);
-      }
-
-      for (let i = 0; i < chunks.length; i++) {
-        await translateChunk(i);
-        if (i < chunks.length - 1 && isMobile) {
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-      }
-
-      await Promise.all(applyPromises);
-
-      console.log('[ContentScript] translateChunksViaBackground complete, allSucceeded:', !hasFailure, 'translatedIds:', translatedIds.size);
-      return { allSucceeded: !hasFailure, translatedIds };
-    }
-
-    function saveOriginalTexts(blocks: TextBlock[], nodeMap: Map<string, Node>) {
-      let saved = 0;
-      for (const block of blocks) {
-        const node = nodeMap.get(block.id);
-        if (node && node instanceof HTMLElement) {
-          originalTexts.set(block.id, node.textContent || '');
-          saved++;
-        }
-      }
-      console.log('[ContentScript] saveOriginalTexts saved:', saved, '/', blocks.length);
-    }
-
-    function applyTranslations(
-      translationMap: Map<string, string>,
-      nodeMap: Map<string, Node>,
-      mode: 'bilingual' | 'target'
-    ) {
-      console.log('[ContentScript] applyTranslations called, translationMap size:', translationMap.size, 'nodeMap size:', nodeMap.size);
-      for (const [blockId, translatedText] of translationMap) {
-        const node = nodeMap.get(blockId);
-        if (!node || !(node instanceof HTMLElement)) {
-          console.warn('[ContentScript] applyTranslations SKIP:', blockId, 'node not found in nodeMap or not HTMLElement');
-          continue;
-        }
-        console.log('[ContentScript] applyTranslations APPLY:', blockId, 'tag:', node.tagName?.toLowerCase(), 'text:', node.textContent?.substring(0, 40));
-        applyBlockTranslation(node, translatedText, mode);
-      }
-    }
-
-    function setupDynamicContentObserver(mode: TranslationMode) {
-      if (domObserver) {
-        domObserver.destroy();
-      }
-
-      domObserver = new DOMObserverManager(
-        async (newBlocks: TextBlock[]) => {
-          console.log('[ContentScript] Dynamic content detected:', newBlocks.length, 'new blocks');
-          
-          const config = await getConfig();
-          for (const block of newBlocks) {
-            if (block.text && block.text.length > 10) {
-              try {
-                const response = await browser.runtime.sendMessage({
-                  action: 'translateChunk',
-                  jsonContent: JSON.stringify([{ id: block.id, text: block.text }]),
-                  sourceLang: config.sourceLang,
-                  targetLang: config.targetLang,
-                  pageUrl: window.location.href,
-                });
-
-                if (response.success && response.result?.length > 0) {
-                  const node = findNodeByText(block.text);
-                  if (node) {
-                    applyBlockTranslation(node, response.result[0][1], config.mode);
-                    translatedBlocks.add(block.id);
-                    console.log('[ContentScript] Dynamic block translated:', block.id);
-                  }
-                }
-              } catch (error) {
-                console.error('Dynamic content translation failed:', error);
-              }
-            }
-          }
-        },
-        () => {},
-        isMobile ? 1500 : 1000
-      );
-
-      domObserver.startMutationObserver();
-    }
-
-    function findNodeByText(text: string): HTMLElement | null {
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_ELEMENT,
-        {
-          acceptNode: (node: Node): number => {
-            const el = node as Element;
-            if (el.classList.contains('fanyi-translated')) return NodeFilter.FILTER_REJECT;
-            if (el.textContent?.trim() === text) return NodeFilter.FILTER_ACCEPT;
-            return NodeFilter.FILTER_SKIP;
-          }
-        }
-      );
-
-      let current: Element | null;
-      while (current = walker.nextNode() as Element) {
-        if (current.textContent?.trim() === text) {
-          return current;
-        }
-      }
-      return null;
-    }
-
-    function restoreOriginal() {
-      translated = false;
-      const translatedNodes = document.querySelectorAll('.fanyi-translated');
-      for (const node of Array.from(translatedNodes)) {
-        restoreBlock(node as HTMLElement);
-      }
-
-      const missingNodes = document.querySelectorAll('.fanyi-missing');
-      for (const node of Array.from(missingNodes)) {
-        const el = node as HTMLElement;
-        el.classList.remove('fanyi-missing');
-        el.removeAttribute('title');
-      }
-
-      const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');
-      for (const node of Array.from(tempAttrNodes)) {
-        const el = node as HTMLElement;
-        delete el.dataset.fanyiBlockId;
-      }
-
-      updateButtonState(false);
-
-      showStatus('已恢复原文', 'success');
-      setTimeout(() => hideStatus(), 2000);
-    }
-
-    function toggleTranslation() {
-      const translatedNodes = document.querySelectorAll('.fanyi-translated');
-      for (const node of Array.from(translatedNodes)) {
-        toggleBlockTranslation(node as HTMLElement);
-      }
-    }
-
-    function showStatus(message: string, type: 'loading' | 'success' | 'error') {
-      if (!translationOverlay) {
-        translationOverlay = document.createElement('div');
-        translationOverlay.className = 'fanyi-status-overlay';
-        document.body.appendChild(translationOverlay);
-      }
-
-      translationOverlay.className = `fanyi-status-overlay fanyi-${type}`;
-      translationOverlay.textContent = message;
-      translationOverlay.style.display = 'flex';
-    }
-
-    function hideStatus() {
-      if (translationOverlay) {
-        translationOverlay.style.display = 'none';
-      }
-    }
-
-    function escapeHtml(text: string): string {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    const style = document.createElement('style');
-    style.textContent = `
-      .fanyi-status-overlay {
-        position: fixed;
-        bottom: ${isMobile ? '60px' : '20px'};
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 6px 12px;
-        background: rgba(0, 0, 0, 0.35);
-        color: rgba(255, 255, 255, 0.7);
-        border-radius: 16px;
-        z-index: 999999;
-        font-size: ${isMobile ? '11px' : '12px'};
-        display: none;
-        max-width: 80%;
-        text-align: center;
-        pointer-events: none;
-      }
-      .fanyi-loading { border: 1px solid rgba(64, 158, 255, 0.3); }
-      .fanyi-success { border: 1px solid rgba(103, 194, 58, 0.3); }
-      .fanyi-error { border: 1px solid rgba(245, 108, 108, 0.3); }
-
-      .fanyi-original {
-        display: block;
-      }
-      .fanyi-translation {
-        display: block;
-      }
-      .fanyi-missing {
-        background: linear-gradient(transparent 60%, rgba(255, 215, 0, 0.35) 60%);
-        cursor: help;
-      }
-      .fanyi-btn-save,
-      .fanyi-btn-translate,
-      .fanyi-btn-restore {
-        flex: 1;
-        padding: ${isMobile ? '8px 10px' : '10px 12px'};
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        background: white;
-        cursor: pointer;
-        font-size: ${isMobile ? '12px' : '13px'};
-        font-weight: 600;
-        white-space: nowrap;
-      }
-      .fanyi-btn-save {
-        background: linear-gradient(135deg, #409eff, #66b1ff);
-        color: white;
-        border: none;
-      }
-      .fanyi-btn-translate {
-        background: linear-gradient(135deg, #67c23a, #85ce61);
-        color: white;
-        border: none;
-      }
-      .fanyi-btn-restore {
-        background: linear-gradient(135deg, #e6a23c, #ebb563);
-        color: white;
-        border: none;
-      }
-      .fanyi-btn-save:active,
-      .fanyi-btn-translate:active,
-      .fanyi-btn-restore:active {
-        opacity: 0.8;
-        transform: scale(0.98);
-      }
-      .fanyi-floating-btn.fanyi-btn-translated {
-        background: linear-gradient(135deg, #67c23a, #85ce61);
-        color: white;
-      }
-    `;
-    document.head.appendChild(style);
   },
 });
