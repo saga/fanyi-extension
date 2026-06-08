@@ -173,10 +173,76 @@ export default defineBackground({
 
         console.log('[Background] Calling DeepSeek API for translation...');
         const service = getService(config.deepseekApiKey);
+
+        // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
+        // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
+        let inputBlocks: Array<{ id: string }> = [];
+        try {
+          inputBlocks = JSON.parse(jsonContent);
+        } catch {
+          /* jsonContent 异常时 processTranslationResult 会抛错 */
+        }
+        const inputIds = inputBlocks.map((b) => b.id);
+        const inputBytes = jsonContent.length;
+        const estInputTokens = Math.ceil(inputBytes / 4);
+        const reservedMaxTokens = Math.max(256, Math.ceil(estInputTokens * 2 * 1.2));
+        console.log(
+          '[Background][ChunkTrace] INPUT',
+          `inputBlocks=${inputBlocks.length}`,
+          `inputIds=[${inputIds.join(',')}]`,
+          `inputBytes=${inputBytes}`,
+          `estInputTokens=${estInputTokens}`,
+          `reservedMaxTokens=${reservedMaxTokens}`,
+          `sourceLang=${sourceLang}`,
+          `targetLang=${targetLang}`,
+        );
+
         const jsonResult = await globalQueue.add(() =>
           service.translate(jsonContent, sourceLang, targetLang, glossary || [], sitePrompt)
         );
         console.log('[Background] Translation API response length:', jsonResult?.length || 0);
+
+        // [ChunkTrace] 出参快照：成功解析 → 对比 inputIds 找出 response 里
+        // 缺哪些 id；如果 parse 失败 → 拿到截断的尾巴判断是不是触顶。
+        let outputIds: string[] = [];
+        let outputBytes = 0;
+        try {
+          const parsed = JSON.parse(jsonResult);
+          const translations = parsed.translations || parsed;
+          if (Array.isArray(translations)) {
+            outputIds = translations
+              .map((t: { id?: string }) => (typeof t?.id === 'string' ? t.id : null))
+              .filter((id: string | null): id is string => !!id);
+          }
+          outputBytes = jsonResult.length;
+        } catch (parseErr) {
+          console.error(
+            '[Background][ChunkTrace] OUTPUT NOT VALID JSON — likely truncated at max_tokens ceiling',
+            {
+              inputBlocks: inputBlocks.length,
+              outputBytes: jsonResult.length,
+              reservedMaxTokens,
+              outputTail: jsonResult.slice(-200),
+              parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+            },
+          );
+        }
+        const missingInResponse = inputIds.filter((id) => !outputIds.includes(id));
+        console.log(
+          '[Background][ChunkTrace] OUTPUT',
+          `outputBlocks=${outputIds.length}`,
+          `outputBytes=${outputBytes}`,
+          `missingInResponse=${JSON.stringify(missingInResponse)}`,
+        );
+        if (missingInResponse.length > 0) {
+          console.warn(
+            '[Background][ChunkTrace] MISSING — model did not return entries for:',
+            missingInResponse,
+            'reservedMaxTokens was',
+            reservedMaxTokens,
+            '(try increasing estimateMaxTokens or split chunk smaller)',
+          );
+        }
 
         const result = processTranslationResult(jsonResult);
         console.log('[Background] Parsed translation blocks:', result.size);

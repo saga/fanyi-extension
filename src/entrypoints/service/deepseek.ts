@@ -8,13 +8,35 @@ const USER_ID = 'fanyi-extension';
 const TRANSLATION_TEMPERATURE = 0.1;
 
 /**
- * Estimate max output tokens for translation. Output is typically 1-2x input.
- * Add 20% buffer to avoid truncation. Minimum 256 tokens.
+ * Estimate max output tokens for translation.
+ *
+ * 真实边界（已查 https://api-docs.deepseek.com/quick_start/pricing）：
+ * - deepseek-v4-flash MAX OUTPUT = 384K（硬上限非常高）
+ * - 计费 = actual tokens × price，不是 reserve × price
+ *   → reserve 大小不会让账单变大，只影响 worst-case latency
+ * - 必须设 cap，因为 response_format: json_object 下模型失控时
+ *   可能"unending stream of whitespace"跑到 384K 仍不停
+ *   （见 https://api-docs.deepseek.com/api/create-chat-completion）
+ *
+ * 翻译 ratio 经验值（chunkBuilder TARGET_TOKENS=800 → 典型 chunk）：
+ * - input 800 tokens (12 blocks) → output ~2000 tokens
+ * - input 1500 tokens (18 blocks) → output ~3700 tokens
+ * - input 2000 tokens (30 blocks, worst case) → output ~5000 tokens
+ * - + JSON 包装（id/translated_text 键名、引号、换行）≈ +10-20%
+ *
+ * 当前公式：* 4 * 2 = 8x input tokens，最低 1024。
+ *  - 800 input  →  6400 reserve（典型 12 块，3.2x headroom）
+ *  - 1500 input → 12000 reserve（18 块，3.2x headroom）
+ *  - 2000 input → 16000 reserve（30 块，3.2x headroom）
+ *  - 200 input  →  1024 reserve（retry 单块的下限）
+ * 3.2x headroom 给模型留出"想多说点"或"加注释"的余量，同时远
+ * 小于 384K 硬上限。再大的 chunk 触顶靠 content.ts 的 per-block
+ * retry 兜底（retry 切到 1-3 块的小 chunk，reserve 永远不会触顶）。
  */
 function estimateMaxTokens(inputJson: string): number {
   // Rough estimate: 1 char ≈ 0.3 tokens for English, 0.5 for CJK
   const estimatedInputTokens = Math.ceil(inputJson.length * 0.5);
-  return Math.max(256, Math.ceil(estimatedInputTokens * 2 * 1.2));
+  return Math.max(1024, Math.ceil(estimatedInputTokens * 5 * 2));
 }
 
 function buildHeaders(apiKey: string): Record<string, string> {

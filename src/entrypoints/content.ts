@@ -13,6 +13,7 @@ import { buildNodeMap } from './utils/blockExtractor';
 import { getConfig, setConfig } from './utils/config';
 import { DOMObserverManager } from './utils/domObserver';
 import type { TextBlock } from './utils/blockExtractor';
+import { buildChunks } from './utils/chunkBuilder';
 import { GESTURES } from './utils/constants';
 import { getCenterPoint } from './utils/common';
 import { extractGlossaryLocal } from './utils/glossaryExtractor';
@@ -491,6 +492,58 @@ export default defineContentScript({
           }
         );
 
+        // Per-block retry for entries the model truncated or silently
+        // skipped. Rationale + data: MISSING_TRANSLATION_ANALYSIS.md §5 方案 A.
+        // - missing >= 50% of total → API is broken, no point retrying
+        // - missing = 0 → no work to do
+        // - otherwise → build new tiny chunks from missing blocks only and
+        //   call the same translator; new cache key (different jsonContent)
+        //   so we get a fresh API call; truncated re-truncation is unlikely
+        //   because per-block chunks are 1-3 blocks ≈ tiny max_tokens budget.
+        const stillMissingIds: string[] = [];
+        for (const [id] of nodeMap) {
+          if (!translatedIds.has(id)) stillMissingIds.push(id);
+        }
+        if (
+          stillMissingIds.length > 0 &&
+          stillMissingIds.length < nodeMap.size / 2
+        ) {
+          showStatus(
+            `补译 ${stillMissingIds.length} 段...`,
+            'loading',
+          );
+          console.log(
+            `[ContentScript] Retrying ${stillMissingIds.length} missing block(s):`,
+            stillMissingIds,
+          );
+          const missingBlockSet = new Set(stillMissingIds);
+          const retryBlocks = blocks.filter((b) => missingBlockSet.has(b.id));
+          // Re-chunk with smaller target — first chunk cap is 12 but for
+          // 1-3 missing blocks we want a single chunk to minimize round-trips.
+          const retryChunks = buildChunks(retryBlocks);
+          console.log(
+            `[ContentScript] Retry built ${retryChunks.length} chunk(s) from ${retryBlocks.length} block(s)`,
+          );
+          const { translatedIds: retryTranslatedIds } = await translateChunksViaBackground(
+            retryChunks,
+            config.sourceLang,
+            config.targetLang,
+            nodeMap,
+            config.mode,
+            glossary,
+          );
+          let recoveredCount = 0;
+          for (const id of retryTranslatedIds) {
+            if (!translatedIds.has(id)) {
+              translatedIds.add(id);
+              recoveredCount++;
+            }
+          }
+          console.log(
+            `[ContentScript] Retry recovered ${recoveredCount}/${stillMissingIds.length} block(s)`,
+          );
+        }
+
         translated = true;
         translatedBlocks = new Set(nodeMap.keys());
 
@@ -603,6 +656,27 @@ export default defineContentScript({
               console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
               chunkMap.set(id, text);
               translatedIds.add(id);
+            }
+            // [ChunkTrace] chunk 维度的 input/output 对比。配合
+            // background.ts 的 [ChunkTrace] 一旦出 missing 能直接定位
+            // 是哪个 chunk 的哪些 id 没回来。
+            const inputIds = chunk.blocks.map((b) => b.id);
+            const outputIds = [...chunkMap.keys()];
+            const chunkMissing = inputIds.filter((id) => !chunkMap.has(id));
+            console.log(
+              `[ContentScript][ChunkTrace] chunk=${chunk.id}`,
+              `inputIds=[${inputIds.join(',')}]`,
+              `outputIds=[${outputIds.join(',')}]`,
+              `missing=[${chunkMissing.join(',')}]`,
+            );
+            if (chunkMissing.length > 0) {
+              console.warn(
+                `[ContentScript][ChunkTrace] chunk=${chunk.id} missing ${chunkMissing.length} blocks — see [Background][ChunkTrace] for max_tokens / response details`,
+                chunkMissing.map((id) => {
+                  const b = chunk.blocks.find((x) => x.id === id);
+                  return `${id}(${b?.tag},${b?.text.length}ch):${b?.text.slice(0, 50)}`;
+                }),
+              );
             }
             applyPromises.push(new Promise<void>(resolve => {
               let applied = false;
