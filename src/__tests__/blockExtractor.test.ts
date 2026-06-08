@@ -4608,3 +4608,423 @@ describe('extractBlocks - Article Container Detection', () => {
   });
 
 });
+
+// ============================================================
+// 通用噪声模式回归测试。覆盖在 blockExtractor.ts 的
+// SKIP_CLASS_PATTERNS 中加入的跨站通用 class 模式，用于
+// 防止以后误删 pattern 导致噪声回流。每个 describe 块对应
+// 一类场景。
+// ============================================================
+
+describe('extractBlocks - Inline signup/newsletter (generic noise)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip inline-signup, inline-newsletter, inline-subscribe, inline-subscription', () => {
+    setupHTML(`
+      <article>
+        <p>Real article body content that should be translated.</p>
+        <div class="inline-signup">
+          <p>Subscribe to our daily newsletter for top stories.</p>
+          <input type="email" placeholder="you@example.com" />
+          <button>Sign up</button>
+        </div>
+        <div class="inline-newsletter">
+          <p>Get the latest updates delivered to your inbox.</p>
+        </div>
+        <div class="inline-subscribe">
+          <p>Join our subscription list for exclusive content.</p>
+        </div>
+        <div class="inline-subscription">
+          <p>Manage your subscription preferences and settings here.</p>
+        </div>
+        <p>Second article paragraph after signup forms.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    expect(blockTexts).toContain('Real article body content that should be translated.');
+    expect(blockTexts).toContain('Second article paragraph after signup forms.');
+    expect(blockTexts.some(t => t.includes('Subscribe to our daily newsletter'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('latest updates delivered'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('subscription list'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Manage your subscription'))).toBe(false);
+  });
+
+  it('should skip embed-signup, embed-newsletter, embed-subscribe', () => {
+    setupHTML(`
+      <article>
+        <p>Article body content here.</p>
+        <div class="embed-signup">
+          <p>Sign up for our premium content access today.</p>
+        </div>
+        <div class="embed-newsletter">
+          <p>Subscribe to the embedded newsletter widget below.</p>
+        </div>
+        <div class="embed-subscribe">
+          <p>Click the embedded subscribe button to register.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Article body content here.');
+    expect(blockTexts.some(t => t.includes('premium content access'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('embedded newsletter'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('embedded subscribe'))).toBe(false);
+  });
+
+  it('should reject both "Sign up" button text and "Email:" label inside inline-signup', () => {
+    // 银行站订阅表单常见结构：<div class=inline-signup><form>...<label>Email:</label>
+    // 要确保 form / label / input / select 整个被拒掉，文本 "Email:" 不进 blocks。
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text content here.</p>
+        <div class="inline-signup">
+          <form>
+            <label>Email:</label>
+            <input type="email" />
+            <select>
+              <option>Daily</option>
+              <option>Weekly</option>
+            </select>
+            <button>Sign up</button>
+            <p>By signing up you agree to our Terms of Use and Privacy Policy.</p>
+          </form>
+        </div>
+        <p>Another article paragraph after the form here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Real article paragraph text content here.');
+    expect(blockTexts).toContain('Another article paragraph after the form here.');
+    expect(blockTexts.some(t => /^Email:?$/.test(t.trim()))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Terms of Use'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Daily'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Read-more / recommended articles (generic noise)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip read-more, read_more, readmore, more-from', () => {
+    setupHTML(`
+      <article>
+        <p>Article body content that should be translated.</p>
+        <div class="read-more">
+          <p>Continue reading the full story on our website now.</p>
+        </div>
+        <div class="read_more">
+          <p>Read more of our exclusive investigative reporting content.</p>
+        </div>
+        <div class="readmore">
+          <p>Click readmore to see the complete article details here.</p>
+        </div>
+        <div class="more-from">
+          <p>More from our politics section this week and updates.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Article body content that should be translated.');
+    expect(blockTexts.some(t => t.includes('Continue reading'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('exclusive investigative'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('readmore to see'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('politics section'))).toBe(false);
+  });
+
+  it('should skip reading-list, recommended-reading, recommended-articles', () => {
+    setupHTML(`
+      <article>
+        <p>Main article body text for translation testing here.</p>
+        <div class="reading-list">
+          <h3>Read More in Technology</h3>
+          <p>JPMorgan Chase taps AI to process checks faster than ever before.</p>
+          <p>Fintech revenues hit record five hundred four billion in 2025.</p>
+        </div>
+        <div class="recommended-reading">
+          <h3>Recommended Reading</h3>
+          <p>California judge rules in favor of OppFi against the regulator.</p>
+        </div>
+        <div class="recommended-articles">
+          <h3>Recommended Articles For You Today</h3>
+          <p>StanChart CEO apologizes over lower value human comments.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Main article body text for translation testing here.');
+    expect(blockTexts.some(t => t.includes('Read More in Technology'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('JPMorgan Chase taps AI'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Fintech revenues'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Recommended Reading'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('California judge'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('StanChart CEO'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Inline article carousels (generic noise)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip storylines-carousel / article-carousel / related-carousel even when nested inside article-body', () => {
+    // bankingdive 把 storylines-carousel 嵌在 .article-body 中间。SKIP_CLASS_PATTERNS
+    // 必须直接命中这个 class，不能因为"在 article-body 里"就放行。
+    setupHTML(`
+      <article>
+        <p>Real article paragraph before the carousel.</p>
+        <div class="article-body">
+          <p>Article body paragraph inside body container.</p>
+          <section class="storylines-carousel-wrapper hide-small show-large">
+            <div class="storylines-carousel">
+              <h3>Read More in Technology</h3>
+              <p>JPMorgan Chase taps AI to process checks faster than before.</p>
+            </div>
+          </section>
+          <p>Article body paragraph after the carousel.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Real article paragraph before the carousel.');
+    expect(blockTexts).toContain('Article body paragraph inside body container.');
+    expect(blockTexts).toContain('Article body paragraph after the carousel.');
+    expect(blockTexts.some(t => t.includes('Read More in Technology'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('JPMorgan Chase taps AI'))).toBe(false);
+  });
+
+  it('should skip article-carousel, inline-carousel, related-stories, more-stories-carousel', () => {
+    setupHTML(`
+      <article>
+        <p>Body paragraph between carousels for testing.</p>
+        <div class="article-carousel">
+          <p>Article carousel with multiple related stories inside.</p>
+        </div>
+        <div class="inline-carousel">
+          <p>Inline carousel showing top stories of the week here.</p>
+        </div>
+        <div class="related-stories">
+          <p>Related stories from our archives and contributor network.</p>
+        </div>
+        <div class="more-stories-carousel">
+          <p>More stories carousel for additional reading suggestions.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Body paragraph between carousels for testing.');
+    expect(blockTexts.some(t => t.includes('multiple related stories'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('top stories of the week'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('archives and contributor'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('additional reading'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Post-article wrapper noise (generic)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip post-article-wrapper / after-article / below-content / article-footer-widgets', () => {
+    setupHTML(`
+      <article>
+        <p>Last paragraph of the real article body here.</p>
+        <div class="post-article-wrapper">
+          <p>More from our coverage area and related investigations.</p>
+        </div>
+        <div class="after-article">
+          <p>After article promotional content and signup widget here.</p>
+        </div>
+        <div class="below-content">
+          <p>Below content recommended stories and newsletter signup.</p>
+        </div>
+        <div class="article-footer-widgets">
+          <p>Article footer widgets with share buttons and tags cloud.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Last paragraph of the real article body here.');
+    expect(blockTexts.some(t => t.includes('related investigations'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('After article promotional'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Below content recommended'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Article footer widgets'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Hybrid ad wrapper noise (generic)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip hybrid-ad, hybrid-ad-wrapper (and underscore variant)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article body text before the ad slot here.</p>
+        <div class="hybrid-ad-wrapper">
+          <p>Hybrid ad wrapper for desktop and mobile sized units.</p>
+        </div>
+        <div class="hybrid-ad">
+          <p>Hybrid ad inner slot for programatic ad placement content.</p>
+        </div>
+        <div class="hybrid_ad_wrapper">
+          <p>Hybrid ad wrapper with underscores for compatibility styles.</p>
+        </div>
+        <p>Real article body text after the ad slots here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Real article body text before the ad slot here.');
+    expect(blockTexts).toContain('Real article body text after the ad slots here.');
+    expect(blockTexts.some(t => t.includes('desktop and mobile sized'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('programatic ad placement'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('compatibility styles'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Printed branding noise (generic)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('should skip printed-branding, printed-logo, print-branding, print-logo', () => {
+    setupHTML(`
+      <article>
+        <h1>Article Title That Must Be Translated</h1>
+        <p>Article body content that is the real translatable text here.</p>
+        <div class="printed-branding">
+          <span class="promoted-branded-copy">An article from</span>
+          <img alt="site logo" />
+        </div>
+        <div class="printed-logo">
+          <p>Print only logo block with brand copyright watermark text.</p>
+        </div>
+        <div class="print-branding">
+          <p>Print branding block with media kit and contact details.</p>
+        </div>
+        <div class="print-logo">
+          <p>Print logo block with footer copyright notice information.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+    expect(blockTexts).toContain('Article Title That Must Be Translated');
+    expect(blockTexts).toContain('Article body content that is the real translatable text here.');
+    expect(blockTexts.some(t => t.includes('An article from'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('brand copyright watermark'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('media kit and contact'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('footer copyright notice'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Bankingdive-style article regression', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  // 这次回归的触发页面：bankingdive.com 的 Wells Fargo CEO 文章
+  // (https://www.bankingdive.com/news/wells-fargo-ceo-scharf-ai-employment-banking-jobs/821368/)
+  // 整页结构：<article>(empty class) > [.first-page-pdf > .printed-branding,
+  // .article-title-wrapper > h1 + p 副标题, .article-byline, .article-wrapper >
+  // .article-body(含 .hybrid-ad-wrapper / .inline-signup / .storylines-carousel),
+  // .reading-list, .post-article-wrapper]
+  // 之前 90 个块、26 个噪声；改后 43 个块、0 个噪声，标题/副标题稳定。
+  it('bankingdive: should extract h1+subtitle+body, drop signup/read-more/post-article noise', () => {
+    setupHTML(`
+      <article class="">
+        <div class="first-page-pdf">
+          <div class="printed-branding">
+            <span class="promoted-branded-copy">An article from</span>
+          </div>
+          <div class="article-title-wrapper">
+            <h1>Wells Fargo CEO: AI effect on employment is complicated</h1>
+            <p>The bank's biggest AI-related challenge is determining how the technology transforms business.</p>
+          </div>
+        </div>
+        <div class="article-byline">
+          <span>Caitlin Mullen</span>
+          <span>Senior Editor</span>
+        </div>
+        <div class="article-wrapper">
+          <div class="article-body">
+            <p>Wells Fargo CEO Charlie Scharf said Wednesday the bank is examining its use of AI carefully.</p>
+            <div class="hybrid-ad-wrapper">
+              <p>Hybrid ad wrapper for desktop and mobile sized units.</p>
+            </div>
+            <p>The bank also plans to hire more people who can build AI systems internally over time.</p>
+            <div class="inline-signup">
+              <form>
+                <label>Email:</label>
+                <input type="email" />
+                <button>Sign up</button>
+                <p>By signing up you agree to our Terms of Use and Privacy Policy.</p>
+              </form>
+            </div>
+            <section class="storylines-carousel-wrapper hide-small show-large">
+              <div class="storylines-carousel">
+                <h3>Read More in Technology</h3>
+                <p>JPMorgan Chase taps AI to process checks faster than before.</p>
+              </div>
+            </section>
+            <p>Ultimately Wells has cut about fifteen billion dollars in expenses over the past five years.</p>
+          </div>
+        </div>
+        <div class="reading-list recommended-reading">
+          <h3>Recommended Reading</h3>
+          <p>California judge rules in favor of OppFi against the regulator.</p>
+        </div>
+        <div class="post-article-wrapper">
+          <p>More from our coverage area and related investigations here.</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const blockTexts = blocks.map(b => b.text);
+
+    // 1. 标题 + 副标题必须保留（即使 h1 在 .article-body 外）
+    expect(blockTexts).toContain('Wells Fargo CEO: AI effect on employment is complicated');
+    expect(blockTexts).toContain("The bank's biggest AI-related challenge is determining how the technology transforms business.");
+
+    // 2. 正文段落必须保留
+    expect(blockTexts).toContain('Wells Fargo CEO Charlie Scharf said Wednesday the bank is examining its use of AI carefully.');
+    expect(blockTexts).toContain('The bank also plans to hire more people who can build AI systems internally over time.');
+    expect(blockTexts).toContain('Ultimately Wells has cut about fifteen billion dollars in expenses over the past five years.');
+
+    // 3. 噪声必须被拒掉
+    expect(blockTexts.some(t => t.includes('An article from'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Caitlin Mullen'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Senior Editor'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('desktop and mobile sized'))).toBe(false);
+    expect(blockTexts.some(t => /^Email:?$/.test(t.trim()))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Terms of Use'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Read More in Technology'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('JPMorgan Chase taps AI'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('Recommended Reading'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('California judge'))).toBe(false);
+    expect(blockTexts.some(t => t.includes('related investigations'))).toBe(false);
+  });
+});

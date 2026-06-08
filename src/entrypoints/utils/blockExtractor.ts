@@ -68,6 +68,10 @@ const SKIP_CLASS_PATTERNS = [
   'zergnet', 'zergnet-widget',
   'rc-widget',
   'native-ad', 'nativead', 'native-ads',
+  // 通用广告 wrapper 变体。bankingdive 用 .hybrid-ad-wrapper 包
+  // 桌面/移动两个尺寸的广告 div；其他站常用 .ad-slot、.ad-banner
+  // 等通用命名。一并列入。
+  'hybrid-ad', 'hybrid-ad-wrapper', 'hybrid_ad_wrapper', 'hybridad',
   'content-recommendation', 'recommended-content',
   'sponsored', 'sponsored-content', 'sponsored-post', 'sponsored-link', 'sponsored-links',
   'promoted', 'promoted-content', 'promoted-post',
@@ -110,6 +114,18 @@ const SKIP_CLASS_PATTERNS = [
   'trending-stories', 'tns-trending-stories-block', 'related-posts',
   'related-articles', 'related-content', 'more-stories', 'more-articles',
   'also-read', 'you-may-like', 'read-next',
+  // 内联推荐/文章列表：通用 "Read More" 模块。带连字符或下划线变体
+  // （read-more-list、reading_list 等）由 startsWith/endsWith 命中。
+  'read-more', 'read_more', 'readmore',
+  'reading-list', 'reading_list', 'readinglist',
+  'recommended-reading', 'recommended_reading', 'recommendedreading',
+  'recommended-articles', 'recommended_articles',
+  'more-from', 'more_from', 'morefrom',
+  // 站点内部文章轮播（"Read More in Technology" 这种 inline carousel
+  // 嵌在 article-body 中间）：永远是其他文章的摘要轮播，跨站通用。
+  'storylines-carousel', 'storylines-carousel-wrapper', 'storylines-carousel-block',
+  'article-carousel', 'article-carousel-wrapper', 'inline-carousel',
+  'related-carousel', 'related-stories', 'more-stories-carousel',
   'comment-list', 'comment-section', 'comment-area', 'comment-module',
   'comment-wrapper', 'comment-body', 'comment-content', 'comment-form',
   'comment-reply', 'comment-thread', 'comment-holder', 'comment-entry',
@@ -119,6 +135,13 @@ const SKIP_CLASS_PATTERNS = [
   'search-wrapper', 'search-widget', 'search-container', 'search-results',
   'login-form', 'login-box', 'login-bar', 'loginbar',
   'signin-form', 'signup-form', 'register-form', 'registration',
+  // 内联订阅表单：插入到正文中间或末尾的 newsletter signup 卡片，
+  // 包含 "Email:"、Newsletter 选项、reCAPTCHA、订阅协议文本等
+  // 与正文无关的噪声。跨站通用（NYT / Bloomberg / Medium /
+  // bankingdive 都有此模式）。
+  'inline-signup', 'inline_newsletter', 'inline-newsletter',
+  'inline-subscribe', 'inline-subscription',
+  'embed-signup', 'embed-newsletter', 'embed-subscribe',
   'auth-form', 'auth-box', 'user-area', 'user-menu', 'user-profile',
   'member-area', 'membership',
   'newsletter-signup', 'newsletter-form', 'newsletter-subscribe',
@@ -129,6 +152,14 @@ const SKIP_CLASS_PATTERNS = [
   'toc', 'table-of-contents', 'toc-container', 'toc-widget',
   'lang-switcher', 'language-switcher', 'language-selector',
   'lang-select', 'lang-selector', 'locale-switcher', 'locale-selector',
+  // 文章底部挂件：post-article-wrapper 包 "Read More" + signup + 相关
+  // 文章广告，几乎全部为噪声。
+  'post-article-wrapper', 'post_article_wrapper', 'postarticlewrapper',
+  'post-content-wrapper', 'after-article', 'after-article-wrapper',
+  'below-content', 'below-content-wrapper', 'article-footer-widgets',
+  // 打印模式残留：仅在 @media print 可见的 logo / 品牌信息，浏览器
+  // 视口里出现但绝无阅读价值。
+  'printed-branding', 'print-branding', 'printed-logo', 'print-logo',
   'tagcloud', 'tags-list', 'tag-list', 'categories-list', 'category-list',
   'taxonomy-list', 'meta-tags', 'entry-tags',
   'captcha', 'g-recaptcha', 'recaptcha', 'h-captcha', 'hcaptcha', 'turnstile',
