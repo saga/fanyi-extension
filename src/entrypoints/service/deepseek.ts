@@ -1,4 +1,4 @@
-import type { TranslationService, GlossaryEntry } from './_service';
+import type { TranslationService, Glossary } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
 
@@ -51,7 +51,7 @@ function buildTranslationBody(
   sourceLang: string,
   targetLang: string,
   sitePrompt?: string,
-  glossary?: GlossaryEntry[]
+  glossary?: Glossary
 ) {
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
@@ -67,18 +67,12 @@ function buildTranslationBody(
 3. Keep URLs, code, version numbers, brand names as-is. Translate everything else.
 4. Treat every block as independent — do not skip, summarize, or merge any block. Each one is a separate text that must be translated in full.`;
 
-// Use the full glossary as-is. We do NOT per-chunk filter here because:
-// 1) the LLM will naturally ignore terms that don't appear in the current
-//    chunk's text, so filtering just costs CPU.
-// 2) per-chunk filtering breaks KV cache reuse — the glossary section
-//    would differ chunk-to-chunk, defeating the cache for everything
-//    after the glossary lines.
-const relevantGlossary = glossary && glossary.length > 0 ? glossary : undefined;
-if (relevantGlossary) {
-  const glossaryLines = relevantGlossary
-    .map((g: GlossaryEntry) => `- "${g.term}" → "${g.translation}"`)
-    .join('\n');
-  systemContent += `\n\nTerminology glossary (MUST follow these translations):\n${glossaryLines}`;
+const docTerms = glossary?.document_terms;
+const hasDocTerms = docTerms && docTerms.length > 0;
+
+if (hasDocTerms) {
+  systemContent += '\n\n' +
+    `"document_terms":${JSON.stringify(docTerms, null, 2)}`;
 }
 
 if (sitePrompt) {
@@ -189,7 +183,7 @@ export class DeepSeekTranslationService implements TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: GlossaryEntry[],
+    glossary: Glossary,
     context?: string,
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
@@ -199,7 +193,7 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      glossary.length > 0 ? glossary : undefined
+      glossary?.document_terms?.length ? glossary : undefined
     );
 
     const raw = await callApi(this.apiKey, JSON.stringify(body));
@@ -210,7 +204,7 @@ export class DeepSeekTranslationService implements TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: GlossaryEntry[],
+    glossary: Glossary,
     context?: string,
   ): AsyncGenerator<string, string, unknown> {
     const blocks = JSON.parse(jsonContent);
@@ -220,7 +214,7 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      glossary.length > 0 ? glossary : undefined
+      glossary?.document_terms?.length ? glossary : undefined
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);

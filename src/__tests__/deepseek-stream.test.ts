@@ -182,7 +182,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
     const mockResponse = createMockResponse(['test']);
     globalFetch.mockResolvedValue(mockResponse);
 
-    const glossary = [{ term: 'React', translation: 'React' }];
+    const glossary = { document_terms: ['React'] };
     const stream = service.translateStream(
       JSON.stringify([{ id: 'b1', text: 'React is great' }]),
       'en',
@@ -194,6 +194,27 @@ describe('DeepSeekTranslationService.translateStream', () => {
 
     const fetchCall = globalFetch.mock.calls[0];
     const body = JSON.parse(fetchCall[1].body);
+    expect(body.messages[0].content).toContain('React');
+    expect(body.messages[0].content).toContain('"document_terms"');
+  });
+
+  it('should handle multiple document_terms in stream', async () => {
+    const mockResponse = createMockResponse(['test']);
+    globalFetch.mockResolvedValue(mockResponse);
+
+    const glossary = { document_terms: ['LLM', 'React'] };
+    const stream = service.translateStream(
+      JSON.stringify([{ id: 'b1', text: 'LLM and React' }]),
+      'en',
+      'zh',
+      glossary
+    );
+
+    await consumeStream(stream);
+
+    const fetchCall = globalFetch.mock.calls[0];
+    const body = JSON.parse(fetchCall[1].body);
+    expect(body.messages[0].content).toContain('LLM');
     expect(body.messages[0].content).toContain('React');
   });
 

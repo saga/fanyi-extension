@@ -2,7 +2,7 @@ import type { SiteRule } from './types';
 
 export const githubRule: SiteRule = {
   hostPattern: 'github.com',
-  skipTerms: [
+  documentTerms: [
     'Releases',
     'Packages',
     'license',

@@ -40,9 +40,9 @@ function hostMatches(host: string, pattern: string): boolean {
 export function buildSitePrompt(rule: SiteRule): string {
   const parts: string[] = [];
 
-  if (rule.skipTerms && rule.skipTerms.length > 0) {
+  if (rule.documentTerms && rule.documentTerms.length > 0) {
     parts.push(
-      `Do NOT translate the following terms, keep them as-is: ${rule.skipTerms.join(', ')}`
+      `"document_terms":${JSON.stringify(rule.documentTerms, null, 2)}`
     );
   }
 

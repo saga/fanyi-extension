@@ -1,5 +1,5 @@
 import nlp from 'compromise/two';
-import type { GlossaryEntry } from '../service/_service';
+import type { Glossary } from '../service/_service';
 import techProductsData from './tech-products.json';
 
 const TECH_PRODUCTS = new Set<string>(techProductsData.products as string[]);
@@ -516,8 +516,9 @@ function extractFrequentTerms(doc: ReturnType<typeof nlp>): string[] {
 export function extractGlossaryLocal(
   fullText: string,
   emphasizedTerms: string[] = []
-): GlossaryEntry[] {
-  const glossaryMap = new Map<string, string>();
+): Glossary {
+  if (!fullText) return { document_terms: [] };
+  const termSet = new Set<string>();
 
   const safeText = fullText
     .replace(/```[\s\S]*?```/g, (m) => ' '.repeat(m.length))
@@ -526,7 +527,7 @@ export function extractGlossaryLocal(
 
   const acronyms = extractAcronyms(safeText);
   for (const acronym of acronyms) {
-    glossaryMap.set(acronym, 'KEEP');
+    termSet.add(acronym);
   }
 
   {
@@ -541,10 +542,10 @@ export function extractGlossaryLocal(
       );
       for (const m of safeText.matchAll(productRe)) {
         const product = m[0];
-        const exists = [...glossaryMap.keys()].some(
+        const exists = [...termSet].some(
           (k) => k.toLowerCase() === product.toLowerCase()
         );
-        if (!exists) glossaryMap.set(product, 'KEEP');
+        if (!exists) termSet.add(product);
       }
     }
   }
@@ -566,70 +567,35 @@ export function extractGlossaryLocal(
 
   const namedEntities = extractNamedEntities(doc);
   for (const entity of namedEntities) {
-    glossaryMap.set(entity, 'KEEP');
+    termSet.add(entity);
   }
 
   const frequentTerms = extractFrequentTerms(doc);
   for (const term of frequentTerms) {
-    if (!glossaryMap.has(term)) {
-      glossaryMap.set(term, 'KEEP');
+    if (!termSet.has(term)) {
+      termSet.add(term);
     }
   }
 
   for (const term of emphasizedTerms) {
     const trimmed = term.trim();
     if (trimmed.length > 1 && trimmed.length < 80) {
-      glossaryMap.set(trimmed, 'KEEP');
+      termSet.add(trimmed);
     }
   }
 
-  const allTerms = [...glossaryMap.keys()];
+  const allTerms = [...termSet];
 
-  const brandSet = new Set(
-    allTerms.filter((t) => /^[A-Z][a-zA-Z0-9]+$/.test(t) && !isCommonNoun(t))
-  );
-  const pairPattern = /\b([A-Z][a-zA-Z0-9]+)\s+([A-Z][a-zA-Z]+)\b/g;
-  const pairCounts = new Map<string, Map<string, number>>();
-
-  for (const m of safeText.matchAll(pairPattern)) {
-    const brand = m[1];
-    if (!brandSet.has(brand)) continue;
-    const word = m[2];
-    if (isCommonNoun(word)) continue;
-    if (isStopword(word)) continue;
-    if (KNOWN_PUBLICATIONS.has(word.toLowerCase())) continue;
-    let inner = pairCounts.get(brand);
-    if (!inner) {
-      inner = new Map<string, number>();
-      pairCounts.set(brand, inner);
-    }
-    inner.set(word, (inner.get(word) || 0) + 1);
-  }
-  for (const [brand, inner] of pairCounts) {
-    for (const [word, count] of inner) {
-      if (count < 2) continue;
-      glossaryMap.set(`${brand} ${word}`, 'KEEP');
-    }
-  }
-
-  const allTerms2 = [...glossaryMap.keys()];
-  allTerms2.sort((a, b) => b.length - a.length);
-
+  // Case dedup + canonical product casing
   const uniqueTerms = new Map<string, string>();
-  for (const term of allTerms2) {
+  for (const term of allTerms) {
     const lower = term.toLowerCase();
 
-    // Race-free canonicalization for known products: if this lowercased
-    // form is in our TECH_PRODUCTS whitelist, lock the spelling to
-    // the official form regardless of which casing the article
-    // surfaced first (e.g. "DBT" / "Dbt" / "dbt" all collapse to "dbt").
     if (CANONICAL_PRODUCTS.has(lower)) {
       uniqueTerms.set(lower, CANONICAL_PRODUCTS.get(lower)!);
       continue;
     }
 
-    // First-seen wins for ordinary terms, with a soft preference for
-    // TitleCase over ALL-CAPS when both are seen.
     if (!uniqueTerms.has(lower)) {
       uniqueTerms.set(lower, term);
     } else if (term !== term.toUpperCase() && /[a-z]/.test(term) && /^[A-Z]/.test(term)) {
@@ -637,15 +603,10 @@ export function extractGlossaryLocal(
     }
   }
 
-  // Second pass: collapse singular/plural pairs. The first pass only
-  // merges case variants ("agent" + "Agent"), but a sentence-initial
-  // "Agents" gets keyed as "agents" — a different key from "agent" —
-  // so they would otherwise both survive. We union each (singular,
-  // plural) pair into a single representative key, so the values
-  // iterator produces one entry per pair instead of two.
-  const singularPluralMerged = new Map<string, string>();
+  // Collapse singular/plural pairs
+  const merged = new Map<string, string>();
   for (const [key, term] of uniqueTerms) {
-    if (singularPluralMerged.has(key)) continue;
+    if (merged.has(key)) continue;
 
     const singular = key.replace(/s$/, '');
     const plural = key + 's';
@@ -665,32 +626,24 @@ export function extractGlossaryLocal(
         return a;
       };
       const winner = preferTitleCase(term, twinTerm);
-      // Pick the shorter key as the canonical one (it's almost always
-      // the singular form, which reads better in a glossary entry).
       const canonicalKey = key.length <= twinKey.length ? key : twinKey;
-      singularPluralMerged.set(canonicalKey, winner);
+      merged.set(canonicalKey, winner);
     } else {
-      singularPluralMerged.set(key, term);
+      merged.set(key, term);
     }
   }
 
-  const filtered: string[] = [];
-  for (const term of singularPluralMerged.values()) {
-    if (filtered.some(kept => isPhraseSubsuming(kept, term))) continue;
-    filtered.push(term);
-  }
-
-  const result: GlossaryEntry[] = [];
-  for (const term of filtered) {
-    result.push({ term, translation: glossaryMap.get(term)! });
-  }
-
-  const scored = result
-    .map((entry) => ({ entry, score: scoreTerm(entry.term, fullText) }))
-    .filter((s) => !isGenericNoise(s.entry.term))
+  // Filter generic noise, score, limit
+  const scored = [...merged.values()]
+    .map((term) => ({ term, score: scoreTerm(term, fullText) }))
+    .filter((s) => !isGenericNoise(s.term))
     .sort((a, b) => b.score - a.score);
 
-  return scored.slice(0, MAX_GLOSSARY_TERMS).map((s) => s.entry);
+  const finalTerms = scored.slice(0, MAX_GLOSSARY_TERMS).map((s) => s.term);
+
+  return {
+    document_terms: finalTerms,
+  };
 }
 
 const GENERIC_NOISE = new Set([

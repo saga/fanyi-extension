@@ -8,7 +8,7 @@ export interface SiteRule {
   /**
    * Terms that should NOT be translated, kept as-is
    */
-  skipTerms?: string[];
+  documentTerms?: string[];
 
   /**
    * CSS selectors whose content should be skipped entirely

@@ -1,5 +1,6 @@
 import browser from 'webextension-polyfill';
 import type { Chunk } from '../utils/contentHelper';
+import type { Glossary } from '../service/_service';
 import { TranslationQueue } from '../utils/translationQueue';
 import {
   buildRetryChunk,
@@ -41,7 +42,7 @@ export interface ChunkCallContext {
   mode: 'bilingual' | 'target';
   sourceLang: string;
   targetLang: string;
-  glossary: Array<{ term: string; translation: string }>;
+  glossary: Glossary;
   onFailure: () => void;
   onApply: (chunkMap: Map<string, string>) => void;
   translatedIds: Set<string>;
@@ -63,7 +64,7 @@ export async function translateChunksViaBackground(
   targetLang: string,
   nodeMap: Map<string, Node>,
   mode: 'bilingual' | 'target',
-  glossary: Array<{ term: string; translation: string }>,
+  glossary: Glossary,
   onProgress?: (current: number, total: number) => void,
   isMobile: boolean = false,
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {

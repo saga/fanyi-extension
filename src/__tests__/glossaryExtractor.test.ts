@@ -5,7 +5,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts acronyms from text', () => {
     const text = 'We use LLM and API to build GPT models with CUDA support.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('LLM');
     expect(terms).toContain('API');
@@ -16,7 +16,7 @@ describe('extractGlossaryLocal', () => {
   it('filters out common English words from acronyms', () => {
     const text = 'THE AND FOR NOT ARE BUT ALL CAN HAS HER WAS ONE OUR OUT USE VIA WHO ITS MAY NOR';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('THE');
     expect(terms).not.toContain('AND');
@@ -26,7 +26,7 @@ describe('extractGlossaryLocal', () => {
   it('filters out MUST DOER VS and other false-positive acronyms', () => {
     const text = 'You MUST be a DOER not a VS Code user. GET SET PUT LET SEE SAY.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('MUST');
     expect(terms).not.toContain('DOER');
@@ -38,7 +38,7 @@ describe('extractGlossaryLocal', () => {
   it('strips trailing punctuation from named entities', () => {
     const text = 'Brady went to Squad: and used TUI, for the project.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     for (const term of terms) {
       expect(term).not.toMatch(/[,;:.!?]$/);
@@ -49,7 +49,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts recurring noun phrases by frequency', () => {
     const text = 'We use Playwright for testing. Playwright runs end-to-end tests. The Playwright framework is great. Playwright supports Chrome.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('Playwright');
   });
@@ -57,7 +57,7 @@ describe('extractGlossaryLocal', () => {
   it('filters out stopwords from frequent terms', () => {
     const text = 'The system works. That is clear. Then we proceed. When ready, we go. You can see Code here. Prompt is important. Work is done.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('The');
     expect(terms).not.toContain('That');
@@ -69,7 +69,7 @@ describe('extractGlossaryLocal', () => {
   it('filters out pure-stopword noun phrases', () => {
     const text = 'The way is long. The way is hard. The way is clear. The way is good.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('The way');
   });
@@ -77,7 +77,7 @@ describe('extractGlossaryLocal', () => {
   it('keeps noun phrases with non-stopword components', () => {
     const text = 'The context window is large. Context window matters. A context window defines limits. The context window expands.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.some(t => t.toLowerCase().includes('context window'))).toBe(true);
   });
@@ -85,7 +85,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts named entities (people, organizations, places)', () => {
     const text = 'Chuang Gan and Maohao Shen from UMass Amherst and MIT published the paper.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.length).toBeGreaterThan(0);
   });
@@ -94,7 +94,7 @@ describe('extractGlossaryLocal', () => {
     const text = 'We introduce workflow compilation for LLM optimization.';
     const emphasized = ['workflow compilation', 'LLM optimization'];
     const result = extractGlossaryLocal(text, emphasized);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('workflow compilation');
     expect(terms).toContain('LLM optimization');
@@ -104,7 +104,7 @@ describe('extractGlossaryLocal', () => {
     const text = 'Some text here.';
     const emphasized = ['A', 'x'.repeat(81)];
     const result = extractGlossaryLocal(text, emphasized);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('A');
     expect(terms).not.toContain('x'.repeat(81));
@@ -113,7 +113,7 @@ describe('extractGlossaryLocal', () => {
   it('removes subsumed terms (shorter term contained in longer one)', () => {
     const text = 'We use CUDA and CUDA Toolkit for GPU programming.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Acronyms (CUDA) are kept even when a longer phrase containing them
     // is also present — the acronym is the load-bearing glossary entry
@@ -124,39 +124,41 @@ describe('extractGlossaryLocal', () => {
     }
   });
 
-  it('returns all entries with KEEP translation', () => {
+  it('returns all entries as strings', () => {
     const text = 'We use LLM and API for GPT models.';
     const result = extractGlossaryLocal(text);
+    const terms = result.document_terms;
 
-    for (const entry of result) {
-      expect(entry.translation).toBe('KEEP');
+    for (const term of terms) {
+      expect(typeof term).toBe('string');
     }
   });
 
   it('sorts results by term length descending', () => {
     const text = 'We use LLM and API for GPT models.';
     const result = extractGlossaryLocal(text);
+    const terms = result.document_terms;
 
-    for (let i = 1; i < result.length; i++) {
-      expect(result[i - 1].term.length).toBeGreaterThanOrEqual(result[i].term.length);
+    for (let i = 1; i < terms.length; i++) {
+      expect(terms[i - 1].length).toBeGreaterThanOrEqual(terms[i].length);
     }
   });
 
   it('handles empty text', () => {
     const result = extractGlossaryLocal('');
-    expect(result).toEqual([]);
+    expect(result.document_terms).toEqual([]);
   });
 
   it('handles text with no extractable terms', () => {
     const text = 'the and for not are but all can has her was one our out use via who its may nor';
     const result = extractGlossaryLocal(text);
-    expect(result.length).toBe(0);
+    expect(result.document_terms.length).toBe(0);
   });
 
   it('deduplicates terms', () => {
     const text = 'We use LLM for LLM training and LLM inference.';
     const result = extractGlossaryLocal(text);
-    const llmEntries = result.filter(r => r.term === 'LLM');
+    const llmEntries = result.document_terms.filter(t => t === 'LLM');
 
     expect(llmEntries.length).toBe(1);
   });
@@ -167,19 +169,19 @@ describe('extractGlossaryLocal', () => {
       trade-off sets. Chuang Gan from MIT and Maohao Shen from UMass Amherst demonstrate
       that CUDA and GPU acceleration improve performance on NLP tasks.`;
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('LLM');
     expect(terms).toContain('CUDA');
     expect(terms).toContain('GPU');
     expect(terms).toContain('NLP');
-    expect(result.length).toBeGreaterThan(4);
+    expect(terms.length).toBeGreaterThan(4);
   });
 
   it('does not extract common words like time year people as glossary terms', () => {
     const text = 'Time passes quickly. Year after year. People change. The time has come. Many people agree. Next year will be better.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('Time');
     expect(terms).not.toContain('Year');
@@ -189,7 +191,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts technical terms that repeat', () => {
     const text = 'The token billing model uses tokens. Token billing is expensive. Token billing requires monitoring. Token billing affects costs.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.some(t => t.toLowerCase().includes('token billing'))).toBe(true);
   });
@@ -199,7 +201,7 @@ describe('extractGlossaryLocal', () => {
   it('merges singular and plural forms of the same noun', () => {
     const text = 'The agent processes data. Each agent handles requests. Multiple agents work together. The agent returns results. Agents are scalable. Agents coordinate well.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Should have either "agent" or "agents", not both
     const agentTerms = terms.filter(t => t.toLowerCase() === 'agent' || t.toLowerCase() === 'agents');
@@ -211,7 +213,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts noun+gerund phrases like token billing', () => {
     const text = 'Token billing is used. Token billing costs money. Token billing requires monitoring. Token billing affects pricing.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.some(t => t.toLowerCase().includes('token billing'))).toBe(true);
   });
@@ -219,7 +221,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts noun+gerund phrases like data processing', () => {
     const text = 'Data processing is fast. Data processing takes time. Data processing requires memory. Data processing is essential.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.some(t => t.toLowerCase().includes('data processing'))).toBe(true);
   });
@@ -229,7 +231,7 @@ describe('extractGlossaryLocal', () => {
   it('rejects phrases starting with a stopword even if they contain substantive words', () => {
     const text = 'The architecture is modular. The architecture scales well. The architecture supports plugins. The architecture is extensible.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('The architecture');
   });
@@ -237,7 +239,7 @@ describe('extractGlossaryLocal', () => {
   it('keeps phrases starting with a non-stopword', () => {
     const text = 'Memory management is crucial. Memory management affects performance. Memory management requires care. Memory management is complex.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.some(t => t.toLowerCase().includes('memory management'))).toBe(true);
   });
@@ -247,7 +249,7 @@ describe('extractGlossaryLocal', () => {
   it('requires single nouns to appear at least 3 times', () => {
     const text = 'The governance model. Governance is important. Governance defines rules. Governance ensures compliance.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // "governance" appears 4+ times as noun — should be included
     expect(terms.some(t => t.toLowerCase() === 'governance')).toBe(true);
@@ -256,7 +258,7 @@ describe('extractGlossaryLocal', () => {
   it('excludes single nouns that appear fewer than 3 times', () => {
     const text = 'The governance model is new. Governance matters here.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('Governance');
     expect(terms).not.toContain('governance');
@@ -267,7 +269,7 @@ describe('extractGlossaryLocal', () => {
   it('requires multi-word phrases to appear at least 2 times', () => {
     const text = 'Context window is large. Context window defines limits.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms.some(t => t.toLowerCase().includes('context window'))).toBe(true);
   });
@@ -275,7 +277,7 @@ describe('extractGlossaryLocal', () => {
   it('excludes multi-word phrases that appear only once', () => {
     const text = 'Context window is large and defines many limits for the model.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('Context window');
   });
@@ -285,7 +287,7 @@ describe('extractGlossaryLocal', () => {
   it('removes shorter term when fully contained in a longer term', () => {
     const text = 'We use PII scrubbing for data. PII scrubbing removes personal info. PII scrubbing is required. PII scrubbing protects users.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Acronyms (PII) survive even when a longer phrase containing them
     // is also present — see isPhraseSubsuming() in glossaryExtractor.ts.
@@ -297,7 +299,7 @@ describe('extractGlossaryLocal', () => {
   it('keeps both terms when neither contains the other', () => {
     const text = 'API calls are frequent. API calls are logged. SDK tools are useful. SDK tools help developers. API calls return data. SDK tools save time.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // "API calls" is specific enough to keep. "SDK tools" is a generic
     // tail-noun phrase ("AI tools", "developer tools" etc.) and is
@@ -312,7 +314,7 @@ describe('extractGlossaryLocal', () => {
   it('handles empty emphasized terms array', () => {
     const text = 'We use LLM for natural language processing.';
     const result = extractGlossaryLocal(text, []);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('LLM');
   });
@@ -320,7 +322,7 @@ describe('extractGlossaryLocal', () => {
   it('handles undefined emphasized terms', () => {
     const text = 'We use LLM for natural language processing.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('LLM');
   });
@@ -329,7 +331,7 @@ describe('extractGlossaryLocal', () => {
     const text = 'Some random text here.';
     const emphasized = ['unique technical term'];
     const result = extractGlossaryLocal(text, emphasized);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('unique technical term');
   });
@@ -344,7 +346,7 @@ describe('extractGlossaryLocal', () => {
     // Verify the natural acronym-stays-independent behavior: when a phrase
     // subsumes an acronym, the acronym is still kept (so the model
     // renders it consistently across the article).
-    const terms = result.map((r) => r.term);
+    const terms = result.document_terms;
     expect(terms).toContain('CUDA Toolkit');
     expect(terms).toContain('CUDA');
     // sanity: result is non-empty
@@ -356,13 +358,13 @@ describe('extractGlossaryLocal', () => {
   it('combines acronyms, named entities, and frequent terms without duplicates', () => {
     const text = 'John Smith from MIT uses CUDA for GPU computing. CUDA accelerates workloads. CUDA is fast. CUDA is reliable. MIT published the research.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('CUDA');
     expect(terms).toContain('GPU');
     expect(terms).toContain('MIT');
     // No duplicate entries
-    const cudaEntries = result.filter(r => r.term === 'CUDA');
+    const cudaEntries = terms.filter(t => t === 'CUDA');
     expect(cudaEntries.length).toBe(1);
   });
 
@@ -386,7 +388,7 @@ describe('extractGlossaryLocal', () => {
     built the TUI squad which ships features every sprint.`;
 
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Key technical terms should be present
     expect(terms.some(t => t.toLowerCase().includes('squad place'))).toBe(true);
@@ -404,7 +406,7 @@ describe('extractGlossaryLocal', () => {
   it('extracts 2-letter acronyms that are not in exclusion list', () => {
     const text = 'We use ML and AI for NLP tasks.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('ML');
     expect(terms).toContain('AI');
@@ -414,7 +416,7 @@ describe('extractGlossaryLocal', () => {
   it('excludes 2-letter acronyms that are in exclusion list', () => {
     const text = 'VS is not an acronym. GET is a verb. DOER is not technical.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('VS');
     expect(terms).not.toContain('GET');
@@ -427,7 +429,7 @@ describe('extractGlossaryLocal', () => {
     // must appear >= 2 times to be extracted (unless they contain digits).
     const text = 'We use POSTGRESQL for storage and WEBSOCKET for streaming. WEBSOCKET is fast, POSTGRESQL is robust.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('POSTGRESQL');
     expect(terms).toContain('WEBSOCKET');
@@ -438,7 +440,7 @@ describe('extractGlossaryLocal', () => {
   it('handles terms with surrounding punctuation', () => {
     const text = 'We use (CUDA) and "API" and GPT, for models.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('CUDA');
     expect(terms).toContain('API');
@@ -474,7 +476,7 @@ describe('extractGlossaryLocal - Performance', () => {
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(2000);
-    expect(result.length).toBeGreaterThan(0);
+    expect(result.document_terms.length).toBeGreaterThan(0);
   });
 
   it('completes within 1000ms for 20-section text (~4KB)', () => {
@@ -485,14 +487,14 @@ describe('extractGlossaryLocal - Performance', () => {
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(1000);
-    expect(result.length).toBeGreaterThan(0);
+    expect(result.document_terms.length).toBeGreaterThan(0);
   });
 
   it('extracts correct terms from large text', () => {
     const largeText = generateLargeText(30);
 
     const result = extractGlossaryLocal(largeText);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Should find common technical terms (acronyms may be subsumed by longer phrases)
     expect(terms.some(t => t.includes('LLM'))).toBe(true);
@@ -510,11 +512,11 @@ describe('extractGlossaryLocal - Performance', () => {
     const result2 = extractGlossaryLocal(base);
 
     // Same input must produce identical ordering (deterministic scoring).
-    expect(result2.map((r) => r.term)).toEqual(result1.map((r) => r.term));
+    expect(result2.document_terms).toEqual(result1.document_terms);
 
-    // All entries should have KEEP translation
-    for (const entry of result1) {
-      expect(entry.translation).toBe('KEEP');
+    // All entries are strings
+    for (const entry of result1.document_terms) {
+      expect(typeof entry).toBe('string');
     }
   });
 
@@ -522,7 +524,7 @@ describe('extractGlossaryLocal - Performance', () => {
     it('ranks acronyms above proper nouns above generic terms', () => {
       const text = 'The API for JavaScript framework handles data processing efficiently.';
       const result = extractGlossaryLocal(text);
-      const terms = result.map((r) => r.term);
+      const terms = result.document_terms;
 
       // Acronyms (API) should appear before proper nouns (JavaScript) which
       // should appear before generic lowercase terms.
@@ -548,7 +550,7 @@ describe('extractGlossaryLocal - Performance', () => {
       const text = Array.from({ length: 5 }, () => vocab).join('. ');
 
       const result = extractGlossaryLocal(text);
-      expect(result.length).toBeLessThanOrEqual(50);
+      expect(result.document_terms.length).toBeLessThanOrEqual(50);
     });
 
     it('keeps high-priority terms when truncating', () => {
@@ -559,10 +561,10 @@ describe('extractGlossaryLocal - Performance', () => {
       const text = `${filler}. The API for JavaScript uses GPT models and CUDA GPU acceleration. We also support TypeScript with Node.js runtime and PostgreSQL database queries.`;
 
       const result = extractGlossaryLocal(text);
-      const terms = result.map((r) => r.term);
+      const terms = result.document_terms;
 
       // Must not exceed the cap
-      expect(result.length).toBeLessThanOrEqual(50);
+      expect(terms.length).toBeLessThanOrEqual(50);
 
       // High-priority terms should be present even if generic ones are truncated
       const hasAcronym = terms.some((t) => /^[A-Z]{2,6}$/.test(t));
@@ -574,7 +576,7 @@ describe('extractGlossaryLocal - Performance', () => {
       const text = 'React JavaScript API for TypeScript developers using Node.js framework.';
       const a = extractGlossaryLocal(text);
       const b = extractGlossaryLocal(text);
-      expect(a.map((r) => r.term)).toEqual(b.map((r) => r.term));
+      expect(a.document_terms).toEqual(b.document_terms);
     });
   });
 });
@@ -591,7 +593,7 @@ describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
     // MAX_RETRIES, HTTP_STATUS are code constants — should NOT be extracted.
     const text = 'We use API and LLM and SQL extensively. ```python\nMAX_RETRIES = 5\nHTTP_STATUS = 200\n``` Also see DB_URL config.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Real acronyms survive
     expect(terms).toContain('API');
@@ -609,7 +611,7 @@ describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
     // They must NOT appear in glossary as proper nouns
     const text = 'Use `myCustomVar` to store the result. Call `fetchData` first, then `handleClick` will fire. Anthropic built the SDK.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('myCustomVar');
     expect(terms).not.toContain('fetchData');
@@ -622,7 +624,7 @@ describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
     // The hostnames should not become glossary entries
     const text = 'Visit https://docs.anthropic.com/api for documentation. See also https://github.com/anthropics/anthropic-sdk. Anthropic publishes these.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).not.toContain('docs.anthropic.com');
     expect(terms).not.toContain('github.com');
@@ -637,7 +639,7 @@ describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
     // and prose-only acronyms are still found.
     const text = '```\nconst API_KEY = "sk-xxx";\n```\nThe API supports streaming.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // API_KEY is in the code block, must not leak
     expect(terms).not.toContain('API_KEY');
@@ -653,13 +655,13 @@ describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
     // score by appearing in the output (after frequency-based filtering).
     const text = 'C++ is fast. C++ is widely used. C++ has many libraries. Vue.js is reactive. Vue.js has great DX. Vue.js is popular.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // The symbols themselves may be cleaned to "C" / "Vue" by cleanTerm,
     // but they must NOT crash or silently disappear.
     // Verify the result is well-formed (no NaN, no infinite loop).
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.every(e => typeof e.term === 'string' && e.translation === 'KEEP')).toBe(true);
+    expect(Array.isArray(result.document_terms)).toBe(true);
+    expect(result.document_terms.every(e => typeof e === 'string')).toBe(true);
     // Vue should be a recognized proper noun (3 occurrences)
     expect(terms).toContain('Vue');
   });
@@ -667,7 +669,7 @@ describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
   it('handles F# and similar symbol-suffixed identifiers', () => {
     const text = 'F# is a functional language. F# runs on .NET. F# has good tooling. F# is mature.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // cleanTerm strips leading punctuation: F# -> F (1 char, filtered
     // by the 2-char minimum), .NET -> NET (3 chars, extracted).
@@ -676,7 +678,7 @@ describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
     // form) in the output.
     expect(terms).toContain('NET');
     // Sanity: result is well-formed
-    expect(result.every(e => typeof e.term === 'string' && e.translation === 'KEEP')).toBe(true);
+    expect(result.document_terms.every(e => typeof e === 'string')).toBe(true);
   });
 });
 
@@ -692,7 +694,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION (sentence starter demotion
       While developers adapted, managers watched. Since then, no issues arose.
     `;
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // None of these grammar words should appear as glossary terms
     expect(terms).not.toContain('However');
@@ -714,7 +716,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION (sentence starter demotion
       Google announced Gemini. The conference was packed.
     `;
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // Real brands survive the unTag intervention
     expect(terms).toContain('Anthropic');
@@ -732,7 +734,7 @@ describe('extractGlossaryLocal - isGenericNoise protection (Bug B)', () => {
     // filtered by the "lowercase plural <= 10 chars" rule.
     const text = 'We use K8s for orchestration. K8s is essential. K8s scales well. K8s is mature.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // K8s is a known tech anchor and must survive
     expect(terms).toContain('K8s');
@@ -743,7 +745,7 @@ describe('extractGlossaryLocal - isGenericNoise protection (Bug B)', () => {
     // but verify they're still captured.
     const text = 'iOS is a platform. macOS is for desktop. tvOS runs on TV. SaaS dominates the market.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // At minimum, the mixed-case forms should appear or be cleanly handled
     expect(terms).toContain('iOS');
@@ -756,7 +758,7 @@ describe('extractGlossaryLocal - isGenericNoise protection (Bug B)', () => {
     // by the lowercase plural heuristic.
     const text = 'We use dbt for transforms. dbt is great. dbt simplifies SQL. dbt is essential. We also use redis and nginx. Redis is fast.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('dbt');
     expect(terms).toContain('redis');
@@ -771,7 +773,7 @@ describe('extractGlossaryLocal - dedup protection (Bug D)', () => {
     // protect TECH_PRODUCTS from TitleCase overwrite.
     const text = 'Dbt is the tool. We use dbt for everything. dbt transforms data. dbt is excellent.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // The lowercase canonical form should be the one kept
     expect(terms).toContain('dbt');
@@ -783,7 +785,7 @@ describe('extractGlossaryLocal - dedup protection (Bug D)', () => {
     // Once deduplicated, there should be at most one entry for dbt
     const text = 'Dbt helps. We use dbt. The dbt project succeeded.';
     const result = extractGlossaryLocal(text);
-    const dbtEntries = result.filter(r => r.term.toLowerCase() === 'dbt');
+    const dbtEntries = result.document_terms.filter(r => r.toLowerCase() === 'dbt');
 
     expect(dbtEntries.length).toBe(1);
   });
@@ -792,7 +794,7 @@ describe('extractGlossaryLocal - dedup protection (Bug D)', () => {
     // GitHub should not be doubled with GITHUB or github
     const text = 'GitHub is popular. github is a code host. We use GitHub daily.';
     const result = extractGlossaryLocal(text);
-    const githubEntries = result.filter(r => r.term.toLowerCase() === 'github');
+    const githubEntries = result.document_terms.filter(r => r.toLowerCase() === 'github');
 
     expect(githubEntries.length).toBe(1);
   });
@@ -805,7 +807,7 @@ describe('extractGlossaryLocal - isPossessive fix (Bug C, fix C)', () => {
     // Result: AI must be in the glossary.
     const text = "OpenAI's engineers are great. AI is the future. AI is everywhere. AI matters.";
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('AI');
   });
@@ -817,7 +819,7 @@ describe('extractGlossaryLocal - isPossessive fix (Bug C, fix C)', () => {
     // After possessive detection, bare "Netflix" should be filtered.
     const text = "Netflix's shows are great. Netflix's content is popular. Netflix's recommendation engine is excellent.";
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     // If Netflix never appears non-possessively, it may be filtered.
     // This is the correct behavior — pure-possessive names are noisy fragments.
@@ -831,7 +833,7 @@ describe('extractGlossaryLocal - productRe lookaround (Bug C fix)', () => {
     // was eaten. With lookbehind/lookahead, all three should match.
     const text = 'We use redis, dbt, and nginx in production.';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('redis');
     expect(terms).toContain('dbt');
@@ -842,7 +844,7 @@ describe('extractGlossaryLocal - productRe lookaround (Bug C fix)', () => {
     // ^ and $ boundaries must work correctly with lookaround
     const text = 'redis is fast. We use it daily. nginx';
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('redis');
     expect(terms).toContain('nginx');
@@ -855,7 +857,7 @@ describe('extractGlossaryLocal - Q3 single-occurrence proper noun retention', ()
     // even if that single occurrence is at the start of a sentence.
     const text = "Anthropic is the only major lab without an open-weight model.";
     const result = extractGlossaryLocal(text);
-    const terms = result.map(r => r.term);
+    const terms = result.document_terms;
 
     expect(terms).toContain('Anthropic');
   });
@@ -864,13 +866,13 @@ describe('extractGlossaryLocal - Q3 single-occurrence proper noun retention', ()
 describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Plan 2)', () => {
   it('STRONG_VERBS: "AI feels" not extracted as a noun phrase', () => {
     const text = 'Local AI feels real in 2026. AI feels great for productivity. Everyone says AI feels good.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms).not.toContain('AI feels');
   });
 
   it('STRONG_VERBS: "LangChain helps" truncated to "langchain"', () => {
     const text = 'LangChain helps developers build LLM apps. LangChain helps simplify prompts. LangChain helps manage chains. LangChain helps a lot.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     // "LangChain helps" should be truncated to "langchain" (canonical lowercase
     // from tech-products.json overrides the TitleCase form)
     expect(terms).toContain('langchain');
@@ -880,7 +882,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
 
   it('STRONG_VERBS: "system enables" truncated to "system"', () => {
     const text = 'The system enables faster deployment. Our system enables real-time tracking. This system enables monitoring.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     // "system" (lowercase, generic) may not be extracted due to frequency gate,
     // but the important thing is "system enables" must not appear as a phrase
     expect(terms.every(t => !t.includes('enables'))).toBe(true);
@@ -888,7 +890,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
 
   it('NOUN_CHAIN_BREAKERS: "Zhipu AI targets" truncated to "Zhipu AI"', () => {
     const text = 'GLM 4.7 from Zhipu AI targets production-grade agent workflows. Zhipu AI targets the enterprise. Zhipu AI targets developers.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     // The fragment must be truncated, not dropped
     expect(terms.some(t => t.includes('Zhipu'))).toBe(true);
     // No sentence fragment should survive
@@ -897,7 +899,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
 
   it('NOUN_CHAIN_BREAKERS: "Docker runs" truncated to "docker"', () => {
     const text = 'Docker runs containers. Docker runs on Linux. Docker runs everywhere. Docker scales well.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     // "docker" is the canonical lowercase form from tech-products.json
     expect(terms).toContain('docker');
     expect(terms.every(t => !t.includes('runs'))).toBe(true);
@@ -905,14 +907,14 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
 
   it('NOUN_CHAIN_BREAKERS: "API calls" should still be kept (calls is not a strong verb)', () => {
     const text = 'API calls are fast. We handle many API calls. API calls return JSON. API calls are reliable.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.some(t => t.toLowerCase().includes('api calls'))).toBe(true);
   });
 
   it('dynamic context: Noun + function word correctly demoted', () => {
     // "targets the" should be detected via [#Noun] (the) pattern
     const text = 'The system targets the enterprise. This software targets the developer. Our tool targets the market.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     // "targets the" must not create a false noun phrase
     expect(terms.every(t => !t.includes('targets the'))).toBe(true);
   });
@@ -923,57 +925,57 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
     const result = extractGlossaryLocal(text);
     // "Feels" at sentence start may be extracted by sentenceStartCapRegex,
     // but it won't be truncated by noun chain breakers (index === 0 is skipped)
-    expect(Array.isArray(result)).toBe(true);
+    expect(result.document_terms).toBeDefined();
   });
 
   it('empty-after-truncation phrases are skipped', () => {
     // If the first word is stopword and the second is a breaker, truncated result is empty
     const text = 'The targets the market.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     // No crash; no garbage output
     expect(terms.every(t => !t.includes('targets the'))).toBe(true);
   });
 
   it('seems/looks/sounds also blocked from Noun+ chains', () => {
     const text = 'The system seems stable. The model looks promising. The API sounds good.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t => !t.includes('seems') && !t.includes('looks') && !t.includes('sounds'))).toBe(true);
   });
 
   it('lets/allows/enables blocked from Noun+ chains', () => {
     const text = 'Kubernetes lets you scale. Docker allows fast deployment. Git enables collaboration.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t => !t.includes('lets') && !t.includes('allows') && !t.includes('enables'))).toBe(true);
   });
 
   it('NOUN_CHAIN_BREAKERS: API endpoint verbs (returns/retrieves/cancels)', () => {
     const text = 'The API returns JSON. The API retrieves records. The API cancels jobs. The API searches indexes. The API lists results. The API marks complete.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t => !t.includes('returns') && !t.includes('retrieves') && !t.includes('cancels'))).toBe(true);
     expect(terms).toContain('API');
   });
 
   it('NOUN_CHAIN_BREAKERS: infrastructure verbs (hosts/serves/stores/loads)', () => {
     const text = 'The server hosts the service. The API serves requests. The database stores records. The system loads config. The CDN caches content. The tool syncs files.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t => !t.includes('hosts') && !t.includes('serves') && !t.includes('stores'))).toBe(true);
   });
 
   it('NOUN_CHAIN_BREAKERS: CI/development verbs (commits/merges/deploys)', () => {
     const text = 'The developer commits code. Git merges branches. The CI deploys builds. The pipeline updates config. The system upgrades packages. The daemon logs events.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t => !t.includes('commits') && !t.includes('merges') && !t.includes('deploys'))).toBe(true);
   });
 
   it('NOUN_CHAIN_BREAKERS: data/ML verbs (trains/predicts/classifies)', () => {
     const text = 'The model trains on data. The model predicts output. The classifier classifies text. The encoder encodes input. The decoder decodes output.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t => !t.includes('trains') && !t.includes('predicts') && !t.includes('classifies'))).toBe(true);
   });
 
   it('STRONG_VERBS: expanded set (appears/becomes/requires/ensures etc.)', () => {
     const text = 'The system appears stable. The model becomes accurate. The process requires config. Validation ensures quality. The firewall prevents attacks. The doc specifies options. The schema defines structure. The error indicates failure.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t =>
       !t.includes('appears') && !t.includes('becomes') && !t.includes('requires') &&
       !t.includes('ensures') && !t.includes('prevents') && !t.includes('specifies') &&
@@ -983,7 +985,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
 
   it('STRONG_VERBS: describes/demonstrates/recommends/mentions/expects', () => {
     const text = 'The doc describes the API. The example demonstrates usage. The guide recommends settings. The report mentions limitations. The function expects input.';
-    const terms = extractGlossaryLocal(text).map(r => r.term);
+    const terms = extractGlossaryLocal(text).document_terms;
     expect(terms.every(t =>
       !t.includes('describes') && !t.includes('demonstrates') &&
       !t.includes('recommends') && !t.includes('mentions') && !t.includes('expects')

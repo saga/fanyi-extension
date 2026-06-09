@@ -2,7 +2,7 @@ import type { SiteRule } from './types';
 
 export const fortuneRule: SiteRule = {
   hostPattern: 'fortune.com',
-  skipTerms: [
+  documentTerms: [
     'Fortune',
     'Uber',
     'AI',

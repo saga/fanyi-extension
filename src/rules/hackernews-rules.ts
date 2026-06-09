@@ -2,7 +2,7 @@ import type { SiteRule } from './types';
 
 export const hackernewsRule: SiteRule = {
   hostPattern: 'news.ycombinator.com',
-  skipTerms: [
+  documentTerms: [
     'Hacker News',
     'new',
     'past',
@@ -38,5 +38,5 @@ export const hackernewsRule: SiteRule = {
     'pre',
   ],
   promptInstructions:
-    'This is Hacker News. Keep navigation terms, voting-related vocabulary, YC-specific terminology, and code snippets untranslated. Preserve article titles in their original form when they contain proper nouns or technical terms.',
+    'This is Hacker News. Keep navigation terms, voting-related vocabulary, YC-specific terminology, and code snippets untranslated.',
 };
