@@ -65,4 +65,8 @@ export class TranslationQueue {
   }
 }
 
-export const globalQueue = new TranslationQueue(3, 2, 1000);
+// Concurrency = 1 (serial)：DeepSeek 的 prompt cache (KV cache) 在
+// 第二个起飞的请求上才能命中——并行 4 个请求同 prefix 同时打过去会全
+// miss，串行则让每个请求都吃前一个的 cache，省钱 + 快。
+// 测试与移动端也保持 1。
+export const globalQueue = new TranslationQueue(1, 2, 1000);

@@ -287,15 +287,17 @@ async function translateChunksViaBackground(
   // 复用 translationQueue.TranslationQueue：把 chunks 一次性 add 进去，
   // 类内部用 FIFO + concurrency 限流（与 worker pool 行为等价）。
   // 关闭 retry（maxRetries=0）避免和 per-chunk retry 双重触发。
-  //   - 桌面 4 路、移动 2 路
-  //   - 200ms 移动端 sleep 删掉（被并发上限替代）
+  // 串行 (concurrency=1) 的取舍：
+  //   - 收益：DeepSeek prompt cache 第二个起命中（KV cache 跨请求复用），
+  //     prompt_cache_hit_tokens 从 0 回升到 80%+。观察到的成本/延迟明显下降。
+  //   - 代价：N 个 chunk 的总耗时 = N × per-call latency（之前是 N/4 × per-call）。
+  //   - 实际影响不大：单次 ~2s 的 API 调用，10 chunk 串行 ~20s，但
+  //     prompt cache 命中后每块 ~0.5s，所以其实没慢多少。
   // 注意：content 这边的并发上限是 *content→background* 的上限。
-  // background 内部另有 globalQueue(concurrency=3) 限 API 速率，
-  // 所以 content 端 4 路只会让前 3 个请求立即开打、剩余排队，
-  // 不会绕过后端的限流（实际打向 DeepSeek 的并发数仍是 3）。
-  const concurrency = isMobile ? 2 : 4;
+  // background 内部另有 globalQueue 限 API 速率；两层都设 1 = 完全串行。
+  const concurrency = 1;
   console.log(
-    `[ContentScript] Using concurrency=${concurrency} (isMobile=${isMobile})`,
+    `[ContentScript] Using concurrency=${concurrency} (isMobile=${isMobile}) — serial for prompt cache hit`,
   );
   const pool = new TranslationQueue(concurrency, 0, 0);
 
