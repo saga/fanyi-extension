@@ -14,7 +14,7 @@ export class TranslationQueue {
   private maxRetries: number;
   private retryDelay: number;
 
-  constructor(concurrency = 3, maxRetries = 2, retryDelay = 1000) {
+  constructor(concurrency = 4, maxRetries = 2, retryDelay = 1000) {
     this.concurrency = concurrency;
     this.maxRetries = maxRetries;
     this.retryDelay = retryDelay;

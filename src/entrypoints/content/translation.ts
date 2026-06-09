@@ -13,6 +13,7 @@ import {
   diffMissingIds,
   shouldRetryMissing,
 } from '../utils/chunkRetry';
+import { TranslationQueue } from '../utils/translationQueue';
 import { buildChunks } from '../utils/chunkBuilder';
 import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { showStatus, hideStatus } from './statusOverlay';
@@ -257,33 +258,55 @@ async function translateChunksViaBackground(
   isMobile: boolean = false,
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
   console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
+
+  // === 并发上限 ===
+  // 复用 translationQueue.TranslationQueue：把 chunks 一次性 add 进去，
+  // 类内部用 FIFO + concurrency 限流（与 worker pool 行为等价）。
+  // 关闭 retry（maxRetries=0）避免和 per-chunk retry 双重触发。
+  //   - 桌面 4 路、移动 2 路
+  //   - 200ms 移动端 sleep 删掉（被并发上限替代）
+  // 注意：content 这边的并发上限是 *content→background* 的上限。
+  // background 内部另有 globalQueue(concurrency=3) 限 API 速率，
+  // 所以 content 端 4 路只会让前 3 个请求立即开打、剩余排队，
+  // 不会绕过后端的限流（实际打向 DeepSeek 的并发数仍是 3）。
+  const concurrency = isMobile ? 2 : 4;
+  console.log(
+    `[ContentScript] Using concurrency=${concurrency} (isMobile=${isMobile})`,
+  );
+  const pool = new TranslationQueue(concurrency, 0, 0);
+
   let completedCount = 0;
   let hasFailure = false;
   const applyPromises: Promise<void>[] = [];
   const translatedIds = new Set<string>();
 
-  for (let i = 0; i < chunks.length; i++) {
-    await translateChunkPayload(
-      chunks[i],
-      /* isRetry */ false,
-      {
-        nodeMap,
-        mode,
-        sourceLang,
-        targetLang,
-        glossary,
-        onFailure: () => { hasFailure = true; },
-        onApply: (chunkMap) => applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, mode)),
-        translatedIds,
-      },
-    );
-    completedCount++;
-    onProgress?.(completedCount, chunks.length);
-    // 移动端每块间多等 200ms，避免 API rate limit
-    if (i < chunks.length - 1 && isMobile) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
+  // chunks.map(c => pool.add(...))：所有 chunk 立即入队，pool 按 concurrency
+  // 上限拉取。map 的下标就是入队顺序；Promise.all 等所有 chunk 完成。
+  // 闭包里读 hasFailure/applyPromises/translatedIds 都能在 await 之后
+  // 看到其他 worker 的更新（JS 单线程 + microtask），不需要 atomic。
+  const chunkPromises = chunks.map((chunk) =>
+    pool.add(async () => {
+      await translateChunkPayload(
+        chunk,
+        /* isRetry */ false,
+        {
+          nodeMap,
+          mode,
+          sourceLang,
+          targetLang,
+          glossary,
+          onFailure: () => { hasFailure = true; },
+          onApply: (chunkMap) =>
+            applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, mode)),
+          translatedIds,
+        },
+      );
+      completedCount++;
+      onProgress?.(completedCount, chunks.length);
+    }),
+  );
+
+  await Promise.all(chunkPromises);
 
   await Promise.all(applyPromises);
   console.log(

@@ -50,4 +50,4 @@ A build hook (`wxt.config.ts:63`) rewrites absolute asset paths in HTML to relat
 - TreeWalker `currentNode` must NOT be set manually — real Chrome/Firefox behave differently from jsdom (see `blockExtractor.ts:375` comment).
 - Translation cache uses simple string hash (not cryptographic) with 7-day TTL.
 - Config writing uses `JSON.parse(JSON.stringify(...))` to strip Proxy wrappers from Vue refs.
-- Chunks process sequentially with 100ms (desktop) / 200ms (mobile) delay between.
+- Chunks process with bounded concurrency: **4 in flight on desktop, 2 on mobile** (worker pool in `utils/chunkRetry.ts:runWithConcurrency`). 200ms inter-chunk sleep removed — the concurrency cap replaces it as the throttle mechanism. Per-chunk retry, global retry, and DOM application (`applyTranslationsWithRAF`) all stay as documented.
