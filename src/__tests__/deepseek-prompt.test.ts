@@ -53,7 +53,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     expect(system).toMatch(/NOT equal input text/i);
   });
 
-  it('tells the user message how many blocks must appear in the output', async () => {
+  it('user message is pure JSON (stable prefix for KV cache)', async () => {
     globalFetch.mockResolvedValue(
       createJsonResponse({
         translations: [
@@ -69,8 +69,14 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     await service.translate(JSON.stringify(blocks), 'en', 'zh', []);
     const body = await captureRequestBody();
     const user = body.messages[1].content as string;
-    expect(user).toContain('Translate 2 blocks to');
-    expect(user).toContain('Simplified Chinese');
+    // user message 必须 = blocksJson，没有任何 "Translate N blocks to LANG"
+    // 之类的可变头部——否则 N 在变 → prefix token 失配 → DeepSeek KV cache
+    // 公共前缀被缩短到只剩 system 段，命中率从 chunk3 起退化成更晚。
+    // 真实稳定头部是 system message 里的 'Translate.*to.*Chinese' 段。
+    expect(user).not.toMatch(/Translate \d+ blocks to/);
+    expect(user.trimStart().startsWith('[')).toBe(true);
+    const system = body.messages[0].content as string;
+    expect(system).toContain('Translate English to Simplified Chinese');
   });
 
   it('still passes when a block is silently returned unchanged (warns)', async () => {

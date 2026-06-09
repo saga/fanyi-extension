@@ -85,20 +85,24 @@ if (sitePrompt) {
   systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
 }
 
+// 用纯静态头部——所有 chunk 共用这个 prefix，能在第 2 次请求就被系统
+// 检测成"公共前缀"并落盘（DeepSeek KV cache 规则：要 2 次出现过的公共
+// 前缀才落盘，第 3 次起命中）。原版写 `Translate ${blocks.length}
+// blocks to ${targetLangName}` 因为 N 在变，user 头部 token 都对不上，
+// 公共前缀被强行缩短到只剩 system 段（~200 tokens），浪费了 user
+// 头部的"自然 cache"。
 return {
-    model: MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: systemContent,
-      },
-      {
-        role: 'user',
-        content: `Translate ${blocks.length} blocks to ${targetLangName}. Output JSON only.
-
-${blocksJson}`,
-      },
-    ],
+  model: MODEL,
+  messages: [
+    {
+      role: 'system',
+      content: systemContent,
+    },
+    {
+      role: 'user',
+      content: `${blocksJson}`,
+    },
+  ],
     response_format: { type: 'json_object' },
     temperature: TRANSLATION_TEMPERATURE,
     max_tokens: estimateMaxTokens(blocksJson),
