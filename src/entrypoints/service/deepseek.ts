@@ -67,12 +67,21 @@ function buildTranslationBody(
 3. Keep URLs, code, version numbers, brand names as-is. Translate everything else.
 4. Treat every block as independent — do not skip, summarize, or merge any block. Each one is a separate text that must be translated in full.`;
 
-const docTerms = glossary?.document_terms;
-const hasDocTerms = docTerms && docTerms.length > 0;
+const hardTerms = glossary?.hard_terms;
+const softTerms = glossary?.soft_terms;
+const hasHard = hardTerms && hardTerms.length > 0;
+const hasSoft = softTerms && softTerms.length > 0;
 
-if (hasDocTerms) {
-  systemContent += '\n\n' +
-    `"document_terms":${JSON.stringify(docTerms, null, 2)}`;
+if (hasHard) {
+  systemContent += '\n\nTerminology:\n' +
+    hardTerms!.map((g) => `${g.source} => ${g.target}`).join('\n');
+}
+if (hasSoft) {
+  systemContent += '\n\nCustom translations:\n' +
+    softTerms!.map((g) => `${g.source} => ${g.target}`).join('\n');
+}
+if (hasHard || hasSoft) {
+  systemContent += '\n\nLongest match first.';
 }
 
 if (sitePrompt) {
@@ -193,7 +202,7 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      glossary?.document_terms?.length ? glossary : undefined
+      glossary.hard_terms.length > 0 || glossary.soft_terms.length > 0 ? glossary : undefined
     );
 
     const raw = await callApi(this.apiKey, JSON.stringify(body));
@@ -214,7 +223,7 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      glossary?.document_terms?.length ? glossary : undefined
+      glossary.hard_terms.length > 0 || glossary.soft_terms.length > 0 ? glossary : undefined
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);

@@ -3,7 +3,6 @@ import { buildNodeMap } from '../utils/blockExtractor';
 import { getConfig } from '../utils/config';
 import { DOMObserverManager } from '../utils/domObserver';
 import { extractGlossaryLocal } from '../utils/glossaryExtractor';
-import type { Glossary } from '../service/_service';
 import { showStatus, hideStatus } from './statusOverlay';
 import { updateButtonState } from './floatingButton';
 import { translateChunksViaBackground } from './chunkTranslation';
@@ -144,9 +143,6 @@ async function handleFullTranslation(
   saveOriginalTexts(blocks, nodeMap, state);
 
   const glossary = await extractGlossary(fullText);
-  if (glossary.document_terms.length > 0) {
-    console.log('[ContentScript] Glossary extracted:', glossary);
-  }
 
   showStatus(`翻译进度: 0/${chunks.length}`, 'loading');
   const { translatedIds } = await translateChunksViaBackground(
@@ -186,8 +182,8 @@ async function handleFullTranslation(
 
 async function extractGlossary(
   fullText: string,
-): Promise<Glossary> {
-  if (fullText.length < 50) return { document_terms: [] };
+): Promise<Array<{ term: string; translation: string }>> {
+  if (fullText.length < 50) return [];
 
   showStatus('正在提取术语表...', 'loading');
   try {
@@ -205,7 +201,7 @@ async function extractGlossary(
     const glossary = extractGlossaryLocal(sample, emphasizedTerms);
     return glossary;
   } catch {
-    return { document_terms: [] };
+    return [];
   }
 }
 

@@ -1,5 +1,6 @@
-export interface Glossary {
-  document_terms: string[];
+export interface GlossaryEntry {
+  term: string;
+  translation: string;
 }
 
 export interface TranslationService {
@@ -7,7 +8,7 @@ export interface TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: Glossary,
+    glossary: GlossaryEntry[],
     context?: string
   ): Promise<string>;
 
@@ -15,7 +16,7 @@ export interface TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: Glossary,
+    glossary: GlossaryEntry[],
     context?: string
   ): AsyncGenerator<string, string, unknown>;
 }

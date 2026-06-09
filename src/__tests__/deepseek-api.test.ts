@@ -52,7 +52,7 @@ describe('DeepSeekTranslationService API methods', () => {
       };
       globalFetch.mockResolvedValue(mockResponse);
 
-      const glossary = { document_terms: ['React'] };
+      const glossary = [{ term: 'React', translation: 'React' }];
       await service.translate(
         JSON.stringify([{ id: 'b1', text: 'React is great' }]),
         'en',
@@ -63,7 +63,7 @@ describe('DeepSeekTranslationService API methods', () => {
       const fetchCall = globalFetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
       expect(body.messages[0].content).toContain('React');
-      expect(body.messages[0].content).toContain('"document_terms"');
+      expect(body.messages[0].content).toContain('Terminology glossary');
     });
 
     it('should handle HTTP 401 error', async () => {

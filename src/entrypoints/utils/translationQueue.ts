@@ -56,34 +56,6 @@ export class TranslationQueue {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  setConcurrency(n: number): void {
-    this.concurrency = n;
-    this.process();
-  }
-
-  /**
-   * Add multiple tasks with warmup-then-parallel strategy:
-   * first `warmupCount` tasks run serially (concurrency=1), then the
-   * remaining tasks run at up to `maxConcurrency`.
-   */
-  async addAllWithWarmup<T>(
-    tasks: (() => Promise<T>)[],
-    warmupCount: number,
-    maxConcurrency: number,
-  ): Promise<T[]> {
-    const promises = tasks.map(t => this.add(t));
-
-    for (let i = 0; i < Math.min(warmupCount, promises.length); i++) {
-      await promises[i];
-    }
-
-    if (promises.length > warmupCount) {
-      this.setConcurrency(maxConcurrency);
-    }
-
-    return Promise.all(promises);
-  }
-
   get pendingCount(): number {
     return this.queue.length;
   }
@@ -93,7 +65,8 @@ export class TranslationQueue {
   }
 }
 
-// Content 层已经保证前两个 chunk 串行预热 KV cache，第三个起采用并行
-// 模式（桌面 4 / 移动 2）。globalQueue 允许最高 4 并发，不拖后腿。
-// 如果有多个标签页同时翻译，globalQueue 也会自然限流到 4。
-export const globalQueue = new TranslationQueue(4, 2, 1000);
+// Concurrency = 1 (serial)：DeepSeek 的 prompt cache (KV cache) 在
+// 第二个起飞的请求上才能命中——并行 4 个请求同 prefix 同时打过去会全
+// miss，串行则让每个请求都吃前一个的 cache，省钱 + 快。
+// 测试与移动端也保持 1。
+export const globalQueue = new TranslationQueue(1, 2, 1000);
