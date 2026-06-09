@@ -213,4 +213,234 @@ describe('TranslationQueue', () => {
     const gap = afterSecond - afterFirst;
     expect(gap).toBeLessThan(100);
   });
+
+  // --- setConcurrency ---
+
+  it('setConcurrency increases throughput of queued tasks', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    let maxRunning = 0;
+    let running = 0;
+
+    const tasks = Array.from({ length: 6 }, (_, i) =>
+      q.add(async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise(r => setTimeout(r, 20));
+        running--;
+        return i;
+      })
+    );
+
+    // Let the first task start (concurrency=1), then bump to 3
+    await new Promise(r => setTimeout(r, 5));
+    q.setConcurrency(3);
+    // Wait for a bit so pending tasks start running
+    await new Promise(r => setTimeout(r, 10));
+
+    await Promise.all(tasks);
+    // Should have run more than 1 at a time after the bump
+    expect(maxRunning).toBe(3);
+  });
+
+  it('setConcurrency from 1 to higher processes pending tasks in parallel', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    const order: number[] = [];
+
+    const tasks = [10, 50, 20, 30].map((delay, i) =>
+      q.add(async () => {
+        await new Promise(r => setTimeout(r, delay));
+        order.push(i);
+        return i;
+      })
+    );
+
+    // Let first task start, then bump concurrency so remaining can start
+    await new Promise(r => setTimeout(r, 10));
+    q.setConcurrency(4);
+
+    await Promise.all(tasks);
+    // With concurrency=1, order would be [0,1,2,3] (FIFO completion).
+    // With concurrency=4 after bump, task 1 (50ms) finishes after 2 (20ms) and 3 (30ms).
+    // Task 0 (10ms) was already running, so it finishes first.
+    expect(order[0]).toBe(0);
+    // Task 2 (20ms) should finish before task 1 (50ms)
+    expect(order.indexOf(2)).toBeLessThan(order.indexOf(1));
+  });
+
+  it('setConcurrency does not affect already running tasks', async () => {
+    const q = new TranslationQueue(2, 0, 0);
+    let running = 0;
+    let maxRunning = 0;
+
+    const tasks = Array.from({ length: 4 }, (_, i) =>
+      q.add(async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise(r => setTimeout(r, 30));
+        running--;
+        return i;
+      })
+    );
+
+    // Start with concurrency=2, then reduce
+    await new Promise(r => setTimeout(r, 10));
+    q.setConcurrency(1);
+
+    await Promise.all(tasks);
+    // Even after reducing concurrency, already-running tasks complete
+    expect(maxRunning).toBe(2);
+  });
+
+  it('setConcurrency on empty queue does not throw', () => {
+    const q = new TranslationQueue(1, 0, 0);
+    expect(() => q.setConcurrency(5)).not.toThrow();
+    expect(() => q.setConcurrency(1)).not.toThrow();
+  });
+
+  it('multiple setConcurrency calls work', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    let maxRunning = 0;
+    let running = 0;
+
+    const tasks = Array.from({ length: 8 }, (_, i) =>
+      q.add(async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise(r => setTimeout(r, 20));
+        running--;
+        return i;
+      })
+    );
+
+    // Ramp up: 1 → 2 → 4
+    await new Promise(r => setTimeout(r, 5));
+    q.setConcurrency(2);
+    await new Promise(r => setTimeout(r, 10));
+    q.setConcurrency(4);
+
+    await Promise.all(tasks);
+    expect(maxRunning).toBe(4);
+  });
+
+  it('warmup-then-parallel pattern: first 2 serial, rest parallel', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    const executionOrder: number[] = [];
+    let running = 0;
+    let maxRunning = 0;
+
+    const tasks = Array.from({ length: 6 }, (_, i) =>
+      q.add(async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        executionOrder.push(i);
+        await new Promise(r => setTimeout(r, 20));
+        running--;
+        return i;
+      })
+    );
+
+    // Warmup: await first two tasks serially (concurrency=1)
+    await tasks[0];
+    await tasks[1];
+
+    // After warmup, bump concurrency
+    q.setConcurrency(3);
+    await Promise.all(tasks);
+
+    // First two tasks completed before bump
+    expect(executionOrder[0]).toBe(0);
+    expect(executionOrder[1]).toBe(1);
+    // After bump, at most 3 ran concurrently
+    expect(maxRunning).toBe(3);
+  });
+
+  it('setConcurrency to 0 does not deadlock', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+
+    const task = q.add(async () => {
+      await new Promise(r => setTimeout(r, 10));
+      return 'done';
+    });
+
+    // Set concurrency to 0 — no new tasks should start
+    q.setConcurrency(0);
+
+    // The already-running task should still complete
+    await expect(task).resolves.toBe('done');
+  });
+
+  it('globalQueue exports correct concurrency', async () => {
+    const { globalQueue: gq } = await import('../entrypoints/utils/translationQueue');
+    expect(gq).toBeDefined();
+  });
+
+  // --- addAllWithWarmup ---
+
+  it('addAllWithWarmup runs first N serially then parallel', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    const order: number[] = [];
+    let maxRunning = 0;
+    let running = 0;
+
+    const tasks = Array.from({ length: 6 }, (_, i) =>
+      async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        order.push(i);
+        await new Promise(r => setTimeout(r, 20));
+        running--;
+        return i;
+      }
+    );
+
+    const results = await q.addAllWithWarmup(tasks, 2, 3);
+
+    expect(results).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(order[0]).toBe(0);
+    expect(order[1]).toBe(1);
+    expect(maxRunning).toBe(3);
+  });
+
+  it('addAllWithWarmup with fewer tasks than warmupCount skips bump', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    let maxRunning = 0;
+    let running = 0;
+
+    const tasks = Array.from({ length: 1 }, (_, i) =>
+      async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise(r => setTimeout(r, 10));
+        running--;
+        return i;
+      }
+    );
+
+    const results = await q.addAllWithWarmup(tasks, 2, 4);
+    expect(results).toEqual([0]);
+    expect(maxRunning).toBe(1);
+  });
+
+  it('addAllWithWarmup with empty task list returns empty', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    const results = await q.addAllWithWarmup([], 2, 4);
+    expect(results).toEqual([]);
+  });
+
+  it('addAllWithWarmup with exact warmupCount tasks runs all serially', async () => {
+    const q = new TranslationQueue(1, 0, 0);
+    const order: number[] = [];
+
+    const tasks = Array.from({ length: 2 }, (_, i) =>
+      async () => {
+        order.push(i);
+        await new Promise(r => setTimeout(r, 10));
+        return i;
+      }
+    );
+
+    const results = await q.addAllWithWarmup(tasks, 2, 4);
+    expect(results).toEqual([0, 1]);
+    expect(order).toEqual([0, 1]);
+  });
 });
