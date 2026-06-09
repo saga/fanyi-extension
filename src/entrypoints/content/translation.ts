@@ -428,11 +428,17 @@ async function translateChunkPayload(
   const inputIds = chunk.blocks.map((b) => b.id);
   const label = isRetry ? `${chunk.id}(retry)` : chunk.id;
 
-  // Outer-call-only outcome snapshot. The retry invocation is a separate
-  // call (isRetry=true) that doesn't write these — its result is merged
-  // into the outer chunk's recovery count via translatedIds.size growth.
-  const translatedBefore = isRetry ? 0 : ctx.translatedIds.size;
+  // Outer-call-only outcome state. The retry invocation (isRetry=true) is
+  // a separate call that doesn't write these — its recoveredIds are
+  // computed inside the inner loop below and read by the SessionSummary
+  // report at the bottom.
   let outerMissingCount = 0;
+  // Hoisted out of the if-block so the SessionSummary report can read
+  // it even when shouldRetryMissing=false (in which case it stays []).
+  // Crucially: it only counts ids recovered by THIS chunk's retry, not
+  // growth from concurrent chunks completing in parallel (which is what
+  // the buggy `translatedIds.size - translatedBefore` snapshot measured).
+  let recoveredIds: string[] = [];
 
   try {
     const response: any = await browser.runtime.sendMessage({
@@ -490,20 +496,35 @@ async function translateChunkPayload(
     // 打 inputBlocks/outputBlocks/missingInResponse 三元组。
     const chunkMissing = diffMissingIds(inputIds, outputIds);
     if (!isRetry) outerMissingCount = chunkMissing.length;
+    // 缺块时只打 3 个示例 id 提示范围，不再 dump 每个 block 的文本
+    // （dump 7 块 = 7 行噪音；要全文直接看 background 的 INPUT/OUTPUT）。
+    const missingHint =
+      chunkMissing.length > 0
+        ? ` (e.g. ${chunkMissing.slice(0, 3).join(',')}${chunkMissing.length > 3 ? `,+${chunkMissing.length - 3}` : ''})`
+        : '';
     console.log(
       `[ContentScript][ChunkTrace] chunk=${label}`,
       `inputIds=[${inputIds.join(',')}]`,
       `outputIds=[${outputIds.join(',')}]`,
-      `missing=[${chunkMissing.join(',')}]`,
+      `missing=${chunkMissing.length}${missingHint}`,
     );
     if (chunkMissing.length > 0) {
+      // 单行 + 强提示：API 实际有回，但 result 是空 → 模型拒答/截断。
+      // 详细原因在 background 的 [ChunkTrace] MISSING 那一行（看
+      // outputTail / missingInResponse / maxTokens 三个字段）。
       console.warn(
-        `[ContentScript][ChunkTrace] chunk=${label} missing ${chunkMissing.length} blocks — see [Background][ChunkTrace] for max_tokens / response details`,
-        chunkMissing.map((id) => {
-          const b = chunk.blocks.find((x) => x.id === id);
-          return `${id}(${b?.tag},${b?.text.length}ch):${b?.text.slice(0, 50)}`;
-        }),
+        `[ContentScript][ChunkTrace] chunk=${label} model returned ${outputIds.length}/${inputIds.length} entries — root cause in [Background][ChunkTrace] OUTPUT/MISSING (model truncation, max_tokens ceiling, or refusal)`,
       );
+      // background 在 success response 里顺手带回了 trace 诊断包
+      // (inputBytes/reservedMaxTokens/missingInResponse/outputTail/
+      // jsonParseFailed)。直接打出来，定位触顶/截断不用翻 background
+      // console——这是大多数 neededRetry 的根因。
+      if (response.trace) {
+        console.warn(
+          `[ContentScript][ChunkTrace] chunk=${label} trace from background:`,
+          response.trace,
+        );
+      }
     }
 
     // DOM 应用（异步等下一帧，避免阻塞主流程）
@@ -527,7 +548,6 @@ async function translateChunkPayload(
         `[ContentScript] ${label} missing ${chunkMissing.length} block(s), retrying as ${retryChunk.id}`,
       );
       const retryMap = await translateChunkPayload(retryChunk, true, ctx);
-      const recoveredIds: string[] = [];
       for (const id of retryMap.keys()) {
         if (!ctx.translatedIds.has(id)) {
           ctx.translatedIds.add(id);
@@ -539,14 +559,15 @@ async function translateChunkPayload(
       );
     }
 
-    // [SessionSummary] outer chunk outcome：snapshot 算 recovery delta。
+    // [SessionSummary] outer chunk outcome。recovered 是 THIS chunk 的
+    // retry 自己补回来的（recoveredIds.length），不是 ctx.translatedIds
+    // 的 size delta——后者会被并发 chunk 完成时的写入污染。
     if (!isRetry) {
-      const recovered = Math.max(0, ctx.translatedIds.size - translatedBefore);
-      const stillMissing = Math.max(0, outerMissingCount - recovered);
       if (outerMissingCount === 0) {
         ctx.onChunkComplete('fully-ok', 0, 0);
       } else {
-        ctx.onChunkComplete('needed-retry', recovered, stillMissing);
+        const stillMissing = Math.max(0, outerMissingCount - recoveredIds.length);
+        ctx.onChunkComplete('needed-retry', recoveredIds.length, stillMissing);
       }
     }
   } catch (error) {

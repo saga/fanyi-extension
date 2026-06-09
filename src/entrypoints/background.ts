@@ -198,8 +198,13 @@ export default defineBackground({
 
         // [ChunkTrace] 出参快照：成功解析 → 对比 inputIds 找出 response 里
         // 缺哪些 id；如果 parse 失败 → 拿到截断的尾巴判断是不是触顶。
+        // 把这些字段打包成 `trace` 一起 sendResponse 回去，让 content 端
+        // 不用再翻 background 的 console 也能看到根因。
         let outputIds: string[] = [];
         let outputBytes = 0;
+        let jsonParseFailed = false;
+        let outputTail = '';
+        let parseErrorMsg = '';
         try {
           const parsed = JSON.parse(jsonResult);
           const translations = parsed.translations || parsed;
@@ -210,14 +215,18 @@ export default defineBackground({
           }
           outputBytes = jsonResult.length;
         } catch (parseErr) {
+          jsonParseFailed = true;
+          outputBytes = jsonResult.length;
+          outputTail = jsonResult.slice(-200);
+          parseErrorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
           console.error(
             '[Background][ChunkTrace] OUTPUT NOT VALID JSON — likely truncated at max_tokens ceiling',
             {
               inputBlocks: inputBlocks.length,
-              outputBytes: jsonResult.length,
+              outputBytes,
               reservedMaxTokens,
-              outputTail: jsonResult.slice(-200),
-              parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+              outputTail,
+              parseError: parseErrorMsg,
             },
           );
         }
@@ -241,7 +250,21 @@ export default defineBackground({
         const result = processTranslationResult(jsonResult);
         await cacheTranslation(cacheKey, result);
 
-        sendResponse({ success: true, result: Array.from(result.entries()) });
+        // 传给 content 端的诊断包：把上面 [ChunkTrace] 的关键字段集中
+        // 起来，content 收到 missing 时直接 console.log 出来，定位根因
+        // 不用再翻 background console。
+        const trace = {
+          inputBytes,
+          estInputTokens,
+          reservedMaxTokens,
+          outputBytes,
+          outputBlocks: outputIds.length,
+          missingInResponse,
+          jsonParseFailed,
+          outputTail: jsonParseFailed ? outputTail : '',
+          parseError: parseErrorMsg,
+        };
+        sendResponse({ success: true, result: Array.from(result.entries()), trace });
       } catch (error) {
         console.error('[Background] translateChunk error:', error);
         console.error('[Background] Full error details:', {
