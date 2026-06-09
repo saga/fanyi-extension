@@ -56,6 +56,37 @@ export class TranslationQueue {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  setConcurrency(n: number): void {
+    this.concurrency = n;
+    if (n > 0) {
+      this.process();
+    }
+  }
+
+  async addAllWithWarmup<T>(
+    tasks: Task<T>[],
+    warmupCount: number,
+    maxConcurrency: number,
+  ): Promise<T[]> {
+    if (tasks.length === 0) return [];
+
+    const results: T[] = [];
+
+    // Run first N serially (warmup)
+    for (let i = 0; i < Math.min(warmupCount, tasks.length); i++) {
+      results.push(await this.add(tasks[i]));
+    }
+
+    // If there are remaining tasks, bump concurrency and start them in parallel
+    if (tasks.length > warmupCount) {
+      this.setConcurrency(maxConcurrency);
+      const remaining = tasks.slice(warmupCount).map((t) => this.add(t));
+      results.push(...(await Promise.all(remaining)));
+    }
+
+    return results;
+  }
+
   get pendingCount(): number {
     return this.queue.length;
   }

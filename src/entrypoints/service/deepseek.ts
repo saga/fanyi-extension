@@ -69,8 +69,10 @@ function buildTranslationBody(
 
 const hardTerms = glossary?.hard_terms;
 const softTerms = glossary?.soft_terms;
+const docTerms = glossary?.document_terms;
 const hasHard = hardTerms && hardTerms.length > 0;
 const hasSoft = softTerms && softTerms.length > 0;
+const hasDoc = docTerms && docTerms.length > 0;
 
 if (hasHard) {
   systemContent += '\n\nTerminology:\n' +
@@ -82,6 +84,11 @@ if (hasSoft) {
 }
 if (hasHard || hasSoft) {
   systemContent += '\n\nLongest match first.';
+}
+
+if (hasDoc) {
+  systemContent += '\n\nPreserve these terms as-is (do not translate):\n' +
+    docTerms!.join(', ');
 }
 
 if (sitePrompt) {
@@ -181,6 +188,14 @@ async function callApi(
   }
 }
 
+function hasGlossaryEntries(glossary?: Glossary): boolean {
+  return !!glossary && (
+    (glossary.hard_terms?.length ?? 0) > 0 ||
+    (glossary.soft_terms?.length ?? 0) > 0 ||
+    (glossary.document_terms?.length ?? 0) > 0
+  );
+}
+
 export class DeepSeekTranslationService implements TranslationService {
   private apiKey: string;
 
@@ -192,7 +207,7 @@ export class DeepSeekTranslationService implements TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: Glossary,
+    glossary?: Glossary,
     context?: string,
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
@@ -202,7 +217,7 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      glossary.hard_terms.length > 0 || glossary.soft_terms.length > 0 ? glossary : undefined
+      hasGlossaryEntries(glossary) ? glossary : undefined
     );
 
     const raw = await callApi(this.apiKey, JSON.stringify(body));
@@ -213,7 +228,7 @@ export class DeepSeekTranslationService implements TranslationService {
     jsonContent: string,
     sourceLang: string,
     targetLang: string,
-    glossary: Glossary,
+    glossary?: Glossary,
     context?: string,
   ): AsyncGenerator<string, string, unknown> {
     const blocks = JSON.parse(jsonContent);
@@ -223,7 +238,7 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      glossary.hard_terms.length > 0 || glossary.soft_terms.length > 0 ? glossary : undefined
+      hasGlossaryEntries(glossary) ? glossary : undefined
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);

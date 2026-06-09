@@ -193,7 +193,7 @@ export default defineBackground({
         );
 
         const jsonResult = await globalQueue.add(() =>
-          service.translate(jsonContent, sourceLang, targetLang, glossary || [], sitePrompt)
+          service.translate(jsonContent, sourceLang, targetLang, glossary, sitePrompt)
         );
 
         // [ChunkTrace] 出参快照：成功解析 → 对比 inputIds 找出 response 里
@@ -316,7 +316,7 @@ export default defineBackground({
           jsonContent,
           sourceLang,
           targetLang,
-          glossary || [],
+          glossary,
           sitePrompt
         );
 
