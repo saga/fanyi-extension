@@ -112,10 +112,6 @@ async function callApi(
   apiKey: string,
   body: string
 ): Promise<string> {
-  console.log('[DeepSeek] Calling API:', API_URL);
-  console.log('[DeepSeek] Request body length:', body.length, 'bytes');
-  console.log('[DeepSeek] API Key length:', apiKey.length);
-
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -124,10 +120,8 @@ async function callApi(
     });
 
     console.log('[DeepSeek] Response status:', response.status);
-    console.log('[DeepSeek] Response headers:', Object.fromEntries(response.headers.entries()));
 
     const responseText = await response.text().catch(() => '');
-    console.log('[DeepSeek] Response body:', responseText.substring(0, 500));
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
@@ -161,7 +155,6 @@ async function callApi(
     }
 
     const data = JSON.parse(responseText);
-    console.log('[DeepSeek] Parsed response:', JSON.stringify(data).substring(0, 300));
 
     const content = data.choices?.[0]?.message?.content;
 
@@ -170,7 +163,6 @@ async function callApi(
       throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
     }
 
-    console.log('[DeepSeek] Response content length:', content.length);
     return content;
   } catch (error) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -227,8 +219,6 @@ export class DeepSeekTranslationService implements TranslationService {
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);
-
-    console.log('[DeepSeek] Calling streaming API:', API_URL);
 
     const response = await fetch(API_URL, {
       method: 'POST',

@@ -161,17 +161,12 @@ export default defineBackground({
 
         const cached = await getCachedTranslation(cacheKey);
         const hasValidCache = cached && cached.size > 0;
-        
-        console.log('[Background] translateChunk cache check:', { cacheKey, hasCache: !!cached, hasValidCache });
 
         if (hasValidCache) {
-          const resultArray = Array.from(cached.entries());
-          console.log('[Background] Using cached translation:', resultArray.length, 'blocks');
-          sendResponse({ success: true, result: resultArray });
+          sendResponse({ success: true, result: Array.from(cached.entries()) });
           return;
         }
 
-        console.log('[Background] Calling DeepSeek API for translation...');
         const service = getService(config.deepseekApiKey);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
@@ -200,7 +195,6 @@ export default defineBackground({
         const jsonResult = await globalQueue.add(() =>
           service.translate(jsonContent, sourceLang, targetLang, glossary || [], sitePrompt)
         );
-        console.log('[Background] Translation API response length:', jsonResult?.length || 0);
 
         // [ChunkTrace] 出参快照：成功解析 → 对比 inputIds 找出 response 里
         // 缺哪些 id；如果 parse 失败 → 拿到截断的尾巴判断是不是触顶。
@@ -245,7 +239,6 @@ export default defineBackground({
         }
 
         const result = processTranslationResult(jsonResult);
-        console.log('[Background] Parsed translation blocks:', result.size);
         await cacheTranslation(cacheKey, result);
 
         sendResponse({ success: true, result: Array.from(result.entries()) });
@@ -284,7 +277,6 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
-        console.log('[Background] Calling DeepSeek streaming API for translation...');
         const service = getService(config.deepseekApiKey);
 
         const stream = service.translateStream(
@@ -310,7 +302,6 @@ export default defineBackground({
         }
 
         const result = processTranslationResult(finalContent);
-        console.log('[Background] Stream translation parsed blocks:', result.size);
 
         sendResponse({ success: true, result: Array.from(result.entries()) });
       } catch (error) {
@@ -334,21 +325,19 @@ export default defineBackground({
         }
 
         console.log('[Background] Validating API Key, length:', apiKey.length);
-        console.log('[Background] API Key prefix:', apiKey.substring(0, 10));
 
         const service = new DeepSeekTranslationService(apiKey);
         const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
-        
+
         const timeout = new Promise((_, reject) => {
           setTimeout(() => reject(new Error('请求超时（10秒）')), 10000);
         });
 
-        const result = await Promise.race([
+        await Promise.race([
           service.translate(testContent, 'en', 'zh', []),
-          timeout
+          timeout,
         ]);
         
-        console.log('[Background] API Key validation successful, response length:', (result as string)?.length || 0);
         sendResponse({ success: true });
       } catch (error) {
         console.error('[Background] API Key validation failed:', error);
@@ -382,7 +371,6 @@ export default defineBackground({
       try {
         const config = await getConfig();
         const hasKey = !!config.deepseekApiKey;
-        console.log('[Background] checkConfig: hasApiKey =', hasKey, ', key length =', config.deepseekApiKey?.length || 0);
         sendResponse({ success: hasKey, config });
       } catch (error) {
         console.error('[Background] checkConfig error:', error);

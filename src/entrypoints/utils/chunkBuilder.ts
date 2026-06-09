@@ -110,14 +110,18 @@ export function buildChunks(blocks: TextBlock[]): Chunk[] {
   flushChunk();
   console.log('[ChunkBuilder] Built', chunks.length, 'chunks');
   if (chunks.length > 0) {
-    console.log('[ChunkBuilder] Chunk sizes:', chunks.map(c => ({ id: c.id, blocks: c.blocks.length, tokens: c.estimatedTokens, blockIds: c.blocks.map(b => b.id).join(',') })));
-    // 详细输出每个 chunk 的 block tag 和 text 预览
-    for (const chunk of chunks) {
-      console.log('[ChunkBuilder] Chunk', chunk.id, 'contains:');
-      for (const block of chunk.blocks) {
-        console.log('  ', block.id, `(${block.tag})`, block.text.substring(0, 60));
-      }
-    }
+    // chunk 级别 summary：id / block 数 / token 估算 / blockId 列表。
+    // 排查 chunk 切分问题（chunk 太大/太小、blockIds 是否连续）时这就够。
+    // 单块的 tag/text 不打：20 块就要 21 行，污染日志。
+    console.log(
+      '[ChunkBuilder] Chunk sizes:',
+      chunks.map((c) => ({
+        id: c.id,
+        blocks: c.blocks.length,
+        tokens: c.estimatedTokens,
+        blockIds: c.blocks.map((b) => b.id).join(','),
+      })),
+    );
   }
   return chunks;
 }

@@ -140,17 +140,8 @@ async function handleFullTranslation(
   state: TranslationState,
   setObserver: (obs: DOMObserverManager | null) => void,
 ): Promise<TranslationResult> {
-  console.log('[ContentScript] handleFullTranslation called, config:', config);
-
   // 1) 提取阶段
-  console.log('[ContentScript] Calling prepareDocument...');
   const { blocks, chunks, fullText } = prepareDocument(document);
-  console.log('[ContentScript] prepareDocument result:', {
-    blocksCount: blocks.length,
-    chunksCount: chunks.length,
-    fullTextLength: fullText.length,
-  });
-  console.log(`[ContentScript] API Request Estimate: ${chunks.length} requests`);
 
   if (blocks.length === 0) {
     throw new Error('没有找到可翻译的内容');
@@ -160,7 +151,6 @@ async function handleFullTranslation(
 
   // 2) DOM 节点映射 + 保存原文
   const nodeMap = buildNodeMap(blocks, document);
-  console.log('[ContentScript] nodeMap size:', nodeMap.size, 'blocks length:', blocks.length);
   warnOnNodeMapMismatch(blocks, nodeMap);
   saveOriginalTexts(blocks, nodeMap, state);
 
@@ -186,9 +176,6 @@ async function handleFullTranslation(
   // 6) 标记 + 收尾
   const missingIds = markMissingBlocks(nodeMap, translatedIds);
   updateButtonState(true);
-  console.log(
-    `[ContentScript] Translation applied: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
-  );
 
   // 7) 动态内容监听
   const observer = setupDynamicContentObserver(state);
@@ -196,6 +183,10 @@ async function handleFullTranslation(
 
   // 8) 清理临时 data 属性（这些是中间过程用的，翻译完该清掉）
   cleanupTempAttrs();
+
+  console.log(
+    `[ContentScript] Session end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
+  );
 
   const statusMsg =
     missingIds.length > 0
@@ -232,13 +223,8 @@ async function extractGlossary(
     // 2) 用前 4000 字符做本地启发式抽取（不需要额外 API 调用）
     const sample = fullText.substring(0, 4000);
     const glossary = extractGlossaryLocal(sample, emphasizedTerms);
-    console.log('[ContentScript] Glossary extracted:', glossary.length, 'terms');
-    for (const entry of glossary) {
-      console.log(`[ContentScript]   "${entry.term}" → "${entry.translation}"`);
-    }
     return glossary;
-  } catch (error) {
-    console.warn('[ContentScript] Glossary extraction failed, proceeding without:', error);
+  } catch {
     return [];
   }
 }
@@ -246,6 +232,44 @@ async function extractGlossary(
 // ============================================================
 // 子流程 2：块翻译（带 per-chunk retry）
 // ============================================================
+
+/**
+ * Map an error message from a failed chunk into a short category tag.
+ *
+ * Goal: when the [SessionSummary] shows `hardFailed=12`, give the user
+ * one glance at WHICH 12 errors. DeepSeek / background.ts wraps the
+ * underlying error with a prefix like `HTTP 429 - ... 请求频率超限`,
+ * so we substring-match on those tokens.
+ *
+ * Categories (in match order):
+ *   401-auth       — invalid / expired API Key
+ *   403-billing    — account balance / banned
+ *   429-rate-limit — request rate exceeded
+ *   5xx-server     — DeepSeek server error
+ *   400-bad-req    — malformed request body
+ *   4xx-other      — other 4xx
+ *   network        — fetch failed (CORS, offline, blocked)
+ *   timeout        — Promise.race timeout (API key validation path)
+ *   json-parse     — DeepSeek returned invalid JSON
+ *   invalid-resp   — DeepSeek response missing choices[0].message.content
+ *   null-body      — streaming response body is null
+ *   other          — unclassified; firstError will be the raw message
+ */
+function categorizeError(msg: string): string {
+  if (!msg) return 'other';
+  if (msg.includes('HTTP 401')) return '401-auth';
+  if (msg.includes('HTTP 403')) return '403-billing';
+  if (msg.includes('HTTP 429')) return '429-rate-limit';
+  if (msg.includes('HTTP 5')) return '5xx-server';
+  if (msg.includes('HTTP 400')) return '400-bad-req';
+  if (/HTTP 4\d\d/.test(msg)) return '4xx-other';
+  if (msg.includes('网络请求失败') || msg.includes('fetch')) return 'network';
+  if (msg.includes('请求超时') || msg.includes('timeout')) return 'timeout';
+  if (msg.includes('Unexpected token') || msg.includes('JSON')) return 'json-parse';
+  if (msg.includes('缺少 choices[0].message.content')) return 'invalid-resp';
+  if (msg.includes('response body is null')) return 'null-body';
+  return 'other';
+}
 
 async function translateChunksViaBackground(
   chunks: Chunk[],
@@ -279,10 +303,24 @@ async function translateChunksViaBackground(
   let hasFailure = false;
   const applyPromises: Promise<void>[] = [];
   const translatedIds = new Set<string>();
+  // Session-level outcome counters. updated via onChunkComplete callback
+  // from each outer translateChunkPayload call. Used to print the
+  // [SessionSummary] line at the end so the user can see at a glance which
+  // failure category dominates (hard-failed vs. missing-need-retry).
+  // errorsByCategory 分桶计数 hardFailed 的原因，一次看清错误分布。
+  const stats = {
+    fullyOk: 0,
+    neededRetry: 0,
+    neededRetryRecovered: 0,
+    neededRetryStillMissing: 0,
+    hardFailed: 0,
+    firstErrorMsg: '' as string,
+    errorsByCategory: {} as Record<string, number>,
+  };
 
   // chunks.map(c => pool.add(...))：所有 chunk 立即入队，pool 按 concurrency
   // 上限拉取。map 的下标就是入队顺序；Promise.all 等所有 chunk 完成。
-  // 闭包里读 hasFailure/applyPromises/translatedIds 都能在 await 之后
+  // 闭包里读 hasFailure/applyPromises/translatedIds/stats 都能在 await 之后
   // 看到其他 worker 的更新（JS 单线程 + microtask），不需要 atomic。
   const chunkPromises = chunks.map((chunk) =>
     pool.add(async () => {
@@ -298,6 +336,21 @@ async function translateChunksViaBackground(
           onFailure: () => { hasFailure = true; },
           onApply: (chunkMap) =>
             applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, mode)),
+          onChunkComplete: (outcome, recovered, stillMissing, errMsg) => {
+            if (outcome === 'fully-ok') stats.fullyOk++;
+            else if (outcome === 'needed-retry') {
+              stats.neededRetry++;
+              stats.neededRetryRecovered += recovered;
+              stats.neededRetryStillMissing += stillMissing;
+            } else if (outcome === 'hard-failed') {
+              stats.hardFailed++;
+              if (!stats.firstErrorMsg && errMsg) stats.firstErrorMsg = errMsg;
+              // 按错误类型分桶：429 多 → 限流；401 多 → key 失效；
+              // json-parse 多 → 触顶或被中间层截断
+              const cat = categorizeError(errMsg || '');
+              stats.errorsByCategory[cat] = (stats.errorsByCategory[cat] || 0) + 1;
+            }
+          },
           translatedIds,
         },
       );
@@ -309,11 +362,29 @@ async function translateChunksViaBackground(
   await Promise.all(chunkPromises);
 
   await Promise.all(applyPromises);
+
+  // [SessionSummary] 一眼看清本会话每种结果的占比：
+  //   fullyOk       = API 返回了所有块、没 retry
+  //   neededRetry   = API 返回了 success 但缺了至少一块（已发起 per-chunk retry）
+  //                   → recovered 是 per-chunk retry 补回来的
+  //                   → stillMissing 是 retry 也没救回来的
+  //   hardFailed    = API 直接失败（HTTP 错误 / JSON 解析失败 / sendMessage 抛错）
+  //                   → errorsByCategory 把 12 个 hardFailed 按原因分桶
+  //                     （429 多数 = 限流、401 = key 失效、json-parse = 触顶等）
+  //   firstError    = 截第一条错的原文（兜底给 'other' 类看）
+  // 详细原因往下滚：[ChunkTrace] / [FailureTrace] 已经有 input/output/error 全量。
+  const errorCatStr = Object.keys(stats.errorsByCategory).length > 0
+    ? ' ' + Object.entries(stats.errorsByCategory)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k}=${v}`)
+        .join(',')
+    : '';
   console.log(
-    '[ContentScript] translateChunksViaBackground complete, allSucceeded:',
-    !hasFailure,
-    'translatedIds:',
-    translatedIds.size,
+    `[ContentScript][SessionSummary] total=${chunks.length} ` +
+    `fullyOk=${stats.fullyOk} ` +
+    `neededRetry=${stats.neededRetry}(recovered=${stats.neededRetryRecovered},stillMissing=${stats.neededRetryStillMissing}) ` +
+    `hardFailed=${stats.hardFailed}${errorCatStr}` +
+    (stats.firstErrorMsg ? ` firstError="${stats.firstErrorMsg.substring(0, 100)}"` : ''),
   );
   return { allSucceeded: !hasFailure, translatedIds };
 }
@@ -330,6 +401,16 @@ interface ChunkCallContext {
   onApply: (chunkMap: Map<string, string>) => void;
   /** 累加 set。 */
   translatedIds: Set<string>;
+  /**
+   * Outer chunk 完成时回调（只对 isRetry=false 触发）。用来累加
+   * [SessionSummary] 的分类计数。errMsg 仅在 hard-failed 时传。
+   */
+  onChunkComplete: (
+    outcome: 'fully-ok' | 'needed-retry' | 'hard-failed',
+    recoveredCount: number,
+    stillMissingCount: number,
+    errMsg?: string,
+  ) => void;
 }
 
 /**
@@ -347,8 +428,11 @@ async function translateChunkPayload(
   const inputIds = chunk.blocks.map((b) => b.id);
   const label = isRetry ? `${chunk.id}(retry)` : chunk.id;
 
-  console.log(`[ContentScript] Translating ${label}, blocks: ${chunk.blocks.length}`);
-  const startTime = Date.now();
+  // Outer-call-only outcome snapshot. The retry invocation is a separate
+  // call (isRetry=true) that doesn't write these — its result is merged
+  // into the outer chunk's recovery count via translatedIds.size growth.
+  const translatedBefore = isRetry ? 0 : ctx.translatedIds.size;
+  let outerMissingCount = 0;
 
   try {
     const response: any = await browser.runtime.sendMessage({
@@ -359,8 +443,6 @@ async function translateChunkPayload(
       pageUrl: window.location.href,
       glossary: ctx.glossary,
     });
-    const elapsed = Date.now() - startTime;
-    console.log(`[ContentScript] ${label} response time: ${elapsed}ms, success: ${response.success}`);
 
     // === 业务失败：response.success === false ===
     if (!response.success) {
@@ -379,11 +461,13 @@ async function translateChunkPayload(
           rawResponse: response,
         },
       );
+      if (!isRetry) {
+        ctx.onChunkComplete('hard-failed', 0, 0, response.error || 'unknown');
+      }
       return chunkMap;
     }
 
     // === 成功：解析 entry → 写入 chunkMap + translatedIds ===
-    console.log(`[ContentScript] ${label} result blocks:`, response.result?.length || 0);
     const outputIds: string[] = [];
     for (const entry of response.result) {
       if (!Array.isArray(entry) || entry.length !== 2) {
@@ -397,7 +481,6 @@ async function translateChunkPayload(
         );
         continue;
       }
-      console.log(`[ContentScript]   Translated block ${id}:`, text.substring(0, 40));
       chunkMap.set(id, text);
       outputIds.push(id);
       ctx.translatedIds.add(id);
@@ -406,6 +489,7 @@ async function translateChunkPayload(
     // [ChunkTrace] input/output 对比，缺失的 id 会在 [Background] 端配合
     // 打 inputBlocks/outputBlocks/missingInResponse 三元组。
     const chunkMissing = diffMissingIds(inputIds, outputIds);
+    if (!isRetry) outerMissingCount = chunkMissing.length;
     console.log(
       `[ContentScript][ChunkTrace] chunk=${label}`,
       `inputIds=[${inputIds.join(',')}]`,
@@ -440,8 +524,7 @@ async function translateChunkPayload(
     ) {
       const retryChunk = buildRetryChunk(chunk, chunkMissing);
       console.log(
-        `[ContentScript] ${label} missing ${chunkMissing.length} block(s), retrying as ${retryChunk.id} (${retryChunk.blocks.length} block(s))`,
-        chunkMissing,
+        `[ContentScript] ${label} missing ${chunkMissing.length} block(s), retrying as ${retryChunk.id}`,
       );
       const retryMap = await translateChunkPayload(retryChunk, true, ctx);
       const recoveredIds: string[] = [];
@@ -453,8 +536,18 @@ async function translateChunkPayload(
       }
       console.log(
         `[ContentScript] ${label} retry recovered ${recoveredIds.length}/${chunkMissing.length} block(s)`,
-        recoveredIds,
       );
+    }
+
+    // [SessionSummary] outer chunk outcome：snapshot 算 recovery delta。
+    if (!isRetry) {
+      const recovered = Math.max(0, ctx.translatedIds.size - translatedBefore);
+      const stillMissing = Math.max(0, outerMissingCount - recovered);
+      if (outerMissingCount === 0) {
+        ctx.onChunkComplete('fully-ok', 0, 0);
+      } else {
+        ctx.onChunkComplete('needed-retry', recovered, stillMissing);
+      }
     }
   } catch (error) {
     // === 运行时错误：response 根本不存在，sendMessage 抛错 ===
@@ -467,6 +560,10 @@ async function translateChunkPayload(
         stack: error instanceof Error ? error.stack?.substring(0, 500) : null,
       },
     );
+    if (!isRetry) {
+      const msg = error instanceof Error ? error.message : String(error);
+      ctx.onChunkComplete('hard-failed', 0, 0, msg);
+    }
   }
   return chunkMap;
 }
@@ -523,13 +620,11 @@ async function retryGlobalMissing(
   );
 
   showStatus(`补译 ${stillMissingIds.length} 段...`, 'loading');
-  console.log(`[ContentScript] Retrying ${stillMissingIds.length} missing block(s):`, stillMissingIds);
 
   const missingSet = new Set(stillMissingIds);
   const retryBlocks = blocks.filter((b) => missingSet.has(b.id));
   // 1-3 块小 chunk 用 buildChunks 切分（首 chunk cap = 12，但 1-3 块必然一桶装下）
   const retryChunks = buildChunks(retryBlocks);
-  console.log(`[ContentScript] Retry built ${retryChunks.length} chunk(s) from ${retryBlocks.length} block(s)`);
 
   const { translatedIds: retryTranslatedIds } = await translateChunksViaBackground(
     retryChunks,
@@ -569,12 +664,6 @@ function markMissingBlocks(
       node.title = '翻译响应中缺少该段落，点击扩展图标重新翻译';
     }
   }
-  if (missingIds.length > 0) {
-    console.warn(
-      `[ContentScript] ${missingIds.length} block(s) had no translation in the API response:`,
-      missingIds,
-    );
-  }
   return missingIds;
 }
 
@@ -588,30 +677,9 @@ function isPageTranslated(): boolean {
 
 function warnOnNodeMapMismatch(blocks: TextBlock[], nodeMap: Map<string, Node>): void {
   if (nodeMap.size === blocks.length) return;
-  console.warn('[ContentScript] Mismatch: some blocks not found in DOM!');
-
-  const blockIds = new Set(blocks.map((b) => b.id));
-  const nodeMapIds = new Set(nodeMap.keys());
-  const missingIds = [...blockIds].filter((id) => !nodeMapIds.has(id));
-  console.warn('[ContentScript] Missing block IDs:', missingIds);
-  for (const id of missingIds) {
-    const block = blocks.find((b) => b.id === id);
-    if (block) {
-      console.warn(
-        '[ContentScript] Missing block detail:',
-        id,
-        'tag:',
-        block.tag,
-        'xpath:',
-        block.xpath,
-        'text:',
-        block.text.substring(0, 60),
-      );
-    }
-  }
-  console.log(
-    '[ContentScript] All blocks summary:',
-    blocks.map((b) => `${b.id}(${b.tag}): ${b.text.substring(0, 50)}`).join(' | '),
+  console.warn(
+    `[ContentScript] NodeMap mismatch: ${nodeMap.size}/${blocks.length} blocks mapped to DOM. ` +
+    `This usually means some blocks share an xpath and were collapsed — see extractors.`,
   );
 }
 
@@ -620,15 +688,12 @@ function saveOriginalTexts(
   nodeMap: Map<string, Node>,
   state: TranslationState,
 ): void {
-  let saved = 0;
   for (const block of blocks) {
     const node = nodeMap.get(block.id);
     if (node && node instanceof HTMLElement) {
       state.originalTexts.set(block.id, node.textContent || '');
-      saved++;
     }
   }
-  console.log('[ContentScript] saveOriginalTexts saved:', saved, '/', blocks.length);
 }
 
 function applyTranslations(
@@ -636,26 +701,9 @@ function applyTranslations(
   nodeMap: Map<string, Node>,
   mode: 'bilingual' | 'target',
 ): void {
-  console.log(
-    '[ContentScript] applyTranslations called, translationMap size:',
-    translationMap.size,
-    'nodeMap size:',
-    nodeMap.size,
-  );
   for (const [blockId, translatedText] of translationMap) {
     const node = nodeMap.get(blockId);
-    if (!node || !(node instanceof HTMLElement)) {
-      console.warn('[ContentScript] applyTranslations SKIP:', blockId, 'node not found in nodeMap or not HTMLElement');
-      continue;
-    }
-    console.log(
-      '[ContentScript] applyTranslations APPLY:',
-      blockId,
-      'tag:',
-      node.tagName?.toLowerCase(),
-      'text:',
-      node.textContent?.substring(0, 40),
-    );
+    if (!node || !(node instanceof HTMLElement)) continue;
     applyBlockTranslation(node, translatedText, mode);
   }
 }
@@ -702,7 +750,6 @@ function setupDynamicContentObserver(
 ): DOMObserverManager {
   const observer = new DOMObserverManager(
     async (newBlocks: TextBlock[]) => {
-      console.log('[ContentScript] Dynamic content detected:', newBlocks.length, 'new blocks');
       const config = await getConfig();
       for (const block of newBlocks) {
         if (!block.text || block.text.length <= 10) continue;
@@ -719,7 +766,6 @@ function setupDynamicContentObserver(
             if (node) {
               applyBlockTranslation(node, response.result[0][1], config.mode);
               state.translatedBlocks.add(block.id);
-              console.log('[ContentScript] Dynamic block translated:', block.id);
             }
           }
         } catch (error) {
