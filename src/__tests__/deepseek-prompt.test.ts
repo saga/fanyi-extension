@@ -53,7 +53,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     expect(system).toMatch(/NOT equal input text/i);
   });
 
-  it('user message is pure JSON (stable prefix for KV cache)', async () => {
+  it('user message prefix is stable (no variable N) but mentions "json" for json_object', async () => {
     globalFetch.mockResolvedValue(
       createJsonResponse({
         translations: [
@@ -69,12 +69,15 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     await service.translate(JSON.stringify(blocks), 'en', 'zh', []);
     const body = await captureRequestBody();
     const user = body.messages[1].content as string;
-    // user message 必须 = blocksJson，没有任何 "Translate N blocks to LANG"
-    // 之类的可变头部——否则 N 在变 → prefix token 失配 → DeepSeek KV cache
-    // 公共前缀被缩短到只剩 system 段，命中率从 chunk3 起退化成更晚。
-    // 真实稳定头部是 system message 里的 'Translate.*to.*Chinese' 段。
+    // 关键：user message 头部不能含变量（"Translate N blocks to LANG"），
+    // 否则 N 在变 → prefix token 失配 → DeepSeek KV cache 公共前缀被缩
+    // 短。固定头部只放"Output JSON only."。
     expect(user).not.toMatch(/Translate \d+ blocks to/);
-    expect(user.trimStart().startsWith('[')).toBe(true);
+    expect(user.startsWith('Output JSON only.')).toBe(true);
+    // 硬约束：response_format: json_object 要求 user message 出现 "json"
+    // 这个字，否则 HTTP 400 invalid_request_error。
+    expect(user.toLowerCase()).toContain('json');
+    // system message 里仍然有目标语言说明
     const system = body.messages[0].content as string;
     expect(system).toContain('Translate English to Simplified Chinese');
   });

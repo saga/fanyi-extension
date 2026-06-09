@@ -85,12 +85,11 @@ if (sitePrompt) {
   systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
 }
 
-// 用纯静态头部——所有 chunk 共用这个 prefix，能在第 2 次请求就被系统
-// 检测成"公共前缀"并落盘（DeepSeek KV cache 规则：要 2 次出现过的公共
-// 前缀才落盘，第 3 次起命中）。原版写 `Translate ${blocks.length}
-// blocks to ${targetLangName}` 因为 N 在变，user 头部 token 都对不上，
-// 公共前缀被强行缩短到只剩 system 段（~200 tokens），浪费了 user
-// 头部的"自然 cache"。
+// user message 头部只放"Output JSON only."这一个稳定字符串——绝不能
+// 嵌入 `${blocks.length}` / `${targetLangName}` 之类的变量（否则 N 在
+// 变 → prefix token 失配 → DeepSeek KV cache 公共前缀被缩短）。
+// "Output JSON only." 也满足 DeepSeek 的硬约束：response_format: json_object
+// 要求 user message 里必须出现 "json" 这个字（否则 HTTP 400 invalid_request_error）。
 return {
   model: MODEL,
   messages: [
@@ -100,7 +99,9 @@ return {
     },
     {
       role: 'user',
-      content: `${blocksJson}`,
+      content: `Output JSON only.
+
+${blocksJson}`,
     },
   ],
     response_format: { type: 'json_object' },
