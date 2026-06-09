@@ -52,7 +52,7 @@ describe('DeepSeekTranslationService API methods', () => {
       };
       globalFetch.mockResolvedValue(mockResponse);
 
-      const glossary = { hard_terms: [{ source: 'React', target: 'React' }] };
+      const glossary = { document_terms: ['React', 'API'] };
       await service.translate(
         JSON.stringify([{ id: 'b1', text: 'React is great' }]),
         'en',
@@ -63,7 +63,7 @@ describe('DeepSeekTranslationService API methods', () => {
       const fetchCall = globalFetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
       expect(body.messages[0].content).toContain('React');
-      expect(body.messages[0].content).toContain('Terminology:');
+      expect(body.messages[0].content).toContain('Required translations:');
     });
 
     it('should handle HTTP 401 error', async () => {
@@ -78,7 +78,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('401');
     });
 
@@ -92,7 +92,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('429');
     });
 
@@ -100,7 +100,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockRejectedValue(new TypeError('fetch failed'));
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('网络请求失败');
     });
 
@@ -116,7 +116,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('无效响应');
     });
 
@@ -130,7 +130,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('500');
     });
   });
@@ -148,7 +148,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('账户余额不足');
     });
 
@@ -162,7 +162,7 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', [])
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
       ).rejects.toThrow('暂时不可用');
     });
   });

@@ -46,6 +46,44 @@ function buildHeaders(apiKey: string): Record<string, string> {
   };
 }
 
+function buildSystemContent(
+  sourceLang: string,
+  targetLang: string,
+  sitePrompt?: string,
+  glossary?: Glossary
+): string {
+  const targetLangName = !targetLang ? 'Simplified Chinese' : targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
+  const sourceLangName = !sourceLang ? 'English' : sourceLang === 'en' ? 'English' : sourceLang;
+
+  // Prompt 设计目标：低成本、高吞吐、非人工交互。每个词都要有价值。
+  // 1. 明确源语言 → 不让模型猜，减少一次隐式语言检测。
+  // 2. 不写 "must NOT equal input" → 品牌名/代号确实就是要保留原文，
+  //    写了反而跟 "Keep URLs, brand names unchanged" 冲突，让模型困惑。
+  // 3. "Longest match first" 太模糊删掉。
+  // 4. user message 精简到 "JSON:" + blocksJson → 更短 token。
+  let systemContent = `Translate ${sourceLangName} to ${targetLangName}.
+
+1. Return {"translations":[{"id":"x","translated_text":"y"}]}. One entry per input block, same ids.
+2. For translatable text, provide a translation. Never return empty string or placeholder.
+3. Keep URLs, code, version numbers, and protected terms unchanged. Translate everything else.
+4. Treat every block as independent — do not skip, summarize, merge, or reorder any block.`;
+
+  const docTerms = glossary?.document_terms;
+  if (docTerms && docTerms.length > 0) {
+    // 排序固定 → token 序列稳定 → DeepSeek KV cache 公共前缀命中。
+    // "Required translations:" 格式用 = 替代 => ，模型解析更精准。
+    const sorted = [...docTerms].sort();
+    systemContent += '\n\nRequired translations:\n' +
+      sorted.map((t) => `${t} = ${t}`).join('\n');
+  }
+
+  if (sitePrompt) {
+    systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
+  }
+
+  return systemContent;
+}
+
 function buildTranslationBody(
   blocks: Array<{ id: string; text: string }>,
   sourceLang: string,
@@ -59,61 +97,22 @@ function buildTranslationBody(
     2
   );
 
-  const targetLangName = targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
-
-  let systemContent = `Translate ${sourceLang === 'en' ? 'English' : sourceLang} to ${targetLangName}. Rules:
-1. Return {"translations":[{"id":"x","translated_text":"y"}]}. One entry per input block, same ids. No extra text.
-2. translated_text must NOT equal input text. Never return empty, "...", or placeholder.
-3. Keep URLs, code, version numbers, brand names as-is. Translate everything else.
-4. Treat every block as independent — do not skip, summarize, or merge any block. Each one is a separate text that must be translated in full.`;
-
-const hardTerms = glossary?.hard_terms;
-const softTerms = glossary?.soft_terms;
-const docTerms = glossary?.document_terms;
-const hasHard = hardTerms && hardTerms.length > 0;
-const hasSoft = softTerms && softTerms.length > 0;
-const hasDoc = docTerms && docTerms.length > 0;
-
-if (hasHard) {
-  systemContent += '\n\nTerminology:\n' +
-    hardTerms!.map((g) => `${g.source} => ${g.target}`).join('\n');
-}
-if (hasSoft) {
-  systemContent += '\n\nCustom translations:\n' +
-    softTerms!.map((g) => `${g.source} => ${g.target}`).join('\n');
-}
-if (hasHard || hasSoft) {
-  systemContent += '\n\nLongest match first.';
-}
-
-if (hasDoc) {
-  systemContent += '\n\nPreserve these terms as-is (do not translate):\n' +
-    docTerms!.join(', ');
-}
-
-if (sitePrompt) {
-  systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
-}
-
-// user message 头部只放"Output JSON only."这一个稳定字符串——绝不能
-// 嵌入 `${blocks.length}` / `${targetLangName}` 之类的变量（否则 N 在
-// 变 → prefix token 失配 → DeepSeek KV cache 公共前缀被缩短）。
-// "Output JSON only." 也满足 DeepSeek 的硬约束：response_format: json_object
-// 要求 user message 里必须出现 "json" 这个字（否则 HTTP 400 invalid_request_error）。
-return {
-  model: MODEL,
-  messages: [
-    {
-      role: 'system',
-      content: systemContent,
-    },
-    {
-      role: 'user',
-      content: `Output JSON only.
-
-${blocksJson}`,
-    },
-  ],
+  // user message 精简到 "JSON:" + blocks — 比 "Output JSON only."
+  // 更短，同时 "JSON" 字样满足 response_format: json_object 硬约束。
+  const systemContent = buildSystemContent(sourceLang, targetLang, sitePrompt, hasGlossaryEntries(glossary) ? glossary : undefined);
+  console.log('[DeepSeek] System prompt built:\n' + systemContent);
+  return {
+    model: MODEL,
+    messages: [
+      {
+        role: 'system' as const,
+        content: systemContent,
+      },
+      {
+        role: 'user' as const,
+        content: `JSON:\n\n${blocksJson}`,
+      },
+    ],
     response_format: { type: 'json_object' },
     temperature: TRANSLATION_TEMPERATURE,
     max_tokens: estimateMaxTokens(blocksJson),

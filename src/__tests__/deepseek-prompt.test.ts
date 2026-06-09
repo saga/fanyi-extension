@@ -35,7 +35,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     globalFetch.mockResolvedValue(
       createJsonResponse({ translations: [{ id: 'b1', translated_text: '你好' }] })
     );
-    await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', []);
+    await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined);
     const body = await captureRequestBody();
     const system = body.messages[0].content as string;
     expect(system).toMatch(/Translate.*to/);
@@ -47,10 +47,13 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     globalFetch.mockResolvedValue(
       createJsonResponse({ translations: [{ id: 'b1', translated_text: '你好' }] })
     );
-    await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', []);
+    await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined);
     const body = await captureRequestBody();
     const system = body.messages[0].content as string;
-    expect(system).toMatch(/NOT equal input text/i);
+    // 不再写 "NOT equal input" — 品牌名/代号就是要保留原文，写了反而
+    // 跟 "Keep URLs, code, version numbers, and protected terms unchanged" 冲突。
+    // 取而代之用 "For translatable text, provide a translation." 暗示不要 no-op。
+    expect(system).toMatch(/For translatable text/i);
   });
 
   it('user message prefix is stable (no variable N) but mentions "json" for json_object', async () => {
@@ -66,14 +69,14 @@ describe('DeepSeekTranslationService.translate prompt', () => {
       { id: 'b1', text: 'hello' },
       { id: 'b2', text: 'world' },
     ];
-    await service.translate(JSON.stringify(blocks), 'en', 'zh', []);
+    await service.translate(JSON.stringify(blocks), 'en', 'zh', undefined);
     const body = await captureRequestBody();
     const user = body.messages[1].content as string;
     // 关键：user message 头部不能含变量（"Translate N blocks to LANG"），
     // 否则 N 在变 → prefix token 失配 → DeepSeek KV cache 公共前缀被缩
-    // 短。固定头部只放"Output JSON only."。
+    // 短。固定头部只放 "JSON:"。
     expect(user).not.toMatch(/Translate \d+ blocks to/);
-    expect(user.startsWith('Output JSON only.')).toBe(true);
+    expect(user.startsWith('JSON:\n\n')).toBe(true);
     // 硬约束：response_format: json_object 要求 user message 出现 "json"
     // 这个字，否则 HTTP 400 invalid_request_error。
     expect(user.toLowerCase()).toContain('json');
@@ -92,7 +95,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
       JSON.stringify([{ id: 'b1', text: 'hello' }]),
       'en',
       'zh',
-      []
+      undefined
     );
     // The raw string is still returned untouched — caller (background) decides
     // what to do. We just verify the diagnostic fired.
@@ -128,7 +131,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
       JSON.stringify([{ id: 'b1', text: 'hello' }]),
       'en',
       'zh',
-      []
+      undefined
     );
     // Drain the stream completely
     while (true) {
