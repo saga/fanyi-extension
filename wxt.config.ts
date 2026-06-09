@@ -8,6 +8,13 @@ export default defineConfig({
   srcDir: 'src',
   vite: () => ({
     build: {
+      // 关闭 minify / uglify，便于在 DevTools 调试 content script。
+      // 注意：dev 和 build 都走这个配置，意味着 *所有* 产出（包含
+      // `pnpm zip` 出的 release 包）都是可读的。release 前如果要
+      // 重新开启 minify，单独写一个 `mode === 'production'` 分支即可。
+      // 参考：
+      //   - https://wxt.dev/api/config.html#vite
+      //   - https://vite.dev/config/build-options#build-minify
       minify: false,
     },
   }),

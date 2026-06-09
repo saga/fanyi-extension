@@ -8,17 +8,24 @@ import type { Chunk } from './chunkBuilder';
  * retry. Pure function — extracted here so it's testable in isolation
  * and the policy is documented in one place.
  *
- * Returns `true` only when ALL of:
+ * Policy (revised after seeing 100% missing failures in the wild):
  *  - this isn't already a retry (cap recursion at 1)
  *  - there is something missing (missingCount > 0)
- *  - the API doesn't look completely broken (missing < 50% of chunk):
- *    if 50%+ blocks are missing, the API is probably failing entirely
- *    and retrying is wasted budget; the global missing sweep at the
- *    end + the visual fanyi-missing marker cover that case instead.
+ *
+ * That's it. We used to also reject when missing >= 50% (rationale:
+ * "API is probably broken, retry is wasted budget"), but that heuristic
+ * is wrong for the most common failure mode: API returns success with
+ * an empty result (model refusal, JSON parse failure, transient network
+ * glitch). In that case 100% of the chunk is missing — exactly the case
+ * where we want a fresh API call rather than giving up. The retry chunk
+ * is a smaller subset, so the cost is bounded; even if retry fails the
+ * same way, the only damage is one extra round-trip logged.
  *
  * @param opts.missingCount how many blocks from this chunk were not
  *                          present in the API response
  * @param opts.totalCount   total blocks the chunk originally contained
+ *                          (kept for API compatibility / future heuristics;
+ *                          not used by the current policy)
  * @param opts.isRetry      true if this is already a retry attempt
  */
 export function shouldRetryMissing(opts: {
@@ -26,13 +33,9 @@ export function shouldRetryMissing(opts: {
   totalCount: number;
   isRetry: boolean;
 }): boolean {
-  const { missingCount, totalCount, isRetry } = opts;
+  const { missingCount, isRetry } = opts;
   if (isRetry) return false;
   if (missingCount <= 0) return false;
-  // Use >= 50% as the "API is broken" cutoff. Note: this counts missing
-  // against the chunk's total, not the page's total — a chunk with 30
-  // blocks losing 14 (47%) still retries, but losing 15 (50%) doesn't.
-  if (missingCount >= totalCount / 2) return false;
   return true;
 }
 

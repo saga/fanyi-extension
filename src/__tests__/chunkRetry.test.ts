@@ -27,33 +27,37 @@ describe('shouldRetryMissing', () => {
   });
 
   it('returns false when this is already a retry (cap recursion at 1)', () => {
+    // 即便 missing 很多，第二轮重试也不允许：避免无限递归 + 限制 API 预算。
     expect(shouldRetryMissing({ missingCount: 3, totalCount: 10, isRetry: true })).toBe(false);
+    expect(shouldRetryMissing({ missingCount: 12, totalCount: 12, isRetry: true })).toBe(false);
   });
 
-  it('returns false when 50% or more of chunk is missing (API likely broken)', () => {
-    // 5 of 10 missing = exactly 50% → don't retry
-    expect(shouldRetryMissing({ missingCount: 5, totalCount: 10, isRetry: false })).toBe(false);
-    // 6 of 10 = 60% → don't retry
-    expect(shouldRetryMissing({ missingCount: 6, totalCount: 10, isRetry: false })).toBe(false);
-    // 30 of 30 = 100% → don't retry
-    expect(shouldRetryMissing({ missingCount: 30, totalCount: 30, isRetry: false })).toBe(false);
-  });
-
-  it('returns true when missing is below 50% threshold and not a retry', () => {
-    // 1 of 10 = 10% → retry
+  it('returns true for partial missing (any count > 0, not a retry)', () => {
     expect(shouldRetryMissing({ missingCount: 1, totalCount: 10, isRetry: false })).toBe(true);
-    // 4 of 10 = 40% → retry
     expect(shouldRetryMissing({ missingCount: 4, totalCount: 10, isRetry: false })).toBe(true);
-    // 14 of 30 = 47% → retry
+    // 4/10 = 40% — 历史阈值下会重试
     expect(shouldRetryMissing({ missingCount: 14, totalCount: 30, isRetry: false })).toBe(true);
   });
 
-  it('boundary: 49% missing on 100 blocks still retries', () => {
-    expect(shouldRetryMissing({ missingCount: 49, totalCount: 100, isRetry: false })).toBe(true);
+  it('returns true for 50% missing (was previously rejected, now allowed)', () => {
+    // 反例：以前 5/10 (50%) 拒绝重试。修正后任何 missing > 0 都重试。
+    // 中等缺失往往意味着 API 偶发抖动，重试一轮可能挽回大部分。
+    expect(shouldRetryMissing({ missingCount: 5, totalCount: 10, isRetry: false })).toBe(true);
+    expect(shouldRetryMissing({ missingCount: 50, totalCount: 100, isRetry: false })).toBe(true);
   });
 
-  it('boundary: 50% missing on 100 blocks does NOT retry', () => {
-    expect(shouldRetryMissing({ missingCount: 50, totalCount: 100, isRetry: false })).toBe(false);
+  it('returns true for 100% missing (the "API returns success with empty result" case)', () => {
+    // 关键场景：API 业务成功但 model/parser 吐了空 result。
+    // 历史 50% 阈值会把这种情况挡掉，导致整 chunk 全部 yellow。
+    // 现在 12/12 missing 也允许重试一轮。
+    expect(shouldRetryMissing({ missingCount: 10, totalCount: 10, isRetry: false })).toBe(true);
+    expect(shouldRetryMissing({ missingCount: 12, totalCount: 12, isRetry: false })).toBe(true);
+    expect(shouldRetryMissing({ missingCount: 30, totalCount: 30, isRetry: false })).toBe(true);
+  });
+
+  it('isRetry trumps missingCount: even small missing on a retry is rejected', () => {
+    // 已重试过 → 不论缺多少都不再重试
+    expect(shouldRetryMissing({ missingCount: 1, totalCount: 100, isRetry: true })).toBe(false);
   });
 });
 

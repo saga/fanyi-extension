@@ -490,13 +490,14 @@ async function retryGlobalMissing(
   }
   if (stillMissingIds.length === 0) return;
 
-  // missing >= 50% → API 整体坏，全局重试也救不回来
-  if (stillMissingIds.length >= nodeMap.size / 2) {
-    console.warn(
-      `[ContentScript] ${stillMissingIds.length}/${nodeMap.size} blocks missing — skipping global retry (>= 50%, API likely broken)`,
-    );
-    return;
-  }
+  // 与 shouldRetryMissing 一致的策略：缺任何块就重试。
+  // 历史版本曾用 50% 阈值短路掉全局兜底（理由"API 整体坏"），但这个
+  // 启发式在 100% 缺失场景下适得其反——per-chunk 重试可能全部失败，导致
+  // 整页 yellow，没有任何补译机会。全局重试用 buildChunks 重新切分，
+  // 小 chunk 给模型更好的成功率；最坏情况只是多几次 API round-trip。
+  console.log(
+    `[ContentScript] Global retry: ${stillMissingIds.length}/${nodeMap.size} blocks still missing`,
+  );
 
   showStatus(`补译 ${stillMissingIds.length} 段...`, 'loading');
   console.log(`[ContentScript] Retrying ${stillMissingIds.length} missing block(s):`, stillMissingIds);
