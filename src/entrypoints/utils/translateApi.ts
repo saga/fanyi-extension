@@ -26,10 +26,20 @@ export function processTranslationResult(jsonResult: string): Map<string, string
   const translations = parsed.translations || parsed;
   const result = new Map<string, string>();
   for (const item of translations) {
-    if (typeof item?.id !== 'string' || typeof item?.translated_text !== 'string') {
-      continue;
-    }
-    result.set(item.id, item.translated_text);
+    if (typeof item?.id !== 'string') continue;
+    // 模型可能用 `text` / `translated_text` / `translation` 中的任意一个——
+    // 都接受。prompt 里说的是 `translated_text`，但实际跑下来模型经常
+    // 自由发挥用 `text`，硬编码 `translated_text` 会让 result Map 是空。
+    const translated =
+      typeof item.translated_text === 'string'
+        ? item.translated_text
+        : typeof item.text === 'string'
+        ? item.text
+        : typeof item.translation === 'string'
+        ? item.translation
+        : null;
+    if (translated === null) continue;
+    result.set(item.id, translated);
   }
   return result;
 }
@@ -57,13 +67,22 @@ export function logUnchangedBlocks(
     let unchanged = 0;
     let extraIds = 0;
     for (const item of translations) {
+      // 同样的字段名宽松：text / translated_text / translation 都认
+      const translatedText =
+        typeof item.translated_text === 'string'
+          ? item.translated_text
+          : typeof item.text === 'string'
+          ? item.text
+          : typeof item.translation === 'string'
+          ? item.translation
+          : null;
       seenIds.add(item.id);
       const original = byId.get(item.id);
       if (original === undefined) {
         extraIds++;
         continue;
       }
-      if (typeof item.translated_text === 'string' && item.translated_text === original) {
+      if (translatedText !== null && translatedText === original) {
         unchanged++;
         console.warn(
           '[TranslateApi] Block',

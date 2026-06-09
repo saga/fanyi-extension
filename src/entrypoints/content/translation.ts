@@ -520,9 +520,13 @@ async function translateChunkPayload(
       // jsonParseFailed)。直接打出来，定位触顶/截断不用翻 background
       // console——这是大多数 neededRetry 的根因。
       if (response.trace) {
+        // 不用 console.warn + object 的形式——Chrome 折叠成 `…` 看不到
+        // 关键字段。改用 JSON.stringify 完全展开：
+        //   - outputIds: 模型实际返的 id 列表（看到底是数字/英文/截断）
+        //   - outputPreview: response 前 200 字符（看 JSON 结构 / 拒答 / 截断）
         console.warn(
-          `[ContentScript][ChunkTrace] chunk=${label} trace from background:`,
-          response.trace,
+          `[ContentScript][ChunkTrace] chunk=${label} trace from background:\n` +
+            JSON.stringify(response.trace, null, 2),
         );
       }
     }

@@ -259,6 +259,16 @@ export default defineBackground({
           reservedMaxTokens,
           outputBytes,
           outputBlocks: outputIds.length,
+          // 模型实际返回的 id 列表——如果跟 inputIds 不重合（即 background
+          // log 里 missingInResponse=inputIds），看这个就知道模型用了什
+          // 么奇怪的 id（数字/英文/截断）。也帮助区分"id 不匹配"和"id 缺
+          // 失"两种情况。
+          outputIds: outputIds.slice(0, 30),
+          // input vs output 交集=0 时，看 response 头 200 字判断是哪种情况：
+          // 1) 返了 JSON 但 ids 错（id 字段名不对、用了数字/英文）
+          // 2) 返了 text 而不是 JSON（prompt 失效）
+          // 3) 返了截断的 JSON（max_tokens 触顶）
+          outputPreview: jsonResult.substring(0, 200),
           missingInResponse,
           jsonParseFailed,
           outputTail: jsonParseFailed ? outputTail : '',

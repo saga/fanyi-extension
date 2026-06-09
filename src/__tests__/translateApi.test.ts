@@ -78,6 +78,45 @@ describe('processTranslationResult', () => {
     expect(result.get('b1')).toBe('你好');
   });
 
+  // 真实场景：prompt 要求 `translated_text` 字段，但模型经常自由发挥用 `text`。
+  // 修复前的 hard bug：id 全在、map 全空、content 报 missing。回归测试。
+  it('accepts `text` field as fallback (model flattens naming)', () => {
+    const json = JSON.stringify({
+      translations: [
+        { id: 'b66', text: '这处房产位于诺埃街160号' },
+        { id: 'b67', text: '另一段翻译' },
+      ],
+    });
+    const result = processTranslationResult(json);
+    expect(result.size).toBe(2);
+    expect(result.get('b66')).toBe('这处房产位于诺埃街160号');
+    expect(result.get('b67')).toBe('另一段翻译');
+  });
+
+  it('accepts `translation` field as fallback', () => {
+    const json = JSON.stringify({
+      translations: [{ id: 'b1', translation: '你好' }],
+    });
+    const result = processTranslationResult(json);
+    expect(result.get('b1')).toBe('你好');
+  });
+
+  it('prefers translated_text over text when both present', () => {
+    const json = JSON.stringify({
+      translations: [{ id: 'b1', translated_text: '正式译', text: 'fallback' }],
+    });
+    const result = processTranslationResult(json);
+    expect(result.get('b1')).toBe('正式译');
+  });
+
+  it('still rejects entries with neither id nor text', () => {
+    const json = JSON.stringify({
+      translations: [{ translated_text: 'no id' }, { id: 'b1' }], // 第二条没 text
+    });
+    const result = processTranslationResult(json);
+    expect(result.size).toBe(0);
+  });
+
   it('throws on invalid JSON', () => {
     expect(() => processTranslationResult('not json')).toThrow();
   });
@@ -161,6 +200,17 @@ describe('logUnchangedBlocks', () => {
     logUnchangedBlocks(raw, [{ id: 'b1', text: 'hello' }]);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  // 配套：logUnchangedBlocks 也得认 `text` 字段，否则 `unchanged` 统计会漏。
+  it('detects unchanged blocks when model uses `text` field', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const raw = JSON.stringify({ translations: [{ id: 'b1', text: 'hello' }] });
+    logUnchangedBlocks(raw, [{ id: 'b1', text: 'hello' }]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+    err.mockRestore();
   });
 });
 
