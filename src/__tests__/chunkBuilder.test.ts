@@ -6,6 +6,15 @@ function makeBlock(id: string, tag: string, text: string): TextBlock {
   return { id, tag, text, xpath: `/${id}` };
 }
 
+/**
+ * Helper: each block text is `repeat` so that estimateTokens ≈ tokens.
+ * estimateTokens = ceil(repeat.length / 4) + 20.
+ */
+function tokenBlock(id: string, tag: string, tokens: number): TextBlock {
+  const text = 'x'.repeat(Math.max(0, (tokens - 20) * 4));
+  return { id, tag, text, xpath: `/${id}` };
+}
+
 describe('buildChunks', () => {
   it('returns empty array for no blocks', () => {
     expect(buildChunks([])).toEqual([]);
@@ -127,5 +136,104 @@ describe('buildChunks', () => {
     // Verify the heading is present
     const allBlocks = chunks.flatMap(c => c.blocks);
     expect(allBlocks.some(b => b.tag === 'h2')).toBe(true);
+  });
+
+  // --- warmup token target tests ---
+
+  it('uses WARMUP_TARGET_TOKENS for first two chunks', () => {
+    // Each block: 100 tokens. WARMUP=200 → 2 blocks per warmup chunk.
+    // TARGET=800 → 8 blocks per normal chunk.
+    const blocks = Array.from({ length: 12 }, (_, i) =>
+      tokenBlock(`b${i + 1}`, 'p', 100)
+    );
+
+    const chunks = buildChunks(blocks);
+
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    // chunk1 and chunk2 warmup: each ≤ 200 tokens
+    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(220);
+    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(220);
+    // chunk3+ normal: each ≤ 800 tokens
+    for (let i = 2; i < chunks.length; i++) {
+      expect(chunks[i].estimatedTokens).toBeLessThanOrEqual(820);
+    }
+  });
+
+  it('both warmup chunks are roughly equal size', () => {
+    const blocks = Array.from({ length: 8 }, (_, i) =>
+      tokenBlock(`b${i + 1}`, 'p', 100)
+    );
+
+    const chunks = buildChunks(blocks);
+
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(220);
+    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(220);
+  });
+
+  it('third chunk is larger than warmup chunks', () => {
+    const blocks = Array.from({ length: 15 }, (_, i) =>
+      tokenBlock(`b${i + 1}`, 'p', 100)
+    );
+
+    const chunks = buildChunks(blocks);
+
+    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(220);
+    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(220);
+    const normalChunks = chunks.slice(2);
+    expect(normalChunks.length).toBeGreaterThan(0);
+    // At least one normal chunk exceeds warmup limit
+    expect(normalChunks.some(c => c.estimatedTokens > 220)).toBe(true);
+  });
+
+  it('single block stays one chunk', () => {
+    const chunks = buildChunks([tokenBlock('b1', 'p', 100)]);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].estimatedTokens).toBe(100);
+  });
+
+  it('preserves block order with warmup splitting', () => {
+    const blocks = Array.from({ length: 10 }, (_, i) =>
+      tokenBlock(`b${i + 1}`, 'p', 60)
+    );
+
+    const chunks = buildChunks(blocks);
+    const allIds = chunks.flatMap(c => c.blocks.map(b => b.id));
+    expect(allIds).toEqual(['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10']);
+  });
+
+  it('small blocks stay in one chunk when under warmup target', () => {
+    const blocks = [
+      tokenBlock('b1', 'p', 30),
+      tokenBlock('b2', 'p', 30),
+      tokenBlock('b3', 'p', 30),
+    ];
+
+    const chunks = buildChunks(blocks);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].blocks).toHaveLength(3);
+  });
+
+  it('warmup split works with heading boundaries', () => {
+    const blocks = [
+      tokenBlock('b1', 'p', 100),
+      tokenBlock('b2', 'p', 100),
+      tokenBlock('b3', 'h2', 100),
+      tokenBlock('b4', 'p', 100),
+      tokenBlock('b5', 'p', 100),
+    ];
+
+    const chunks = buildChunks(blocks);
+    const totalBlocks = chunks.reduce((sum, c) => sum + c.blocks.length, 0);
+    expect(totalBlocks).toBe(5);
+  });
+
+  it('smallest possible block fits in warmup chunk', () => {
+    const blocks = [
+      tokenBlock('b1', 'p', 30),
+    ];
+    const chunks = buildChunks(blocks);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].estimatedTokens).toBe(30);
   });
 });

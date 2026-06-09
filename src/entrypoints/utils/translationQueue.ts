@@ -13,14 +13,11 @@ export class TranslationQueue {
   private concurrency: number;
   private maxRetries: number;
   private retryDelay: number;
-  private interChunkDelay: number;
-  private lastFinishAt = 0;
 
-  constructor(concurrency = 4, maxRetries = 2, retryDelay = 1000, interChunkDelay = 200) {
+  constructor(concurrency = 4, maxRetries = 2, retryDelay = 1000) {
     this.concurrency = concurrency;
     this.maxRetries = maxRetries;
     this.retryDelay = retryDelay;
-    this.interChunkDelay = interChunkDelay;
   }
 
   async add<T>(task: Task<T>): Promise<T> {
@@ -37,16 +34,6 @@ export class TranslationQueue {
 
       this.running++;
 
-      // Inter-chunk 间隔：给 DeepSeek KV cache 一点时间把上一次请求
-      // 的 prefix 完整落盘（文档："缓存构建耗时为秒级"）。200ms 是
-      // 经验值——再大对总延迟影响明显，再小看不出 cache 改善。
-      // 只在有"前序请求"时 sleep，避免第一次冷启动白白等。
-      if (this.lastFinishAt > 0) {
-        const elapsed = Date.now() - this.lastFinishAt;
-        const wait = Math.max(0, this.interChunkDelay - elapsed);
-        if (wait > 0) await this.delay(wait);
-      }
-
       try {
         const result = await item.task();
         item.resolve(result);
@@ -60,7 +47,6 @@ export class TranslationQueue {
         }
       } finally {
         this.running--;
-        this.lastFinishAt = Date.now();
         this.process();
       }
     }

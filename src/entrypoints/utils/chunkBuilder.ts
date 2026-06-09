@@ -8,18 +8,8 @@ export interface Chunk {
 }
 
 const MAX_INPUT_TOKENS = 500000;
-const TARGET_TOKENS = 800;
-
-/**
- * 首 chunk 的硬上限块数。h1 + 副标题 + 几段引言对模型来说才是
- * "高价值、必须翻译"的内容；超过这个阈值就把剩余正文推到第二
- * chunk，宁可让首 chunk 小一点也要保住 h1/副标题稳定出译文。
- *
- * 设大点（比如 30）就跟 TARGET_TOKENS 没区别了；设小点（比如 6）
- * 又会让正文散得稀碎。当前 12 是经验值：覆盖 h1 + 副标题 +
- * 4-5 段引言/第一段正文，剩下正文进 chunk 2+。
- */
-const FIRST_CHUNK_MAX_BLOCKS = 12;
+const TARGET_TOKENS = 600;
+const WARMUP_TARGET_TOKENS = 200;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -63,20 +53,11 @@ export function buildChunks(blocks: TextBlock[]): Chunk[] {
     const blockTokens = estimateTokens(block.text) + 20;
 
     const isBoundary = isStructuralBoundary(block);
-    const wouldExceed = currentTokens + blockTokens > TARGET_TOKENS;
+    const targetTokens = chunks.length < 2 ? WARMUP_TARGET_TOKENS : TARGET_TOKENS;
+    const wouldExceed = currentTokens + blockTokens > targetTokens;
     const mustFlush = currentTokens + blockTokens > MAX_INPUT_TOKENS;
-    // 首 chunk 块数超阈值也要切，避免正文段落挤爆首 chunk 把
-    // h1/副标题挤出译文。直接切到 chunk 2+ 让正文慢慢翻译。
-    const wouldExceedFirstChunkCap =
-      chunks.length === 0 && currentBlocks.length >= FIRST_CHUNK_MAX_BLOCKS;
 
     if (mustFlush) {
-      flushChunk();
-      currentBlocks.push(block);
-      currentTokens = blockTokens;
-    } else if (wouldExceedFirstChunkCap) {
-      // 首 chunk 块数已达上限（即使 token 还没爆），强制切到
-      // chunk 2，把剩余正文留给后续 chunk。
       flushChunk();
       currentBlocks.push(block);
       currentTokens = blockTokens;

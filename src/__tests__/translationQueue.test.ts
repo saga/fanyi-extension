@@ -186,4 +186,31 @@ describe('TranslationQueue', () => {
     await Promise.all(tasks);
     expect(order).toEqual([1, 2, 3]);
   });
+
+  // --- no inter-chunk delay ---
+
+  it('does not add artificial delay between sequential tasks', async () => {
+    const q = new TranslationQueue(1, 0, 10);
+
+    const start = Date.now();
+
+    await q.add(async () => {
+      await new Promise(r => setTimeout(r, 10));
+      return 'first';
+    });
+
+    const afterFirst = Date.now();
+
+    await q.add(async () => {
+      await new Promise(r => setTimeout(r, 10));
+      return 'second';
+    });
+
+    const afterSecond = Date.now();
+
+    // Second task should start immediately after first finishes (no inter-chunk delay).
+    // Gap between starts ≈ first task duration (10ms), not 200ms+.
+    const gap = afterSecond - afterFirst;
+    expect(gap).toBeLessThan(100);
+  });
 });
