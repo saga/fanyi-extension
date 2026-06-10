@@ -19,15 +19,13 @@ const FULL_PUBLICATIONS = techProductsData.publications as string[];
 
 // Tech-domain anchors
 const TECH_ANCHORS = new Set([
-  'AI', 'ML', 'LLM', 'RAG', 'NLP', 'GPU', 'CPU', 'TPU', 'NPU', 'FPGA', 'ASIC',
-  'API', 'REST', 'GraphQL', 'gRPC', 'SQL', 'NoSQL', 'MCP', 'RBAC', 'PII',
+  'AI', 'ML', 'LLM', 'RAG', 'NLP', 'GPU', 'CPU', 'TPU', 'NPU',  
+  'API', 'GraphQL', 'gRPC', 'SQL', 'NoSQL', 'MCP', 'RBAC', 'PII',
   'TLS', 'SSL', 'SDK', 'IDE', 'CDN', 'DDoS', 'SaaS', 'PaaS', 'IaaS', 'FaaS',
-  'ETL', 'ELT', 'CI', 'CD', 'JVM', 'WASM', 'K8s',
-  'Kafka', 'Flink', 'Spark', 'Airflow', 'Superset', 'Beam', 'Storm',
-  'Terraform', 'Ansible', 'Pulumi', 'Crossplane', 'Helm',
-  'dbt', 'Postgres', 'Redis', 'MongoDB', 'Elasticsearch', 'ClickHouse',
-  'Docker', 'Kubernetes', 'Nomad', 'Consul', 'Vault',
-  'TimesFM', 'PyTorch', 'TensorFlow', 'LangChain', 'LangGraph', 'Ollama',
+  'ETL', 'ELT', 'JVM', 'WASM', 'K8s',
+  'Kafka', 'Flink', 'Spark', 'Airflow', 
+   'Postgres', 'Redis', 'MongoDB', 'Elasticsearch', 'ClickHouse',
+  'Docker', 'Kubernetes', 'PyTorch', 'TensorFlow', 'LangChain', 'LangGraph', 'Ollama',
   'Anthropic',
 ]);
 
@@ -637,6 +635,7 @@ export function extractGlossaryLocal(
   const scored = [...merged.values()]
     .map((term) => ({ term, score: scoreTerm(term, fullText) }))
     .filter((s) => !isGenericNoise(s.term))
+    .filter((s) => !isSentenceStartMisident(s.term, fullText))
     .sort((a, b) => b.score - a.score);
 
   const finalTerms = scored.slice(0, MAX_GLOSSARY_TERMS).map((s) => s.term);
@@ -679,6 +678,90 @@ function isGenericNoise(term: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Compromise 经常把"句首大写"的普通词识别为 proper noun：
+ * "Boost the cash flow" → "Boost" 进入 candidates
+ * "Forecast says ..." → "Forecast" 进入 candidates
+ * "Soars in 2026" → "Soars" 进入 candidates
+ * "Tech companies ..." → "Tech" 进入 candidates
+ *
+ * 这些词应该被翻译成中文（"提升"/"预测"/"飙升"/"科技"），但被
+ * compromise 当成命名实体，污染了 glossary，最终导致模型把它们所在
+ * 的整段回传为 no-op 翻译。
+ *
+ * 修复策略：单 capitalized 普通词（Boost/Forecast/Soars/Cash/Tech）
+ * 出现在句首 + 不在白名单 + 出现次数 ≤ 1 → 当句首误识丢弃。
+ *
+ * 已知品牌（Anthropic/Microsoft/Google/Apple/...）即使在句首也保留。
+ * 它们的 frequency 一般 ≥ 2 或命中下面白名单。
+ *
+ * 多词短语（"Goldman Sachs Research"）不受影响 — `term.includes(' ')`
+ * 直接 return false 走绿色通道。
+ */
+const KNOWN_BRANDS_AT_SENTENCE_START = new Set([
+  // Tech
+  'Anthropic', 'Microsoft', 'Google', 'Apple', 'Amazon', 'Meta', 'Tesla',
+  'Nvidia', 'Intel', 'Oracle', 'IBM', 'Adobe', 'Salesforce', 'Netflix',
+  'Spotify', 'Uber', 'Airbnb', 'Twitter', 'Facebook', 'Linkedin',
+  // AI companies / products
+  'Openai', 'Deepseek', 'Claude', 'Gemini', 'Copilot', 'Cursor',
+  // Frameworks
+  'React', 'Vue', 'Angular', 'Svelte', 'Django', 'Flask', 'Rails',
+  'Laravel', 'Symfony', 'Fastapi', 'Express', 'Koa', 'Nestjs',
+  'Spring', 'Hibernate', 'Tomcat', 'Webpack', 'Vite', 'Rollup',
+  'Babel', 'Eslint', 'Prettier', 'Jest', 'Mocha', 'Cypress', 'Playwright',
+  'Puppeteer', 'Selenium',
+  // Cloud / infra
+  'Docker', 'Kubernetes', 'Postgres', 'Postgresql', 'Mysql', 'Redis',
+  'Mongodb', 'Elasticsearch', 'Kafka', 'Rabbitmq', 'Nginx', 'Apache',
+  'Terraform', 'Pulumi', 'Ansible', 'Puppet', 'Chef', 'Vagrant',
+  // Tools
+  'Github', 'Gitlab', 'Bitbucket', 'Jenkins', 'Circleci', 'Travis',
+  'Datadog', 'Splunk', 'Pagerduty', 'Opsgenie',
+  // 人物
+  'Goldman', 'Sachs', 'Morgan', 'Stanley', 'Jpmorgan', 'Citigroup',
+  'Schneider', 'Schroeder', 'Pichai', 'Nadella', 'Altman',
+  // 中文网站中常见的英文专名
+  'Asml', 'Tsmc', 'Samsung', 'Huawei', 'Tencent', 'Alibaba', 'Bytedance',
+  'Baidu', 'Xiaomi',
+  // 其他常见专名
+  'S&P', 'Nasdaq', 'Nyse',
+]);
+
+function isSentenceStartMisident(term: string, fullText: string): boolean {
+  // 只针对"单 capitalized 词"
+  if (term.includes(' ')) return false;
+  if (!/^[A-Z][a-z]+$/.test(term)) return false;
+
+  // 已知品牌豁免
+  if (KNOWN_BRANDS_AT_SENTENCE_START.has(term)) return false;
+  if (KNOWN_BRANDS_AT_SENTENCE_START.has(term.toLowerCase())) return false;
+  if (TECH_ANCHORS_LOWER.has(term.toLowerCase())) return false;
+  if (TECH_PRODUCTS.has(term)) return false;
+  if (TECH_PRODUCTS.has(term.toLowerCase())) return false;
+  if (KNOWN_PUBLICATIONS.has(term.toLowerCase())) return false;
+
+  // 检查 term 是否出现在句首 + 出现次数 <= 1（首次即句首）
+  // 全词匹配，统计位置和次数
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matchRe = new RegExp(
+    `\\b${escaped}\\b`,
+    'g',
+  );
+  const matches = fullText.match(matchRe) || [];
+
+  if (matches.length >= 2) {
+    // 出现 ≥ 2 次 → 大概率不是误识
+    return false;
+  }
+
+  // 出现 ≤ 1 次，且这个 1 次正好在句首
+  const sentenceStartRe = new RegExp(
+    `(^|[.!?\\n]\\s*|\\A\\s*)${escaped}(?=\\s|$|[,;:])`,
+  );
+  return sentenceStartRe.test(fullText);
 }
 
 function isPhraseSubsuming(kept: string, term: string): boolean {
