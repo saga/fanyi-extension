@@ -4165,6 +4165,191 @@ describe('extractBlocks - Rating, polling and voting widgets', () => {
   });
 });
 
+describe('extractBlocks - Article <header> with h1/h2 (aleksagordic style)', () => {
+  // Bug fix: 之前 <header> 整棵子树被连坐拒绝，
+  // 导致文章页面的 h1 标题和 h2 副标题永远抓不到。
+  // 修复: 含 h1-h6 的 <header> 改为 FILTER_SKIP（跳过自身但走子树），
+  //       不含的（典型 nav / 顶部 chrome）仍然整棵拒绝。
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('extracts h1 and h2 inside an article <header>', () => {
+    setupHTML(`
+      <article>
+        <header class="mb-8">
+          <h1 class="font-bold text-3xl mb-4">Inside the Transformer: The Life of a Token</h1>
+          <h2 class="text-xl mb-3 mt-6">A deep dive into a modern dense transformer</h2>
+        </header>
+        <p>First paragraph of the article body here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const tagList = blocks.map(b => b.tag);
+    const texts = blocks.map(b => b.text);
+
+    expect(tagList).toContain('h1');
+    expect(tagList).toContain('h2');
+    expect(texts.some(t => t.includes('Inside the Transformer'))).toBe(true);
+    expect(texts.some(t => t.includes('deep dive into a modern'))).toBe(true);
+  });
+
+  it('still rejects chrome <header> (navbar) without headings', () => {
+    setupHTML(`
+      <header class="site-header">
+        <nav>
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/blog">Blog</a>
+        </nav>
+      </header>
+      <main>
+        <p>Real article body content for translation testing.</p>
+      </main>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    // nav links 不应该被翻译
+    expect(texts.some(t => t.includes('Home'))).toBe(false);
+    expect(texts.some(t => t.includes('About'))).toBe(false);
+    expect(texts).toContain('Real article body content for translation testing.');
+  });
+
+  it('extracts h1 from blog post header (h1 only, not meta p)', () => {
+    setupHTML(`
+      <article>
+        <header>
+          <h1>My Blog Post Title</h1>
+          <p class="meta">By John Doe on May 26, 2026</p>
+        </header>
+        <p>Article body content goes here for translation.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const tagList = blocks.map(b => b.tag);
+    const texts = blocks.map(b => b.text);
+
+    // h1 进去
+    expect(tagList).toContain('h1');
+    expect(texts.some(t => t.includes('My Blog Post Title'))).toBe(true);
+    // article body p 进去
+    expect(texts).toContain('Article body content goes here for translation.');
+    // meta p（作者 / 日期）被 isMetadataClass 跳过，保留原文
+    expect(texts.some(t => t.includes('By John Doe'))).toBe(false);
+  });
+});
+
+describe('extractBlocks - Metadata class skipping (author/date/category)', () => {
+  // 文章元数据容器（class 含 meta/author/byline/category/dateline）
+  // 整棵子树拒绝，避免误翻人名 / 日期 / 分类。
+  // 用整词分割匹配（split on [_\-\s]），不会误伤 class="metadata-block" 这种。
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('skips post-meta with author and date', () => {
+    setupHTML(`
+      <article>
+        <p class="post-meta">By John Doe on May 26, 2026 in Tech</p>
+        <p>Real article body text for translation testing.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts.some(t => t.includes('By John Doe'))).toBe(false);
+    expect(texts.some(t => t.includes('May 26, 2026'))).toBe(false);
+    expect(texts).toContain('Real article body text for translation testing.');
+  });
+
+  it('skips author-bio block', () => {
+    setupHTML(`
+      <div>
+        <p>First paragraph of article body here.</p>
+        <div class="author-bio">
+          <p>Written by Jane Smith, Senior Engineer at Acme Corp.</p>
+        </div>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('First paragraph of article body here.');
+    expect(texts.some(t => t.includes('Jane Smith'))).toBe(false);
+    expect(texts.some(t => t.includes('Senior Engineer'))).toBe(false);
+  });
+
+  it('skips post-categories list', () => {
+    setupHTML(`
+      <article>
+        <p>Real article content for the reader here.</p>
+        <ul class="post-categories">
+          <li>Tech</li>
+          <li>AI</li>
+          <li>Engineering</li>
+        </ul>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('Real article content for the reader here.');
+    // 分类列表里 li 不应被翻译
+    expect(texts.some(t => t === 'Tech' || t === 'AI' || t === 'Engineering')).toBe(false);
+  });
+
+  it('does NOT skip class="metadata-block" (false positive guard)', () => {
+    // "metadata" 整词不在 set 里（set 是 "meta"），整词分割后 metadata 不命中
+    // → 这类合法内容容器应当被翻译
+    setupHTML(`
+      <div>
+        <p>Content block that is just metadata-ish but real prose.</p>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('Content block that is just metadata-ish but real prose.');
+  });
+
+  it('does NOT skip class="authorship" (false positive guard)', () => {
+    // "authorship" 整词不在 set 里（set 是 "author"），不会被误伤
+    setupHTML(`
+      <section>
+        <p>Discussion of authorship in modern publishing here.</p>
+      </section>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('Discussion of authorship in modern publishing here.');
+  });
+
+  it('handles complex class with multiple tokens including meta', () => {
+    setupHTML(`
+      <article>
+        <p>Real prose content body for translation testing.</p>
+        <p class="entry-header meta-info">By Author Name, Posted 2 Days Ago</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('Real prose content body for translation testing.');
+    expect(texts.some(t => t.includes('Author Name'))).toBe(false);
+  });
+});
+
 describe('extractBlocks - Exit intent and welcome popups', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

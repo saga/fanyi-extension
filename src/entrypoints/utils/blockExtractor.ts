@@ -207,6 +207,39 @@ function shouldSkipByClass(el: Element): boolean {
 }
 
 /**
+ * 文章 header 内的元数据容器: 作者、日期、分类、tag 列表
+ * （典型 class: `post-meta` / `entry-meta` / `article-meta` /
+ * `author-bio` / `byline` / `post-categories` / `category-list`）
+ *
+ * 这类容器的内容（"By John Doe" / "May 26, 2026" / "Tech"）是页面元数据，
+ * 不是正文。强行翻译会:
+ *   1. 翻错人名（"John Doe" → "约翰·多伊"，用户不习惯）
+ *   2. 翻错日期格式（"May 26" → "5月26日"，但站点可能就是英文日期）
+ *   3. 把分类标签翻成中文破坏 SEO / 标签云
+ *
+ * 用整词分割匹配（split on [_\-\s]）而不是子串，避免误伤:
+ *   - `class="metadata-block"` → 分割后 `metadata` 不在 set 里 ✓ 保留
+ *   - `class="author-bio"` → `author` 在 set 里 ✓ 跳过
+ *   - `class="post-meta-info"` → `meta` 在 set 里 ✓ 跳过
+ */
+const METADATA_CLASS_TOKENS = new Set([
+  'meta',           // post-meta, entry-meta, article-meta, meta-info
+  'author',         // author-name, author-bio, post-author
+  'byline',         // byline, entry-byline
+  'category',       // post-category, category-link
+  'categories',     // post-categories, categories-list (与 SKIP_CLASS_PATTERNS 重复但更宽松)
+  'dateline',       // article-dateline
+]);
+
+function isMetadataClass(el: Element): boolean {
+  if (!el.className || typeof el.className !== 'string') return false;
+  const className = el.className.toLowerCase();
+  // 整词分割: 把 "post-meta-info" 拆成 ["post", "meta", "info"]
+  const tokens = className.split(/[\s_\-]+/);
+  return tokens.some((token) => METADATA_CLASS_TOKENS.has(token));
+}
+
+/**
  * 一些站点把噪声包在非 DIRECT_SET 的容器里（典型：<ul class="social-icon-list">
  *   <li>Copy link</li>...</ul>）。TreeWalker 走到 <li> 时
  * shouldSkipByClass() 看的是 <li> 自身 class（没有），会误放过 li。
@@ -553,8 +586,33 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
 
+  if (isMetadataClass(el)) {
+    // 文章元数据（作者 / 日期 / 分类 / byline）整棵子树拒绝，
+    // 避免误翻人名 / 日期格式 / 分类标签。
+    rejectedCache.add(el);
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
+  if (tag === 'header') {
+    // 文章页面的 <header> 通常是真实内容（标题、副标题、作者、日期、分类），
+    // 不能整棵子树拒绝。
+    // 但页面 chrome（navbar / site-header）也是 <header>，仍然要拒。
+    //
+    // 区分: 含 h1-h6 的 <header> 当作文章 header → 跳过自身但继续走子树
+    //        不含的（典型 nav / 顶部 chrome）→ 整棵拒绝
+    const hasHeading = el.querySelector('h1, h2, h3, h4, h5, h6') !== null;
+    if (hasHeading) {
+      counters.skipped++;
+      return NodeFilter.FILTER_SKIP;
+    }
+    rejectedCache.add(el);
+    counters.skipped++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
   if (SEMANTIC_SKIP_TAGS.has(tag)) {
-    // 语义噪声容器（header/footer/nav）整棵子树全部丢弃
+    // 其他语义噪声容器（footer / aside / nav）整棵子树全部丢弃
     rejectedCache.add(el);
     counters.skipped++;
     return NodeFilter.FILTER_REJECT;
