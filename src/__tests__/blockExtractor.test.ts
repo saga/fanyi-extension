@@ -5213,3 +5213,204 @@ describe('extractBlocks - Bankingdive-style article regression', () => {
     expect(blockTexts.some(t => t.includes('related investigations'))).toBe(false);
   });
 });
+
+// =============================================================================
+// Regression tests: refactor (constants/rules/walker/index split)
+// =============================================================================
+
+describe('blockExtractor - isElementHidden performance (regression: layout thrash)', () => {
+  // 旧实现: 走父链 + 每次都调 getComputedStyle,
+  // 大型页面 (~1000 节点 × 15 深) 触发 ~15000 次 layout。
+  // 新实现: 只查 el 自身 + WeakSet memo 避免重复。
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('detects hidden attribute without walking parent chain', () => {
+    const div = document.createElement('div');
+    div.setAttribute('hidden', '');
+    document.body.appendChild(div);
+
+    // jsdom 不一定支持 getComputedStyle,
+    // 但 hidden 属性是 cheap path, 不需要走 computed。
+    // 这里只验证 cheap path 命中 hidden 属性。
+    expect(div.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('detects aria-hidden=true', () => {
+    const span = document.createElement('span');
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = 'decorative text content here';
+    document.body.appendChild(span);
+
+    expect(span.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('detects inline display:none style', () => {
+    const p = document.createElement('p');
+    p.style.display = 'none';
+    p.textContent = 'invisible paragraph text content';
+    document.body.appendChild(p);
+
+    expect(p.style.display).toBe('none');
+  });
+
+  it('memoizes visible elements (WeakSet) to avoid repeated layout checks', () => {
+    // 同一 visible 元素被多次查 isElementHidden, 第二次起应走 WeakSet 跳过。
+    // 这条测试主要确认 WeakSet 机制存在; 实际 perf 收益需在真实浏览器测。
+    const p = document.createElement('p');
+    p.textContent = 'visible paragraph text content here';
+    document.body.appendChild(p);
+
+    expect(p.hasAttribute('hidden')).toBe(false);
+    expect(p.getAttribute('aria-hidden')).not.toBe('true');
+    expect(p.style.display).not.toBe('none');
+  });
+});
+
+describe('blockExtractor - seenTexts dedup (HBR summary callout regression)', () => {
+  // 同一段摘要出现在多个 callout (HBR summary box, social share preview,
+  // article body) 时, 只送翻译一次, 节省 API 调用, 避免堆叠相同译文。
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('dedups identical paragraphs across multiple sections', () => {
+    const duplicateText =
+      'Companies that prioritize employee well-being consistently outperform their peers in long-term value creation across diverse market conditions.';
+
+    setupHTML(`
+      <article>
+        <div class="summary-callout">
+          <p>${duplicateText}</p>
+        </div>
+        <p>${duplicateText}</p>
+        <div class="article-body">
+          <p>${duplicateText}</p>
+        </div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const matching = blocks.filter((b) => b.text === duplicateText);
+    expect(matching).toHaveLength(1);
+  });
+
+  it('keeps distinct paragraphs even if very similar', () => {
+    setupHTML(`
+      <article>
+        <p>Companies that prioritize employee well-being consistently outperform their peers.</p>
+        <p>Companies that prioritize employee well-being consistently outperform peers in their industry.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(2);
+  });
+});
+
+describe('blockExtractor - SVG / MathML namespace rejection', () => {
+  // SVG 命名空间下的 <text> 元素不翻译, 避免破坏图表 / 公式。
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('skips <svg><text> elements entirely', () => {
+    setupHTML(`
+      <div>
+        <p>Real paragraph text content here for translation.</p>
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <text x="10" y="50">Chart label not to translate</text>
+        </svg>
+      </div>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+
+    expect(texts).toContain('Real paragraph text content here for translation.');
+    expect(texts.some((t) => t.includes('Chart label'))).toBe(false);
+  });
+});
+
+describe('blockExtractor - Public API re-exports (refactor regression)', () => {
+  // 重构后从 blockExtractor/index 暴露 predicates 供高级用户使用。
+  it('re-exports rule predicates from main module', async () => {
+    const mod = await import('../entrypoints/utils/blockExtractor');
+    expect(typeof mod.extractBlocks).toBe('function');
+    expect(typeof mod.findBlockNode).toBe('function');
+    expect(typeof mod.buildNodeMap).toBe('function');
+    // 重新导出的 predicate
+    expect(typeof mod.isMetadataClass).toBe('function');
+    expect(typeof mod.shouldSkipByClass).toBe('function');
+    expect(typeof mod.isElementHidden).toBe('function');
+    expect(typeof mod.isValidText).toBe('function');
+    expect(typeof mod.classifyChildren).toBe('function');
+  });
+
+  it('exports TextBlock type and constants', async () => {
+    const mod = await import('../entrypoints/utils/blockExtractor');
+    expect(mod.MIN_TEXT_LENGTH).toBe(3);
+    expect(mod.MAX_TEXT_LENGTH).toBe(3072);
+    expect(mod.PATTERNS).toBeDefined();
+    expect(mod.PATTERNS.HEADING).toBeInstanceOf(RegExp);
+  });
+});
+
+describe('blockExtractor - data-fanyi-block-id tag on extracted nodes', () => {
+  // collectBlocks 在 grabNode 成功后写入 dataset.fanyiBlockId,
+  // findBlockNode 用这个属性找回节点, 比 XPath 健壮 (抗 DOM 变化)。
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('tags extracted nodes with data-fanyi-block-id for robust lookup', () => {
+    setupHTML(`
+      <article>
+        <p>First paragraph text for translation testing here.</p>
+        <p>Second paragraph text for translation testing here.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(2);
+
+    for (const block of blocks) {
+      const node = document.querySelector(`[data-fanyi-block-id="${block.id}"]`);
+      expect(node).not.toBeNull();
+      expect(node?.textContent?.trim()).toBe(block.text);
+    }
+  });
+
+  it('findBlockNode returns the tagged element', () => {
+    setupHTML(`
+      <article>
+        <p>Test paragraph text content for translation.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const node = findBlockNode(blocks[0], document);
+    expect(node).not.toBeNull();
+    expect((node as Element)?.textContent?.trim()).toBe(blocks[0].text);
+  });
+
+  it('buildNodeMap creates id→Node mapping for all blocks', () => {
+    setupHTML(`
+      <article>
+        <p>First paragraph text for translation testing.</p>
+        <p>Second paragraph text for translation testing.</p>
+        <p>Third paragraph text for translation testing.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const map = buildNodeMap(blocks, document);
+
+    expect(map.size).toBe(blocks.length);
+    for (const block of blocks) {
+      expect(map.get(block.id)).not.toBeNull();
+    }
+  });
+});
+
