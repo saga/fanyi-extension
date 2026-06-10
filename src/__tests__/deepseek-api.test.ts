@@ -63,7 +63,31 @@ describe('DeepSeekTranslationService API methods', () => {
       const fetchCall = globalFetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
       expect(body.messages[0].content).toContain('React');
-      expect(body.messages[0].content).toContain('Required translations:');
+      expect(body.messages[0].content).toContain('Preserve only proper nouns and named entities.');
+      expect(body.messages[0].content).toContain('This page mentions:');
+    });
+
+    it('omits Named entities section when glossary is empty', async () => {
+      const mockResponse = {
+        ok: true,
+        status: 200,
+        headers: new Map(),
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          choices: [{ message: { content: '{"translations":[]}' } }],
+        })),
+      };
+      globalFetch.mockResolvedValue(mockResponse);
+
+      await service.translate(
+        JSON.stringify([{ id: 'b1', text: 'hello' }]),
+        'en',
+        'zh',
+        { document_terms: [] }
+      );
+
+      const fetchCall = globalFetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.messages[0].content).not.toContain('Preserve only proper nouns and named entities.');
     });
 
     it('should handle HTTP 401 error', async () => {

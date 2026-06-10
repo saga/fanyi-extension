@@ -336,6 +336,33 @@ export default defineBackground({
 
         const result = processTranslationResult(finalContent);
 
+        // [StreamTrace] 诊断：把模型返回的前 3 条译文贴出来，确认是否 no-op
+        try {
+          const parsed = JSON.parse(finalContent);
+          const translations = parsed.translations || parsed;
+          if (Array.isArray(translations)) {
+            const streamInputIds = (() => {
+              try { return (JSON.parse(message.jsonContent) as Array<{ id: string; text: string }>).map((b) => b); }
+              catch { return []; }
+            })();
+            const sample = translations.slice(0, 3).map((t: { id?: string; translated_text?: string }) => ({
+              id: t.id,
+              text: typeof t.translated_text === 'string' ? t.translated_text.substring(0, 80) : 'N/A',
+            }));
+            const noOpCount = translations.filter((t: { translated_text?: string }, i: number) => {
+              const inputBlock = streamInputIds[i];
+              return inputBlock && t.translated_text === inputBlock.text;
+            }).length;
+            console.log(
+              '[Background][StreamTrace] sample=',
+              JSON.stringify(sample),
+              `noOpCount=${noOpCount}/${translations.length}`,
+            );
+          }
+        } catch {
+          /* 不是有效 JSON 时下面的 processTranslationResult 会抛 */
+        }
+
         sendResponse({ success: true, result: Array.from(result.entries()) });
       } catch (error) {
         console.error('[Background] translateChunkStream error:', error);

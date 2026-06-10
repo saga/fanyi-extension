@@ -65,16 +65,27 @@ function buildSystemContent(
 
 1. Return {"translations":[{"id":"x","translated_text":"y"}]}. One entry per input block, same ids.
 2. For translatable text, provide a translation. Never return empty string or placeholder.
-3. Keep URLs, code, version numbers, and protected terms unchanged. Translate everything else.
+3. Keep URLs, code, and version numbers unchanged. Translate everything else.
 4. Treat every block as independent — do not skip, summarize, merge, or reorder any block.`;
 
   const docTerms = glossary?.document_terms;
   if (docTerms && docTerms.length > 0) {
     // 排序固定 → token 序列稳定 → DeepSeek KV cache 公共前缀命中。
-    // "Required translations:" 格式用 = 替代 => ，模型解析更精准。
+    // 没有 glossary → 不写这段，免得空 Examples 占 token。
     const sorted = [...docTerms].sort();
-    systemContent += '\n\nRequired translations:\n' +
-      sorted.map((t) => `${t} = ${t}`).join('\n');
+    systemContent += `
+
+Preserve only proper nouns and named entities. Examples:
+- company names
+- organization names
+- product names
+- service names
+- trademarks
+
+This page mentions:
+${sorted.join('\n')}
+
+Translate all ordinary English words and phrases normally.`;
   }
 
   if (sitePrompt) {
