@@ -22,6 +22,7 @@ const defaultConfig: Config = {
   targetLang: 'zh',
   mode: 'bilingual',
   deepseekApiKey: '',
+  apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',

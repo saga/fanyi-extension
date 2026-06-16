@@ -20,6 +20,17 @@
         <span v-else-if="apiStatus === 'fail'" class="status-text error">未配置或无效</span>
       </div>
 
+      <div class="input-item">
+        <label>API 端点 URL (兼容 OpenAI 协议)</label>
+        <input
+          type="text"
+          v-model="config.apiBaseUrl"
+          placeholder="https://api.deepseek.com/v1/chat/completions"
+          @input="onApiBaseUrlChange"
+        />
+        <span class="hint-text">留空 = 默认 DeepSeek。可填 OpenAI / 自建代理 (Ollama 等)。</span>
+      </div>
+
       <div class="select-item">
         <label>源语言</label>
         <select v-model="config.sourceLang" @change="saveConfig">
@@ -74,11 +85,19 @@ const config = ref<Config>({
   targetLang: 'zh',
   mode: 'bilingual',
   deepseekApiKey: '',
+  apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
+  shortcuts: {
+    translatePage: 'Alt+T',
+    translateSelection: 'Alt+S',
+    restoreOriginal: 'Alt+R',
+    toggleTranslation: 'Alt+V',
+  },
   touchGesture: 'TripleTap',
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
 let checkTimer: number | null = null;
+let urlTimer: number | null = null;
 
 onMounted(async () => {
   config.value = await getConfig();
@@ -96,6 +115,19 @@ function onApiKeyChange() {
     saveConfig();
     checkApiKey();
   }, 800);
+}
+
+function onApiBaseUrlChange() {
+  // 改 URL 后不需要重新验证 (验证是 round-trip + 看响应),
+  // 只持久化即可。下次翻译请求会读新 URL。
+  if (urlTimer) clearTimeout(urlTimer);
+  urlTimer = window.setTimeout(() => {
+    // 用户清空 → 恢复默认 URL, 不要存空字符串 (否则 UI 再次打开会显示空)。
+    if (!config.value.apiBaseUrl?.trim()) {
+      config.value.apiBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
+    }
+    saveConfig();
+  }, 400);
 }
 
 async function checkApiKey() {
@@ -268,9 +300,16 @@ h2 {
 
 .status-text {
   font-size: 12px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .status-text.checking { color: #909399; }
 .status-text.success { color: #67c23a; }
 .status-text.error { color: #f56c6c; }
+
+.hint-text {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+  line-height: 1.4;
+}
 </style>

@@ -70,13 +70,53 @@ export const DIRECT_SET: ReadonlySet<string> = new Set(DIRECT_SET_RAW);
 /**
  * SKIP_SET: 命中后**自身**永远不翻译,整棵子树拒绝。
  * 这些是结构性 / 交互性元素,翻译无意义或会破坏功能。
+ *
+ * 📋 表格元素 (<td> <th> <caption> <dt>) 故意保留在 SKIP_SET:
+ *   - 代码表 / 数据表 (Wikipedia GDP 对比、Wikipedia 年度统计) 现阶段不翻,
+ *     原因: 模型对数字/单位/年份的翻译一致性差,容易把 "10,000" 翻成 "一万"
+ *     或把 "Q1" 翻成 "第一季度" 破坏对照阅读。
+ *   - 未来如需支持, 应在 rules.ts 加 isDataTable() 判定 (table role / 数字密度
+ *     / 单元格 <a> 比例) 再单独放行, 而不是粗暴地全翻。
+ *   - 相关: <pre> <code> 也保留在 SKIP_SET, 防止代码块被强行翻译破坏语法。
+ *
+ * 📋 表单元素 (<label> <legend> <option> <optgroup> <form> <fieldset>) 故意**不**
+ *    列入 SKIP_SET: 它们是用户可见文本,应让 walker 抓取翻译。fall through 到
+ *    默认分类后, <label>Email</label> 会被当作纯文本节点接受, <form><p>...</p>
+ *    </form> 会被当作容器让子树通过。
+ *
+ * 📋 媒体元素 (<video> <audio> <picture> <source>) 列入 SKIP_SET: 控件/轨道
+ *    都是用户态而非正文, 早 reject 节省 walker 工作。
  */
 const SKIP_SET_RAW = [
-  'html', 'body',                        // 根容器
-  'script', 'style', 'noscript', 'iframe',  // 脚本 / 样式 / 嵌入页
-  'input', 'textarea', 'select', 'button',  // 表单控件
-  'code', 'pre',                         // 代码块
-  'dt', 'td', 'th', 'caption',           // 表格相关
+  // --- 根 / 文档元信息 (HEAD 子树通常不被 walker 访问, 防御性列出) ---
+  'html', 'head', 'body', 'title', 'meta', 'link', 'base',
+
+  // --- 脚本 / 样式 / 嵌入页 ---
+  'script', 'style', 'noscript', 'iframe', 'template', 'slot',
+
+  // --- 嵌入内容 (类似 iframe, 整棵子树不应被翻译) ---
+  'embed', 'object', 'param',
+
+  // --- 媒体播放器 (控件/字幕等是用户态, 不是正文) ---
+  'video', 'audio', 'track', 'source', 'picture',
+
+  // --- 图片地图 ---
+  'map', 'area',
+
+  // --- 表单: 仅保留真正无文本的纯输入控件, 其它(可见文本)应翻译 ---
+  //   - input/textarea: value 是用户输入, 不是 DOM 文本节点
+  //   - select/button: 内的 <option>/文字 是用户可见 UI, 应翻译
+  //   - datalist/output/meter/progress: 同上, 文本可能可翻
+  'input', 'textarea',
+
+  // --- 代码 (保留原文, 不破坏语法) ---
+  'code', 'pre', 'kbd', 'samp', 'var', 'tt',
+
+  // --- 表格相关 (代码表 / 数据表, 现阶段不翻, 见上面注释) ---
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption',
+  'col', 'colgroup', 'dt',
+  // 注意: <dd> 故意不在此, 它在 DIRECT_SET 里, 要翻译定义描述 (description)。
+  // 注意: <hgroup> 故意不在此, 见 walker.ts 的"其他容器"分支: 子 h1-h6 应翻译。
 ];
 export const SKIP_SET: ReadonlySet<string> = new Set(SKIP_SET_RAW);
 
@@ -88,17 +128,39 @@ export const SKIP_SET: ReadonlySet<string> = new Set(SKIP_SET_RAW);
  *    - 含 h1-h6 → 跳过自身,走子树 (文章 header,标题要翻)
  *    - 不含     → 整棵拒绝 (navbar / site-header)
  */
-const SEMANTIC_SKIP_TAGS_RAW = ['header', 'footer', 'aside', 'nav'];
+const SEMANTIC_SKIP_TAGS_RAW = [
+  'header',  // ⚠️ 单独处理,见 walker.ts
+  'footer', 'aside', 'nav',
+  'search',  // <search>: 搜索区域,语义上的 nav 兄弟
+  'dialog',  // <dialog>: 模态弹窗, 类似 cookie banner
+  'address', // <address>: 联系人信息, 类比 byline 不翻
+];
 export const SEMANTIC_SKIP_TAGS: ReadonlySet<string> = new Set(SEMANTIC_SKIP_TAGS_RAW);
 
 /**
  * INLINE_SET: 命中后根据上下文决定: 若在 article 内且无块级父 → 作为翻译块;
  * 否则跳过 (避免内联元素被独立抓出导致句子碎片化)。
+ *
+ * 按 MDN [inline text semantics](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements#inline_text_semantics)
+ * + [demarcating edits](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements#demarcating_edits)
+ * 分类补全, 兼顾 obsolete 元素 (<font> <tt>) 兼容老站。
  */
 const INLINE_SET_RAW = [
-  'a', 'b', 'strong', 'span', 'em', 'i', 'u', 'small', 'sub', 'sup',
-  'font', 'mark', 'cite', 'q', 'abbr', 'time', 'ruby', 'bdi', 'bdo',
-  'img', 'br', 'wbr', 'svg',
+  // --- Inline text semantics (MDN 标准列表) ---
+  'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'dfn',
+  'em', 'i', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong',
+  'sub', 'sup', 'time', 'u', 'var', 'wbr',
+  // ruby 注音 (东亚语言常用): rb/rt/rp 是 ruby 的子元素, 整体让 walker 抓
+  'ruby', 'rb', 'rt', 'rp',
+
+  // --- Demarcating edits (MDN: <del> <ins>) ---
+  'del', 'ins',
+
+  // --- Obsolete 但仍有站用 ---
+  'font', 'tt', 'big', 'strike',
+
+  // --- 媒体占位 (无文本, 但如果被独立抓也安全) ---
+  'img',
 ];
 export const INLINE_SET: ReadonlySet<string> = new Set(INLINE_SET_RAW);
 

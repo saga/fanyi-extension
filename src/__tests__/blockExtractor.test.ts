@@ -203,17 +203,32 @@ describe('extractBlocks - Skip Elements', () => {
     expect(blocks[0].tag).toBe('p');
   });
 
-  it('should skip form elements', () => {
+  it('should skip form input elements (input/textarea have no DOM text)', () => {
     setupHTML(`
       <input type="text" value="Input value" />
       <textarea>Textarea content here.</textarea>
-      <button>Click me button text.</button>
-      <select><option>Option text here.</option></select>
       <p>Normal paragraph content here.</p>
     `);
 
     const blocks = extractBlocks(document);
     expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toBe('Normal paragraph content here.');
+  });
+
+  it('should translate button and option text (visible UI labels)', () => {
+    setupHTML(`
+      <button>Submit button text content</button>
+      <select>
+        <option>First option text content</option>
+        <option>Second option text content</option>
+      </select>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Submit button text content');
+    expect(texts).toContain('First option text content');
+    expect(texts).toContain('Second option text content');
   });
 
   it('should skip iframe tags', () => {
@@ -5413,4 +5428,282 @@ describe('blockExtractor - data-fanyi-block-id tag on extracted nodes', () => {
     }
   });
 });
+
+// =============================================================================
+// MDN coverage regression tests
+// (验证 constants.ts 补全后的行为: 新加的 <search> <dialog> <address> <hgroup>
+//  <del> <ins> <kbd> <samp> <var> <data> <s> <dfn> <ruby> 元素按预期分类)
+// =============================================================================
+
+describe('blockExtractor - MDN coverage: SEMANTIC_SKIP_TAGS additions', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('skips entire <dialog> subtree (modal, like cookie banner)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <dialog open>
+          <p>This dialog body text should not be translated.</p>
+          <button>OK</button>
+        </dialog>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    expect(texts.some((t) => t.includes('dialog body text'))).toBe(false);
+    expect(texts).not.toContain('OK');
+  });
+
+  it('skips entire <search> subtree (search region, semantic nav)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <search>
+          <p>Search the website for related content here.</p>
+        </search>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    expect(texts.some((t) => t.includes('Search the website'))).toBe(false);
+  });
+
+  it('skips entire <address> subtree (contact info, byline analog)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <address>
+          Contact: John Doe, john@example.com, San Francisco
+        </address>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    expect(texts.some((t) => t.includes('Contact: John Doe'))).toBe(false);
+  });
+});
+
+describe('blockExtractor - MDN coverage: SKIP_SET additions (media / embed)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('skips <video> and its <track> subtitles', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <video controls>
+          <source src="movie.mp4" type="video/mp4">
+          <track src="subs_en.vtt" kind="subtitles" srclang="en">
+          Your browser does not support video.
+        </video>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    expect(texts.some((t) => t.includes('Your browser does not support video'))).toBe(false);
+  });
+
+  it('skips <embed> and <object> (similar to iframe)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <embed src="plugin.swf" type="application/x-shockwave-flash">
+        <object data="external.html">
+          <p>This is fallback text inside object element.</p>
+        </object>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    expect(texts.some((t) => t.includes('fallback text inside object'))).toBe(false);
+  });
+
+  it('skips <template> placeholder content (avoid grabbing ghost text)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <template id="tpl">
+          <p>Template ghost text that should not be extracted.</p>
+        </template>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    expect(texts.some((t) => t.includes('Template ghost text'))).toBe(false);
+  });
+});
+
+describe('blockExtractor - MDN coverage: <hgroup> allows inner headings', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('skips <hgroup> wrapper but still extracts inner <h1>', () => {
+    setupHTML(`
+      <article>
+        <hgroup>
+          <h1>Article Main Title Text For Translation</h1>
+          <h2>Subtitle of the article goes here today</h2>
+        </hgroup>
+        <p>Real article body paragraph text for translation testing.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Article Main Title Text For Translation');
+    expect(texts).toContain('Subtitle of the article goes here today');
+    expect(texts).toContain('Real article body paragraph text for translation testing.');
+  });
+});
+
+describe('blockExtractor - MDN coverage: demarcating edits inline', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('treats <del> and <ins> as inline (translated via parent block)', () => {
+    setupHTML(`
+      <article>
+        <p>The price is <del>twenty dollars</del> <ins>ten dollars</ins> for this item today.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].text).toContain('twenty dollars');
+    expect(blocks[0].text).toContain('ten dollars');
+  });
+});
+
+describe('blockExtractor - MDN coverage: code preservation (regression)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('does not translate <kbd>, <samp>, <var>, <code> standalone', () => {
+    // 验证: 单纯 <kbd>Ctrl+C</kbd> 不应被独立抓出 (会作为内联不被接受)
+    // 但在 paragraph 中, 整段仍被 paragraph 抓
+    setupHTML(`
+      <article>
+        <p>Press <kbd>Ctrl+C</kbd> to copy text in this application.</p>
+        <p>The variable <var>count</var> stores the total number of items.</p>
+        <p>Output: <samp>File not found error in current directory.</samp></p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks.length).toBe(3);
+    for (const block of blocks) {
+      // 不应单独抓 kbd/var/samp, 应作为整段 paragraph
+      expect(block.tag).toBe('p');
+    }
+  });
+
+  it('preserves <code> and <pre> as invisible to translation', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <p>Use the function <code>getUserById(id)</code> to fetch the user data.</p>
+        <pre>function foo() { return 42; }</pre>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    // pre 整段不应被抓
+    expect(texts.some((t) => t.includes('function foo()'))).toBe(false);
+    // code 也不应独立被抓 (它在 <p> 内, 整段 <p> 抓)
+    const codeParagraph = blocks.find((b) => b.text.includes('getUserById'));
+    expect(codeParagraph).toBeDefined();
+    expect(codeParagraph!.text).toContain('getUserById(id)');
+  });
+});
+
+describe('blockExtractor - MDN coverage: data tables not translated (regression)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('does not translate content inside <table> (Wikipedia-style data tables)', () => {
+    setupHTML(`
+      <article>
+        <p>Real article paragraph text for translation testing.</p>
+        <table>
+          <thead>
+            <tr><th>Year</th><th>GDP</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>2024</td><td>$25.4T</td></tr>
+            <tr><td>2023</td><td>$23.0T</td></tr>
+          </tbody>
+        </table>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts).toContain('Real article paragraph text for translation testing.');
+    // 表格内容应被拒绝
+    expect(texts.some((t) => t.includes('Year') && t.includes('GDP'))).toBe(false);
+    expect(texts.some((t) => t.includes('2024') || t.includes('25.4T'))).toBe(false);
+  });
+});
+
+describe('blockExtractor - MDN coverage: form text is translatable (regression)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('translates <label> and <legend> text (visible UI labels)', () => {
+    setupHTML(`
+      <form>
+        <fieldset>
+          <legend>Personal information section heading text</legend>
+          <label>Email address field label</label>
+          <input type="email">
+        </fieldset>
+      </form>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts.some((t) => t.includes('Personal information'))).toBe(true);
+    expect(texts.some((t) => t.includes('Email address field label'))).toBe(true);
+  });
+
+  it('translates <option> text inside <select>', () => {
+    setupHTML(`
+      <label for="lang">Choose a programming language</label>
+      <select id="lang">
+        <option>JavaScript option label</option>
+        <option>TypeScript option label</option>
+        <option>Python option label</option>
+      </select>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map((b) => b.text);
+    expect(texts.some((t) => t.includes('Choose a programming language'))).toBe(true);
+    expect(texts.some((t) => t.includes('JavaScript option label'))).toBe(true);
+    expect(texts.some((t) => t.includes('TypeScript option label'))).toBe(true);
+    expect(texts.some((t) => t.includes('Python option label'))).toBe(true);
+  });
+});
+
 

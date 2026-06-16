@@ -178,4 +178,87 @@ describe('prepareDocument', () => {
 
     expect(() => prepareDocument(document)).toThrow('No translatable content found');
   });
+
+  it('should use .u-rich-text-blog for Webflow sites (claude.com)', () => {
+    // claude.com/blog 使用 Webflow，文章内容在 .u-rich-text-blog.w-richtext 内
+    document.body.innerHTML = `
+      <nav>Navigation</nav>
+      <div class="hero">Hero section</div>
+      <div class="u-rich-text-blog u-margin-trim w-richtext">
+        <h2>Types of skills</h2>
+        <p>After cataloging all of our internal skills at Anthropic, we noticed they cluster into nine categories.</p>
+        <h3>Research skills</h3>
+        <p>Research skills help Claude find and synthesize information.</p>
+      </div>
+      <footer>Footer</footer>
+    `;
+
+    const { fullText } = prepareDocument(document);
+
+    expect(fullText).toContain('Types of skills');
+    expect(fullText).toContain('After cataloging');
+    expect(fullText).toContain('Research skills');
+    expect(fullText).not.toContain('Navigation');
+    expect(fullText).not.toContain('Hero section');
+    expect(fullText).not.toContain('Footer');
+  });
+
+  it('should refine to .post-content inside <article> (Jane Street)', () => {
+    // Jane Street blog: <article> 包含 .post-header + .post-content + .bios-container
+    // 需要下钻到 .post-content 只取正文
+    document.body.innerHTML = `
+      <article>
+        <div class="post-header">
+          <h3>Formal methods and the future of programming</h3>
+          <span class="date">Jun 07, 2026</span>
+          <ul class="social-share">
+            <li><a href="#">Share on Facebook</a></li>
+          </ul>
+          <div class="author">By: Yaron Minsky</div>
+        </div>
+        <div class="post-content">
+          <p>I've been telling people for the last 25 years that Jane Street was not interested in formal methods.</p>
+          <p>I'm not saying that anymore.</p>
+          <h1>Why the change of heart?</h1>
+          <p>Agentic coding upsets the formal-methods apple-cart in a few ways.</p>
+        </div>
+        <div class="bios-container">
+          <p class="bio">Yaron Minsky joined Jane Street back in 2002.</p>
+        </div>
+      </article>
+    `;
+
+    const { fullText, blocks } = prepareDocument(document);
+
+    expect(fullText).toContain("I've been telling people");
+    expect(fullText).toContain("I'm not saying that anymore");
+    expect(fullText).toContain("Why the change of heart");
+    expect(fullText).toContain("Agentic coding upsets");
+    expect(fullText).not.toContain('Share on Facebook');
+    expect(fullText).not.toContain('Yaron Minsky joined Jane Street');
+    expect(blocks.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('should use Layer 2 smart detection when selectors fail', () => {
+    // 没有标准选择器的页面，靠评分识别正文
+    document.body.innerHTML = `
+      <div class="nav-bar">
+        <a href="/home">Home</a>
+        <a href="/about">About</a>
+        <a href="/blog">Blog</a>
+      </div>
+      <div class="custom-wrapper">
+        <h1>Welcome to Our Site</h1>
+        <p>This is the main content with multiple paragraphs of text.</p>
+        <p>More content here to increase the text density score.</p>
+        <p>Even more content to ensure detection works properly.</p>
+      </div>
+    `;
+
+    const { fullText } = prepareDocument(document);
+
+    expect(fullText).toContain('Welcome to Our Site');
+    expect(fullText).toContain('main content');
+    expect(fullText).not.toContain('Home');
+  });
 });
