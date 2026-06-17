@@ -1,10 +1,60 @@
-import { applyBlockTranslation, cleanupTranslationMarks } from '../utils/translationDisplay';
+import { applyBlockTranslation } from '../utils/translationDisplay';
 import type { TextBlock } from '../utils/blockExtractor';
 import type { Config } from '../utils/config';
 
 // 大多数平台（Cloudflare Workers / Netlify Functions）请求体限制约 1MB。
 // 保守阈值：超过 900KB 时只发送 body，避免被网关截断导致服务端收到空 body 报 400。
 const MAX_FULL_HTML_CHARS = 900_000;
+
+/** 扩展端注入到 DOM 的 UI 选择器，发送 HTML 前需要移除。 */
+const EXTENSION_UI_SELECTORS = [
+  '.fanyi-status-overlay',
+  '.fanyi-floating-btn',
+  '.fanyi-config-panel',
+  '.selection-translator',
+] as const;
+
+/**
+ * 准备发送给服务端的 HTML：
+ * 1. clone 当前 DOM，不影响用户正在看到的页面。
+ * 2. 清理已有的双语译文结构（.fanyi-original / .fanyi-translation）。
+ * 3. 清理扩展端 UI（状态提示、浮动按钮、配置面板等）。
+ * 4. 保留 data-fanyi-block-id，让服务端能直接定位 block。
+ */
+function prepareHtmlForServer(): string {
+  const clone = document.documentElement.cloneNode(true) as HTMLElement;
+
+  // 清理 clone 上的翻译标记，恢复成"已标记 block id 但未翻译"的状态。
+  for (const node of Array.from(clone.querySelectorAll('.fanyi-translated'))) {
+    const el = node as HTMLElement;
+    const originalSpan = el.querySelector('.fanyi-original');
+    if (originalSpan) {
+      while (originalSpan.firstChild) {
+        el.insertBefore(originalSpan.firstChild, originalSpan);
+      }
+      originalSpan.remove();
+    }
+    el.querySelector('.fanyi-translation')?.remove();
+    el.classList.remove('fanyi-translated');
+    delete el.dataset.originalText;
+  }
+  for (const node of Array.from(clone.querySelectorAll('.fanyi-missing'))) {
+    const el = node as HTMLElement;
+    el.classList.remove('fanyi-missing');
+    el.removeAttribute('title');
+  }
+
+  // 移除扩展端 UI，避免服务端把它们当成页面正文翻译或保存。
+  for (const selector of EXTENSION_UI_SELECTORS) {
+    for (const node of Array.from(clone.querySelectorAll(selector))) {
+      node.remove();
+    }
+  }
+
+  const fullHtml = clone.outerHTML;
+  const bodyHtml = clone.querySelector('body')?.outerHTML ?? fullHtml;
+  return fullHtml.length > MAX_FULL_HTML_CHARS ? bodyHtml : fullHtml;
+}
 
 /**
  * 通过服务端翻译页面。
@@ -23,17 +73,10 @@ export async function translateViaServer(
     throw new Error('DeepSeek API Key 未配置，服务端翻译需要 API Key');
   }
 
-  // 先清理当前 DOM 中已有的翻译标记，避免把原文+译文双语文本一起发给服务端。
-  // 注意：这里不清理 data-fanyi-block-id，服务端仍然可以直接定位 block。
-  cleanupTranslationMarks();
-
-  const fullHtml = document.documentElement.outerHTML;
-  const bodyHtml = document.body?.outerHTML ?? fullHtml;
-  const html = fullHtml.length > MAX_FULL_HTML_CHARS ? bodyHtml : fullHtml;
-
+  const html = prepareHtmlForServer();
   console.log(
-    `[ServerTranslation] url=${url} fullHtml=${fullHtml.length} bytes ` +
-      `sentHtml=${html.length} bytes (bodyFallback=${html === bodyHtml})`,
+    `[ServerTranslation] url=${url} sentHtml=${html.length} bytes ` +
+      `(bodyFallback=${html.startsWith('<body')})`,
   );
 
   const response = await fetch(serverUrl, {

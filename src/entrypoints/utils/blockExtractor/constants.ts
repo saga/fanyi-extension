@@ -159,6 +159,10 @@ const INLINE_SET_RAW = [
   // --- Obsolete 但仍有站用 ---
   'font', 'tt', 'big', 'strike',
 
+  // --- Medium / Towards Data Science 内联标注标签 ---
+  // <mdspan> 用于高亮/注释,语义上等价于 <span>,不应作为独立翻译块。
+  'mdspan',
+
   // --- 媒体占位 (无文本, 但如果被独立抓也安全) ---
   'img',
 ];

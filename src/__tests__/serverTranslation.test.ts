@@ -6,13 +6,11 @@ import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 // Mock translationDisplay to avoid actual DOM manipulation side effects
 vi.mock('../entrypoints/utils/translationDisplay', () => ({
   applyBlockTranslation: vi.fn(),
-  cleanupTranslationMarks: vi.fn(),
 }));
 
-import { applyBlockTranslation, cleanupTranslationMarks } from '../entrypoints/utils/translationDisplay';
+import { applyBlockTranslation } from '../entrypoints/utils/translationDisplay';
 
 const baseConfig: Config = {
-  enabled: true,
   sourceLang: 'en',
   targetLang: 'zh',
   deepseekApiKey: 'sk-test-api-key',
@@ -96,13 +94,69 @@ describe('translateViaServer', () => {
     expect(body.mode).toBe('bilingual');
     expect(body.service).toBe('deepseek');
 
-    expect(cleanupTranslationMarks).toHaveBeenCalledTimes(1);
-
     expect(result.size).toBe(2);
     expect(result.has('b1')).toBe(true);
     expect(result.has('b2')).toBe(true);
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '这是一个测试段落。');
+  });
+
+  it('cleans up extension UI before sending HTML', async () => {
+    document.body.innerHTML += `
+      <div class="fanyi-status-overlay fanyi-loading">正在发送到服务端翻译...</div>
+      <div class="fanyi-floating-btn">译</div>
+      <div class="fanyi-config-panel">config panel</div>
+      <div class="selection-translator">selection translator</div>
+    `;
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(baseConfig, blocks, nodeMap);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).not.toContain('fanyi-status-overlay');
+    expect(body.html).not.toContain('fanyi-floating-btn');
+    expect(body.html).not.toContain('fanyi-config-panel');
+    expect(body.html).not.toContain('selection-translator');
+  });
+
+  it('strips existing bilingual translation markup before sending HTML', async () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <article>
+          <h1 data-fanyi-block-id="b1" class="fanyi-translated" data-original-text="Hello World">
+            <span class="fanyi-original">Hello World</span>
+            <span class="fanyi-translation">你好世界</span>
+          </h1>
+        </article>
+      </body></html>
+    `;
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(baseConfig, blocks, nodeMap);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).toContain('data-fanyi-block-id="b1"');
+    expect(body.html).toContain('Hello World');
+    expect(body.html).not.toContain('fanyi-translation');
+    expect(body.html).not.toContain('fanyi-original');
+    expect(body.html).not.toContain('fanyi-translated');
+    expect(body.html).not.toContain('data-original-text');
   });
 
   it('skips blocks whose translation span is missing', async () => {

@@ -163,6 +163,20 @@ describe('extractBlocks - Inline Elements', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].tag).toBe('p');
   });
+
+  it('should treat Medium mdspan as inline element inside parent paragraph', () => {
+    setupHTML(`
+      <article>
+        <p>This article is the <mdspan datatext="el123">second</mdspan> part of the series.</p>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].tag).toBe('p');
+    expect(blocks[0].text).toBe('This article is the second part of the series.');
+    expect(blocks.some(b => b.tag === 'mdspan')).toBe(false);
+  });
 });
 
 describe('extractBlocks - Skip Elements', () => {
