@@ -8,27 +8,24 @@
       <span class="source-text">{{ sourceText }}</span>
       <div class="actions">
         <button @click="copyTranslation" title="复制译文">📋</button>
-        <button @click="toggleMode" title="切换模式">🔄</button>
         <button @click="close" title="关闭">✕</button>
       </div>
     </div>
     <div class="translation-result">
-      <p v-if="mode === 'bilingual'" class="source">{{ sourceText }}</p>
+      <p class="source">{{ sourceText }}</p>
       <p class="target">{{ translatedText }}</p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
 import { translateText } from '@/entrypoints/utils/translateApi';
-import { getConfig } from '@/entrypoints/utils/config';
 
 const visible = ref(false);
 const position = ref({ x: 0, y: 0 });
 const sourceText = ref('');
 const translatedText = ref('');
-const mode = ref<'bilingual' | 'target'>('bilingual');
 
 let selectionTimeout: number | null = null;
 
@@ -42,8 +39,6 @@ const handleSelection = async () => {
   }
 
   sourceText.value = text;
-  const config = await getConfig();
-  mode.value = config.mode;
 
   try {
     const result = await translateText(text);
@@ -64,10 +59,6 @@ const handleSelection = async () => {
 
 const copyTranslation = () => {
   navigator.clipboard.writeText(translatedText.value);
-};
-
-const toggleMode = async () => {
-  mode.value = mode.value === 'bilingual' ? 'target' : 'bilingual';
 };
 
 const close = () => {

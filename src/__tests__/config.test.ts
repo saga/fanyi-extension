@@ -20,7 +20,6 @@ const defaultConfig: Config = {
   enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
-  mode: 'bilingual',
   deepseekApiKey: '',
   apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
   shortcuts: {
@@ -30,6 +29,8 @@ const defaultConfig: Config = {
     toggleTranslation: 'Alt+V',
   },
   touchGesture: 'TripleTap',
+  useServerTranslation: false,
+  serverUrl: 'https://s.sunxiunan.com/fanyi/page',
 };
 
 describe('config', () => {
@@ -64,10 +65,9 @@ describe('config', () => {
 
   describe('setConfig', () => {
     it('stores partial config and merges with defaults', async () => {
-      await setConfig({ targetLang: 'ja', mode: 'target' });
+      await setConfig({ targetLang: 'ja' });
       const stored = store['local:config'];
       expect(stored.targetLang).toBe('ja');
-      expect(stored.mode).toBe('target');
       expect(stored.sourceLang).toBe('auto'); // default preserved in merge
     });
 
@@ -87,11 +87,11 @@ describe('config', () => {
     });
 
     it('overwrites existing config values', async () => {
-      store['local:config'] = { targetLang: 'en', mode: 'bilingual' };
-      await setConfig({ mode: 'target' });
+      store['local:config'] = { targetLang: 'en' };
+      await setConfig({ sourceLang: 'zh' });
       const stored = store['local:config'];
       expect(stored.targetLang).toBe('en'); // preserved
-      expect(stored.mode).toBe('target'); // overwritten
+      expect(stored.sourceLang).toBe('zh'); // overwritten
     });
   });
 
@@ -99,8 +99,6 @@ describe('config', () => {
     it('resets storage to default config', async () => {
       store['local:config'] = {
         targetLang: 'ja',
-        mode: 'target',
-        deepseekApiKey: 'sk-custom',
       };
       await resetConfig();
       expect(store['local:config']).toEqual(defaultConfig);

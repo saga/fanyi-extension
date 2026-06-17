@@ -1,4 +1,4 @@
-export type TranslationMode = 'bilingual' | 'target';
+export type TranslationMode = 'bilingual';
 
 /**
  * Wrap translation around an element without destroying its existing children.
@@ -7,15 +7,16 @@ export type TranslationMode = 'bilingual' | 'target';
  * or `node.textContent = translatedText`, which destroyed any nested links,
  * images, inline formatting, etc. — making the original content unclickable.
  *
- * Now we move the existing child nodes into a `.fanyi-original` span (in
- * target mode we additionally hide it), and append a `.fanyi-translation`
- * span alongside. The original DOM tree is preserved untouched and can be
- * restored by moving the children back in `restoreBlock`.
+ * Now we move the existing child nodes into a `.fanyi-original` span, and
+ * append a `.fanyi-translation` span alongside. The original DOM tree is
+ * preserved untouched and can be restored by moving the children back in
+ * `restoreBlock`.
+ *
+ * 始终使用双语对照模式 (original + translation 并排显示)。
  */
 export function applyBlockTranslation(
   node: HTMLElement,
   translatedText: string,
-  mode: TranslationMode
 ): void {
   if (node.classList.contains('fanyi-translated')) {
     return;
@@ -35,10 +36,6 @@ export function applyBlockTranslation(
   const translationSpan = document.createElement('span');
   translationSpan.className = 'fanyi-translation';
   translationSpan.textContent = translatedText;
-
-  if (mode === 'target') {
-    originalSpan.style.display = 'none';
-  }
 
   node.appendChild(originalSpan);
   node.appendChild(translationSpan);

@@ -86,13 +86,6 @@ function buildPanelHtml(isMobile: boolean): string {
           <option value="ja">日语</option>
         </select>
       </div>
-      <div class="fanyi-config-row">
-        <label>翻译模式</label>
-        <div class="fanyi-radio-group">
-          <label><input type="radio" name="mode" value="bilingual" /> 双语对照</label>
-          <label><input type="radio" name="mode" value="target" /> 仅译文</label>
-        </div>
-      </div>
       ${isMobile ? `
       <div class="fanyi-config-row">
         <label>触摸手势</label>
@@ -102,6 +95,16 @@ function buildPanelHtml(isMobile: boolean): string {
         </select>
       </div>
       ` : ''}
+      <div class="fanyi-config-row fanyi-config-switch">
+        <label>
+          <input type="checkbox" class="fanyi-use-server" />
+          使用服务端翻译
+        </label>
+      </div>
+      <div class="fanyi-config-row fanyi-server-url-row" style="display:none">
+        <label>服务端地址</label>
+        <input type="text" class="fanyi-server-url" placeholder="https://s.sunxiunan.com/fanyi/page" />
+      </div>
       <div class="fanyi-config-actions">
         <button class="fanyi-btn-save">保存</button>
         <button class="fanyi-btn-translate">翻译</button>
@@ -117,12 +120,24 @@ async function loadConfigIntoPanel(panel: HTMLElement, isMobile: boolean): Promi
   (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value = config.deepseekApiKey || '';
   (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value = config.sourceLang || 'auto';
   (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
-  const modeRadio = panel.querySelector(`input[name="mode"][value="${config.mode || 'bilingual'}"]`) as HTMLInputElement | null;
-  if (modeRadio) modeRadio.checked = true;
 
   if (isMobile) {
     const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement | null;
     if (gestureSelect) gestureSelect.value = config.touchGesture || 'TripleTap';
+  }
+
+  // 服务端翻译开关
+  const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
+  const serverUrlRow = panel.querySelector('.fanyi-server-url-row') as HTMLElement | null;
+  if (useServerCheckbox) {
+    useServerCheckbox.checked = config.useServerTranslation || false;
+    if (serverUrlRow) {
+      serverUrlRow.style.display = useServerCheckbox.checked ? '' : 'none';
+    }
+  }
+  const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
+  if (serverUrlInput) {
+    serverUrlInput.value = config.serverUrl || 'https://s.sunxiunan.com/fanyi/page';
   }
 }
 
@@ -152,6 +167,15 @@ function wirePanelEvents(
     panel.remove();
     onRestore();
   });
+
+  // 服务端翻译开关：切换显示/隐藏服务端地址输入框
+  const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
+  const serverUrlRow = panel.querySelector('.fanyi-server-url-row') as HTMLElement | null;
+  if (useServerCheckbox && serverUrlRow) {
+    useServerCheckbox.addEventListener('change', () => {
+      serverUrlRow.style.display = useServerCheckbox.checked ? '' : 'none';
+    });
+  }
 }
 
 /** 收集面板上的表单值 → 调 background 验证 API Key → 成功则写入 storage。 */
@@ -176,19 +200,27 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
       config.deepseekApiKey = apiKey;
       config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
       config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
-      const modeRadio = panel.querySelector('input[name="mode"]:checked') as HTMLInputElement | null;
-      config.mode = (modeRadio?.value || 'bilingual') as 'bilingual' | 'target';
 
       if (isMobile) {
         const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement | null;
         if (gestureSelect) config.touchGesture = gestureSelect.value;
       }
 
+      const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
+      if (useServerCheckbox) {
+        config.useServerTranslation = useServerCheckbox.checked;
+      }
+      const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
+      if (serverUrlInput) {
+        const url = serverUrlInput.value.trim();
+        config.serverUrl = url || 'https://s.sunxiunan.com/fanyi/page';
+      }
+
       await setConfig(config);
       showStatus('设置已保存', 'success');
       setTimeout(hideStatus, 2000);
     } else {
-      const errorMsg = response?.error || '未知错误';
+      const errorMsg = (response as any)?.error || '未知错误';
       console.error('[ContentScript] Validation failed:', errorMsg);
       showStatus('API Key 无效: ' + errorMsg, 'error');
       setTimeout(hideStatus, 5000);

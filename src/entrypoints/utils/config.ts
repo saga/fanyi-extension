@@ -11,7 +11,6 @@ export interface Config {
   enabled: boolean;
   sourceLang: string;
   targetLang: string;
-  mode: 'bilingual' | 'target';
   deepseekApiKey: string;
   /** OpenAI-compatible chat completions 端点, 例如:
    *   - DeepSeek: https://api.deepseek.com/v1/chat/completions
@@ -23,13 +22,16 @@ export interface Config {
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
   touchGesture: string;
+  /** 是否使用服务端翻译（发送到 /fanyi/page） */
+  useServerTranslation: boolean;
+  /** 服务端翻译地址，留空时使用默认地址 */
+  serverUrl: string;
 }
 
 const defaultConfig: Config = {
   enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
-  mode: 'bilingual',
   deepseekApiKey: '',
   apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
   shortcuts: {
@@ -39,6 +41,8 @@ const defaultConfig: Config = {
     toggleTranslation: 'Alt+V',
   },
   touchGesture: 'TripleTap',
+  useServerTranslation: false,
+  serverUrl: 'https://s.sunxiunan.com/fanyi/page',
 };
 
 /** 读取 API 端点 URL, 留空时回落到默认 DeepSeek 端点。 */

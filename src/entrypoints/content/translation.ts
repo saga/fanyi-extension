@@ -6,6 +6,7 @@ import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { showStatus, hideStatus } from './statusOverlay';
 import { updateButtonState } from './floatingButton';
 import { translateChunksViaBackground } from './chunkTranslation';
+import { translateViaServer } from './serverTranslation';
 import {
   retryGlobalMissing,
   markMissingBlocks,
@@ -70,7 +71,8 @@ export function createTranslationController(
       }
 
       const config = await getConfig();
-      if (!config.deepseekApiKey) {
+      // 使用服务端翻译时不需要本地 API Key
+      if (!config.useServerTranslation && !config.deepseekApiKey) {
         showStatus('API Key 没有配置', 'error');
         setTimeout(hideStatus, 3000);
         return;
@@ -125,7 +127,7 @@ interface TranslationResult {
 }
 
 async function handleFullTranslation(
-  config: { sourceLang: string; targetLang: string; mode: 'bilingual' | 'target' },
+  config: import('../utils/config').Config,
   isMobile: boolean,
   state: TranslationState,
   setObserver: (obs: DOMObserverManager | null) => void,
@@ -142,6 +144,25 @@ async function handleFullTranslation(
   warnOnNodeMapMismatch(blocks, nodeMap);
   saveOriginalTexts(blocks, nodeMap, state);
 
+  // 使用服务端翻译
+  if (config.useServerTranslation) {
+    showStatus('正在发送到服务端翻译...', 'loading');
+    const translatedIds = await translateViaServer(config, blocks, nodeMap);
+    const missingIds = markMissingBlocks(nodeMap, translatedIds);
+    updateButtonState(true);
+    cleanupTempAttrs();
+    console.log(
+      `[ContentScript] Server translation end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
+    );
+    const statusMsg =
+      missingIds.length > 0
+        ? `翻译完成（${missingIds.length} 段未返回）`
+        : '翻译完成';
+    showStatus(statusMsg, 'success');
+    setTimeout(hideStatus, 3000);
+    return { translated: true, observer: null };
+  }
+
   const glossary = await extractGlossary(fullText);
 
   showStatus(`翻译进度: 0/${chunks.length}`, 'loading');
@@ -150,7 +171,6 @@ async function handleFullTranslation(
     config.sourceLang,
     config.targetLang,
     nodeMap,
-    config.mode,
     glossary,
     (current, total) => showStatus(`翻译进度: ${current}/${total}`, 'loading'),
     isMobile,
@@ -182,8 +202,8 @@ async function handleFullTranslation(
 
 async function extractGlossary(
   fullText: string,
-): Promise<Array<{ term: string; translation: string }>> {
-  if (fullText.length < 50) return [];
+): Promise<import('../service/_service').Glossary> {
+  if (fullText.length < 50) return {};
 
   showStatus('正在提取术语表...', 'loading');
   try {
@@ -198,12 +218,12 @@ async function extractGlossary(
     }
 
     const sample = fullText.substring(0, 4000);
-    const glossary = extractGlossaryLocal(sample, emphasizedTerms);
-    return glossary;
+    return extractGlossaryLocal(sample, emphasizedTerms);
   } catch {
-    return [];
+    return {};
   }
 }
+
 
 function cleanupTempAttrs(): void {
   const tempAttrNodes = document.querySelectorAll('[data-fanyi-block-id]');

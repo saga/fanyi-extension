@@ -21,7 +21,7 @@ export async function retryGlobalMissing(
   blocks: TextBlock[],
   nodeMap: Map<string, Node>,
   translatedIds: Set<string>,
-  config: { sourceLang: string; targetLang: string; mode: 'bilingual' | 'target' },
+  config: { sourceLang: string; targetLang: string },
   isMobile: boolean,
 ): Promise<void> {
   const stillMissingIds: string[] = [];
@@ -45,8 +45,7 @@ export async function retryGlobalMissing(
     config.sourceLang,
     config.targetLang,
     nodeMap,
-    config.mode,
-    [],
+    {},
     undefined,
     isMobile,
   );
@@ -162,7 +161,7 @@ export function setupDynamicContentObserver(
           if (response.success && response.result?.length > 0) {
             const node = findNodeByText(block.text);
             if (node) {
-              applyBlockTranslation(node, response.result[0][1], config.mode);
+              applyBlockTranslation(node, response.result[0][1]);
               state.translatedBlocks.add(block.id);
             }
           }

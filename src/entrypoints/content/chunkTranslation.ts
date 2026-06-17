@@ -39,7 +39,6 @@ function categorizeError(msg: string): string {
 
 export interface ChunkCallContext {
   nodeMap: Map<string, Node>;
-  mode: 'bilingual' | 'target';
   sourceLang: string;
   targetLang: string;
   glossary: Glossary;
@@ -63,7 +62,6 @@ export async function translateChunksViaBackground(
   sourceLang: string,
   targetLang: string,
   nodeMap: Map<string, Node>,
-  mode: 'bilingual' | 'target',
   glossary: Glossary,
   onProgress?: (current: number, total: number) => void,
   isMobile: boolean = false,
@@ -99,13 +97,12 @@ export async function translateChunksViaBackground(
         /* isRetry */ false,
         {
           nodeMap,
-          mode,
           sourceLang,
           targetLang,
           glossary,
           onFailure: () => { hasFailure = true; },
           onApply: (chunkMap) =>
-            applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, mode)),
+            applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap)),
           onChunkComplete: (outcome, recovered, stillMissing, errMsg) => {
             if (outcome === 'fully-ok') stats.fullyOk++;
             else if (outcome === 'needed-retry') {
@@ -290,12 +287,11 @@ async function translateChunkPayload(
 function applyTranslations(
   translationMap: Map<string, string>,
   nodeMap: Map<string, Node>,
-  mode: 'bilingual' | 'target',
 ): void {
   for (const [blockId, translatedText] of translationMap) {
     const node = nodeMap.get(blockId);
     if (!node || !(node instanceof HTMLElement)) continue;
-    applyBlockTranslation(node, translatedText, mode);
+    applyBlockTranslation(node, translatedText);
   }
 }
 
@@ -306,19 +302,18 @@ function applyTranslations(
 export function applyTranslationsWithRAF(
   translationMap: Map<string, string>,
   nodeMap: Map<string, Node>,
-  mode: 'bilingual' | 'target',
 ): Promise<void> {
   return new Promise((resolve) => {
     let applied = false;
     const frameId = requestAnimationFrame(() => {
       applied = true;
-      applyTranslations(translationMap, nodeMap, mode);
+      applyTranslations(translationMap, nodeMap);
       resolve();
     });
     setTimeout(() => {
       if (applied) return;
       cancelAnimationFrame(frameId);
-      applyTranslations(translationMap, nodeMap, mode);
+      applyTranslations(translationMap, nodeMap);
       resolve();
     }, 5000);
   });

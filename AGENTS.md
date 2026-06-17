@@ -19,11 +19,22 @@ pnpm zip            # package Chrome
 WXT extension with entrypoints at `src/entrypoints/`:
 - `background.ts` — orchestrates translation via DeepSeek API, manages cache, handles messages
 - `content.ts` — injected on all pages, extracts DOM blocks, applies translations inline
+- `content/serverTranslation.ts` — sends pre-marked HTML to `/fanyi/page` server endpoint and applies bilingual translations from the returned HTML
 - `popup/` — Vue 3 app for config UI
 - `service/deepseek.ts` — API client (hardcoded model `deepseek-v4-flash`, endpoint `api.deepseek.com/v1/chat/completions`)
 - `utils/blockExtractor.ts` — walks DOM with TreeWalker, returns `TextBlock[]`
 - `utils/chunkBuilder.ts` — groups blocks into chunks
 - `utils/config.ts` — `@wxt-dev/storage` at key `local:config`
+
+## Server translation mode
+
+When `config.useServerTranslation` is enabled, the extension skips the local DeepSeek API and instead sends the page HTML (with `data-fanyi-block-id` attributes set by the walker) to a configured `/fanyi/page` endpoint. The server returns a bilingual HTML response; the extension extracts `.fanyi-translation` text for each marked block and applies it via `applyBlockTranslation()`. This mode does not require a local API key.
+
+Key files for server mode:
+- `src/entrypoints/content/serverTranslation.ts` — `translateViaServer()` implementation
+- `src/entrypoints/utils/config.ts` — `useServerTranslation` and `serverUrl` config fields
+- `src/entrypoints/popup/App.vue` and `src/entrypoints/content/configPanel.ts` — UI switches and URL input
+- `fanyi-extension-blocks-protocol.md` — protocol between extension and server
 
 `src/rules/` — site-specific translation rules (GitHub, Reddit, HackerNews). Add files there and register in `index.ts`.
 

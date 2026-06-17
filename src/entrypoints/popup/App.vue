@@ -15,7 +15,8 @@
           placeholder="输入 DeepSeek API Key"
           @input="onApiKeyChange"
         />
-        <span v-if="apiStatus === 'checking'" class="status-text checking">验证中...</span>
+        <span v-if="config.useServerTranslation" class="status-text success">服务端模式（无需 API Key）</span>
+        <span v-else-if="apiStatus === 'checking'" class="status-text checking">验证中...</span>
         <span v-else-if="apiStatus === 'ok'" class="status-text success">已配置</span>
         <span v-else-if="apiStatus === 'fail'" class="status-text error">未配置或无效</span>
       </div>
@@ -50,20 +51,28 @@
         </select>
       </div>
 
-      <div class="radio-item">
-        <label>翻译模式</label>
-        <div class="radio-group">
-          <label><input type="radio" value="bilingual" v-model="config.mode" @change="saveConfig" /> 双语对照</label>
-          <label><input type="radio" value="target" v-model="config.mode" @change="saveConfig" /> 仅译文</label>
-        </div>
-      </div>
-
       <div class="select-item">
         <label>触屏手势</label>
         <select v-model="config.touchGesture" @change="saveConfig">
           <option value="TripleTap">三击翻译</option>
           <option value="ThreeFinger">三指翻译</option>
         </select>
+      </div>
+
+      <label class="switch-item">
+        <input type="checkbox" v-model="config.useServerTranslation" @change="saveConfig" />
+        <span>使用服务端翻译</span>
+      </label>
+
+      <div v-if="config.useServerTranslation" class="input-item">
+        <label>服务端翻译地址</label>
+        <input
+          type="text"
+          v-model="config.serverUrl"
+          placeholder="https://s.sunxiunan.com/fanyi/page"
+          @input="onServerUrlChange"
+        />
+        <span class="hint-text">留空 = 默认地址。发送 HTML 到服务端翻译。</span>
       </div>
 
       <div class="actions">
@@ -83,7 +92,6 @@ const config = ref<Config>({
   enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
-  mode: 'bilingual',
   deepseekApiKey: '',
   apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
   shortcuts: {
@@ -93,11 +101,14 @@ const config = ref<Config>({
     toggleTranslation: 'Alt+V',
   },
   touchGesture: 'TripleTap',
+  useServerTranslation: false,
+  serverUrl: 'https://s.sunxiunan.com/fanyi/page',
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
 let checkTimer: number | null = null;
 let urlTimer: number | null = null;
+let serverUrlTimer: number | null = null;
 
 onMounted(async () => {
   config.value = await getConfig();
@@ -125,6 +136,17 @@ function onApiBaseUrlChange() {
     // 用户清空 → 恢复默认 URL, 不要存空字符串 (否则 UI 再次打开会显示空)。
     if (!config.value.apiBaseUrl?.trim()) {
       config.value.apiBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
+    }
+    saveConfig();
+  }, 400);
+}
+
+function onServerUrlChange() {
+  if (serverUrlTimer) clearTimeout(serverUrlTimer);
+  serverUrlTimer = window.setTimeout(() => {
+    // 用户清空 → 恢复默认地址
+    if (!config.value.serverUrl?.trim()) {
+      config.value.serverUrl = 'https://s.sunxiunan.com/fanyi/page';
     }
     saveConfig();
   }, 400);
