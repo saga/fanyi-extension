@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { extractBlocks, findBlockNode, buildNodeMap } from '../entrypoints/utils/blockExtractor';
 
 // Mock matchSiteRule for shouldSkipBySiteRules tests
@@ -1662,6 +1662,127 @@ describe('extractBlocks - Nested lists', () => {
     const blocks = extractBlocks(document);
     const liBlocks = blocks.filter(b => b.tag === 'li');
     expect(liBlocks.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('extractBlocks - Dynamic Noise Detection', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockStyleAndRect(el: HTMLElement, style: Partial<CSSStyleDeclaration>, rect: Partial<DOMRect>) {
+    el.getBoundingClientRect = () => rect as DOMRect;
+
+    const styleMap = new WeakMap<Element, Partial<CSSStyleDeclaration>>();
+    styleMap.set(el, {
+      position: 'static',
+      zIndex: 'auto',
+      display: 'block',
+      visibility: 'visible',
+      ...style,
+    });
+
+    const original = window.getComputedStyle;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).getComputedStyle = (target: Element) => {
+      if (styleMap.has(target)) {
+        return styleMap.get(target);
+      }
+      return original(target);
+    };
+  }
+
+  it('should skip cookie banner by text content', () => {
+    setupHTML(`
+      <article>
+        <p>This is the real article content with enough text.</p>
+        <div id="cookie-banner">We use cookies. Accept All Reject All</div>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('This is the real article content with enough text.');
+    expect(texts.some(t => t.includes('Accept All'))).toBe(false);
+    expect(texts.some(t => t.includes('cookies'))).toBe(false);
+  });
+
+  it('should skip popup by fixed position + high z-index + large viewport cover', () => {
+    setupHTML(`
+      <article>
+        <p>This is the real article content with enough text.</p>
+        <div id="popup">Subscribe to our newsletter today!</div>
+      </article>
+    `);
+
+    const popup = document.getElementById('popup')!;
+    mockStyleAndRect(popup, { position: 'fixed', zIndex: '1001' }, { width: 500, height: 300 });
+    Object.defineProperty(window, 'innerWidth', { value: 1200, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true });
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('This is the real article content with enough text.');
+    expect(texts.some(t => t.includes('newsletter'))).toBe(false);
+  });
+
+  it('should not skip small fixed icons', () => {
+    setupHTML(`
+      <article>
+        <p>This is the real article content with enough text.</p>
+        <div id="feedback-icon">Feedback</div>
+      </article>
+    `);
+
+    const icon = document.getElementById('feedback-icon')!;
+    mockStyleAndRect(icon, { position: 'fixed', zIndex: '1001' }, { width: 48, height: 48 });
+    Object.defineProperty(window, 'innerWidth', { value: 1200, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true });
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('This is the real article content with enough text.');
+    expect(texts).toContain('Feedback');
+  });
+
+  it('should skip ad container by standard ad size', () => {
+    setupHTML(`
+      <article>
+        <p>This is the real article content with enough text.</p>
+        <div id="ad">Advertisement</div>
+      </article>
+    `);
+
+    const ad = document.getElementById('ad')!;
+    mockStyleAndRect(ad, {}, { width: 300, height: 250 });
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('This is the real article content with enough text.');
+    expect(texts.some(t => t.includes('Advertisement'))).toBe(false);
+  });
+
+  it('should skip ad iframe by src pattern', () => {
+    setupHTML(`
+      <article>
+        <p>This is the real article content with enough text.</p>
+        <iframe src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></iframe>
+      </article>
+    `);
+
+    const blocks = extractBlocks(document);
+    const texts = blocks.map(b => b.text);
+
+    expect(texts).toContain('This is the real article content with enough text.');
+    expect(blocks.some(b => b.tag === 'iframe')).toBe(false);
   });
 });
 

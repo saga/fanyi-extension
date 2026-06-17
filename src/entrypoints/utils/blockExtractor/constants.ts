@@ -396,3 +396,90 @@ export interface WalkerCounters {
 export function createCounters(): WalkerCounters {
   return { rejected: 0, skipped: 0, accepted: 0 };
 }
+
+// =============================================================================
+// 动态噪声检测 (DOM / Style 特征)
+// =============================================================================
+//
+// 有些第三方脚本动态插入的节点 (Cookie Banner / Popup / 广告位) 没有固定 class,
+// 或者 class 不在 SKIP_CLASS_PATTERNS 里。这里提供基于 style/文本/尺寸的启发式检测。
+
+/**
+ * Cookie Banner / Consent 弹窗常见文本关键词。
+ * 命中后整棵子树拒绝,避免翻译 "Accept All" / "Manage Cookies" 等 UI 文本。
+ */
+const COOKIE_BANNER_TEXT_PATTERNS_RAW = [
+  'accept all',
+  'reject all',
+  'allow all',
+  'cookie settings',
+  'cookie preferences',
+  'manage cookies',
+  'manage your cookies',
+  'we use cookies',
+  'uses cookies',
+  'cookie policy',
+  'privacy settings',
+  'your privacy choices',
+  'consent preferences',
+];
+export const COOKIE_BANNER_TEXT_PATTERNS: ReadonlySet<string> = new Set(
+  COOKIE_BANNER_TEXT_PATTERNS_RAW,
+);
+
+/**
+ * 常见广告 iframe src 域名 / 路径片段。
+ * 用于 isAdIframe() 判断,补充 SKIP_CLASS_PATTERNS 的不足。
+ */
+const AD_IFRAME_PATTERNS_RAW = [
+  'googlesyndication',
+  'doubleclick',
+  'adsystem',
+  'googleadservices',
+  'taboola',
+  'outbrain',
+  'criteo',
+  'amazon-adsystem',
+  'facebook.com/tr',      // Meta Pixel
+  'analytics',
+];
+export const AD_IFRAME_PATTERNS: ReadonlySet<string> = new Set(AD_IFRAME_PATTERNS_RAW);
+
+/**
+ * 常见标准广告位尺寸 (宽 x 高, 像素)。
+ * 配合容差 (±5px) 识别固定尺寸广告位。
+ */
+export const AD_SIZE_PATTERNS: ReadonlyArray<readonly [number, number]> = [
+  [300, 250],   // Medium Rectangle
+  [728, 90],    // Leaderboard
+  [970, 90],    // Billboard
+  [970, 250],   // Portrait
+  [160, 600],   // Wide Skyscraper
+  [300, 600],   // Half Page
+  [320, 50],    // Mobile Banner
+  [320, 100],   // Large Mobile Banner
+  [468, 60],    // Banner
+  [120, 600],   // Skyscraper
+  [250, 250],   // Square
+  [200, 200],   // Small Square
+];
+
+/**
+ * Popup / Modal / Floating Banner 的 style 特征阈值。
+ */
+export const POPUP_STYLE_DETECTION = {
+  /** z-index 超过此值才认为是弹窗。 */
+  MIN_Z_INDEX: 1000,
+  /** 覆盖视口面积比例超过此值才认为是弹窗 (避免误判固定导航栏)。 */
+  MIN_VIEWPORT_COVER_RATIO: 0.15,
+  /** 最小 pixel 面积,避免很小的 fixed 图标被误判。 */
+  MIN_AREA_PX: 10_000,
+} as const;
+
+/**
+ * 需要参与动态噪声检测的容器标签。
+ * 只对这类块级容器调用 getComputedStyle / getBoundingClientRect,避免 inline 元素浪费性能。
+ */
+export const DYNAMIC_NOISE_CONTAINER_TAGS: ReadonlySet<string> = new Set([
+  'div', 'section', 'aside', 'dialog', 'article', 'main', 'nav', 'footer', 'header'
+]);

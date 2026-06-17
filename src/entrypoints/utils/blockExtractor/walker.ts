@@ -20,11 +20,15 @@ import {
   classifyChildren,
   hasBlockLevelParent,
   hasTranslateBlockClass,
+  isAdBySize,
+  isAdIframe,
   isContentEditable,
+  isCookieBannerByText,
   isElementHidden,
   isInsideArticle,
   isMetadataClass,
   isNonHTMLNamespace,
+  isPopupByStyle,
   isValidText,
   shouldSkipByClass,
   shouldSkipBySiteRules,
@@ -140,6 +144,16 @@ function acceptWalkerNode(
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
+
+  // 动态噪声检测 (第三方脚本插入的 Cookie Banner / Popup / 广告位等)。
+  // 这些检查相对 expensive,但只在 DYNAMIC_NOISE_CONTAINER_TAGS 上触发,
+  // 并用 WeakSet 在 rules 内部做了缓存。
+  if (isCookieBannerByText(el) || isPopupByStyle(el) || isAdBySize(el) || isAdIframe(el)) {
+    rejectedCache.add(el);
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
   if (isMetadataClass(el)) {
     // 文章元数据 (作者 / 日期 / 分类) 整棵子树拒绝
     rejectedCache.add(el);

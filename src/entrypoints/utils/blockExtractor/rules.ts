@@ -11,13 +11,18 @@
 
 import { matchSiteRule, type SiteRule } from '../../../rules';
 import {
+  AD_IFRAME_PATTERNS,
+  AD_SIZE_PATTERNS,
   ARTICLE_CONTAINER_CLASS_PATTERNS,
+  COOKIE_BANNER_TEXT_PATTERNS,
   DIRECT_SET,
+  DYNAMIC_NOISE_CONTAINER_TAGS,
   INLINE_SET,
   MAX_TEXT_LENGTH,
   METADATA_TOKENS,
   MIN_TEXT_LENGTH,
   PATTERNS,
+  POPUP_STYLE_DETECTION,
   SKIP_CLASS_PATTERNS,
   XHTML_NAMESPACE,
 } from './constants';
@@ -350,4 +355,115 @@ export function hasTranslateBlockClass(el: Element): boolean {
     el.classList.contains('fanyi-bilingual-block') ||
     el.classList.contains('notranslate')
   );
+}
+
+// =============================================================================
+// 动态噪声检测 (DOM / Style 特征)
+// =============================================================================
+//
+// 第三方脚本动态插入的节点往往没有固定 class,这里用 style/文本/尺寸做启发式判断。
+// 这些检查相对 expensive,因此:
+//   1. 只在大容器标签上调用 (DYNAMIC_NOISE_CONTAINER_TAGS)
+//   2. 用 WeakSet 缓存结果,同一元素不会重复计算
+//   3. 放在 walker 的 class/站点规则检查之后,优先用廉价规则过滤
+
+const _cookieBannerMemo = new WeakSet<Element>();
+const _popupMemo = new WeakSet<Element>();
+const _adSizeMemo = new WeakSet<Element>();
+
+/**
+ * 是否因文本内容命中 Cookie Banner / Consent 弹窗关键词。
+ * 命中后整棵子树拒绝,避免翻译 "Accept All" / "Manage Cookies" 等 UI 文本。
+ */
+export function isCookieBannerByText(el: Element): boolean {
+  if (_cookieBannerMemo.has(el)) return true;
+
+  const tag = el.tagName.toLowerCase();
+  if (!DYNAMIC_NOISE_CONTAINER_TAGS.has(tag)) return false;
+
+  // 只检查直接文本子节点,不深入子树——子树会在 walker 中也被逐个访问,
+  // 命中后通过 rejectedCache 连坐拒绝,避免 O(n^2) 重复扫描。
+  const directText = Array.from(el.childNodes)
+    .filter((n): n is Text => n.nodeType === Node.TEXT_NODE)
+    .map(n => n.textContent || '')
+    .join(' ')
+    .toLowerCase();
+
+  const matched = Array.from(COOKIE_BANNER_TEXT_PATTERNS).some(p => directText.includes(p));
+  if (matched) {
+    _cookieBannerMemo.add(el);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 是否因固定 / sticky 定位 + 高 z-index + 大面积覆盖视口而被判定为 Popup / Modal。
+ * 命中后整棵子树拒绝,避免翻译 Newsletter 订阅框、登录弹窗、促销浮层等。
+ */
+export function isPopupByStyle(el: Element): boolean {
+  if (_popupMemo.has(el)) return true;
+  if (!(el instanceof HTMLElement)) return false;
+
+  const tag = el.tagName.toLowerCase();
+  if (!DYNAMIC_NOISE_CONTAINER_TAGS.has(tag)) return false;
+
+  try {
+    const style = window.getComputedStyle(el);
+    if (style.position !== 'fixed' && style.position !== 'sticky') return false;
+
+    const zIndex = parseInt(style.zIndex || '0', 10);
+    if (Number.isNaN(zIndex) || zIndex < POPUP_STYLE_DETECTION.MIN_Z_INDEX) return false;
+
+    const rect = el.getBoundingClientRect();
+    const area = rect.width * rect.height;
+    if (area < POPUP_STYLE_DETECTION.MIN_AREA_PX) return false;
+
+    const viewportArea = window.innerWidth * window.innerHeight;
+    if (viewportArea <= 0) return false;
+
+    const coverRatio = area / viewportArea;
+    if (coverRatio < POPUP_STYLE_DETECTION.MIN_VIEWPORT_COVER_RATIO) return false;
+
+    _popupMemo.add(el);
+    return true;
+  } catch {
+    // jsdom 等无 layout 环境,静默忽略
+    return false;
+  }
+}
+
+/**
+ * 是否因尺寸匹配标准广告位而被判定为广告容器。
+ * 命中后整棵子树拒绝。
+ */
+export function isAdBySize(el: Element): boolean {
+  if (_adSizeMemo.has(el)) return true;
+  if (!(el instanceof HTMLElement)) return false;
+
+  const tag = el.tagName.toLowerCase();
+  if (!DYNAMIC_NOISE_CONTAINER_TAGS.has(tag) && tag !== 'iframe') return false;
+
+  try {
+    const rect = el.getBoundingClientRect();
+    for (const [w, h] of AD_SIZE_PATTERNS) {
+      if (Math.abs(rect.width - w) <= 5 && Math.abs(rect.height - h) <= 5) {
+        _adSizeMemo.add(el);
+        return true;
+      }
+    }
+  } catch {
+    // jsdom 等无 layout 环境,静默忽略
+  }
+  return false;
+}
+
+/**
+ * 广告 iframe: 通过 src 匹配常见广告/追踪域名。
+ * 命中后整棵子树拒绝。
+ */
+export function isAdIframe(el: Element): boolean {
+  if (el.tagName.toLowerCase() !== 'iframe') return false;
+  const src = ((el as HTMLIFrameElement).src || '').toLowerCase();
+  return Array.from(AD_IFRAME_PATTERNS).some(p => src.includes(p));
 }
