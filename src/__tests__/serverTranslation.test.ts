@@ -12,9 +12,10 @@ vi.mock('../entrypoints/utils/translationDisplay', () => ({
 import { applyBlockTranslation, cleanupTranslationMarks } from '../entrypoints/utils/translationDisplay';
 
 const baseConfig: Config = {
+  enabled: true,
   sourceLang: 'en',
   targetLang: 'zh',
-  deepseekApiKey: 'sk-test',
+  deepseekApiKey: 'sk-test-api-key',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -89,7 +90,7 @@ describe('translateViaServer', () => {
     const body = JSON.parse(options.body);
     expect(body.html).toContain('data-fanyi-block-id="b1"');
     expect(body.url).toBe(window.location.href);
-    expect(body.apiKey).toBe('sk-test');
+    expect(body.apiKey).toBe('sk-test-api-key');
     expect(body.source).toBe('en');
     expect(body.target).toBe('zh');
     expect(body.mode).toBe('bilingual');

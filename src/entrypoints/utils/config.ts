@@ -8,6 +8,7 @@ export interface ShortcutConfig {
 }
 
 export interface Config {
+  enabled: boolean;
   sourceLang: string;
   targetLang: string;
   deepseekApiKey: string;
@@ -20,6 +21,7 @@ export interface Config {
 }
 
 const defaultConfig: Config = {
+  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',

@@ -2,6 +2,11 @@
   <div class="popup-container">
     <h2>简简单单翻译</h2>
     <div class="settings">
+      <label class="switch-item">
+        <input type="checkbox" v-model="config.enabled" @change="saveConfig" />
+        <span>启用翻译</span>
+      </label>
+
       <div class="input-item">
         <label>DeepSeek API Key</label>
         <input
@@ -65,6 +70,7 @@ import { ref, onMounted, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 
 const config = ref<Config>({
+  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',

@@ -76,6 +76,7 @@ export function createTranslationController(
         setTimeout(hideStatus, 3000);
         return;
       }
+      if (!config.enabled) return;
 
       isTranslating = true;
       showStatus('正在提取文本...', 'loading');
