@@ -2,11 +2,6 @@
   <div class="popup-container">
     <h2>简简单单翻译</h2>
     <div class="settings">
-      <label class="switch-item">
-        <input type="checkbox" v-model="config.enabled" @change="saveConfig" />
-        <span>启用翻译</span>
-      </label>
-
       <div class="input-item">
         <label>DeepSeek API Key</label>
         <input
@@ -45,15 +40,28 @@
         <span>通过远程服务器翻译当前页面（发送 HTML）</span>
       </label>
 
-      <div v-if="config.useServerTranslation" class="input-item">
-        <label>服务端翻译地址</label>
-        <input
-          type="text"
-          v-model="config.serverUrl"
-          placeholder="https://s.sunxiunan.com/fanyi/page"
-          @input="onServerUrlChange"
-        />
-        <span class="hint-text">把当前页面 HTML 发送到远程服务器翻译，适合绕过页面反爬或本地没有 API Key 的场景。</span>
+      <div v-if="config.useServerTranslation" class="server-group">
+        <div class="input-item">
+          <label>服务端翻译地址</label>
+          <input
+            type="text"
+            v-model="config.serverUrl"
+            placeholder="https://s.sunxiunan.com/fanyi/page"
+            @input="onServerUrlChange"
+          />
+          <span class="hint-text">把当前页面发送到远程服务器翻译</span>
+        </div>
+
+        <div class="select-item">
+          <label>服务端翻译 Provider</label>
+          <select v-model="config.provider" @change="saveConfig">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="nvidia">NVIDIA</option>
+            <option value="cloudflare">Cloudflare</option>
+          </select>
+          <span class="hint-text">选择服务端翻译使用的 LLM Provider，仅对"通过远程服务器翻译"生效。</span>
+        </div>
       </div>
 
       <div class="actions">
@@ -70,10 +78,10 @@ import { ref, onMounted, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 
 const config = ref<Config>({
-  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',
+  provider: 'deepseek',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -201,6 +209,16 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.server-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fafafa;
 }
 
 .lang-row {

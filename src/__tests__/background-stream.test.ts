@@ -34,7 +34,7 @@ describe('handleTranslateChunkStream logic', () => {
   // Since background.ts uses browser APIs, we test the logic separately
 
   async function handleTranslateChunkStream(
-    config: { deepseekApiKey?: string },
+    config: { deepseekApiKey?: string; provider?: string },
     message: {
       jsonContent: string;
       sourceLang: string;
@@ -112,7 +112,7 @@ describe('handleTranslateChunkStream logic', () => {
     }
 
     await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key' },
+      { deepseekApiKey: 'test-key', provider: 'deepseek' },
       { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh', tabId: 123 },
       {},
       { translateStream: mockStream },
@@ -146,7 +146,7 @@ describe('handleTranslateChunkStream logic', () => {
     }
 
     await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key' },
+      { deepseekApiKey: 'test-key', provider: 'deepseek' },
       { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh' },
       { tab: { id: 456 } },
       { translateStream: mockStream },
@@ -169,7 +169,7 @@ describe('handleTranslateChunkStream logic', () => {
     }
 
     await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key' },
+      { deepseekApiKey: 'test-key', provider: 'deepseek' },
       { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh', tabId: 123 },
       {},
       { translateStream: mockStream },
@@ -193,7 +193,7 @@ describe('handleTranslateChunkStream logic', () => {
     const glossary = [{ term: 'API', translation: 'API' }];
 
     await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key' },
+      { deepseekApiKey: 'test-key', provider: 'deepseek' },
       { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh', glossary },
       {},
       { translateStream },
@@ -217,7 +217,7 @@ describe('handleTranslateChunkStream logic', () => {
     }
 
     await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key' },
+      { deepseekApiKey: 'test-key', provider: 'deepseek' },
       { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh' },
       {},
       { translateStream: mockStream },
@@ -242,7 +242,7 @@ describe('handleTranslateChunkStream logic', () => {
 
     await expect(async () => {
       await handleTranslateChunkStream(
-        { deepseekApiKey: 'test-key' },
+        { deepseekApiKey: 'test-key', provider: 'deepseek' },
         { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh' },
         {},
         { translateStream: mockStream },

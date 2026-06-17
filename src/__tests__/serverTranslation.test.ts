@@ -14,6 +14,7 @@ const baseConfig: Config = {
   sourceLang: 'en',
   targetLang: 'zh',
   deepseekApiKey: 'sk-test-api-key',
+  provider: 'deepseek',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -227,7 +228,7 @@ describe('translateViaServer', () => {
     expect(applyBlockTranslation).not.toHaveBeenCalled();
   });
 
-  it('throws when apiKey is missing', async () => {
+  it('throws when apiKey is missing for deepseek', async () => {
     const config = { ...baseConfig, deepseekApiKey: '' };
     const blocks: TextBlock[] = [
       { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
@@ -238,6 +239,25 @@ describe('translateViaServer', () => {
       'DeepSeek API Key 未配置',
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('uses fixed deepseek service and sends apiKey', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const config: Config = { ...baseConfig, deepseekApiKey: 'sk-test' };
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(config, blocks, nodeMap);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.service).toBe('deepseek');
+    expect(body.apiKey).toBe('sk-test');
   });
 
   it('throws when server responds with non-OK status', async () => {

@@ -7,11 +7,14 @@ export interface ShortcutConfig {
   toggleTranslation: string;
 }
 
+export type Provider = 'deepseek' | 'cloudflare' | 'openrouter' | 'nvidia';
+
 export interface Config {
-  enabled: boolean;
   sourceLang: string;
   targetLang: string;
   deepseekApiKey: string;
+  /** 服务端翻译使用的 LLM Provider（仅对"通过远程服务器翻译"生效，本地翻译固定 DeepSeek） */
+  provider: Provider;
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
   /** 是否使用服务端翻译（发送到 /fanyi/page） */
@@ -21,10 +24,10 @@ export interface Config {
 }
 
 const defaultConfig: Config = {
-  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',
+  provider: 'deepseek',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',

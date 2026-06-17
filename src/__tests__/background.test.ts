@@ -139,7 +139,7 @@ describe('background message handlers', () => {
     }
 
     it('should return error when API key is missing', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: '' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: '', provider: 'deepseek' });
       const sendResponse = vi.fn();
 
       await handleTranslateChunk(
@@ -154,7 +154,7 @@ describe('background message handlers', () => {
     });
 
     it('should use cached translation when available', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', provider: 'deepseek' });
       const cachedMap = new Map([['b1', '你好']]);
       mockGetCachedTranslation.mockResolvedValue(cachedMap);
       const sendResponse = vi.fn();
@@ -172,7 +172,7 @@ describe('background message handlers', () => {
     });
 
     it('should call API and cache result when no cache', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', provider: 'deepseek' });
       mockGetCachedTranslation.mockResolvedValue(null);
       mockGenerateCacheKey.mockReturnValue('cache-key-123');
       mockTranslate.mockResolvedValue('{"translations":[{"id":"b1","translated_text":"你好"}]}');
@@ -197,7 +197,7 @@ describe('background message handlers', () => {
     });
 
     it('should use provided cache key', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', provider: 'deepseek' });
       mockGetCachedTranslation.mockResolvedValue(null);
       mockTranslate.mockResolvedValue('{"translations":[]}');
       mockQueueAdd.mockImplementation((fn) => fn());
@@ -214,7 +214,7 @@ describe('background message handlers', () => {
     });
 
     it('should handle API errors', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', provider: 'deepseek' });
       mockGetCachedTranslation.mockResolvedValue(null);
       mockQueueAdd.mockImplementation((fn) => fn());
       mockTranslate.mockRejectedValue(new Error('API Error'));
@@ -233,7 +233,7 @@ describe('background message handlers', () => {
     });
 
     it('should pass glossary to translate', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', provider: 'deepseek' });
       mockGetCachedTranslation.mockResolvedValue(null);
       mockTranslate.mockResolvedValue('{"translations":[]}');
       mockQueueAdd.mockImplementation((fn) => fn());
@@ -375,26 +375,26 @@ describe('background message handlers', () => {
     }
 
     it('should return true when API key exists', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', targetLang: 'zh' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: 'test-key', provider: 'deepseek', targetLang: 'zh' });
       const sendResponse = vi.fn();
 
       await handleCheckConfig(sendResponse);
 
       expect(sendResponse).toHaveBeenCalledWith({
         success: true,
-        config: { deepseekApiKey: 'test-key', targetLang: 'zh' },
+        config: { deepseekApiKey: 'test-key', provider: 'deepseek', targetLang: 'zh' },
       });
     });
 
     it('should return false when API key is missing', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: '', targetLang: 'zh' });
+      mockGetConfig.mockResolvedValue({ deepseekApiKey: '', provider: 'deepseek', targetLang: 'zh' });
       const sendResponse = vi.fn();
 
       await handleCheckConfig(sendResponse);
 
       expect(sendResponse).toHaveBeenCalledWith({
         success: false,
-        config: { deepseekApiKey: '', targetLang: 'zh' },
+        config: { deepseekApiKey: '', provider: 'deepseek', targetLang: 'zh' },
       });
     });
 

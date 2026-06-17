@@ -71,13 +71,13 @@ export function createTranslationController(
       }
 
       const config = await getConfig();
-      if (!config.deepseekApiKey) {
+      // 使用服务端翻译时不需要本地 API Key
+      const needApiKey = !config.useServerTranslation;
+      if (needApiKey && !config.deepseekApiKey) {
         showStatus('API Key 没有配置', 'error');
         setTimeout(hideStatus, 3000);
         return;
       }
-      if (!config.enabled) return;
-
       isTranslating = true;
       showStatus('正在提取文本...', 'loading');
 

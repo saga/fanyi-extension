@@ -68,6 +68,11 @@ export async function translateViaServer(
 ): Promise<Set<string>> {
   const serverUrl = config.serverUrl?.trim() || 'https://s.sunxiunan.com/fanyi/page';
   const url = window.location.href;
+  const service = 'deepseek';
+  // provider 只对服务端翻译生效：告诉服务端用哪个 LLM provider 调用翻译。
+  // 本地翻译固定走 DeepSeek，不受此配置影响。
+  const provider = config.provider || 'deepseek';
+
   const apiKey = config.deepseekApiKey?.trim();
   if (!apiKey) {
     throw new Error('DeepSeek API Key 未配置，服务端翻译需要 API Key');
@@ -75,24 +80,28 @@ export async function translateViaServer(
 
   const html = prepareHtmlForServer();
   console.log(
-    `[ServerTranslation] url=${url} sentHtml=${html.length} bytes ` +
+    `[ServerTranslation] url=${url} service=${service} provider=${provider} sentHtml=${html.length} bytes ` +
       `(bodyFallback=${html.startsWith('<body')})`,
   );
+
+  const body: Record<string, any> = {
+    html,
+    url,
+    source: config.sourceLang,
+    target: config.targetLang,
+    // 扩展端只支持双语对照模式，服务端也已强制此模式
+    mode: 'bilingual' as const,
+    service,
+    provider,
+  };
+  if (service === 'deepseek' && apiKey) {
+    body.apiKey = apiKey;
+  }
 
   const response = await fetch(serverUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      html,
-      url,
-      apiKey,
-      source: config.sourceLang,
-      target: config.targetLang,
-      // 扩展端只支持双语对照模式，服务端也已强制此模式
-      mode: 'bilingual' as const,
-      // /fanyi/page 固定使用 DeepSeek，服务端不接受其他 service
-      service: 'deepseek' as const,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

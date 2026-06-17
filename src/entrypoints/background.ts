@@ -1,6 +1,6 @@
 import browser from 'webextension-polyfill';
 import { DeepSeekTranslationService } from './service/deepseek';
-import { getConfig, setConfig } from './utils/config';
+import { getConfig } from './utils/config';
 import {
   getCachedTranslation,
   cacheTranslation,
@@ -23,16 +23,9 @@ export default defineBackground({
     const isContextMenuSupported = !!browser.contextMenus;
     const isCommandsSupported = !!browser.commands;
 
-    // Service cache is in-memory; Firefox may suspend background scripts.
-    // Recreate service instances as needed; don't rely on persistence.
-    // Key: apiKey — endpoint 已固定为 DeepSeek，无需再按 URL 区分。
-    const serviceCache = new Map<string, DeepSeekTranslationService>();
-
+    // Service instances are lightweight; create per request.
     function getService(apiKey: string): DeepSeekTranslationService {
-      if (!serviceCache.has(apiKey)) {
-        serviceCache.set(apiKey, new DeepSeekTranslationService(apiKey));
-      }
-      return serviceCache.get(apiKey)!;
+      return new DeepSeekTranslationService(apiKey);
     }
 
     browser.runtime.onInstalled.addListener(() => {
@@ -385,6 +378,7 @@ export default defineBackground({
           return;
         }
 
+        const config = await getConfig();
         console.log('[Background] Validating API Key, length:', apiKey.length);
 
         const service = new DeepSeekTranslationService(apiKey);

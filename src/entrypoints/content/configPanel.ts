@@ -1,5 +1,5 @@
 import browser from 'webextension-polyfill';
-import { getConfig, setConfig } from '../utils/config';
+import { getConfig, setConfig, type Config } from '../utils/config';
 import { showStatus, hideStatus } from './statusOverlay';
 
 /**
@@ -92,9 +92,20 @@ function buildPanelHtml(isMobile: boolean): string {
           通过远程服务器翻译当前页面
         </label>
       </div>
-      <div class="fanyi-config-row fanyi-server-url-row" style="display:none">
-        <label>服务端地址</label>
-        <input type="text" class="fanyi-server-url" placeholder="https://s.sunxiunan.com/fanyi/page" />
+      <div class="fanyi-server-group" style="display:none">
+        <div class="fanyi-config-row fanyi-server-url-row">
+          <label>服务端地址</label>
+          <input type="text" class="fanyi-server-url" placeholder="https://s.sunxiunan.com/fanyi/page" />
+        </div>
+        <div class="fanyi-config-row">
+          <label>服务端翻译 Provider</label>
+          <select class="fanyi-provider">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="nvidia">NVIDIA</option>
+            <option value="cloudflare">Cloudflare</option>
+          </select>
+        </div>
       </div>
       <div class="fanyi-config-actions">
         <button class="fanyi-btn-save">保存</button>
@@ -109,17 +120,17 @@ function buildPanelHtml(isMobile: boolean): string {
 async function loadConfigIntoPanel(panel: HTMLElement, isMobile: boolean): Promise<void> {
   const config = await getConfig();
   (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value = config.deepseekApiKey || '';
+  (panel.querySelector('.fanyi-provider') as HTMLSelectElement).value = config.provider || 'deepseek';
   (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value = config.sourceLang || 'auto';
   (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
 
   // 服务端翻译开关
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
-  const serverUrlRow = panel.querySelector('.fanyi-server-url-row') as HTMLElement | null;
+  const serverGroup = panel.querySelector('.fanyi-server-group') as HTMLElement | null;
   if (useServerCheckbox) {
     useServerCheckbox.checked = config.useServerTranslation || false;
-    if (serverUrlRow) {
-      serverUrlRow.style.display = useServerCheckbox.checked ? '' : 'none';
-    }
+    const display = useServerCheckbox.checked ? '' : 'none';
+    if (serverGroup) serverGroup.style.display = display;
   }
   const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
   if (serverUrlInput) {
@@ -154,66 +165,73 @@ function wirePanelEvents(
     onRestore();
   });
 
-  // 服务端翻译开关：切换显示/隐藏服务端地址输入框
+  // 服务端翻译开关：切换显示/隐藏服务端地址和 Provider 整个 group
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
-  const serverUrlRow = panel.querySelector('.fanyi-server-url-row') as HTMLElement | null;
+  const serverGroup = panel.querySelector('.fanyi-server-group') as HTMLElement | null;
   if (useServerCheckbox) {
     useServerCheckbox.addEventListener('change', () => {
-      if (serverUrlRow) {
-        serverUrlRow.style.display = useServerCheckbox.checked ? '' : 'none';
-      }
+      const display = useServerCheckbox.checked ? '' : 'none';
+      if (serverGroup) serverGroup.style.display = display;
     });
   }
 }
 
-/** 收集面板上的表单值 → 调 background 验证 API Key → 成功则写入 storage。 */
+/** 收集面板上的表单值 → 按需验证 API Key → 成功则写入 storage。 */
 async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promise<void> {
   const apiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value.trim();
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
   const useServer = useServerCheckbox?.checked ?? false;
 
-  if (!apiKey) {
+  // 本地翻译需要 API Key；服务端翻译也需要 API Key（固定 DeepSeek）
+  const needApiKey = !useServer;
+  if (needApiKey && !apiKey) {
     showStatus('API Key 不能为空', 'error');
     setTimeout(hideStatus, 2000);
     return;
   }
 
-  showStatus('正在验证 API Key...', 'loading');
-  try {
-    const response = await browser.runtime.sendMessage({
-      action: 'validateApiKey',
-      apiKey,
-    });
-    console.log('[ContentScript] Validation response:', response);
+  if (needApiKey) {
+    showStatus('正在验证 API Key...', 'loading');
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: 'validateApiKey',
+        apiKey,
+      });
+      console.log('[ContentScript] Validation response:', response);
 
-    if ((response as any)?.success) {
-      const config = await getConfig();
-      config.deepseekApiKey = apiKey;
-      config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
-      config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
-
-      if (useServerCheckbox) {
-        config.useServerTranslation = useServerCheckbox.checked;
+      if (!(response as any)?.success) {
+        const errorMsg = (response as any)?.error || '未知错误';
+        console.error('[ContentScript] Validation failed:', errorMsg);
+        showStatus('API Key 无效: ' + errorMsg, 'error');
+        setTimeout(hideStatus, 5000);
+        return;
       }
-      const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
-      if (serverUrlInput) {
-        const url = serverUrlInput.value.trim();
-        config.serverUrl = url || 'https://s.sunxiunan.com/fanyi/page';
-      }
-
-      await setConfig(config);
-      showStatus('设置已保存', 'success');
-      setTimeout(hideStatus, 2000);
-    } else {
-      const errorMsg = (response as any)?.error || '未知错误';
-      console.error('[ContentScript] Validation failed:', errorMsg);
-      showStatus('API Key 无效: ' + errorMsg, 'error');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '网络错误';
+      console.error('[ContentScript] Validation error:', error);
+      showStatus('验证失败: ' + errorMsg, 'error');
       setTimeout(hideStatus, 5000);
+      return;
     }
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : '网络错误';
-    console.error('[ContentScript] Validation error:', error);
-    showStatus('验证失败: ' + errorMsg, 'error');
-    setTimeout(hideStatus, 5000);
   }
+
+  // 验证通过或不需要验证：写入 storage
+  const config = await getConfig();
+  config.deepseekApiKey = apiKey;
+  config.provider = (panel.querySelector('.fanyi-provider') as HTMLSelectElement).value as Config['provider'];
+  config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
+  config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
+
+  if (useServerCheckbox) {
+    config.useServerTranslation = useServerCheckbox.checked;
+  }
+  const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
+  if (serverUrlInput) {
+    const url = serverUrlInput.value.trim();
+    config.serverUrl = url || 'https://s.sunxiunan.com/fanyi/page';
+  }
+
+  await setConfig(config);
+  showStatus('设置已保存', 'success');
+  setTimeout(hideStatus, 2000);
 }

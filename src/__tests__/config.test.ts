@@ -17,10 +17,10 @@ import { getConfig, setConfig, resetConfig, hasApiKey } from '../entrypoints/uti
 import type { Config } from '../entrypoints/utils/config';
 
 const defaultConfig: Config = {
-  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',
+  provider: 'deepseek',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
