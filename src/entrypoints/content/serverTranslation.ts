@@ -74,8 +74,10 @@ export async function translateViaServer(
   const provider = config.provider || 'deepseek';
 
   const apiKey = config.deepseekApiKey?.trim();
-  if (!apiKey) {
-    throw new Error('DeepSeek API Key 未配置，服务端翻译需要 API Key');
+  // provider=deepseek 时，服务端会用客户端提供的 API Key 调用 DeepSeek，所以必须校验；
+  // 其他 provider 由服务端自行管理凭据，客户端不需要 API Key。
+  if (provider === 'deepseek' && !apiKey) {
+    throw new Error('DeepSeek API Key 未配置，服务端翻译（DeepSeek）需要 API Key');
   }
 
   const html = prepareHtmlForServer();
@@ -94,7 +96,9 @@ export async function translateViaServer(
     service,
     provider,
   };
-  if (service === 'deepseek' && apiKey) {
+  // 仅当 provider=deepseek 时才把客户端的 API Key 发给服务端；
+  // 其他 provider 的凭据由服务端自行管理。
+  if (provider === 'deepseek' && apiKey) {
     body.apiKey = apiKey;
   }
 

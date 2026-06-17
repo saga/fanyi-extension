@@ -228,8 +228,8 @@ describe('translateViaServer', () => {
     expect(applyBlockTranslation).not.toHaveBeenCalled();
   });
 
-  it('throws when apiKey is missing for deepseek', async () => {
-    const config = { ...baseConfig, deepseekApiKey: '' };
+  it('throws when apiKey is missing for deepseek provider', async () => {
+    const config = { ...baseConfig, deepseekApiKey: '', provider: 'deepseek' as const };
     const blocks: TextBlock[] = [
       { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
     ];
@@ -241,14 +241,33 @@ describe('translateViaServer', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('uses fixed deepseek service and sends apiKey', async () => {
+  it('does not require apiKey when provider is not deepseek', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
       text: async () => '<html><body></body></html>',
     });
 
-    const config: Config = { ...baseConfig, deepseekApiKey: 'sk-test' };
+    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'openrouter' };
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(config, blocks, nodeMap);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.provider).toBe('openrouter');
+    expect(body.apiKey).toBeUndefined();
+  });
+
+  it('uses fixed deepseek service and sends apiKey when provider is deepseek', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const config: Config = { ...baseConfig, deepseekApiKey: 'sk-test', provider: 'deepseek' };
     const blocks: TextBlock[] = [];
     const nodeMap = new Map<string, Node>();
 
@@ -257,6 +276,7 @@ describe('translateViaServer', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.service).toBe('deepseek');
+    expect(body.provider).toBe('deepseek');
     expect(body.apiKey).toBe('sk-test');
   });
 

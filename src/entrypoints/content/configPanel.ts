@@ -181,9 +181,12 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
   const apiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value.trim();
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
   const useServer = useServerCheckbox?.checked ?? false;
+  const providerSelect = panel.querySelector('.fanyi-provider') as HTMLSelectElement | null;
+  const provider = (providerSelect?.value || 'deepseek') as Config['provider'];
 
-  // 本地翻译需要 API Key；服务端翻译也需要 API Key（固定 DeepSeek）
-  const needApiKey = !useServer;
+  // 使用服务端翻译且 provider 不是 deepseek 时，才不需要本地 API Key；
+  // 其他情况（本地翻译、或服务端翻译但 provider=deepseek）都需要 API Key。
+  const needApiKey = !useServer || provider === 'deepseek';
   if (needApiKey && !apiKey) {
     showStatus('API Key 不能为空', 'error');
     setTimeout(hideStatus, 2000);

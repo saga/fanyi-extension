@@ -71,8 +71,9 @@ export function createTranslationController(
       }
 
       const config = await getConfig();
-      // 使用服务端翻译时不需要本地 API Key
-      const needApiKey = !config.useServerTranslation;
+      // 使用服务端翻译且 provider 不是 deepseek 时，才不需要本地 API Key；
+      // 其他情况（本地翻译、或服务端翻译但 provider=deepseek）都需要 API Key。
+      const needApiKey = !config.useServerTranslation || config.provider === 'deepseek';
       if (needApiKey && !config.deepseekApiKey) {
         showStatus('API Key 没有配置', 'error');
         setTimeout(hideStatus, 3000);
