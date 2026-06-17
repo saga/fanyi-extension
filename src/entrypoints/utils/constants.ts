@@ -1,6 +1,4 @@
 export const GESTURES = {
-  ThreeFinger: 'ThreeFinger',
-  FourFinger: 'FourFinger',
   TripleTap: 'TripleTap',
 } as const;
 

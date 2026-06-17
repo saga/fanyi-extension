@@ -3,26 +3,24 @@ import { translateViaServer } from '../entrypoints/content/serverTranslation';
 import type { Config } from '../entrypoints/utils/config';
 import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 
-// Mock applyBlockTranslation to avoid actual DOM manipulation side effects
+// Mock translationDisplay to avoid actual DOM manipulation side effects
 vi.mock('../entrypoints/utils/translationDisplay', () => ({
   applyBlockTranslation: vi.fn(),
+  cleanupTranslationMarks: vi.fn(),
 }));
 
-import { applyBlockTranslation } from '../entrypoints/utils/translationDisplay';
+import { applyBlockTranslation, cleanupTranslationMarks } from '../entrypoints/utils/translationDisplay';
 
 const baseConfig: Config = {
-  enabled: true,
   sourceLang: 'en',
   targetLang: 'zh',
-  deepseekApiKey: '',
-  apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
+  deepseekApiKey: 'sk-test',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
     restoreOriginal: 'Alt+R',
     toggleTranslation: 'Alt+V',
   },
-  touchGesture: 'TripleTap',
   useServerTranslation: true,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
 };
@@ -91,9 +89,13 @@ describe('translateViaServer', () => {
     const body = JSON.parse(options.body);
     expect(body.html).toContain('data-fanyi-block-id="b1"');
     expect(body.url).toBe(window.location.href);
+    expect(body.apiKey).toBe('sk-test');
     expect(body.source).toBe('en');
     expect(body.target).toBe('zh');
     expect(body.mode).toBe('bilingual');
+    expect(body.service).toBe('deepseek');
+
+    expect(cleanupTranslationMarks).toHaveBeenCalledTimes(1);
 
     expect(result.size).toBe(2);
     expect(result.has('b1')).toBe(true);
@@ -168,6 +170,19 @@ describe('translateViaServer', () => {
 
     expect(result.size).toBe(0);
     expect(applyBlockTranslation).not.toHaveBeenCalled();
+  });
+
+  it('throws when apiKey is missing', async () => {
+    const config = { ...baseConfig, deepseekApiKey: '' };
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    await expect(translateViaServer(config, blocks, nodeMap)).rejects.toThrow(
+      'DeepSeek API Key 未配置',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('throws when server responds with non-OK status', async () => {

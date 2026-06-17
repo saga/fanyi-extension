@@ -71,3 +71,31 @@ export function toggleBlockTranslation(node: HTMLElement): void {
     el.style.display = el.style.display === 'none' ? '' : 'none';
   }
 }
+
+/**
+ * 清理页面上所有翻译标记（.fanyi-original / .fanyi-translation / .fanyi-translated
+ * / .fanyi-missing），但保留 walker 设置的 data-fanyi-block-id。
+ *
+ * 用途：服务端翻译前，先把当前 DOM 恢复到“未翻译但已标记 block id”的状态，
+ * 避免把已有的译文/原文双语文本一起发给服务端。
+ */
+export function cleanupTranslationMarks(): void {
+  for (const node of Array.from(document.querySelectorAll('.fanyi-translated'))) {
+    const el = node as HTMLElement;
+    const originalSpan = el.querySelector('.fanyi-original');
+    if (originalSpan) {
+      while (originalSpan.firstChild) {
+        el.insertBefore(originalSpan.firstChild, originalSpan);
+      }
+      originalSpan.remove();
+    }
+    el.querySelector('.fanyi-translation')?.remove();
+    el.classList.remove('fanyi-translated');
+    delete el.dataset.originalText;
+  }
+  for (const node of Array.from(document.querySelectorAll('.fanyi-missing'))) {
+    const el = node as HTMLElement;
+    el.classList.remove('fanyi-missing');
+    el.removeAttribute('title');
+  }
+}

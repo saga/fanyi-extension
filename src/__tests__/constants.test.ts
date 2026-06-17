@@ -4,17 +4,13 @@ import type { GestureType } from '../entrypoints/utils/constants';
 
 describe('constants', () => {
   describe('GESTURES', () => {
-    it('contains all gesture types', () => {
+    it('only contains TripleTap', () => {
       expect(GESTURES).toEqual({
-        ThreeFinger: 'ThreeFinger',
-        FourFinger: 'FourFinger',
         TripleTap: 'TripleTap',
       });
     });
 
-    it('has matching key-value pairs', () => {
-      expect(GESTURES.ThreeFinger).toBe('ThreeFinger');
-      expect(GESTURES.FourFinger).toBe('FourFinger');
+    it('has matching key-value pair', () => {
       expect(GESTURES.TripleTap).toBe('TripleTap');
     });
   });
@@ -22,12 +18,8 @@ describe('constants', () => {
   describe('GestureType', () => {
     it('allows valid gesture values', () => {
       // Type-level test: ensure GESTURES values are assignable to GestureType
-      const gestures: GestureType[] = [
-        GESTURES.ThreeFinger,
-        GESTURES.FourFinger,
-        GESTURES.TripleTap,
-      ];
-      expect(gestures).toHaveLength(3);
+      const gestures: GestureType[] = [GESTURES.TripleTap];
+      expect(gestures).toHaveLength(1);
     });
   });
 });

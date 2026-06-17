@@ -97,8 +97,7 @@ export default defineContentScript({
      * 统一处理三种动作（translate / restore / toggle）。
      *
      * translate 用 start()（异步），restore/toggle 同步即可。
-     * 第一次调用会懒加载控制器 + 检查 config.enabled / deepseekApiKey，
-     * 与 start() 内部的检查是双保险（防止消息路由绕过 UI）。
+     * 第一次调用会懒加载控制器。
      */
     function handleAction(action: 'translate' | 'restore' | 'toggle'): void {
       void ensureController().then((ctrl) => {
@@ -113,17 +112,9 @@ export default defineContentScript({
       });
     }
 
-    /** 懒加载控制器，首次创建前先检查扩展是否启用。 */
+    /** 懒加载控制器。 */
     async function ensureController(): Promise<TranslationController> {
       if (translation) return translation;
-      const config = await getConfig();
-      if (!config.enabled) {
-        showStatus('扩展未启用，请在 popup 中启用', 'error');
-        setTimeout(hideStatus, 3000);
-        // 仍然返回一个空 controller，调用方执行空操作；避免 throw 污染 onMessage
-        translation = createTranslationController(isMobile, state);
-        return translation;
-      }
       translation = createTranslationController(isMobile, state);
       return translation;
     }

@@ -2,11 +2,6 @@
   <div class="popup-container">
     <h2>简简单单翻译</h2>
     <div class="settings">
-      <label class="switch-item">
-        <input type="checkbox" v-model="config.enabled" @change="saveConfig" />
-        <span>启用翻译</span>
-      </label>
-
       <div class="input-item">
         <label>DeepSeek API Key</label>
         <input
@@ -15,53 +10,34 @@
           placeholder="输入 DeepSeek API Key"
           @input="onApiKeyChange"
         />
-        <span v-if="config.useServerTranslation" class="status-text success">服务端模式（无需 API Key）</span>
-        <span v-else-if="apiStatus === 'checking'" class="status-text checking">验证中...</span>
+        <span v-if="apiStatus === 'checking'" class="status-text checking">验证中...</span>
         <span v-else-if="apiStatus === 'ok'" class="status-text success">已配置</span>
         <span v-else-if="apiStatus === 'fail'" class="status-text error">未配置或无效</span>
       </div>
 
-      <div class="input-item">
-        <label>API 端点 URL (兼容 OpenAI 协议)</label>
-        <input
-          type="text"
-          v-model="config.apiBaseUrl"
-          placeholder="https://api.deepseek.com/v1/chat/completions"
-          @input="onApiBaseUrlChange"
-        />
-        <span class="hint-text">留空 = 默认 DeepSeek。可填 OpenAI / 自建代理 (Ollama 等)。</span>
-      </div>
-
-      <div class="select-item">
-        <label>源语言</label>
-        <select v-model="config.sourceLang" @change="saveConfig">
-          <option value="auto">自动检测</option>
-          <option value="en">英语</option>
-          <option value="zh">中文</option>
-          <option value="ja">日语</option>
-        </select>
-      </div>
-
-      <div class="select-item">
-        <label>目标语言</label>
-        <select v-model="config.targetLang" @change="saveConfig">
-          <option value="zh">中文</option>
-          <option value="en">英语</option>
-          <option value="ja">日语</option>
-        </select>
-      </div>
-
-      <div class="select-item">
-        <label>触屏手势</label>
-        <select v-model="config.touchGesture" @change="saveConfig">
-          <option value="TripleTap">三击翻译</option>
-          <option value="ThreeFinger">三指翻译</option>
-        </select>
+      <div class="lang-row">
+        <div class="select-item">
+          <label>源语言</label>
+          <select v-model="config.sourceLang" @change="saveConfig">
+            <option value="auto">自动检测</option>
+            <option value="en">英语</option>
+            <option value="zh">中文</option>
+            <option value="ja">日语</option>
+          </select>
+        </div>
+        <div class="select-item">
+          <label>目标语言</label>
+          <select v-model="config.targetLang" @change="saveConfig">
+            <option value="zh">中文</option>
+            <option value="en">英语</option>
+            <option value="ja">日语</option>
+          </select>
+        </div>
       </div>
 
       <label class="switch-item">
         <input type="checkbox" v-model="config.useServerTranslation" @change="saveConfig" />
-        <span>使用服务端翻译</span>
+        <span>通过远程服务器翻译当前页面（发送 HTML）</span>
       </label>
 
       <div v-if="config.useServerTranslation" class="input-item">
@@ -72,7 +48,7 @@
           placeholder="https://s.sunxiunan.com/fanyi/page"
           @input="onServerUrlChange"
         />
-        <span class="hint-text">留空 = 默认地址。发送 HTML 到服务端翻译。</span>
+        <span class="hint-text">把当前页面 HTML 发送到远程服务器翻译，适合绕过页面反爬或本地没有 API Key 的场景。</span>
       </div>
 
       <div class="actions">
@@ -89,25 +65,21 @@ import { ref, onMounted, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 
 const config = ref<Config>({
-  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',
-  apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
     restoreOriginal: 'Alt+R',
     toggleTranslation: 'Alt+V',
   },
-  touchGesture: 'TripleTap',
   useServerTranslation: false,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
 let checkTimer: number | null = null;
-let urlTimer: number | null = null;
 let serverUrlTimer: number | null = null;
 
 onMounted(async () => {
@@ -126,19 +98,6 @@ function onApiKeyChange() {
     saveConfig();
     checkApiKey();
   }, 800);
-}
-
-function onApiBaseUrlChange() {
-  // 改 URL 后不需要重新验证 (验证是 round-trip + 看响应),
-  // 只持久化即可。下次翻译请求会读新 URL。
-  if (urlTimer) clearTimeout(urlTimer);
-  urlTimer = window.setTimeout(() => {
-    // 用户清空 → 恢复默认 URL, 不要存空字符串 (否则 UI 再次打开会显示空)。
-    if (!config.value.apiBaseUrl?.trim()) {
-      config.value.apiBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
-    }
-    saveConfig();
-  }, 400);
 }
 
 function onServerUrlChange() {
@@ -236,6 +195,16 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.lang-row {
+  display: flex;
+  gap: 12px;
+}
+
+.lang-row > .select-item {
+  flex: 1;
+  min-width: 0;
 }
 
 .input-item label,

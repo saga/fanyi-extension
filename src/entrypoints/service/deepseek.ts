@@ -135,11 +135,10 @@ function buildTranslationBody(
 
 async function callApi(
   apiKey: string,
-  apiBaseUrl: string,
   body: string
 ): Promise<string> {
   try {
-    const response = await fetch(apiBaseUrl, {
+    const response = await fetch(DEFAULT_API_URL, {
       method: 'POST',
       headers: buildHeaders(apiKey),
       body,
@@ -209,12 +208,9 @@ function hasGlossaryEntries(glossary?: Glossary): boolean {
 
 export class DeepSeekTranslationService implements TranslationService {
   private apiKey: string;
-  private apiBaseUrl: string;
 
-  constructor(apiKey: string, apiBaseUrl: string = DEFAULT_API_URL) {
+  constructor(apiKey: string) {
     this.apiKey = apiKey;
-    // 防御性 trim: 留空 / 空白 → 回落到默认, 避免 fetch 失败时报 "Failed to construct 'URL'"
-    this.apiBaseUrl = apiBaseUrl?.trim() || DEFAULT_API_URL;
   }
 
   async translate(
@@ -234,7 +230,7 @@ export class DeepSeekTranslationService implements TranslationService {
       hasGlossaryEntries(glossary) ? glossary : undefined
     );
 
-    const raw = await callApi(this.apiKey, this.apiBaseUrl, JSON.stringify(body));
+    const raw = await callApi(this.apiKey, JSON.stringify(body));
     return logUnchangedBlocks(raw, blocks);
   }
 
@@ -257,7 +253,7 @@ export class DeepSeekTranslationService implements TranslationService {
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);
 
-    const response = await fetch(this.apiBaseUrl, {
+    const response = await fetch(DEFAULT_API_URL, {
       method: 'POST',
       headers: buildHeaders(this.apiKey),
       body,

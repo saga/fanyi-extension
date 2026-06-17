@@ -1,6 +1,3 @@
-import { GESTURES } from '../utils/constants';
-import { getCenterPoint } from '../utils/common';
-import { getConfig } from '../utils/config';
 import { showConfigPanel } from './configPanel';
 
 /**
@@ -14,9 +11,7 @@ import { showConfigPanel } from './configPanel';
  *
  * 触屏手势（仅在 enable && 触屏设备上响应）：
  *   - TripleTap（三击）：500ms 内的 3 次单击
- *   - ThreeFinger（三指）：3 指同时触碰
- *   - FourFinger（四指）：4 指同时触碰
- *   手势类型从 config.touchGesture 读取，用户可在配置面板切换。
+ *   手势类型固定为 TripleTap，不再提供配置项。
  */
 
 const BTN_POSITION_KEY = 'fanyi-btn-position';
@@ -186,11 +181,10 @@ export function updateButtonState(isTranslated: boolean): void {
 }
 
 /**
- * 注册全局 touchstart 监听器，根据 config.touchGesture 触发翻译。
+ * 注册全局 touchstart 监听器，固定使用 TripleTap 手势触发翻译。
  *
  * 移动端没有"鼠标点击"，需要单独识别手势：
  *   - TripleTap: 500ms 内连续 3 次单击（用 tapCount + tapTimer 实现）
- *   - ThreeFinger / FourFinger: 同时触摸指头数符合才触发
  *
  * 注：Firefox / Chrome 触屏都遵循 TouchEvent 接口，无需 UA 区分。
  */
@@ -200,7 +194,7 @@ export function setupTouchEvents(
   let tapCount = 0;
   let tapTimer: number | undefined;
 
-  const handleTouchStart = async (event: TouchEvent) => {
+  const handleTouchStart = (event: TouchEvent) => {
     const target = event.target as Element;
     // 命中扩展自身的 UI 时不响应手势
     if (
@@ -211,35 +205,15 @@ export function setupTouchEvents(
       return;
     }
 
-    const config = await getConfig();
-    if (!config.enabled) return;
-
-    const gesture = config.touchGesture || GESTURES.TripleTap;
-    const multiFingerGestures: string[] = [GESTURES.ThreeFinger, GESTURES.FourFinger];
-
-    if (multiFingerGestures.includes(gesture)) {
-      const required = gesture === GESTURES.ThreeFinger ? 3 : 4;
-      if (event.touches.length === required) {
-        const center = getCenterPoint(event.touches, required);
-        if (center) {
-          try { event.preventDefault(); } catch (e) { /* ignore */ }
-          onTranslate();
-        }
-      }
-      return;
-    }
-
-    if (gesture === GESTURES.TripleTap) {
-      if (event.touches.length !== 1) return;
-      tapCount++;
-      if (tapCount === 1) {
-        tapTimer = window.setTimeout(() => { tapCount = 0; }, TRIPLE_TAP_WINDOW_MS);
-      } else if (tapCount === 3) {
-        if (tapTimer) clearTimeout(tapTimer);
-        tapCount = 0;
-        try { event.preventDefault(); } catch (e) { /* ignore */ }
-        onTranslate();
-      }
+    if (event.touches.length !== 1) return;
+    tapCount++;
+    if (tapCount === 1) {
+      tapTimer = window.setTimeout(() => { tapCount = 0; }, TRIPLE_TAP_WINDOW_MS);
+    } else if (tapCount === 3) {
+      if (tapTimer) clearTimeout(tapTimer);
+      tapCount = 0;
+      try { event.preventDefault(); } catch (e) { /* ignore */ }
+      onTranslate();
     }
   };
 

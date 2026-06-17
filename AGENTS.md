@@ -28,11 +28,11 @@ WXT extension with entrypoints at `src/entrypoints/`:
 
 ## Server translation mode
 
-When `config.useServerTranslation` is enabled, the extension skips the local DeepSeek API and instead sends the page HTML (with `data-fanyi-block-id` attributes set by the walker) to a configured `/fanyi/page` endpoint. The server returns a bilingual HTML response; the extension extracts `.fanyi-translation` text for each marked block and applies it via `applyBlockTranslation()`. This mode does not require a local API key.
+When `config.useServerTranslation` is enabled, the extension sends the page HTML (with `data-fanyi-block-id` attributes set by the walker) to a configured `/fanyi/page` endpoint. The endpoint only supports `mode='bilingual'` and `service='deepseek'`, and requires the extension to provide a DeepSeek API Key (`config.deepseekApiKey`) in the request body. The server uses this client-provided key to call DeepSeek, then returns a bilingual HTML response. The extension extracts `.fanyi-translation` text for each marked block and applies it via `applyBlockTranslation()`.
 
 Key files for server mode:
 - `src/entrypoints/content/serverTranslation.ts` — `translateViaServer()` implementation
-- `src/entrypoints/utils/config.ts` — `useServerTranslation` and `serverUrl` config fields
+- `src/entrypoints/utils/config.ts` — `useServerTranslation`, `serverUrl`, and `deepseekApiKey` config fields
 - `src/entrypoints/popup/App.vue` and `src/entrypoints/content/configPanel.ts` — UI switches and URL input
 - `fanyi-extension-blocks-protocol.md` — protocol between extension and server
 

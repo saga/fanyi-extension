@@ -6,11 +6,11 @@ import { showStatus, hideStatus } from './statusOverlay';
  * 配置面板（点击浮动按钮长按出现）。
  *
  * 面板内容：
- *   - DeepSeek API Key（必填，保存时实时验证）
+ *   - DeepSeek API Key（保存时实时验证）
  *   - 源语言（auto / en / zh / ja）
  *   - 目标语言（zh / en / ja）
- *   - 翻译模式（双语 / 仅译文）
- *   - 触屏手势（仅移动端：三击 / 三指）
+ *   - 远程服务器翻译开关 + 地址 + Provider
+ *   - 触屏手势固定为"三击翻译"
  *
  * 交互流程：
  *   1. 用户填好表 → 点保存 → 后台 validateApiKey
@@ -86,19 +86,10 @@ function buildPanelHtml(isMobile: boolean): string {
           <option value="ja">日语</option>
         </select>
       </div>
-      ${isMobile ? `
-      <div class="fanyi-config-row">
-        <label>触摸手势</label>
-        <select class="fanyi-touch-gesture">
-          <option value="TripleTap">三击翻译</option>
-          <option value="ThreeFinger">三指翻译</option>
-        </select>
-      </div>
-      ` : ''}
       <div class="fanyi-config-row fanyi-config-switch">
         <label>
           <input type="checkbox" class="fanyi-use-server" />
-          使用服务端翻译
+          通过远程服务器翻译当前页面
         </label>
       </div>
       <div class="fanyi-config-row fanyi-server-url-row" style="display:none">
@@ -120,11 +111,6 @@ async function loadConfigIntoPanel(panel: HTMLElement, isMobile: boolean): Promi
   (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value = config.deepseekApiKey || '';
   (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value = config.sourceLang || 'auto';
   (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
-
-  if (isMobile) {
-    const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement | null;
-    if (gestureSelect) gestureSelect.value = config.touchGesture || 'TripleTap';
-  }
 
   // 服务端翻译开关
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
@@ -171,9 +157,11 @@ function wirePanelEvents(
   // 服务端翻译开关：切换显示/隐藏服务端地址输入框
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
   const serverUrlRow = panel.querySelector('.fanyi-server-url-row') as HTMLElement | null;
-  if (useServerCheckbox && serverUrlRow) {
+  if (useServerCheckbox) {
     useServerCheckbox.addEventListener('change', () => {
-      serverUrlRow.style.display = useServerCheckbox.checked ? '' : 'none';
+      if (serverUrlRow) {
+        serverUrlRow.style.display = useServerCheckbox.checked ? '' : 'none';
+      }
     });
   }
 }
@@ -181,6 +169,9 @@ function wirePanelEvents(
 /** 收集面板上的表单值 → 调 background 验证 API Key → 成功则写入 storage。 */
 async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promise<void> {
   const apiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value.trim();
+  const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
+  const useServer = useServerCheckbox?.checked ?? false;
+
   if (!apiKey) {
     showStatus('API Key 不能为空', 'error');
     setTimeout(hideStatus, 2000);
@@ -195,18 +186,12 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
     });
     console.log('[ContentScript] Validation response:', response);
 
-    if (response?.success) {
+    if ((response as any)?.success) {
       const config = await getConfig();
       config.deepseekApiKey = apiKey;
       config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
       config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
 
-      if (isMobile) {
-        const gestureSelect = panel.querySelector('.fanyi-touch-gesture') as HTMLSelectElement | null;
-        if (gestureSelect) config.touchGesture = gestureSelect.value;
-      }
-
-      const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
       if (useServerCheckbox) {
         config.useServerTranslation = useServerCheckbox.checked;
       }

@@ -17,18 +17,15 @@ import { getConfig, setConfig, resetConfig, hasApiKey } from '../entrypoints/uti
 import type { Config } from '../entrypoints/utils/config';
 
 const defaultConfig: Config = {
-  enabled: true,
   sourceLang: 'auto',
   targetLang: 'zh',
   deepseekApiKey: '',
-  apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
     restoreOriginal: 'Alt+R',
     toggleTranslation: 'Alt+V',
   },
-  touchGesture: 'TripleTap',
   useServerTranslation: false,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
 };

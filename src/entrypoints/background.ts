@@ -1,6 +1,6 @@
 import browser from 'webextension-polyfill';
 import { DeepSeekTranslationService } from './service/deepseek';
-import { getConfig, setConfig, getApiBaseUrl } from './utils/config';
+import { getConfig, setConfig } from './utils/config';
 import {
   getCachedTranslation,
   cacheTranslation,
@@ -25,16 +25,14 @@ export default defineBackground({
 
     // Service cache is in-memory; Firefox may suspend background scripts.
     // Recreate service instances as needed; don't rely on persistence.
-    // Key: `${apiKey}|${apiBaseUrl}` — 同一 key 不同 endpoint 是不同实例
-    // (用户切换 provider 后旧实例应 GC)。
+    // Key: apiKey — endpoint 已固定为 DeepSeek，无需再按 URL 区分。
     const serviceCache = new Map<string, DeepSeekTranslationService>();
 
-    function getService(apiKey: string, apiBaseUrl: string): DeepSeekTranslationService {
-      const key = `${apiKey}|${apiBaseUrl}`;
-      if (!serviceCache.has(key)) {
-        serviceCache.set(key, new DeepSeekTranslationService(apiKey, apiBaseUrl));
+    function getService(apiKey: string): DeepSeekTranslationService {
+      if (!serviceCache.has(apiKey)) {
+        serviceCache.set(apiKey, new DeepSeekTranslationService(apiKey));
       }
-      return serviceCache.get(key)!;
+      return serviceCache.get(apiKey)!;
     }
 
     browser.runtime.onInstalled.addListener(() => {
@@ -170,7 +168,7 @@ export default defineBackground({
           return;
         }
 
-        const service = getService(config.deepseekApiKey, config.apiBaseUrl);
+        const service = getService(config.deepseekApiKey);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
         // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
@@ -313,7 +311,7 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
-        const service = getService(config.deepseekApiKey, config.apiBaseUrl);
+        const service = getService(config.deepseekApiKey);
 
         const stream = service.translateStream(
           jsonContent,
@@ -389,8 +387,7 @@ export default defineBackground({
 
         console.log('[Background] Validating API Key, length:', apiKey.length);
 
-        const apiBaseUrl = await getApiBaseUrl();
-        const service = new DeepSeekTranslationService(apiKey, apiBaseUrl);
+        const service = new DeepSeekTranslationService(apiKey);
         const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
 
         const timeout = new Promise((_, reject) => {
@@ -398,7 +395,7 @@ export default defineBackground({
         });
 
         await Promise.race([
-          service.translate(testContent, 'en', 'zh', []),
+          service.translate(testContent, 'en', 'zh', undefined),
           timeout,
         ]);
         
