@@ -104,7 +104,7 @@ export function createTranslationController(
 
     restore() {
       isTranslatedState = false;
-      restoreOriginal();
+      restoreOriginal(state);
     },
 
     toggle() {
@@ -132,6 +132,13 @@ async function handleFullTranslation(
   state: TranslationState,
   setObserver: (obs: DOMObserverManager | null) => void,
 ): Promise<TranslationResult> {
+  // 防御性检查：即使 start() 已经判断过，在真正发送请求前再确认一次，
+  // 防止 content script 重新注入、或多入口同时触发导致重复翻译。
+  if (isPageTranslated()) {
+    console.log('[ContentScript] Page already translated, skip sending request.');
+    return { translated: true, observer: null };
+  }
+
   const { blocks, chunks, fullText } = prepareDocument(document);
 
   if (blocks.length === 0) {
@@ -160,6 +167,9 @@ async function handleFullTranslation(
         : '翻译完成';
     showStatus(statusMsg, 'success');
     setTimeout(hideStatus, 3000);
+    if (document.body) {
+      document.body.dataset.fanyiTranslated = 'true';
+    }
     return { translated: true, observer: null };
   }
 
@@ -197,6 +207,9 @@ async function handleFullTranslation(
   showStatus(statusMsg, 'success');
   setTimeout(hideStatus, 3000);
 
+  if (document.body) {
+    document.body.dataset.fanyiTranslated = 'true';
+  }
   return { translated: true, observer };
 }
 

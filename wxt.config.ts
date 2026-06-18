@@ -27,7 +27,8 @@ export default defineConfig({
     if (env.browser === 'firefox') {
       // Firefox (Desktop & Android)
       // 需要访问默认翻译服务端 s.sunxiunan.com，以及 DeepSeek API。
-      manifest.permissions = ['storage', 'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*'];
+      // 桌面 Firefox 完整支持 contextMenus，Android Firefox 会静默忽略不支持的 API。
+      manifest.permissions = ['storage', 'contextMenus', 'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*'];
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
@@ -40,7 +41,11 @@ export default defineConfig({
     } else {
       // Chrome & other Chromium browsers
       manifest.permissions = ['storage', 'contextMenus'];
-      manifest.host_permissions = ['https://api.deepseek.com/*'];
+      manifest.host_permissions = [
+        'https://api.deepseek.com/*',
+        'https://s.sunxiunan.com/*',
+        'https://ss.dal.workers.dev/*',
+      ];
       manifest.commands = {
         'translate-page': {
           suggested_key: {

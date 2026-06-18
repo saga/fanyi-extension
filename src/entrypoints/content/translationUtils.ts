@@ -85,7 +85,15 @@ export function markMissingBlocks(
 // ============================================================
 
 export function isPageTranslated(): boolean {
-  return document.querySelector('.fanyi-translated') !== null;
+  // 页面级标记 + 节点级标记同时检查：
+  // 1. body 上的 data-fanyi-translated 在翻译完成后设置，restore 时移除，toggle 不会移除；
+  // 2. .fanyi-translated class / data-original-text 在 applyBlockTranslation 时设置。
+  // 这样即使 toggle 隐藏译文、或服务端翻译清理了节点标记，仍能判断已翻译。
+  return (
+    document.body?.dataset.fanyiTranslated === 'true' ||
+    document.querySelector('.fanyi-translated') !== null ||
+    document.querySelector('[data-original-text]') !== null
+  );
 }
 
 export function warnOnNodeMapMismatch(blocks: TextBlock[], nodeMap: Map<string, Node>): void {
@@ -117,7 +125,7 @@ function cleanupTempAttrs(): void {
   }
 }
 
-export function restoreOriginal(): void {
+export function restoreOriginal(state?: TranslationState): void {
   for (const node of Array.from(document.querySelectorAll('.fanyi-translated'))) {
     restoreBlock(node as HTMLElement);
   }
@@ -127,6 +135,13 @@ export function restoreOriginal(): void {
     el.removeAttribute('title');
   }
   cleanupTempAttrs();
+  if (document.body) {
+    delete document.body.dataset.fanyiTranslated;
+  }
+  if (state) {
+    state.originalTexts.clear();
+    state.translatedBlocks.clear();
+  }
   updateButtonState(false);
   showStatus('已恢复原文', 'success');
   setTimeout(hideStatus, 2000);
