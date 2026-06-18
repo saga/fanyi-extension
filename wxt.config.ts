@@ -26,7 +26,8 @@ export default defineConfig({
 
     if (env.browser === 'firefox') {
       // Firefox (Desktop & Android)
-      manifest.permissions = ['storage', 'https://api.deepseek.com/*'];
+      // 需要访问默认翻译服务端 s.sunxiunan.com，以及 DeepSeek API。
+      manifest.permissions = ['storage', 'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*'];
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
