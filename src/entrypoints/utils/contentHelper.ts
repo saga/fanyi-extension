@@ -104,16 +104,29 @@ function refineArticleRoot(candidate: Element): Element {
   return candidate;
 }
 
+function hasMeaningfulContent(el: Element): boolean {
+  // 过滤掉空的占位容器（如 Microsoft TechCommunity 里第一个 <article>
+  // 是 CustomComponent_lia-article__sQ7z4 这类无正文的包装）。
+  const text = (el.textContent || '').trim();
+  return text.length > 0;
+}
+
 function findArticleRoot(doc: Document): Element {
   // Layer 1: 选择器快速匹配（处理已知站点）
+  // 用 querySelectorAll 取第一个有内容的匹配项，避免类似 Microsoft
+  // TechCommunity 那样第一个 <article> 是空占位符的情况。
   for (const selector of ARTICLE_SELECTORS) {
-    const el = doc.querySelector(selector);
-    if (el) return refineArticleRoot(el);
+    const els = doc.querySelectorAll(selector);
+    for (const el of Array.from(els)) {
+      if (hasMeaningfulContent(el)) {
+        return refineArticleRoot(el);
+      }
+    }
   }
 
   // Layer 2: 智能评分（处理未知站点）
   const detected = detectArticleRoot(doc);
-  if (detected) return detected;
+  if (detected && hasMeaningfulContent(detected)) return detected;
 
   // Layer 3: 兜底
   return doc.body || doc.documentElement;
