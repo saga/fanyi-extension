@@ -93,7 +93,7 @@ describe('translateViaServer', () => {
     expect(body.source).toBe('en');
     expect(body.target).toBe('zh');
     expect(body.mode).toBe('bilingual');
-    expect(body.service).toBe('deepseek');
+    expect(body.provider).toBe('deepseek');
 
     expect(result.size).toBe(2);
     expect(result.has('b1')).toBe(true);
@@ -256,11 +256,31 @@ describe('translateViaServer', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    // provider 直接复用本地 provider 配置，服务端据此选择 LLM
     expect(body.provider).toBe('openrouter');
     expect(body.apiKey).toBeUndefined();
   });
 
-  it('uses fixed deepseek service and sends apiKey when provider is deepseek', async () => {
+  it('sends provider=nvidia and no apiKey when provider is nvidia', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'nvidia' };
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(config, blocks, nodeMap);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.provider).toBe('nvidia');
+    expect(body.apiKey).toBeUndefined();
+  });
+
+  it('sends provider=deepseek and apiKey when provider is deepseek', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -275,7 +295,6 @@ describe('translateViaServer', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.service).toBe('deepseek');
     expect(body.provider).toBe('deepseek');
     expect(body.apiKey).toBe('sk-test');
   });

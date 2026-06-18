@@ -68,9 +68,9 @@ export async function translateViaServer(
 ): Promise<Set<string>> {
   const serverUrl = config.serverUrl?.trim() || 'https://s.sunxiunan.com/fanyi/page';
   const url = window.location.href;
-  const service = 'deepseek';
-  // provider 只对服务端翻译生效：告诉服务端用哪个 LLM provider 调用翻译。
-  // 本地翻译固定走 DeepSeek，不受此配置影响。
+  // 服务端翻译使用的 LLM 提供方，直接复用本地 provider 配置
+  // （deepseek/openrouter/nvidia/cloudflare）。
+  // 服务端 /fanyi/page 根据 provider 字段选择对应的 LLM。
   const provider = config.provider || 'deepseek';
 
   const apiKey = config.deepseekApiKey?.trim();
@@ -82,7 +82,7 @@ export async function translateViaServer(
 
   const html = prepareHtmlForServer();
   console.log(
-    `[ServerTranslation] url=${url} service=${service} provider=${provider} sentHtml=${html.length} bytes ` +
+    `[ServerTranslation] url=${url} provider=${provider} sentHtml=${html.length} bytes ` +
       `(bodyFallback=${html.startsWith('<body')})`,
   );
 
@@ -93,7 +93,6 @@ export async function translateViaServer(
     target: config.targetLang,
     // 扩展端只支持双语对照模式，服务端也已强制此模式
     mode: 'bilingual' as const,
-    service,
     provider,
   };
   // 仅当 provider=deepseek 时才把客户端的 API Key 发给服务端；
