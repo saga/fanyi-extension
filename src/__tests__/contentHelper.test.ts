@@ -261,4 +261,31 @@ describe('prepareDocument', () => {
     expect(fullText).toContain('main content');
     expect(fullText).not.toContain('Home');
   });
+
+  it('should use .blog-content for Ghost CMS sites (commoncog.com)', () => {
+    // commoncog.com 使用 Ghost CMS：没有 <article>/<main>，正文在 .blog-content 内
+    document.body.innerHTML = `
+      <header class="site-header">Commoncog</header>
+      <div class="relative">
+        <div class="col-span-12 md:col-span-8 blog-content font-serif">
+          <h1>How to Improve at Sensemaking AI?</h1>
+          <p>Note: This is Part 3 of a short series on sensemaking.</p>
+          <p>In Part 1 we discussed one way to make sense of AI.</p>
+        </div>
+        <aside class="sidebar">
+          <p>Subscribe to the newsletter</p>
+        </aside>
+      </div>
+      <footer class="site-footer">Footer content</footer>
+    `;
+
+    const { fullText } = prepareDocument(document);
+
+    expect(fullText).toContain('How to Improve at Sensemaking AI');
+    expect(fullText).toContain('Part 3 of a short series');
+    expect(fullText).toContain('make sense of AI');
+    expect(fullText).not.toContain('Commoncog');
+    expect(fullText).not.toContain('Subscribe to the newsletter');
+    expect(fullText).not.toContain('Footer content');
+  });
 });

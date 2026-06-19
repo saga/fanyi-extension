@@ -467,3 +467,126 @@ export function isAdIframe(el: Element): boolean {
   const src = ((el as HTMLIFrameElement).src || '').toLowerCase();
   return Array.from(AD_IFRAME_PATTERNS).some(p => src.includes(p));
 }
+
+// =============================================================================
+// 低优先级 / Overlay 元素标记
+// =============================================================================
+//
+// 这些元素 walker 会拒绝翻译，但保留在 DOM 中。通过 data 属性标记后，
+// 注入的 CSS 可以对它们进行视觉弱化或完全隐藏，让阅读注意力集中在正文上。
+
+const LOW_PRIORITY_SELECTORS = [
+  // 语义标签（含 heading 的 header 除外，由调用方判断）
+  { tag: 'nav' },
+  { tag: 'footer' },
+  { tag: 'aside' },
+
+  // 广告 / 推广
+  { classPattern: /\bad\b|banner|sponsor|promo|affiliate|advert/i },
+  { idPattern: /\bad\b|banner|sponsor|promo|advert/i },
+
+  // 社交分享 / 评论 / 相关推荐
+  { classPattern: /share|social|comment|related|recommend|sidebar/i },
+  { idPattern: /share|social|comment|related|recommend|sidebar/i },
+
+  // 站点级 chrome（非文章内容）
+  { classPattern: /navbar|site-nav|global-nav|topbar|subscribe|newsletter|cookie|consent/i },
+  { idPattern: /navbar|site-nav|global-nav|topbar|subscribe|newsletter|cookie|consent/i },
+  { tag: 'form', classPattern: /subscribe|newsletter/i },
+];
+
+const OVERLAY_PATTERNS = [
+  // Cookie / GDPR / 隐私同意
+  { classPattern: /\bcookie\b|consent|gdpr|privacy-banner|cookie-banner/i },
+  { idPattern: /\bcookie\b|consent|gdpr|privacy/i },
+
+  // 通用弹窗 / Modal / Overlay
+  { classPattern: /\bpopup\b|\bmodal\b|overlay|dialog|backdrop|lightbox/i },
+  { idPattern: /\bpopup\b|\bmodal\b|overlay|dialog/i },
+  { role: 'dialog' },
+
+  // Substack 系列
+  { classPattern: /subscription-popup|paywall|subscribe-popup|newsletter-modal/i },
+
+  // 固定定位的干扰性 banner（顶部/底部 fixed bar）
+  {
+    tag: 'div',
+    styleCheck: (el: Element) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const pos = el.style?.position;
+      return pos === 'fixed' || pos === 'sticky';
+    },
+  },
+];
+
+function matchSelectorRule(
+  el: Element,
+  rule: {
+    tag?: string;
+    classPattern?: RegExp;
+    idPattern?: RegExp;
+    role?: string;
+    styleCheck?: (el: Element) => boolean;
+  },
+): boolean {
+  // tag/role 是前置过滤条件
+  if (rule.tag && el.tagName.toLowerCase() !== rule.tag) return false;
+  if (rule.role && el.getAttribute('role') !== rule.role) return false;
+
+  // 如果规则只有 tag/role，匹配即命中
+  const hasHitCondition = rule.classPattern || rule.idPattern || rule.styleCheck;
+  if (!hasHitCondition) return true;
+
+  // 有附加命中条件时，任一条件满足即命中
+  if (rule.classPattern) {
+    // SVG 元素的 className 是 SVGAnimatedString，需要防御
+    const cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+    if (rule.classPattern.test(cls)) return true;
+  }
+  if (rule.idPattern) {
+    const id = (el.id || '').toLowerCase();
+    if (rule.idPattern.test(id)) return true;
+  }
+  if (rule.styleCheck) {
+    // styleCheck 是确定性条件：通过则命中，不通过则此规则不命中
+    if (rule.styleCheck(el)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * 是否为低优先级元素（需要视觉弱化但保留 DOM）。
+ * 注意：这只是标记建议，最终是否打标记由 walker 在拒绝分支中决定。
+ */
+export function isLowPriorityElement(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+
+  // header 含 heading 时不视为低优先级（可能是文章标题区）
+  if (tag === 'header') {
+    const hasHeading = el.querySelector('h1,h2,h3,h4,h5,h6') !== null;
+    if (hasHeading) return false;
+  }
+
+  for (const rule of LOW_PRIORITY_SELECTORS) {
+    if (matchSelectorRule(el, rule)) return true;
+  }
+  return false;
+}
+
+/**
+ * 是否为弹窗 / overlay / cookie banner 等遮挡性元素。
+ * 这些元素会直接被隐藏（display: none）。
+ *
+ * 注意：article / main 内部的容器即使 class 含 "overlay" 也很可能是
+ * 站点 CMS 包装（如 Substack 的 .overlay-zrMCxn），不在此列。
+ */
+export function isOverlayElement(el: Element): boolean {
+  const inArticle = el.closest('article, main, [role="main"], [role="article"]');
+  if (inArticle) return false;
+
+  for (const rule of OVERLAY_PATTERNS) {
+    if (matchSelectorRule(el, rule)) return true;
+  }
+  return false;
+}

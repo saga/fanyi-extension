@@ -14,6 +14,7 @@ const ARTICLE_SELECTORS = [
   '.story-content',
   '.u-rich-text-blog',        // Webflow blog rich text (claude.com)
   '.rich-text',               // Generic rich text wrapper
+  '.blog-content',            // Ghost CMS
   '.post-content',            // Common blog CMS (Jane Street, Hugo, Jekyll)
   '.entry-content',           // WordPress
   '.page-content',

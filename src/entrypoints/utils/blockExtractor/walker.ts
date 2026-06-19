@@ -26,8 +26,10 @@ import {
   isCookieBannerByText,
   isElementHidden,
   isInsideArticle,
+  isLowPriorityElement,
   isMetadataClass,
   isNonHTMLNamespace,
+  isOverlayElement,
   isPopupByStyle,
   isValidText,
   shouldSkipByClass,
@@ -37,6 +39,48 @@ import type { TextBlock } from './types';
 
 /** DIRECT_SET 拼接成 CSS 选择器, 用于 querySelector 检查子树是否还有 DIRECT_SET 元素。 */
 const DIRECT_SET_CSS_SELECTOR = Array.from(DIRECT_SET).join(',');
+
+// =============================================================================
+// Soft score hint (ultra-cheap heuristic)
+// =============================================================================
+//
+// 只用于 sidebar / article 混排、SPA wrapper vs real article body 等场景。
+// 给 walker 一个"倾向性"判断，而不是硬过滤，避免过早 reject/skip 正文块。
+
+function computeSoftHint(el: Element): number {
+  let score = 0;
+  const cls = (el.className || '').toLowerCase();
+
+  if (cls.includes('article') || cls.includes('post')) score += 2;
+  if (cls.includes('content') || cls.includes('body')) score += 2;
+  if (cls.includes('main')) score += 1;
+
+  if (cls.includes('sidebar') || cls.includes('nav')) score -= 3;
+  if (cls.includes('footer') || cls.includes('comment')) score -= 2;
+
+  return score;
+}
+
+function getSoftHint(el: Element, scoreHint: WeakMap<Element, number>): number {
+  let hint = scoreHint.get(el);
+  if (hint === undefined) {
+    hint = computeSoftHint(el);
+    scoreHint.set(el, hint);
+  }
+  return hint;
+}
+
+/**
+ * 对低优先级元素打标记。同一元素只打一次（通过 scoreHint 缓存判断）。
+ */
+function markLowPriorityIfNeeded(
+  el: Element,
+  scoreHint: WeakMap<Element, number>
+): void {
+  if (!scoreHint.has(el) && isLowPriorityElement(el)) {
+    el.setAttribute('data-fanyi-low-priority', 'true');
+  }
+}
 
 // =============================================================================
 // grabNode: 把已 ACCEPT 的节点评估为"翻译块"或"非块"
@@ -99,7 +143,8 @@ function grabNode(node: Node): Element | false {
 function acceptWalkerNode(
   node: Node,
   counters: WalkerCounters,
-  rejectedCache: WeakSet<Element>
+  rejectedCache: WeakSet<Element>,
+  scoreHint: WeakMap<Element, number>
 ): number {
   // 文本节点: 仅当父被拒时连坐拒绝;否则接受让 grabNode 评估
   if (node instanceof Text) {
@@ -123,6 +168,15 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
 
+  // 0.5) 弹窗 / overlay / cookie banner：直接标记移除并拒绝整棵子树。
+  // 这些元素不是页面内容，会遮挡正文，必须在 walker 最前面处理。
+  if (isOverlayElement(el)) {
+    el.setAttribute('data-fanyi-remove', 'true');
+    rejectedCache.add(el);
+    counters.rejected++;
+    return NodeFilter.FILTER_REJECT;
+  }
+
   // 1) 硬性拒绝条件 (整棵子树拒绝,无例外)
   if (isNonHTMLNamespace(el)) {
     rejectedCache.add(el);
@@ -130,6 +184,7 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
   if (SKIP_SET.has(tag) || hasTranslateBlockClass(el) || isContentEditable(el)) {
+    markLowPriorityIfNeeded(el, scoreHint);
     rejectedCache.add(el);
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
@@ -140,6 +195,7 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
   if (shouldSkipByClass(el) || shouldSkipBySiteRules(el)) {
+    markLowPriorityIfNeeded(el, scoreHint);
     rejectedCache.add(el);
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
@@ -182,10 +238,18 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
 
+  // ⭐ soft score hint: 给 walker 一个轻量倾向性判断，避免过早误杀。
+  const hint = getSoftHint(el, scoreHint);
+
   // 4) DIRECT_SET 元素: 自身评估, 若子树还有 DIRECT_SET 则跳过 (让子块独立抓)
   if (DIRECT_SET.has(tag)) {
     const hasDirectSetDescendant = el.querySelector(DIRECT_SET_CSS_SELECTOR) !== null;
     if (hasDirectSetDescendant) {
+      counters.skipped++;
+      return NodeFilter.FILTER_SKIP;
+    }
+    // hint 为负（sidebar/nav/footer 里的 p/li）降权 skip，不抓成独立块
+    if (hint < 0) {
       counters.skipped++;
       return NodeFilter.FILTER_SKIP;
     }
@@ -230,15 +294,16 @@ export function collectBlocks(
   seenTexts: Set<string>
 ): WalkerCounters {
   const counters = { rejected: 0, skipped: 0, accepted: 0 };
-  // Per-walker WeakSet: 被 REJECT 的元素入表, 后代 O(1) 查表。
+  // Per-walker: 被 REJECT 的元素入表 + soft score hint 缓存。
   // 随 DOM GC, 无内存泄漏。
   const rejectedCache = new WeakSet<Element>();
+  const scoreHint = new WeakMap<Element, number>();
 
   const walker = document.createTreeWalker(
     startNode,
     NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
     {
-      acceptNode: (node) => acceptWalkerNode(node, counters, rejectedCache),
+      acceptNode: (node) => acceptWalkerNode(node, counters, rejectedCache, scoreHint),
     }
   );
 

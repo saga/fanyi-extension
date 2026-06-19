@@ -87,5 +87,23 @@ export function getStyles(isMobile: boolean): string {
       background: linear-gradient(135deg, #67c23a, #85ce61);
       color: white;
     }
+
+    /* 低优先级元素视觉弱化（保留 DOM，hover 恢复） */
+    [data-fanyi-low-priority="true"] {
+      opacity: 0.35 !important;
+      filter: grayscale(60%) !important;
+      transition: opacity 0.2s ease, filter 0.2s ease !important;
+    }
+    [data-fanyi-low-priority="true"]:hover {
+      opacity: 1 !important;
+      filter: none !important;
+    }
+
+    /* 弹窗 / overlay / cookie banner 直接隐藏 */
+    [data-fanyi-remove="true"] {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
   `;
 }
