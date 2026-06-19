@@ -112,16 +112,105 @@ function hasMeaningfulContent(el: Element): boolean {
   return text.length > 0;
 }
 
+/**
+ * Webflow 等 CMS 常把一篇博客拆到多个 .u-rich-text-blog / .rich-text 容器。
+ * 第一个命中后只覆盖开篇，后续内容在同级兄弟容器中。
+ *
+ * 策略：逐层向上检查 ancestor 是否包含其他有实质文本的兄弟节点。
+ * 如果有（且 ancestor 不是 nav/body），说明当前元素只是碎片，
+ * 向上扩展到该 ancestor。
+ *
+ * 特殊处理 <main>：如果当前元素不包含 h1/h2 标题，继续向上扩展到 <main>，
+ * 因为标题可能在 <main> 内但在 .entry-content 外。
+ */
+function expandIfFragmented(el: Element): Element {
+  let current: Element = el;
+  const MAX_UP = 6;
+  for (let i = 0; i < MAX_UP; i++) {
+    const parent = current.parentElement;
+    if (!parent) break;
+
+    const tag = parent.tagName.toLowerCase();
+    if (tag === 'body' || tag === 'html') break;
+
+    const classes = `${parent.className || ''} ${parent.id || ''}`;
+    if (/nav|menu|sidebar|footer|header|comment|widget/i.test(classes)) break;
+
+    // 当前元素不包含 h1/h2 标题 → 可能需要向上扩展来包含标题
+    const hasHeading = current.querySelector('h1, h2') !== null;
+    if (!hasHeading) {
+      // 向上检查最多 3 级祖先，看标题是否在当前元素之外
+      let ancestor: Element | null = parent;
+      let foundHeadingOutside = false;
+      for (let j = 0; j < 3 && ancestor; j++) {
+        const ancTag = ancestor.tagName.toLowerCase();
+        if (ancTag === 'body' || ancTag === 'html') break;
+        // 检查 ancestor 的兄弟节点是否有标题
+        const ancSiblings = Array.from(ancestor.parentElement?.children || []);
+        foundHeadingOutside = ancSiblings.some(
+          (s) =>
+            s !== ancestor &&
+            (s.tagName === 'H1' || s.tagName === 'H2' || s.querySelector?.('h1, h2')),
+        );
+        if (foundHeadingOutside) break;
+        ancestor = ancestor.parentElement;
+      }
+      if (foundHeadingOutside) {
+        current = parent;
+        continue;
+      }
+    }
+
+    const parentLen = (parent.textContent || '').trim().length;
+    const currentLen = (current.textContent || '').trim().length;
+
+    // 纯包装层（文本相同），穿过它继续向上
+    if (parentLen <= currentLen) {
+      current = parent;
+      continue;
+    }
+
+    // parent 有额外文本：检查是否来自有实质内容的兄弟节点
+    const siblings = Array.from(parent.children).filter((c) => c !== current);
+    const hasRichSibling = siblings.some((s) => {
+      const text = (s.textContent || '').trim();
+      if (text.length > 200) return true;
+      const sTag = s.tagName?.toLowerCase();
+      if (sTag === 'h1' || sTag === 'h2') return true;
+      if (s.querySelector('h1, h2')) return true;
+      return false;
+    });
+    if (!hasRichSibling) break;
+
+    current = parent;
+  }
+  return current;
+}
+
 function findArticleRoot(doc: Document): Element {
   // Layer 1: 选择器快速匹配（处理已知站点）
-  // 用 querySelectorAll 取第一个有内容的匹配项，避免类似 Microsoft
-  // TechCommunity 那样第一个 <article> 是空占位符的情况。
+  // 对每个选择器：先取内容最多的匹配项（避免空占位符/短摘要），
+  // 再 refine，最后 expandIfFragmented（处理标题在外、正文拆成多容器）。
   for (const selector of ARTICLE_SELECTORS) {
-    const els = doc.querySelectorAll(selector);
-    for (const el of Array.from(els)) {
-      if (hasMeaningfulContent(el)) {
-        return refineArticleRoot(el);
+    const els = Array.from(doc.querySelectorAll(selector));
+    let bestInSelector: Element | null = null;
+    let bestLen = 0;
+    for (const el of els) {
+      const len = (el.textContent || '').trim().length;
+      if (len > 0 && len > bestLen) {
+        bestLen = len;
+        bestInSelector = el;
       }
+    }
+    if (bestInSelector) {
+      const refined = refineArticleRoot(bestInSelector);
+      const expanded = expandIfFragmented(refined);
+      if (expanded !== refined) {
+        console.log(
+          `[ContentHelper] Expanded from <${refined.tagName}> .${(refined.className || '').slice(0, 40)} to <${expanded.tagName}> .${(expanded.className || '').slice(0, 40)}`,
+        );
+      }
+      return expanded;
     }
   }
 
