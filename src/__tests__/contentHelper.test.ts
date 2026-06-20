@@ -179,6 +179,35 @@ describe('prepareDocument', () => {
     expect(() => prepareDocument(document)).toThrow('No translatable content found');
   });
 
+  // Regression: databricks.com blog. A consent/cookie SDK banner that gets picked as
+  // the article root yields 0 blocks (every descendant is pruned by overlay/cookie
+  // rules). prepareDocument must fall back to <body> so the real article still gets
+  // translated, rather than throwing "No translatable content found".
+  it('falls back to body when the detected root yields 0 translatable blocks', () => {
+    // Simulate the failure mode: a candidate root (here the banner) whose entire
+    // subtree is pruned by the walker, plus a real article elsewhere in <body>.
+    document.body.innerHTML = `
+      <div id="onetrust-consent-sdk">
+        <div id="onetrust-pc-sdk" class="otPcTab ot-hide ot-sdk-not-webkit">
+          <div id="ot-pc-content" class="ot-pc-scrollbar ot-sdk-row">
+            <p>Cookie banner text that the walker should never translate.</p>
+          </div>
+        </div>
+      </div>
+      <div class="text-blog-body">
+        <h1>Introducing the product</h1>
+        <p>This is the real article body with multiple paragraphs of genuine content.</p>
+        <p>Second paragraph of the actual article continues here with more detail.</p>
+      </div>
+    `;
+
+    const { blocks, fullText } = prepareDocument(document);
+
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(fullText).toContain('real article body');
+    expect(fullText).not.toContain('Cookie banner text');
+  });
+
   it('should use .u-rich-text-blog for Webflow sites (claude.com)', () => {
     // claude.com/blog 使用 Webflow，文章内容在 .u-rich-text-blog.w-richtext 内
     document.body.innerHTML = `

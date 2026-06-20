@@ -179,5 +179,56 @@ describe('contentDetector', () => {
       expect(root).not.toBeNull();
       expect(root!.textContent).toContain('main content');
     });
+
+    // Regression: databricks.com blog. OneTrust cookie banner (#onetrust-consent-sdk
+    // → #onetrust-pc-sdk → #ot-pc-content) holds ~2600 chars of dense GDPR legal text
+    // with almost no links, so it scores HIGHER than the real article body. Without
+    // the consent-SDK exclusion it wins detectArticleRoot() and the walker then prunes
+    // the whole subtree (every ancestor carries ot-/onetrust/consent classes), yielding
+    // 0 blocks → "No translatable content found".
+    it('excludes consent/cookie SDK containers even when they score highest', () => {
+      document.body.innerHTML = `
+        <div id="onetrust-consent-sdk">
+          <div id="onetrust-pc-sdk" class="otPcTab ot-hide">
+            <div id="ot-pc-content" class="ot-pc-scrollbar ot-sdk-row">
+              <p>We use cookies to personalize content and analyze our traffic. You can consent to the use of such technologies by accepting all, or reject all non-essential technologies.</p>
+              <p>Privacy Preference Center. When you visit any website, it may store or retrieve information on your browser, mostly in the form of cookies.</p>
+              <p>Manage your privacy preferences and consent settings across all vendors. Strictly Necessary Cookies Always Active.</p>
+            </div>
+          </div>
+        </div>
+        <div class="rich-text-blog">
+          <h1>Introducing the product</h1>
+          <p>This is the real article body with multiple paragraphs of genuine content that users want translated.</p>
+          <p>Second paragraph of the actual article continues here with more detail.</p>
+          <p>Third paragraph rounds out the article body so it has healthy text density.</p>
+        </div>
+      `;
+
+      const root = detectArticleRoot(document);
+      expect(root).not.toBeNull();
+      // Must pick the article, never any OneTrust container.
+      expect(root!.id).not.toBe('ot-pc-content');
+      expect(root!.id).not.toBe('onetrust-pc-sdk');
+      expect(root!.closest('#onetrust-consent-sdk')).toBeNull();
+      expect(root!.textContent).toContain('real article body');
+    });
+
+    it('excludes consent SDK reachable via class match (Cookiebot)', () => {
+      document.body.innerHTML = `
+        <div class="CybotCookiebotDialog">
+          <p>We use cookies. Accept all. Manage consent. Privacy settings for everyone.</p>
+          <p>Cookiebot consent dialog with lots of dense legal text and no links at all.</p>
+        </div>
+        <div class="post-content">
+          <h2>Real post</h2>
+          <p>This is the genuine article content that should be detected as the root.</p>
+          <p>Additional paragraphs ensure this scores well in the detection algorithm.</p>
+        </div>
+      `;
+      const root = detectArticleRoot(document);
+      expect(root).not.toBeNull();
+      expect(root!.className).toContain('post-content');
+    });
   });
 });

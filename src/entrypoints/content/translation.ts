@@ -6,7 +6,7 @@ import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { showStatus, hideStatus } from './statusOverlay';
 import { updateButtonState } from './floatingButton';
 import { translateChunksViaBackground } from './chunkTranslation';
-import { translateViaServer } from './serverTranslation';
+import { translateViaServer, checkServerCache, applyServerTranslatedHtml } from './serverTranslation';
 import {
   retryGlobalMissing,
   markMissingBlocks,
@@ -139,6 +139,21 @@ async function handleFullTranslation(
     return { translated: true, observer: null };
   }
 
+  // 服务端翻译模式下，先查询服务端缓存，命中即可跳过 prepareHtmlForServer 等重计算。
+  let cachedHtml: string | null = null;
+  if (config.useServerTranslation) {
+    showStatus('正在检查服务端缓存...', 'loading');
+    try {
+      cachedHtml = await checkServerCache(config);
+      if (cachedHtml) {
+        console.log('[ContentScript] Server cache hit, skip heavy HTML preparation.');
+      }
+    } catch (e) {
+      console.error('[ContentScript] Server cache check failed:', e);
+      // 缓存检查失败不阻塞，继续走正常翻译流程
+    }
+  }
+
   const { blocks, chunks, fullText } = prepareDocument(document);
 
   if (blocks.length === 0) {
@@ -153,8 +168,14 @@ async function handleFullTranslation(
 
   // 使用服务端翻译
   if (config.useServerTranslation) {
-    showStatus('正在发送到服务端翻译...', 'loading');
-    const translatedIds = await translateViaServer(config, blocks, nodeMap);
+    let translatedIds: Set<string>;
+    if (cachedHtml) {
+      showStatus('正在应用服务端缓存...', 'loading');
+      translatedIds = applyServerTranslatedHtml(cachedHtml, blocks, nodeMap);
+    } else {
+      showStatus('正在发送到服务端翻译...', 'loading');
+      translatedIds = await translateViaServer(config, blocks, nodeMap);
+    }
     const missingIds = markMissingBlocks(nodeMap, translatedIds);
     updateButtonState(true);
     cleanupTempAttrs();

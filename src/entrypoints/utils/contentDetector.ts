@@ -111,6 +111,45 @@ const NEGATIVE_CONTAINER_ID_RE =
 const META_ID_RE = /(?:author|byline|timestamp|tag|category|topic|date|meta)/i;
 
 // =============================================================================
+// 绝对排除：隐私同意 / Cookie / 广告 SDK 容器
+// =============================================================================
+//
+// 这些容器 (OneTrust, Cookiebot, TrustArc, Quantcast Choice, GDPR banner...)
+// 文本密度天然很高 (几千字符的法律条文、几乎没链接)，会让 scoreElement() 得到
+// 超高分，从而在 detectArticleRoot() 里压过真正的文章正文。
+// 但它们绝不该被当作 article root —— 走 extractBlocks 后整棵子树会被 overlay /
+// cookie 规则剪枝, 返回 0 块, 最终用户看到 "No translatable content found"。
+// (回归 case: databricks.com 博客, OneTrust #ot-pc-content 抢走了 root。)
+//
+// 命中任一 token 的元素 (含其祖先) 直接从候选里剔除, 不参与评分。
+
+const CONSENT_SDK_ID_RE =
+  /(?:onetrust|cookiebot|trustarc|quantcast|consent|gdpr|cookielaw|cookie-law|privacy)/i;
+const CONSENT_SDK_CLASS_RE =
+  /(?:onetrust|\bot-sdk|ot-pc|ot-cookie|cookiebot|trustarc|quantcast|qc-cmp|cookie-banner|consent-banner|gdpr-banner|privacy-banner)/i;
+
+/**
+ * 元素 (或其任意祖先) 是否是隐私同意 / Cookie / 广告 SDK 容器。
+ * 用于在 detectArticleRoot 里绝对排除这类高密度但非正文的容器。
+ */
+function isConsentSdkContainer(el: Element): boolean {
+  let current: Element | null = el;
+  while (current) {
+    const tag = current.tagName.toLowerCase();
+    if (tag === 'body' || tag === 'html') return false;
+
+    const id = current.id || '';
+    if (id && CONSENT_SDK_ID_RE.test(id)) return true;
+
+    const cls = typeof current.className === 'string' ? current.className : '';
+    if (cls && CONSENT_SDK_CLASS_RE.test(cls)) return true;
+
+    current = current.parentElement;
+  }
+  return false;
+}
+
+// =============================================================================
 // 结构 boost
 // =============================================================================
 
@@ -275,6 +314,9 @@ export function collectCandidates(doc: Document): Element[] {
 
   function add(el: Element | null) {
     if (!el || seen.has(el) || el === doc.body || el === doc.documentElement) return;
+    // 绝对排除: 隐私同意 / Cookie / 广告 SDK 容器 (含祖先命中)。
+    // 它们文本密度高、会拿到超高评分, 但 extractBlocks 后必然 0 块。
+    if (isConsentSdkContainer(el)) return;
     seen.add(el);
     candidates.push(el);
   }
@@ -346,6 +388,15 @@ export function detectArticleRoot(doc: Document): Element | null {
   if (bestScore < SCORE_THRESHOLD) {
     console.log(
       `[ContentDetector] Best score ${bestScore.toFixed(1)} < threshold ${SCORE_THRESHOLD}, fallback to body`,
+    );
+    return null;
+  }
+
+  // 防御: 即便通过了 collectCandidates 过滤, 也再校验一次冠军不是 consent SDK
+  // (理论上不会命中, 但 collectCandidates 的祖先展开可能引入外层包装)。
+  if (best && isConsentSdkContainer(best)) {
+    console.log(
+      `[ContentDetector] Best candidate is a consent/cookie SDK container, ignoring (score: ${bestScore.toFixed(1)})`,
     );
     return null;
   }

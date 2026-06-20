@@ -56,6 +56,65 @@ function prepareHtmlForServer(): string {
   return fullHtml.length > MAX_FULL_HTML_CHARS ? bodyHtml : fullHtml;
 }
 
+function getDefaultServerUrl(config: Config): string {
+  return config.serverUrl?.trim() || 'https://s.sunxiunan.com/fanyi/page';
+}
+
+/**
+ * 查询服务端是否已有当前 URL 的翻译缓存。
+ * @returns 命中的翻译后 HTML；未命中返回 null。
+ */
+export async function checkServerCache(config: Config): Promise<string | null> {
+  const serverUrl = getDefaultServerUrl(config);
+  const checkUrl = new URL(serverUrl);
+  checkUrl.pathname = checkUrl.pathname.replace(/\/$/, '') + '/check';
+  checkUrl.searchParams.set('url', window.location.href);
+  checkUrl.searchParams.set('source', config.sourceLang || 'en');
+  checkUrl.searchParams.set('target', config.targetLang || 'zh');
+
+  const response = await fetch(checkUrl.toString(), { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`服务端缓存检查失败: ${response.status} ${response.statusText}`);
+  }
+  // 204 表示未缓存
+  if (response.status === 204) {
+    return null;
+  }
+  return response.text();
+}
+
+/**
+ * 解析服务端返回的双语对照 HTML，按 block id 回填到当前 DOM。
+ */
+export function applyServerTranslatedHtml(
+  translatedHtml: string,
+  blocks: TextBlock[],
+  nodeMap: Map<string, Node>,
+): Set<string> {
+  const parser = new DOMParser();
+  const translatedDoc = parser.parseFromString(translatedHtml, 'text/html');
+
+  const translatedIds = new Set<string>();
+  for (const block of blocks) {
+    const el = translatedDoc.querySelector(`[data-fanyi-block-id="${block.id}"]`);
+    if (!el) continue;
+
+    // 服务端返回的是双语对照 HTML：元素内部有 .fanyi-original 和 .fanyi-translation
+    // 扩展端只取 .fanyi-translation 的文本回填，保持与本地翻译一致的双语显示。
+    const translationSpan = el.querySelector('.fanyi-translation');
+    const translatedText = translationSpan?.textContent?.trim();
+    if (!translatedText || translatedText === block.text) continue;
+
+    const node = nodeMap.get(block.id);
+    if (node instanceof HTMLElement) {
+      applyBlockTranslation(node, translatedText);
+      translatedIds.add(block.id);
+    }
+  }
+
+  return translatedIds;
+}
+
 /**
  * 通过服务端翻译页面。
  * 发送包含 data-fanyi-block-id 的 HTML 到 /fanyi/page，
@@ -66,7 +125,7 @@ export async function translateViaServer(
   blocks: TextBlock[],
   nodeMap: Map<string, Node>,
 ): Promise<Set<string>> {
-  const serverUrl = config.serverUrl?.trim() || 'https://s.sunxiunan.com/fanyi/page';
+  const serverUrl = getDefaultServerUrl(config);
   const url = window.location.href;
   // 服务端翻译使用的 LLM 提供方，直接复用本地 provider 配置
   // （deepseek/openrouter/nvidia/cloudflare）。
@@ -117,28 +176,5 @@ export async function translateViaServer(
   }
 
   const translatedHtml = await response.text();
-
-  // 解析返回的 HTML，提取翻译后的文本
-  const parser = new DOMParser();
-  const translatedDoc = parser.parseFromString(translatedHtml, 'text/html');
-
-  const translatedIds = new Set<string>();
-  for (const block of blocks) {
-    const el = translatedDoc.querySelector(`[data-fanyi-block-id="${block.id}"]`);
-    if (!el) continue;
-
-    // 服务端返回的是双语对照 HTML：元素内部有 .fanyi-original 和 .fanyi-translation
-    // 扩展端只取 .fanyi-translation 的文本回填，保持与本地翻译一致的双语显示。
-    const translationSpan = el.querySelector('.fanyi-translation');
-    const translatedText = translationSpan?.textContent?.trim();
-    if (!translatedText || translatedText === block.text) continue;
-
-    const node = nodeMap.get(block.id);
-    if (node instanceof HTMLElement) {
-      applyBlockTranslation(node, translatedText);
-      translatedIds.add(block.id);
-    }
-  }
-
-  return translatedIds;
+  return applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
 }

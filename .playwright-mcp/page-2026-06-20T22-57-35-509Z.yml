@@ -1,0 +1,932 @@
+- generic [ref=e1]:
+  - generic [ref=e4]:
+    - link "Skip to main content" [ref=e5] [cursor=pointer]:
+      - /url: "#main"
+    - navigation "Main Navigation" [ref=e6]:
+      - generic [ref=e7]:
+        - link "Header databricks logo" [ref=e8] [cursor=pointer]:
+          - /url: /
+          - figure [ref=e9]
+        - list [ref=e12]:
+          - listitem [ref=e13]:
+            - button "Why Databricks" [ref=e15] [cursor=pointer]
+          - listitem [ref=e16]:
+            - button "Product" [ref=e18] [cursor=pointer]
+          - listitem [ref=e19]:
+            - button "Solutions" [ref=e21] [cursor=pointer]
+          - listitem [ref=e22]:
+            - button "Resources" [ref=e24] [cursor=pointer]
+          - listitem [ref=e25]:
+            - button "About" [ref=e27] [cursor=pointer]
+        - generic [ref=e28]:
+          - button "Switch language. Current Language - English" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+          - button "Site search" [ref=e37] [cursor=pointer]:
+            - img [ref=e38]
+        - list [ref=e41]:
+          - listitem [ref=e42]:
+            - link "Login" [ref=e43] [cursor=pointer]:
+              - /url: https://login.databricks.com/?dbx_source=www&itm=main-cta-login&l=en-EN
+          - listitem [ref=e44]:
+            - link "Contact Us" [ref=e45] [cursor=pointer]:
+              - /url: /company/contact
+          - listitem [ref=e46]:
+            - link "Try Databricks in Main Navigation" [ref=e47] [cursor=pointer]:
+              - /url: https://www.databricks.com/signup?dbx_source=www&itm_data=dbx-web-nav&l=en-EN&itm_source=www&itm_category=blog&itm_page=introducing-genie-one-genie-ontology-and-genie-agents&itm_location=nav&itm_component=menu-area&itm_offer=signup
+              - text: Try Databricks
+    - generic [ref=e48]:
+      - generic [ref=e50]:
+        - navigation "Breadcrumbs" [ref=e51]:
+          - list [ref=e52]:
+            - listitem [ref=e53]:
+              - link "All Posts" [ref=e54] [cursor=pointer]:
+                - /url: /blog
+                - text: All blogs
+            - listitem [ref=e55]:
+              - generic [ref=e56]: /
+              - link "Platform" [ref=e57] [cursor=pointer]:
+                - /url: /blog/category/platform
+        - navigation "Table of contents" [ref=e58]:
+          - button "Table of contents" [ref=e59] [cursor=pointer]:
+            - generic [ref=e60]:
+              - generic [ref=e61]:
+                - img [ref=e62]
+                - generic [ref=e64]: Table of contents
+              - img [ref=e66]
+        - generic [ref=e68]:
+          - banner [ref=e69]:
+            - generic [ref=e70]:
+              - link "Product" [ref=e71] [cursor=pointer]:
+                - /url: /blog/category/platform/product
+              - time [ref=e73]: June 16, 2026
+            - generic [ref=e74]:
+              - heading "Introducing Genie One, Genie Agents, and Genie Ontology" [level=1] [ref=e75]
+              - paragraph [ref=e76]: The data-smart AI coworker, grounded in your enterprise context.
+            - paragraph [ref=e77]:
+              - text: by
+              - link "Sydney Sundell" [ref=e78] [cursor=pointer]:
+                - /url: /blog/author/sydney-sundell
+              - text: ","
+              - link "Ken Wong" [ref=e79] [cursor=pointer]:
+                - /url: /blog/author/ken-wong
+              - text: and
+              - link "Elise Georis" [ref=e80] [cursor=pointer]:
+                - /url: /blog/author/elise-georis
+          - generic [ref=e84]:
+            - button "Summary" [ref=e86] [cursor=pointer]:
+              - generic [ref=e88]: Summary
+              - img [ref=e90]
+            - list [ref=e94]:
+              - listitem [ref=e95]: Genie One is the data-smart AI coworker for business users, expanding Genie beyond conversational analytics, with agentic actions, skills, integrations across Slack, Microsoft Teams, mobile apps, and MCP-based assistant experiences.
+              - listitem [ref=e96]: Genie Agents let teams turn prompts into shareable, autonomous agents that can reason over structured and unstructured data, and take action across business tools.
+              - listitem [ref=e97]: Genie Ontology is a unified context layer that extracts and reasons over knowledge from data and connected tools, so Genie can identify trustworthy sources and answer with full business context.
+          - generic [ref=e98]:
+            - paragraph [ref=e99]: Despite the progress in LLMs and consumer chat agents, most enterprise teams still struggle to put AI to work on real business questions. The reason is that getting insights out of data - the ground truth of the business - is hard even with the latest generations of models and agents.
+            - paragraph [ref=e100]:
+              - text: The reason for this is that the business context required to use data is scattered across dashboards, queries, pipelines, wikis, tickets, documents, and chat threads. When AI doesn’t easily find the information it needs, it fills in the gaps with inference, producing answers that are generic at best and wrong at worst. The current generation of agents often go through a process of iterative probing that is extremely slow and costly, and forcing a compromise in quality. This has resulted in
+              - link "unacceptably poor performance" [ref=e101] [cursor=pointer]:
+                - /url: https://www.databricks.com/blog/pushing-frontier-data-agents-genie
+              - text: for truly data-driven decision making and actions.
+            - paragraph [ref=e102]: "Today, we are announcing our solution to this problem:"
+            - list [ref=e103]:
+              - listitem [ref=e104]: "Genie One: a data-smart AI coworker that works across all of your data,"
+              - listitem [ref=e105]: "Genie Agents: a way for everyone to create dedicated agents to automate work, and"
+              - listitem [ref=e106]: "Genie Ontology: an automatic and secure context store that enables agents to achieve superior accuracy and performance."
+            - 'heading "Genie One: The data-smart AI coworker for every team" [level=2] [ref=e107]'
+            - paragraph [ref=e108]:
+              - figure [ref=e109]:
+                - 'button "Expand: image1.png" [ref=e110]':
+                  - img "image1.png" [ref=e112]
+                  - generic:
+                    - img
+                    - generic: Expand
+            - paragraph [ref=e113]:
+              - text: Genie began as a conversational analytics assistant in Databricks AI/BI.
+              - link "Genie One" [ref=e114] [cursor=pointer]:
+                - /url: https://www.databricks.com/product/genie/one
+              - text: "is the next step: a data-smart AI coworker designed to help users move from insight to action."
+            - list [ref=e115]:
+              - listitem [ref=e116]:
+                - strong [ref=e117]: For all of your apps and data.
+                - text: Genie One connects insights from across your entire data estate through a rich ecosystem of native connectors. Through
+                - link "Lakehouse federation" [ref=e118] [cursor=pointer]:
+                  - /url: https://docs.databricks.com/aws/en/query-federation/
+                - text: ","
+                - link "Lakeflow Connect" [ref=e119] [cursor=pointer]:
+                  - /url: https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/
+                - text: ", and new two-way integrations to everyday business tools (e.g., Gmail, Slack, Teams), Genie One can extract insights and orchestrate actions with any system you may have."
+              - listitem [ref=e120]:
+                - strong [ref=e121]: Full co-work capabilities.
+                - text: Genie One provides a full suite of agentic-cowork capabilities, including schedules and alerts, monitoring, document creation, custom skills, and custom MCP support. Sales leaders can ask Genie to prepare a daily brief for all their customer meetings, combining the context from their calendar, email, and hard data from their Lakehouse and other connected systems. General managers can simply paste in last month’s business review document, and ask Genie to update it with the latest information from their inventory systems, along with the transcripts from their team discussions. The possibilities are endless.
+            - paragraph:
+              - figure:
+                - 'button "Expand: image7.gif"':
+                  - generic:
+                    - img "image7.gif"
+                  - generic: Expand
+            - paragraph [ref=e122]:
+              - text: Because enterprise work happens across a full stack of tools and surfaces, we’re bringing Genie to everywhere work happens—starting by embedding it natively into
+              - link "Slack" [ref=e123] [cursor=pointer]:
+                - /url: https://docs.databricks.com/aws/en/genie-ui/genie-slack
+              - text: and
+              - link "Microsoft Teams" [ref=e124] [cursor=pointer]:
+                - /url: https://learn.microsoft.com/en-us/azure/databricks/integrations/msft-teams
+              - text: . Users can simply @mention Genie in any conversation to ask questions in natural language and get accurate answers in seconds. Genie can also be used in public channels and threads, helping teams collaborate without switching context. Every response is governed, secure, and tailored to what each user is authorized to access.
+            - paragraph:
+              - figure:
+                - 'button "Expand: image5.gif"':
+                  - generic:
+                    - img "image5.gif"
+                  - generic: Expand
+            - paragraph [ref=e125]:
+              - text: For users on the go, we’re launching new
+              - link "databricks genie iOS" [ref=e126] [cursor=pointer]:
+                - /url: https://apps.apple.com/lk/app/databricks-genie/id6758961415
+                - text: iOS
+              - text: and
+              - link "Android" [ref=e127] [cursor=pointer]:
+                - /url: https://play.google.com/store/apps/details?id=com.databricks.one.mobile&hl=en_US
+              - text: apps that put Genie in your pocket. Users can ask questions, get alerts, and take action on insights grounded in your company data, from anywhere.
+            - paragraph [ref=e128]: And for organizations who have adopted an existing AI agent or developed their own, we’re also announcing the Genie MCP App, which allows those users to benefit from Genie without having to change their workflows.
+            - paragraph:
+              - figure:
+                - 'button "Expand: image4.gif"':
+                  - generic:
+                    - img "image4.gif"
+                  - generic: Expand
+            - blockquote [ref=e129]:
+              - img [ref=e130]
+              - generic [ref=e135]: Our investment in building the Uplight Data Platform on top of Databricks is paying off in powerful new ways. By bringing Genie One capabilities to our data, we’re enabling teams across Uplight to explore, discover, and innovate with more speed, confidence, and creativity than ever before. This is the promise of data democratization - enabling a culture where curiosity, data-informed decision-making, and innovation can happen at every level of the company.
+              - generic [ref=e136]: — Micaela Christopher, Director of Data Science and Engineering, Uplight
+            - 'heading "Genie Agents: from a single prompt to an autonomous agent" [level=2] [ref=e137]'
+            - paragraph [ref=e138]:
+              - text: Databricks customers have created more than a million Genie Spaces—curated, governed chat experiences scoped to specific topics, with verified logic and benchmarks. Now,
+              - strong [ref=e139]: Genie Spaces is evolving into Genie Agents
+              - text: ": curated, domain-specific AI agents that:"
+            - list [ref=e140]:
+              - listitem [ref=e141]:
+                - strong [ref=e142]: Take autonomous action.
+                - text: Genie Agents use the same tools Genie One does—MCP connections, scheduled tasks, document and artifact generation, and writes to external systems—to complete multi-step workflows without need for oversight or intervention.
+              - listitem [ref=e143]:
+                - strong [ref=e144]: Reason over unstructured data, not just tables and views.
+                - text: Agents can be grounded in documents, files, and knowledge sources alongside structured data, covering the full context of a real business problem.
+            - paragraph [ref=e145]:
+              - text: "Best of all, creating an agent is as simple as describing what you want:"
+              - strong [ref=e146]: spin up a Genie Agent from a single prompt
+              - text: in Genie One or Genie Code, scope it, benchmark it, and share it for teammates to use or customize. Genie Agents let domain experts scale their expertise by turning trusted rules, data, and workflows into coworkers the whole team can rely on.
+            - paragraph:
+              - figure:
+                - 'button "Expand: image6.gif"':
+                  - generic:
+                    - img "image6.gif"
+                  - generic: Expand
+            - blockquote [ref=e147]:
+              - img [ref=e148]
+              - generic [ref=e153]: At Foot Locker, Genie Agents are transforming how we lead. They provide our executives and business teams with a centralized space to harness AI-driven insights across every North American banner we operate. As we scale Genie to the enterprise, it's reshaping the way our business interacts with data and makes the decisions that matter most. Genie isn't just a tool; it's the engine driving self-service insights across our organization
+              - generic [ref=e154]: — Matt Giunipero, VP of Data & Analytics and Krish Lakshminarayanan, VP, AI, Data & Analytics, Enterprise Architecture, Foot Locker
+            - 'heading "Genie Ontology: a living context graph for your business" [level=2] [ref=e155]'
+            - paragraph [ref=e156]:
+              - text: Genie One and Genie Agents are powered by
+              - strong [ref=e157]: Genie Ontology
+              - text: ", an automatic context layer. Genie Ontology automatically extracts snippets of knowledge from tables, queries, dashboards, pipelines, and connected apps, and organizes that knowledge into a living graph of how a company works and what the data inside"
+              - emphasis [ref=e158]: actually
+              - text: means. Genie has context about where to look, what to trust, and how to answer in a way that reflects how the company actually uses its data. That includes metric definitions, business terms, unique calculations, and the relationships between concepts, metrics, tables, and teams.
+            - paragraph:
+              - figure:
+                - 'button "Expand: image2.gif"':
+                  - generic:
+                    - img "image2.gif"
+                  - generic: Expand
+            - paragraph [ref=e159]: One key innovation of Genie Ontology is its approach to determining authority. Using an approach similar to PageRank, Genie Ontology weighs where a definition came from, the relative authority of that source’s author, how often people rely on it, how closely it ties to certified and widely-used assets, and how fresh it is. Then, Genie answers from the sources that carry the most weight. It also enforces the permissions of each source by only showing you the content that you actually have permissions to see. The result is that Genie solves the context problem, without asking your teams to hand-curate it or manage a separate permissions system.
+            - paragraph [ref=e160]:
+              - text: Our internal benchmark of real-world enterprise data analysis tasks have shown that Genie Ontology significantly improves agent performance on complex, enterprise data questions. In our testing, Genie answered
+              - strong [ref=e161]: 84.5%
+              - text: of questions correctly on the first attempt, while the strongest general-purpose coding agent managed just
+              - strong [ref=e162]: 52.4%
+              - text: — and the weakest only
+              - strong [ref=e163]: 25%
+              - text: . And Genie doesn’t trade off accuracy for speed. Genie delivers high accuracy
+              - emphasis [ref=e164]: and
+              - text: low latency, 2× faster than the strongest coding agent.
+            - 'figure "Source: internal Databricks benchmark — 28-question real-world data-analysis suite, June 2026. Competing coding agents are anonymized." [ref=e165]':
+              - 'button "Expand: image3.png"':
+                - generic:
+                  - img "image3.png"
+                - generic: Expand
+              - generic [ref=e166]: "Source: internal Databricks benchmark — 28-question real-world data-analysis suite, June 2026. Competing coding agents are anonymized."
+            - heading "Governed and secure by design" [level=2] [ref=e167]
+            - paragraph [ref=e168]: To roll out any AI tool across a company, leaders and IT teams need confidence that it’s governed, secure, and ready to scale. That’s why Genie One includes a full suite of admin governance tools designed to help organizations deploy AI across their teams.
+            - paragraph [ref=e169]:
+              - text: Like every Databricks product, governance and security sit at the heart of Genie. Permissions are enforced by default on every answer through source-native ACLs or Unity Catalog. MCP, tools and costs are governed by the
+              - strong [ref=e170]: Unity AI Gateway
+              - text: ", providing a single pane of governance for admins."
+            - paragraph [ref=e171]: Getting started
+            - paragraph [ref=e172]: "Genie One is the data-smart AI coworker every business user needs: it understands enterprise context, works across the tools where work happens, and is governed by design."
+            - paragraph [ref=e173]:
+              - text: To try Genie One, see our
+              - link "documentation" [ref=e174] [cursor=pointer]:
+                - /url: https://docs.databricks.com/gcp/en/genie-ui/genie
+              - text: ", install the mobile app for"
+              - link "genie ui iOS" [ref=e175] [cursor=pointer]:
+                - /url: https://apps.apple.com/hu/app/databricks-genie/id6758961415
+                - text: iOS
+              - text: or
+              - link "Android" [ref=e176] [cursor=pointer]:
+                - /url: https://play.google.com/store/apps/details?id=com.databricks.one.mobile&hl=en_US
+              - text: ", or contact your Databricks account team."
+          - generic [ref=e177]:
+            - generic [ref=e178]:
+              - generic [ref=e179]:
+                - heading "Get the latest posts in your inbox" [level=3] [ref=e180]
+                - paragraph [ref=e181]: Subscribe to our blog and get the latest posts delivered to your inbox.
+              - generic [ref=e182]:
+                - status
+                - generic [ref=e183]:
+                  - generic [ref=e186]:
+                    - generic [ref=e187]:
+                      - generic [ref=e188]: "*"
+                      - text: Work Email
+                    - textbox "* Work Email" [ref=e189]
+                  - generic [ref=e192]:
+                    - generic [ref=e193]:
+                      - generic [ref=e194]: "*"
+                      - text: Country
+                    - combobox "* Country Country*" [ref=e195]:
+                      - option "Select"
+                      - option "Afghanistan"
+                      - option "Åland Islands"
+                      - option "Albania"
+                      - option "Algeria"
+                      - option "American Samoa"
+                      - option "Andorra"
+                      - option "Angola"
+                      - option "Anguilla"
+                      - option "Antarctica"
+                      - option "Antigua and Barbuda"
+                      - option "Argentina"
+                      - option "Armenia"
+                      - option "Aruba"
+                      - option "Australia"
+                      - option "Austria"
+                      - option "Azerbaijan"
+                      - option "Bahamas"
+                      - option "Bahrain"
+                      - option "Bangladesh"
+                      - option "Barbados"
+                      - option "Belarus"
+                      - option "Belgium"
+                      - option "Belize"
+                      - option "Benin"
+                      - option "Bermuda"
+                      - option "Bhutan"
+                      - option "Bolivia, Plurinational State of"
+                      - option "Bonaire, Sint Eustatius and Saba"
+                      - option "Bosnia and Herzegovina"
+                      - option "Botswana"
+                      - option "Bouvet Island"
+                      - option "Brazil"
+                      - option "British Indian Ocean Territory"
+                      - option "Brunei Darussalam"
+                      - option "Bulgaria"
+                      - option "Burkina Faso"
+                      - option "Burundi"
+                      - option "Cambodia"
+                      - option "Cameroon"
+                      - option "Canada"
+                      - option "Cape Verde"
+                      - option "Cayman Islands"
+                      - option "Central African Republic"
+                      - option "Chad"
+                      - option "Chile"
+                      - option "China"
+                      - option "Christmas Island"
+                      - option "Cocos (Keeling) Islands"
+                      - option "Colombia"
+                      - option "Comoros"
+                      - option "Congo, the Democratic Republic of the"
+                      - option "Congo"
+                      - option "Cook Islands"
+                      - option "Costa Rica"
+                      - option "Côte d'Ivoire"
+                      - option "Croatia"
+                      - option "Cuba"
+                      - option "Curaçao"
+                      - option "Cyprus"
+                      - option "Czech Republic"
+                      - option "Denmark"
+                      - option "Djibouti"
+                      - option "Dominica"
+                      - option "Dominican Republic"
+                      - option "Ecuador"
+                      - option "Egypt"
+                      - option "El Salvador"
+                      - option "Equatorial Guinea"
+                      - option "Eritrea"
+                      - option "Estonia"
+                      - option "Ethiopia"
+                      - option "Falkland Islands (Malvinas)"
+                      - option "Faroe Islands"
+                      - option "Fiji"
+                      - option "Finland"
+                      - option "France"
+                      - option "French Guiana"
+                      - option "French Polynesia"
+                      - option "French Southern Territories"
+                      - option "Gabon"
+                      - option "Gambia"
+                      - option "Georgia"
+                      - option "Germany"
+                      - option "Ghana"
+                      - option "Gibraltar"
+                      - option "Greece"
+                      - option "Greenland"
+                      - option "Grenada"
+                      - option "Guadeloupe"
+                      - option "Guam"
+                      - option "Guatemala"
+                      - option "Guernsey"
+                      - option "Guinea"
+                      - option "Guinea-Bissau"
+                      - option "Guyana"
+                      - option "Haiti"
+                      - option "Heard Island and McDonald Islands"
+                      - option "Holy See (Vatican City State)"
+                      - option "Honduras"
+                      - option "Hong Kong"
+                      - option "Hungary"
+                      - option "Iceland"
+                      - option "India"
+                      - option "Indonesia"
+                      - option "Iran, Islamic Republic of"
+                      - option "Iraq"
+                      - option "Ireland"
+                      - option "Isle of Man"
+                      - option "Israel"
+                      - option "Italy"
+                      - option "Jamaica"
+                      - option "Japan"
+                      - option "Jersey"
+                      - option "Jordan"
+                      - option "Kazakhstan"
+                      - option "Kenya"
+                      - option "Kiribati"
+                      - option "Korea, Democratic People's Republic of"
+                      - option "Korea, Republic of"
+                      - option "Kuwait"
+                      - option "Kyrgyzstan"
+                      - option "Lao People's Democratic Republic"
+                      - option "Latvia"
+                      - option "Lebanon"
+                      - option "Lesotho"
+                      - option "Liberia"
+                      - option "Libya"
+                      - option "Liechtenstein"
+                      - option "Lithuania"
+                      - option "Luxembourg"
+                      - option "Macao"
+                      - option "Macedonia, the former Yugoslav Republic of"
+                      - option "Madagascar"
+                      - option "Malawi"
+                      - option "Malaysia"
+                      - option "Maldives"
+                      - option "Mali"
+                      - option "Malta"
+                      - option "Marshall Islands"
+                      - option "Martinique"
+                      - option "Mauritania"
+                      - option "Mauritius"
+                      - option "Mayotte"
+                      - option "Mexico"
+                      - option "Micronesia, Federated States of"
+                      - option "Moldova, Republic of"
+                      - option "Monaco"
+                      - option "Mongolia"
+                      - option "Montenegro"
+                      - option "Montserrat"
+                      - option "Morocco"
+                      - option "Mozambique"
+                      - option "Myanmar"
+                      - option "Namibia"
+                      - option "Nauru"
+                      - option "Nepal"
+                      - option "Netherlands"
+                      - option "New Caledonia"
+                      - option "New Zealand"
+                      - option "Nicaragua"
+                      - option "Niger"
+                      - option "Nigeria"
+                      - option "Niue"
+                      - option "Norfolk Island"
+                      - option "Northern Mariana Islands"
+                      - option "Norway"
+                      - option "Oman"
+                      - option "Pakistan"
+                      - option "Palau"
+                      - option "Palestinian Territory, Occupied"
+                      - option "Panama"
+                      - option "Papua New Guinea"
+                      - option "Paraguay"
+                      - option "Peru"
+                      - option "Philippines"
+                      - option "Pitcairn"
+                      - option "Poland"
+                      - option "Portugal"
+                      - option "Puerto Rico"
+                      - option "Qatar"
+                      - option "Réunion"
+                      - option "Romania"
+                      - option "Russian Federation"
+                      - option "Rwanda"
+                      - option "Saint Barthélemy"
+                      - option "Saint Helena, Ascension and Tristan da Cunha"
+                      - option "Saint Kitts and Nevis"
+                      - option "Saint Lucia"
+                      - option "Saint Martin (French part)"
+                      - option "Saint Pierre and Miquelon"
+                      - option "Saint Vincent and the Grenadines"
+                      - option "Samoa"
+                      - option "San Marino"
+                      - option "Sao Tome and Principe"
+                      - option "Saudi Arabia"
+                      - option "Senegal"
+                      - option "Serbia"
+                      - option "Seychelles"
+                      - option "Sierra Leone"
+                      - option "Singapore"
+                      - option "Sint Maarten (Dutch part)"
+                      - option "Slovakia"
+                      - option "Slovenia"
+                      - option "Solomon Islands"
+                      - option "Somalia"
+                      - option "South Africa"
+                      - option "South Georgia and the South Sandwich Islands"
+                      - option "South Sudan"
+                      - option "Spain"
+                      - option "Sri Lanka"
+                      - option "Sudan"
+                      - option "Suriname"
+                      - option "Svalbard and Jan Mayen"
+                      - option "Swaziland"
+                      - option "Sweden"
+                      - option "Switzerland"
+                      - option "Syrian Arab Republic"
+                      - option "Taiwan"
+                      - option "Tajikistan"
+                      - option "Tanzania, United Republic of"
+                      - option "Thailand"
+                      - option "Timor-Leste"
+                      - option "Togo"
+                      - option "Tokelau"
+                      - option "Tonga"
+                      - option "Trinidad and Tobago"
+                      - option "Tunisia"
+                      - option "Turkey"
+                      - option "Turkmenistan"
+                      - option "Turks and Caicos Islands"
+                      - option "Tuvalu"
+                      - option "Uganda"
+                      - option "Ukraine"
+                      - option "United Arab Emirates"
+                      - option "United Kingdom"
+                      - option "United States" [selected]
+                      - option "United States Minor Outlying Islands"
+                      - option "Uruguay"
+                      - option "Uzbekistan"
+                      - option "Vanuatu"
+                      - option "Venezuela, Bolivarian Republic of"
+                      - option "Viet Nam"
+                      - option "Virgin Islands, British"
+                      - option "Virgin Islands, U.S."
+                      - option "Wallis and Futuna"
+                      - option "Western Sahara"
+                      - option "Yemen"
+                      - option "Zambia"
+                      - option "Zimbabwe"
+                  - generic [ref=e200]:
+                    - text: By clicking “Subscribe” I understand that I will receive Databricks communications, and I agree to Databricks processing my personal data in accordance with its
+                    - link "Privacy Policy" [ref=e201] [cursor=pointer]:
+                      - /url: https://www.databricks.com/legal/privacynotice
+                    - text: .
+                  - button "Subscribe" [ref=e204] [cursor=pointer]
+            - link "View all blogs" [ref=e206] [cursor=pointer]:
+              - /url: /blog
+      - contentinfo [ref=e208]:
+        - generic [ref=e209]:
+          - generic [ref=e210]:
+            - generic [ref=e211]:
+              - generic [ref=e213]:
+                - heading "Why Databricks page link in footer" [level=2] [ref=e215]: Why Databricks
+                - generic [ref=e216]:
+                  - heading "Discover page link in footer" [level=3] [ref=e217]: Discover
+                  - list [ref=e218]:
+                    - listitem [ref=e219]:
+                      - link "For App Developers page link in footer" [ref=e220] [cursor=pointer]:
+                        - /url: /developers
+                        - text: For App Developers
+                    - listitem [ref=e221]:
+                      - link "For Executives page link in footer" [ref=e222] [cursor=pointer]:
+                        - /url: /why-databricks/executives
+                        - text: For Executives
+                    - listitem [ref=e223]:
+                      - link "For Startups page link in footer" [ref=e224] [cursor=pointer]:
+                        - /url: /product/startups
+                        - text: For Startups
+                    - listitem [ref=e225]:
+                      - link "Lakehouse Architecture page link in footer" [ref=e226] [cursor=pointer]:
+                        - /url: /product/data-lakehouse
+                        - text: Lakehouse Architecture
+                    - listitem [ref=e227]:
+                      - link "Databricks AI Research page link in footer" [ref=e228] [cursor=pointer]:
+                        - /url: /research/databricks-ai-research
+                        - text: Databricks AI Research
+                - generic [ref=e229]:
+                  - heading "Customers page link in footer" [level=3] [ref=e230]: Customers
+                  - list [ref=e231]:
+                    - listitem [ref=e232]:
+                      - link "Customer Stories page link in footer" [ref=e233] [cursor=pointer]:
+                        - /url: https://www.databricks.com/customers
+                        - text: Customer Stories
+                - generic [ref=e234]:
+                  - heading "Partners page link in footer" [level=3] [ref=e235]: Partners
+                  - list [ref=e236]:
+                    - listitem [ref=e237]:
+                      - link "Partner Overview page link in footer" [ref=e238] [cursor=pointer]:
+                        - /url: /partners
+                        - text: Partner Overview
+                    - listitem [ref=e239]:
+                      - link "Partner Program page link in footer" [ref=e240] [cursor=pointer]:
+                        - /url: /partners/partner-program
+                        - text: Partner Program
+                    - listitem [ref=e241]:
+                      - link "Find a Partner page link in footer" [ref=e242] [cursor=pointer]:
+                        - /url: /partners/partner-directory
+                        - text: Find a Partner
+                    - listitem [ref=e243]:
+                      - link "Partner Spotlight page link in footer" [ref=e244] [cursor=pointer]:
+                        - /url: /partners/partner-spotlight
+                        - text: Partner Spotlight
+                    - listitem [ref=e245]:
+                      - link "Cloud Providers page link in footer" [ref=e246] [cursor=pointer]:
+                        - /url: /partners/cloud-partners
+                        - text: Cloud Providers
+                    - listitem [ref=e247]:
+                      - link "Partner Solutions page link in footer" [ref=e248] [cursor=pointer]:
+                        - /url: /partners/consulting-and-si/partner-solutions
+                        - text: Partner Solutions
+              - generic [ref=e250]:
+                - heading "Product page link in footer" [level=2] [ref=e252]: Product
+                - generic [ref=e253]:
+                  - heading "Databricks Platform page link in footer" [level=3] [ref=e254]: Databricks Platform
+                  - list [ref=e255]:
+                    - listitem [ref=e256]:
+                      - link "Platform Overview page link in footer" [ref=e257] [cursor=pointer]:
+                        - /url: /product/data-intelligence-platform
+                        - text: Platform Overview
+                    - listitem [ref=e258]:
+                      - link "Application Development page link in footer" [ref=e259] [cursor=pointer]:
+                        - /url: /product/databricks-apps
+                        - text: Application Development
+                    - listitem [ref=e260]:
+                      - link "Artificial Intelligence page link in footer" [ref=e261] [cursor=pointer]:
+                        - /url: /product/artificial-intelligence
+                        - text: Artificial Intelligence
+                    - listitem [ref=e262]:
+                      - link "Business Intelligence page link in footer" [ref=e263] [cursor=pointer]:
+                        - /url: /product/business-intelligence
+                        - text: Business Intelligence
+                    - listitem [ref=e264]:
+                      - link "Business Productivity page link in footer" [ref=e265] [cursor=pointer]:
+                        - /url: /product/genie/one
+                        - text: Business Productivity
+                    - listitem [ref=e266]:
+                      - link "Customer Data Platform page link in footer" [ref=e267] [cursor=pointer]:
+                        - /url: /product/customerlake-cdp
+                        - text: Customer Data Platform
+                    - listitem [ref=e268]:
+                      - link "Data Engineering page link in footer" [ref=e269] [cursor=pointer]:
+                        - /url: /product/data-engineering
+                        - text: Data Engineering
+                    - listitem [ref=e270]:
+                      - link "Data Warehousing page link in footer" [ref=e271] [cursor=pointer]:
+                        - /url: /product/databricks-lakehouse
+                        - text: Data Warehousing
+                    - listitem [ref=e272]:
+                      - link "Database page link in footer" [ref=e273] [cursor=pointer]:
+                        - /url: /product/lakebase
+                        - text: Database
+                    - listitem [ref=e274]:
+                      - link "Governance page link in footer" [ref=e275] [cursor=pointer]:
+                        - /url: /product/unity-catalog
+                        - text: Governance
+                    - listitem [ref=e276]:
+                      - link "Security page link in footer" [ref=e277] [cursor=pointer]:
+                        - /url: /product/lakewatch
+                        - text: Security
+                    - listitem [ref=e278]:
+                      - link "Sharing page link in footer" [ref=e279] [cursor=pointer]:
+                        - /url: /product/delta-sharing
+                        - text: Sharing
+                - generic [ref=e280]:
+                  - heading "Pricing page link in footer" [level=3] [ref=e281]: Pricing
+                  - list [ref=e282]:
+                    - listitem [ref=e283]:
+                      - link "Pricing Overview page link in footer" [ref=e284] [cursor=pointer]:
+                        - /url: /product/pricing
+                        - text: Pricing Overview
+                    - listitem [ref=e285]:
+                      - link "Pricing Calculator page link in footer" [ref=e286] [cursor=pointer]:
+                        - /url: /product/pricing/product-pricing/instance-types
+                        - text: Pricing Calculator
+                - link "Open Source page link in footer" [ref=e288] [cursor=pointer]:
+                  - /url: /product/open-source
+                  - text: Open Source
+                - generic [ref=e289]:
+                  - heading "Integrations and Data page link in footer" [level=3] [ref=e290]: Integrations and Data
+                  - list [ref=e291]:
+                    - listitem [ref=e292]:
+                      - link "Marketplace page link in footer" [ref=e293] [cursor=pointer]:
+                        - /url: /product/marketplace
+                        - text: Marketplace
+                    - listitem [ref=e294]:
+                      - link "IDE Integrations page link in footer" [ref=e295] [cursor=pointer]:
+                        - /url: /product/data-science/ide-integrations
+                        - text: IDE Integrations
+                    - listitem [ref=e296]:
+                      - link "Partner Connect page link in footer" [ref=e297] [cursor=pointer]:
+                        - /url: /partnerconnect
+                        - text: Partner Connect
+              - generic [ref=e299]:
+                - heading "Solutions page link in footer" [level=2] [ref=e301]: Solutions
+                - generic [ref=e302]:
+                  - heading "Databricks For Industries page link in footer" [level=3] [ref=e303]: Databricks For Industries
+                  - list [ref=e304]:
+                    - listitem [ref=e305]:
+                      - link "Communications page link in footer" [ref=e306] [cursor=pointer]:
+                        - /url: /solutions/industries/telecommunications
+                        - text: Communications
+                    - listitem [ref=e307]:
+                      - link "Financial Services page link in footer" [ref=e308] [cursor=pointer]:
+                        - /url: /solutions/industries/financial-services
+                        - text: Financial Services
+                    - listitem [ref=e309]:
+                      - link "Healthcare and Life Sciences page link in footer" [ref=e310] [cursor=pointer]:
+                        - /url: /solutions/industries/healthcare-and-life-sciences
+                        - text: Healthcare and Life Sciences
+                    - listitem [ref=e311]:
+                      - link "Manufacturing page link in footer" [ref=e312] [cursor=pointer]:
+                        - /url: /solutions/industries/manufacturing-industry-solutions
+                        - text: Manufacturing
+                    - listitem [ref=e313]:
+                      - link "Media and Entertainment page link in footer" [ref=e314] [cursor=pointer]:
+                        - /url: /solutions/industries/media-and-entertainment
+                        - text: Media and Entertainment
+                    - listitem [ref=e315]:
+                      - link "Public Sector page link in footer" [ref=e316] [cursor=pointer]:
+                        - /url: /solutions/industries/public-sector
+                        - text: Public Sector
+                    - listitem [ref=e317]:
+                      - link "Retail page link in footer" [ref=e318] [cursor=pointer]:
+                        - /url: /solutions/industries/retail-industry-solutions
+                        - text: Retail
+                    - listitem [ref=e319]:
+                      - link "View All page link in footer" [ref=e320] [cursor=pointer]:
+                        - /url: /solutions
+                        - text: View All
+                - generic [ref=e321]:
+                  - heading "Cross Industry Solutions page link in footer" [level=3] [ref=e322]: Cross Industry Solutions
+                  - list [ref=e323]:
+                    - listitem [ref=e324]:
+                      - link "AI Agents page link in footer" [ref=e325] [cursor=pointer]:
+                        - /url: /solutions/ai-agents
+                        - text: AI Agents
+                    - listitem [ref=e326]:
+                      - link "AI Governance page link in footer" [ref=e327] [cursor=pointer]:
+                        - /url: /solutions/industries/ai-governance
+                        - text: AI Governance
+                    - listitem [ref=e328]:
+                      - link "Cybersecurity page link in footer" [ref=e329] [cursor=pointer]:
+                        - /url: /solutions/industries/cybersecurity
+                        - text: Cybersecurity
+                    - listitem [ref=e330]:
+                      - link "Marketing page link in footer" [ref=e331] [cursor=pointer]:
+                        - /url: /solutions/industries/marketing
+                        - text: Marketing
+                - link "Data Migration page link in footer" [ref=e333] [cursor=pointer]:
+                  - /url: /solutions/migration
+                  - text: Data Migration
+                - link "Forward Deployed Engineering page link in footer" [ref=e335] [cursor=pointer]:
+                  - /url: /professional-services
+                  - text: Forward Deployed Engineering
+                - link "Solution Accelerators page link in footer" [ref=e337] [cursor=pointer]:
+                  - /url: /solutions/accelerators
+                  - text: Solution Accelerators
+              - generic [ref=e339]:
+                - heading "Resources page link in footer" [level=2] [ref=e341]: Resources
+                - link "Documentation page link in footer" [ref=e343] [cursor=pointer]:
+                  - /url: https://www.databricks.com/databricks-documentation
+                  - text: Documentation
+                - link "Customer Support page link in footer" [ref=e345] [cursor=pointer]:
+                  - /url: https://www.databricks.com/support
+                  - text: Customer Support
+                - link "Community page link in footer" [ref=e347] [cursor=pointer]:
+                  - /url: https://community.databricks.com/
+                  - text: Community
+                - generic [ref=e348]:
+                  - heading "Learning page link in footer" [level=3] [ref=e349]: Learning
+                  - list [ref=e350]:
+                    - listitem [ref=e351]:
+                      - link "Training page link in footer" [ref=e352] [cursor=pointer]:
+                        - /url: /learn/training/home
+                        - text: Training
+                    - listitem [ref=e353]:
+                      - link "Certification page link in footer" [ref=e354] [cursor=pointer]:
+                        - /url: https://www.databricks.com/learn/training/certification
+                        - text: Certification
+                    - listitem [ref=e355]:
+                      - link "Free Edition page link in footer" [ref=e356] [cursor=pointer]:
+                        - /url: /learn/free-edition
+                        - text: Free Edition
+                    - listitem [ref=e357]:
+                      - link "University Alliance page link in footer" [ref=e358] [cursor=pointer]:
+                        - /url: /university
+                        - text: University Alliance
+                    - listitem [ref=e359]:
+                      - link "Databricks Academy Login page link in footer" [ref=e360] [cursor=pointer]:
+                        - /url: https://www.databricks.com/learn/training/login
+                        - text: Databricks Academy Login
+                - generic [ref=e361]:
+                  - heading "Events page link in footer" [level=3] [ref=e362]: Events
+                  - list [ref=e363]:
+                    - listitem [ref=e364]:
+                      - link "Data + AI Summit page link in footer" [ref=e365] [cursor=pointer]:
+                        - /url: /dataaisummit
+                        - text: Data + AI Summit
+                    - listitem [ref=e366]:
+                      - link "Data + AI World Tour page link in footer" [ref=e367] [cursor=pointer]:
+                        - /url: /dataaisummit/worldtour
+                        - text: Data + AI World Tour
+                    - listitem [ref=e368]:
+                      - link "AI Days page link in footer" [ref=e369] [cursor=pointer]:
+                        - /url: https://www.databricks.com/ai-days
+                        - text: AI Days
+                    - listitem [ref=e370]:
+                      - link "Event Calendar page link in footer" [ref=e371] [cursor=pointer]:
+                        - /url: /events
+                        - text: Event Calendar
+                - generic [ref=e372]:
+                  - heading "Blog and Podcasts page link in footer" [level=3] [ref=e373]: Blog and Podcasts
+                  - list [ref=e374]:
+                    - listitem [ref=e375]:
+                      - link "Databricks Blog page link in footer" [ref=e376] [cursor=pointer]:
+                        - /url: /blog
+                        - text: Databricks Blog
+                    - listitem [ref=e377]:
+                      - link "AI Blog page link in footer" [ref=e378] [cursor=pointer]:
+                        - /url: /blog/category/databricks-ai
+                        - text: AI Blog
+                    - listitem [ref=e379]:
+                      - link "Data Brew Podcast page link in footer" [ref=e380] [cursor=pointer]:
+                        - /url: /discover/data-brew
+                        - text: Data Brew Podcast
+                    - listitem [ref=e381]:
+                      - link "Champions of Data & AI Podcast page link in footer" [ref=e382] [cursor=pointer]:
+                        - /url: /discover/champions-of-data-and-ai
+                        - text: Champions of Data & AI Podcast
+              - generic [ref=e384]:
+                - heading "About page link in footer" [level=2] [ref=e386]: About
+                - generic [ref=e387]:
+                  - heading "Company page link in footer" [level=3] [ref=e388]: Company
+                  - list [ref=e389]:
+                    - listitem [ref=e390]:
+                      - link "Who We Are page link in footer" [ref=e391] [cursor=pointer]:
+                        - /url: /company/about-us
+                        - text: Who We Are
+                    - listitem [ref=e392]:
+                      - link "Our Team page link in footer" [ref=e393] [cursor=pointer]:
+                        - /url: /company/leadership-team
+                        - text: Our Team
+                    - listitem [ref=e394]:
+                      - link "Databricks Ventures page link in footer" [ref=e395] [cursor=pointer]:
+                        - /url: /databricks-ventures
+                        - text: Databricks Ventures
+                    - listitem [ref=e396]:
+                      - link "Contact Us page link in footer" [ref=e397] [cursor=pointer]:
+                        - /url: /company/contact
+                        - text: Contact Us
+                - generic [ref=e398]:
+                  - heading "Careers page link in footer" [level=3] [ref=e399]: Careers
+                  - list [ref=e400]:
+                    - listitem [ref=e401]:
+                      - link "Open Jobs page link in footer" [ref=e402] [cursor=pointer]:
+                        - /url: /company/careers/open-positions
+                        - text: Open Jobs
+                    - listitem [ref=e403]:
+                      - link "Working at Databricks page link in footer" [ref=e404] [cursor=pointer]:
+                        - /url: /company/careers
+                        - text: Working at Databricks
+                - generic [ref=e405]:
+                  - heading "Press page link in footer" [level=3] [ref=e406]: Press
+                  - list [ref=e407]:
+                    - listitem [ref=e408]:
+                      - link "Awards and Recognition page link in footer" [ref=e409] [cursor=pointer]:
+                        - /url: /company/awards-and-recognition
+                        - text: Awards and Recognition
+                    - listitem [ref=e410]:
+                      - link "Newsroom page link in footer" [ref=e411] [cursor=pointer]:
+                        - /url: /company/newsroom
+                        - text: Newsroom
+                - link "Security and Trust page link in footer" [ref=e413] [cursor=pointer]:
+                  - /url: /trust
+                  - text: Security and Trust
+            - generic [ref=e414]:
+              - link "databricks logo" [ref=e419] [cursor=pointer]:
+                - /url: https://www.databricks.com/
+                - figure [ref=e420]:
+                  - img "databricks logo" [ref=e425]
+              - generic [ref=e426]:
+                - paragraph [ref=e428]:
+                  - text: Databricks Inc.
+                  - text: 160 Spear Street, 15th Floor
+                  - text: San Francisco, CA 94105
+                  - text: 1-866-330-0121
+                - list [ref=e430]:
+                  - listitem [ref=e431]:
+                    - link "Visit our LinkedIn page" [ref=e432] [cursor=pointer]:
+                      - /url: https://www.linkedin.com/company/databricks
+                      - img [ref=e433]
+                  - listitem [ref=e435]:
+                    - link "Visit our Facebook page" [ref=e436] [cursor=pointer]:
+                      - /url: https://www.facebook.com/pages/Databricks/560203607379694
+                      - img [ref=e437]
+                  - listitem [ref=e439]:
+                    - link "Visit our Twitter page" [ref=e440] [cursor=pointer]:
+                      - /url: https://twitter.com/databricks
+                      - img [ref=e441]
+                  - listitem [ref=e443]:
+                    - link "rss feed" [ref=e444] [cursor=pointer]:
+                      - /url: https://www.databricks.com/feed
+                      - img [ref=e445]
+                  - listitem [ref=e447]:
+                    - link "glassdoor" [ref=e448] [cursor=pointer]:
+                      - /url: https://www.glassdoor.com/Overview/Working-at-Databricks-EI_IE954734.11,21.htm
+                      - img [ref=e449]
+                  - listitem [ref=e452]:
+                    - link "Watch the Video on Youtube" [ref=e453] [cursor=pointer]:
+                      - /url: https://www.youtube.com/@Databricks
+                      - img [ref=e454]
+                - generic [ref=e456]:
+                  - figure [ref=e461]
+                  - paragraph [ref=e470]:
+                    - link "See Careers" [ref=e471] [cursor=pointer]:
+                      - /url: https://www.databricks.com/company/careers
+                    - link "at Databricks" [ref=e472] [cursor=pointer]:
+                      - /url: https://www.databricks.com/company/careers
+          - generic [ref=e473]:
+            - paragraph [ref=e480]:
+              - text: © Databricks 2026. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the
+              - link "The Apache Software Foundation" [ref=e481] [cursor=pointer]:
+                - /url: https://www.apache.org/
+                - text: Apache Software Foundation
+              - text: .
+            - list [ref=e482]:
+              - listitem [ref=e483]:
+                - link "Read Privacy Notice" [ref=e484] [cursor=pointer]:
+                  - /url: https://www.databricks.com/legal/privacynotice
+                  - text: Privacy Notice
+              - listitem [ref=e485]:
+                - text: "|"
+                - link "Read Terms of Use" [ref=e486] [cursor=pointer]:
+                  - /url: https://www.databricks.com/legal/terms-of-use
+                  - text: Terms of Use
+              - listitem [ref=e487]:
+                - text: "|"
+                - link "Read Modern Slavery Statement" [ref=e488] [cursor=pointer]:
+                  - /url: https://www.databricks.com/legal/modern-slavery-policy-statement
+                  - text: Modern Slavery Statement
+              - listitem [ref=e489]:
+                - text: "|"
+                - link "Read California Privacy" [ref=e490] [cursor=pointer]:
+                  - /url: https://www.databricks.com/legal/supplemental-privacy-notice-california-residents
+                  - text: California Privacy
+              - listitem [ref=e491]:
+                - text: "|"
+                - link "Read Your Privacy Choices" [ref=e492] [cursor=pointer]:
+                  - /url: "#yourprivacychoices"
+                  - text: Your Privacy Choices
+              - listitem [ref=e493]
+  - region "Cookie banner" [active] [ref=e495]:
+    - dialog "We Care About Your Privacy" [ref=e496]:
+      - generic [ref=e497]:
+        - generic [ref=e499]:
+          - heading "We Care About Your Privacy" [level=2] [ref=e500]
+          - generic [ref=e501]:
+            - text: Databricks uses cookies and similar technologies to enhance site navigation, analyze site usage, personalize content and ads, and as further described in our
+            - link "Cookie Notice" [ref=e502] [cursor=pointer]:
+              - /url: https://www.databricks.com/legal/cookienotice
+            - text: . To disable non-essential cookies, click “Reject All”. You can also manage your cookie settings by clicking “Manage Preferences.”
+        - generic [ref=e504]:
+          - button "Manage Preferences, Opens the preference center dialog" [ref=e505] [cursor=pointer]: Manage Preferences
+          - generic [ref=e506]:
+            - button "Reject All" [ref=e507] [cursor=pointer]
+            - button "Accept All" [ref=e508] [cursor=pointer]
+        - button "Close" [ref=e510] [cursor=pointer]

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { translateViaServer } from '../entrypoints/content/serverTranslation';
+import {
+  translateViaServer,
+  checkServerCache,
+  applyServerTranslatedHtml,
+} from '../entrypoints/content/serverTranslation';
 import type { Config } from '../entrypoints/utils/config';
 import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 
@@ -342,5 +346,145 @@ describe('translateViaServer', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('https://s.sunxiunan.com/fanyi/page');
+  });
+});
+
+describe('checkServerCache', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns cached HTML when server responds 200', async () => {
+    const cachedHtml = '<html><body>cached</body></html>';
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => cachedHtml,
+    });
+
+    const result = await checkServerCache(baseConfig);
+
+    expect(result).toBe(cachedHtml);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/fanyi/page/check');
+    expect(url).toContain(`url=${encodeURIComponent(window.location.href)}`);
+    expect(url).toContain('source=en');
+    expect(url).toContain('target=zh');
+  });
+
+  it('returns null when server responds 204 (not cached)', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+    });
+
+    const result = await checkServerCache(baseConfig);
+
+    expect(result).toBeNull();
+  });
+
+  it('falls back to default server URL when config.serverUrl is empty', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+    });
+
+    const config = { ...baseConfig, serverUrl: '' };
+    await checkServerCache(config);
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('https://s.sunxiunan.com/fanyi/page/check');
+  });
+
+  it('throws when server responds non-OK', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+    });
+
+    await expect(checkServerCache(baseConfig)).rejects.toThrow(
+      '服务端缓存检查失败: 500 Internal Server Error',
+    );
+  });
+});
+
+describe('applyServerTranslatedHtml', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.documentElement.innerHTML = `
+      <html><body>
+        <article>
+          <h1 data-fanyi-block-id="b1">Hello World</h1>
+          <p data-fanyi-block-id="b2">This is a test paragraph.</p>
+        </article>
+      </body></html>
+    `;
+  });
+
+  it('applies translations from server HTML to current DOM', () => {
+    const translatedHtml = `
+      <html><body>
+        <article>
+          <h1 data-fanyi-block-id="b1" class="fanyi-translated">
+            <span class="fanyi-original">Hello World</span>
+            <span class="fanyi-translation">你好世界</span>
+          </h1>
+          <p data-fanyi-block-id="b2" class="fanyi-translated">
+            <span class="fanyi-original">This is a test paragraph.</span>
+            <span class="fanyi-translation">这是一个测试段落。</span>
+          </p>
+        </article>
+      </body></html>
+    `;
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
+      { id: 'b2', xpath: '/html/body/article/p', tag: 'p', text: 'This is a test paragraph.' },
+    ];
+
+    const nodeMap = new Map<string, Node>([
+      ['b1', document.querySelector('h1')!],
+      ['b2', document.querySelector('p')!],
+    ]);
+
+    const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
+
+    expect(result.size).toBe(2);
+    expect(result.has('b1')).toBe(true);
+    expect(result.has('b2')).toBe(true);
+    expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
+    expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '这是一个测试段落。');
+  });
+
+  it('skips blocks whose translation equals original text', () => {
+    const translatedHtml = `
+      <html><body>
+        <h1 data-fanyi-block-id="b1" class="fanyi-translated">
+          <span class="fanyi-original">Hello World</span>
+          <span class="fanyi-translation">Hello World</span>
+        </h1>
+      </body></html>
+    `;
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
+    ];
+
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
+
+    expect(result.size).toBe(0);
+    expect(applyBlockTranslation).not.toHaveBeenCalled();
   });
 });
