@@ -26,6 +26,11 @@ export interface SiteRule {
    * Additional prompt instructions for this site
    */
   promptInstructions?: string;
+
+  /**
+   * 文档级专有名词（公司/产品/服务名），用于 system prompt 中"保留原文"的提示
+   */
+  documentTerms?: string[];
 }
 
 export interface MatchedRule {
