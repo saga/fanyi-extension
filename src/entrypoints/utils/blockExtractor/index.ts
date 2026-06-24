@@ -97,4 +97,5 @@ export {
   classifyChildren,
   isContentEditable,
   hasTranslateBlockClass,
+  isOverlayElement,
 } from './rules';

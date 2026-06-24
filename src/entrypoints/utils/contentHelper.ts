@@ -1,4 +1,4 @@
-import { extractBlocks, type TextBlock } from './blockExtractor';
+import { extractBlocks, isOverlayElement, type TextBlock } from './blockExtractor';
 import { buildChunks, type Chunk } from './chunkBuilder';
 import { detectArticleRoot } from './contentDetector';
 
@@ -222,6 +222,36 @@ function findArticleRoot(doc: Document): Element {
   return doc.body || doc.documentElement;
 }
 
+/**
+ * 隐藏文章根节点之外的弹窗 / overlay / cookie banner。
+ *
+ * walker 只遍历 effectiveRoot 子树, body 层级的 modal (登录弹窗、
+ * cookie 同意浮层、newsletter 订阅弹窗等) 不会被遇到。这些元素
+ * 会遮挡译文, 需要在翻译前单独标记为 data-fanyi-remove 隐藏掉。
+ *
+ * 用宽泛的 CSS 选择器先圈定候选, 再用 isOverlayElement 精确判定,
+ * 避免对全文档做 getComputedStyle 扫描。
+ */
+function hideBodyOverlays(doc: Document, articleRoot: Element): void {
+  const candidates = doc.querySelectorAll(
+    '[class*="modal"], [class*="popup"], [class*="overlay"], ' +
+      '[class*="dialog"], [class*="backdrop"], [class*="lightbox"], ' +
+      '[class*="cookie"], [id*="modal"], [id*="popup"], [id*="overlay"], ' +
+      '[id*="dialog"], [id*="cookie"], [role="dialog"]',
+  );
+  for (const el of candidates) {
+    const tag = el.tagName.toLowerCase();
+    // 绝不隐藏 body / html / article 根节点本身
+    if (tag === 'body' || tag === 'html') continue;
+    if (articleRoot.contains(el)) continue;
+    if (el === articleRoot) continue;
+    if (el.hasAttribute('data-fanyi-remove')) continue;
+    if (isOverlayElement(el)) {
+      el.setAttribute('data-fanyi-remove', 'true');
+    }
+  }
+}
+
 export function prepareDocument(root: Document | Element): {
   blocks: TextBlock[];
   chunks: Chunk[];
@@ -229,6 +259,14 @@ export function prepareDocument(root: Document | Element): {
 } {
   // 优先使用文章容器，减少 TreeWalker 遍历范围
   const effectiveRoot = root instanceof Document ? findArticleRoot(root) : root;
+
+  // 隐藏文章根节点之外的弹窗 / overlay / cookie banner。
+  // walker 只遍历 effectiveRoot 子树, body 层级的 modal (如登录弹窗、
+  // cookie 同意浮层) 不会被遇到, 需要在这里单独清理, 否则会遮挡译文。
+  if (root instanceof Document) {
+    hideBodyOverlays(root, effectiveRoot);
+  }
+
   let blocks = extractBlocks(effectiveRoot);
 
   // 防御性回退: 当 detectArticleRoot 误判 (e.g. 选了一个高密度但被 walker 整棵
