@@ -50,6 +50,17 @@ export interface TranslationController {
   toggle(): void;
   /** 当前是否处于"已翻译"状态。 */
   isTranslated(): boolean;
+  /**
+   * SPA 路由切换时静默重置状态：
+   *   - 停止动态内容监听器（避免旧 observer 在新页面上误触发）
+   *   - 重置 isTranslatedState / isTranslating 闭包变量
+   *   - 清理 DOM 上残留的翻译标记（部分 SPA 不替换整个 body）
+   *   - 不弹"已恢复原文"提示
+   *
+   * 为什么需要：Next.js / Vue Router 等客户端导航不会重新加载文档，
+   * content script 闭包状态会残留，导致跳转新页面后按 Alt+T 误判为"已翻译"。
+   */
+  resetState(): void;
 }
 
 export function createTranslationController(
@@ -113,6 +124,18 @@ export function createTranslationController(
 
     isTranslated() {
       return isTranslatedState || isPageTranslated();
+    },
+
+    resetState() {
+      // 停止旧页面的动态内容监听器,避免它在 SPA 替换 DOM 后误触发新内容翻译。
+      if (domObserver) {
+        domObserver.destroy();
+        domObserver = null;
+      }
+      isTranslating = false;
+      isTranslatedState = false;
+      // 静默清理:不弹"已恢复原文"提示（SPA 路由切换时这个提示会让用户困惑）。
+      restoreOriginal(state, true);
     },
   };
 }
