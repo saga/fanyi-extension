@@ -55,10 +55,18 @@ function getSiteRule(): SiteRule | null {
 /**
  * 把 className 按空白切分,小写。
  * 防御: SVG 元素的 className 是 SVGAnimatedString,不是 string,直接当 string 用会报错。
+ *
+ * 过滤含 ':' 或 '[' 的 token: 这些是 Tailwind CSS 的变体前缀(如
+ * 'toc-visible:@md:col-span-8')和任意值语法(如 'backdrop-blur-[4.375rem]'),
+ * 不是语义化的 class 名。保留它们会导致 'toc-visible:' 被误匹配为 'toc'
+ * 目录, 'backdrop-blur-[...]' 被误匹配为 'backdrop' 弹窗, 从而跳过正文内容。
  */
 function tokenizeClass(el: Element): string[] {
   if (!el.className || typeof el.className !== 'string') return [];
-  return el.className.toLowerCase().split(/\s+/);
+  return el.className
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t && !t.includes(':') && !t.includes('['));
 }
 
 /**

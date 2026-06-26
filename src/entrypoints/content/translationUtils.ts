@@ -144,7 +144,7 @@ export function restoreOriginal(state?: TranslationState): void {
   }
   updateButtonState(false);
   showStatus('已恢复原文', 'success');
-  setTimeout(hideStatus, 2000);
+  setTimeout(hideStatus, 4000);
 }
 
 export function toggleTranslation(): void {

@@ -66,7 +66,7 @@ export function createTranslationController(
       if (isTranslating) return;
       if (isTranslatedState || isPageTranslated()) {
         showStatus('页面已翻译', 'success');
-        setTimeout(hideStatus, 2000);
+        setTimeout(hideStatus, 4000);
         return;
       }
 
@@ -76,7 +76,7 @@ export function createTranslationController(
       const needApiKey = !config.useServerTranslation || config.provider === 'deepseek';
       if (needApiKey && !config.deepseekApiKey) {
         showStatus('API Key 没有配置', 'error');
-        setTimeout(hideStatus, 3000);
+        setTimeout(hideStatus, 5000);
         return;
       }
       isTranslating = true;
@@ -187,7 +187,7 @@ async function handleFullTranslation(
         ? `翻译完成（${missingIds.length} 段未返回）`
         : '翻译完成';
     showStatus(statusMsg, 'success');
-    setTimeout(hideStatus, 3000);
+    setTimeout(hideStatus, 5000);
     if (document.body) {
       document.body.dataset.fanyiTranslated = 'true';
     }
@@ -226,7 +226,7 @@ async function handleFullTranslation(
       ? `翻译完成（${missingIds.length} 段未返回，可重试）`
       : '翻译完成';
   showStatus(statusMsg, 'success');
-  setTimeout(hideStatus, 3000);
+  setTimeout(hideStatus, 5000);
 
   if (document.body) {
     document.body.dataset.fanyiTranslated = 'true';

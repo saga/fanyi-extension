@@ -33,7 +33,11 @@ export function showStatus(message: string, type: StatusType): void {
   // 切换颜色类（loading=蓝边 / success=绿边 / error=红边，CSS 见 styles.ts）
   translationOverlay.className = `fanyi-status-overlay fanyi-${type}`;
   translationOverlay.textContent = message;
-  translationOverlay.style.display = 'flex';
+  // 防御：如果 overlay 被误标记为 data-fanyi-remove（hideBodyOverlays 的
+  // [class*="overlay"] 选择器会匹配 .fanyi-status-overlay），移除该标记，
+  // 否则 CSS 的 display:none !important 会覆盖下面的 flex。
+  translationOverlay.removeAttribute('data-fanyi-remove');
+  translationOverlay.style.setProperty('display', 'flex', 'important');
 }
 
 /** 隐藏状态条（不销毁 DOM，下一次 showStatus 可复用）。 */

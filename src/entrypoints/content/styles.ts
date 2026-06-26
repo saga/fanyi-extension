@@ -19,19 +19,21 @@ export function getStyles(isMobile: boolean): string {
   return `
     .fanyi-status-overlay {
       position: fixed;
-      bottom: ${isMobile ? '60px' : '20px'};
+      bottom: ${isMobile ? '70px' : '24px'};
       left: 50%;
       transform: translateX(-50%);
-      padding: 6px 12px;
-      background: rgba(0, 0, 0, 0.35);
-      color: rgba(255, 255, 255, 0.7);
-      border-radius: 16px;
+      padding: ${isMobile ? '10px 20px' : '14px 28px'};
+      background: rgba(0, 0, 0, 0.72);
+      color: rgba(255, 255, 255, 0.96);
+      border-radius: 24px;
       z-index: 999999;
-      font-size: ${isMobile ? '11px' : '12px'};
+      font-size: ${isMobile ? '14px' : '16px'};
+      font-weight: 500;
       display: none;
       max-width: 80%;
       text-align: center;
       pointer-events: none;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     }
     .fanyi-loading { border: 1px solid rgba(64, 158, 255, 0.3); }
     .fanyi-success { border: 1px solid rgba(103, 194, 58, 0.3); }

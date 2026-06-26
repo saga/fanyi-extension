@@ -246,6 +246,22 @@ function hideBodyOverlays(doc: Document, articleRoot: Element): void {
     if (articleRoot.contains(el)) continue;
     if (el === articleRoot) continue;
     if (el.hasAttribute('data-fanyi-remove')) continue;
+    // 跳过扩展端自身注入的 UI 元素（class 以 fanyi- 开头或为 selection-translator），
+    // 否则 hideBodyOverlays 的 [class*="overlay"] 会匹配到 .fanyi-status-overlay
+    // 并把它标记为 data-fanyi-remove，导致翻译过程中状态提示条被隐藏。
+    {
+      const cls = el.classList;
+      let isExtensionUi = cls.contains('selection-translator');
+      if (!isExtensionUi) {
+        for (let i = 0; i < cls.length; i++) {
+          if (cls[i].startsWith('fanyi-')) {
+            isExtensionUi = true;
+            break;
+          }
+        }
+      }
+      if (isExtensionUi) continue;
+    }
     if (isOverlayElement(el)) {
       el.setAttribute('data-fanyi-remove', 'true');
     }
