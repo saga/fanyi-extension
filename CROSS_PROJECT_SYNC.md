@@ -77,6 +77,7 @@
 - `rules/fortune-rules.ts`
 - `rules/hackernews-rules.ts`
 - `rules/reddit-rules.ts`
+- `rules/claude-rules.ts`
 
 ### 9. `blockExtractor/constants.ts`（静态数据部分）
 以下常量**完全一致**：
@@ -104,7 +105,10 @@
 以下逻辑**必须同步**：
 - `ARTICLE_SELECTORS` 列表
 - `refineArticleRoot(candidate)` — 向上扩展到 `<article>` 以包含标题
-- `expandIfFragmented(refined)` — 碎片内容自动扩展
+- `expandWrappers(refined)` — 穿透纯包装层（parent 文本 == child 文本时向上穿，遇到 nav/footer/header 等 class 停止）
+- `scoreArticleContainer(container)` — 11 个评分因子（h1/h2/textLen/p/img/author/time/nav/buttons/related/li）
+- `chooseBestRoot(candidate)` — h1 守卫 + candidate/parent/grandParent 三层评分选最高分
+- `scoreCache`（WeakMap）— 评分缓存
 - `hasValidHeadingOutside`、`hasMeaningfulContent`
 
 ### 13. `translateApi.ts`（公共 API）
@@ -184,22 +188,24 @@
 - **同步建议**：排除逻辑必须同步；评分公式不需要同步（两边都在迭代）
 
 ### 9. `contentHelper.ts`（prepareDocument）
-- **一致**：`findArticleRoot`、`refineArticleRoot`、`expandIfFragmented`
+- **一致**：`findArticleRoot`、`refineArticleRoot`、`expandWrappers`、`scoreArticleContainer`、`chooseBestRoot`（含 h1 守卫）、Layer 0（site rule `articleRootSelector`）
 - **差异**：
   - fanyi-extension 的 `prepareDocument` 调用 `hideBodyOverlays`（隐藏文章根节点外的 body 层级弹窗）
   - vocal-saga 不需要 `hideBodyOverlays`（服务端不渲染页面，无遮挡问题）
   - L3 兜底：fanyi-extension 直接返回 `doc.body`，vocal-saga 有 `findArticleRootL3`
   - `extractBlocks` 签名：fanyi-extension 不传 pageUrl，vocal-saga 传 pageUrl
+  - `findArticleRoot` 签名：fanyi-extension 用 `window.location.href`，vocal-saga 接收 `pageUrl` 参数
 - **同步建议**：文章根节点选择逻辑必须同步；`hideBodyOverlays` 不需要同步到 vocal-saga
 
 ### 10. `rules/types.ts`
-- **一致**：`SiteRule` 接口字段完全一致（含 `documentTerms?: string[]`）
+- **一致**：`SiteRule` 接口字段完全一致（含 `documentTerms?: string[]`、`articleRootSelector?: string`）
 - **历史**：fanyi-extension 曾缺少 `documentTerms` 字段声明（实际代码已使用），已修复
+- `articleRootSelector` 用于站点特定的文章根节点选择（如 claude.com 的 `main.page_main`），在 `findArticleRoot` 的 Layer 0 优先使用
 
 ### 11. `rules/index.ts`
 - **一致**：`matchSiteRule(url)` 函数、`hostMatches` 函数
-- **差异**：vocal-saga 多了 `arxivRule`
-- **同步建议**：新增站点规则时考虑两边是否都需要
+- **差异**：vocal-saga 多了 `arxivRule`（服务端特有）
+- **同步建议**：新增站点规则时考虑两边是否都需要（`claudeRule` 两边都有）
 
 ### 12. `blockExtractor/types.ts`（扩展字段）
 - **差异**：vocal-saga 的 `TextBlock` 多了 `renderHint?: { inlineCandidate?: boolean }` 字段
@@ -242,7 +248,7 @@
 - [ ] `CONSENT_SDK_ID_RE` / `CONSENT_SDK_CLASS_RE` 正则
 - [ ] `isConsentSdkContainer` 逻辑
 - [ ] `ARTICLE_SELECTORS` 列表
-- [ ] `refineArticleRoot` / `expandIfFragmented` 逻辑
+- [ ] `refineArticleRoot` / `expandWrappers` / `scoreArticleContainer` / `chooseBestRoot` 逻辑
 - [ ] `POSITIVE_ID_RE` / `NEGATIVE_CONTAINER_ID_RE` / `META_ID_RE`
 
 ### Block 提取
