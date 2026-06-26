@@ -271,18 +271,24 @@ function scoreArticleContainer(container: Element): RootScore {
  * 只有 candidate 缺 h1（如 claude.com 的 h1 在 hero section）时才向上评分。
  */
 function chooseBestRoot(candidate: Element): Element {
+  // h1 守卫：candidate 已有 h1（文章主标题），直接返回。
+  // 如 Jane Street 的 .post-content 自带 h1，说明它就是文章根。
   if (candidate.querySelector('h1')) {
     return candidate;
   }
 
+  // candidate 缺 h1 时（如 claude.com 的 h1 在 hero section，正文 section 缺 h1），
+  // 向上扫描直到遇到含 h1 的祖先或 body/html，收集所有候选后评分选最高分。
+  // 固定 3 层不够：claude.com 的 .u-rich-text-blog 到 main.page_main 有 7 层嵌套。
   const list: Element[] = [];
   let p: Element | null = candidate;
-  for (let i = 0; i < 3; i++) {
-    if (!p) break;
-    // 不越过 body/html
+  while (p) {
     const tag = p.tagName.toLowerCase();
     if (tag === 'body' || tag === 'html') break;
     list.push(p);
+    // 遇到含 h1 的祖先就停止向上 —— h1 是文章主标题的标志，
+    // 更上层的容器（如 page_wrap 含整个页面）只会引入噪声。
+    if (p.querySelector('h1')) break;
     p = p.parentElement;
   }
 
