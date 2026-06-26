@@ -75,14 +75,6 @@ export default defineContentScript({
     );
     setupTouchEvents(() => handleAction('translate'));
 
-    // === SPA 路由切换监听 ===
-    // Next.js / Vue Router 等客户端导航不会重新加载文档,content script 闭包状态
-    // (isTranslatedState / originalTexts / domObserver) 会残留,导致跳转新页面后
-    // 按 Alt+T 误判为"页面已翻译"而直接 return。监听 URL 变化后静默重置状态。
-    setupSpaNavigationListener(() => {
-      void ensureController().then((ctrl) => ctrl.resetState());
-    });
-
     // === 消息路由：来自 background、popup、keyboard shortcut ===
     browser.runtime.onMessage.addListener((message: any) => {
       switch (message.action) {
@@ -128,40 +120,3 @@ export default defineContentScript({
     }
   },
 });
-
-// ============================================================
-// SPA 路由切换监听
-// ============================================================
-
-/**
- * 监听 SPA 客户端导航（URL 变化但文档不重新加载）。
- *
- * 三种触发源:
- *   1. history.pushState — 大多数 SPA 路由器（Next.js / Vue Router / React Router）
- *   2. history.replaceState — 部分路由器替换 URL 而不入栈
- *   3. popstate — 浏览器前进/后退
- *
- * pushState/replaceState 不会触发 popstate,所以必须 hook 这两个方法。
- * 用 lastUrl 去重,避免重复触发（某些框架会连续调用 pushState + replaceState）。
- */
-function setupSpaNavigationListener(onUrlChange: () => void): void {
-  let lastUrl = window.location.href;
-
-  const check = () => {
-    if (window.location.href === lastUrl) return;
-    lastUrl = window.location.href;
-    onUrlChange();
-  };
-
-  // hook pushState / replaceState
-  for (const key of ['pushState', 'replaceState'] as const) {
-    const original = history[key];
-    history[key] = function (this: History, ...args: Parameters<typeof original>) {
-      const ret = original.apply(this, args);
-      check();
-      return ret;
-    } as typeof original;
-  }
-
-  window.addEventListener('popstate', check);
-}
