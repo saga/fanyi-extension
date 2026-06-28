@@ -30,6 +30,43 @@ webclaw 是面向 LLM/AI Agent 的**网页内容提取工具链**，核心定位
 
 三种形态共享同一套底层提取 crate。
 
+```mermaid
+graph TB
+    subgraph "接入层"
+        CLI["webclaw-cli<br/>命令行"]
+        MCP["webclaw-mcp<br/>stdio MCP server"]
+        HTTP["webclaw-server<br/>axum REST API"]
+    end
+
+    subgraph "能力层"
+        LLM["webclaw-llm<br/>ProviderChain"]
+        CORE["webclaw-core<br/>提取/评分/清洗"]
+        PDF["webclaw-pdf<br/>PDF 文本提取"]
+    end
+
+    subgraph "抓取层"
+        FETCH["webclaw-fetch<br/>HTTP/爬虫/TLS指纹/30+ extractor"]
+    end
+
+    subgraph "外部服务"
+        API["api.webclaw.io<br/>闭源云 API"]
+        OL["Ollama<br/>本地 LLM"]
+        OL2["OpenAI/Gemini/Anthropic<br/>云端 LLM"]
+    end
+
+    CLI --> FETCH
+    MCP --> FETCH
+    HTTP --> FETCH
+    CLI --> LLM
+    MCP --> LLM
+    HTTP --> LLM
+    FETCH --> CORE
+    FETCH --> PDF
+    FETCH -.->|"反爬 fallback"| API
+    LLM -.->|"local-first"| OL
+    LLM -.->|"fallback"| OL2
+```
+
 ---
 
 ## 二、Workspace 架构
@@ -59,21 +96,36 @@ webclaw-server   axum REST API（自托管参考实现）
 
 ### 2.3 依赖关系图
 
-```
-                    webclaw-core (零网络依赖)
-                   /       |        \
-            webclaw-pdf  webclaw-fetch ← (wreq BoringSSL)
-                          /    |    \
-                  webclaw-llm  |   (reqwest, 无指纹)
-                       |       |
-                       └───┬───┘
-                           │
-            ┌──────────────┼──────────────┐
-            │              │              │
-       webclaw-cli    webclaw-mcp   webclaw-server
+```mermaid
+graph TD
+    CORE["webclaw-core<br/>零网络依赖 · WASM-safe"]
+    PDF["webclaw-pdf"]
+    FETCH["webclaw-fetch<br/>wreq BoringSSL TLS 指纹"]
+    LLM["webclaw-llm<br/>reqwest 无指纹"]
+    CLI["webclaw-cli"]
+    MCP["webclaw-mcp"]
+    SRV["webclaw-server"]
+
+    CORE --> PDF
+    FETCH --> CORE
+    FETCH --> PDF
+    LLM -.->|"独立网络栈<br/>不依赖 fetch"| FETCH
+
+    CLI --> FETCH
+    CLI --> LLM
+    CLI --> CORE
+
+    MCP --> FETCH
+    MCP --> LLM
+
+    SRV --> FETCH
+    SRV --> LLM
+
+    CLI -.->|"互不依赖"| MCP
+    MCP -.->|"互不依赖"| SRV
 ```
 
-三个二进制 crate 互不依赖，共享底层 crate。
+三个二进制 crate 互不依赖，共享底层 crate。`webclaw-llm` 故意不依赖 `webclaw-fetch`——LLM API 用普通 reqwest，不需要 TLS 指纹。
 
 ---
 
@@ -83,19 +135,30 @@ webclaw-server   axum REST API（自托管参考实现）
 
 入口：`extract_with_options(html, url, options) -> ExtractionResult`
 
-```
-1. Reddit fast path      → old.reddit.com SSR HTML 解析
-2. YouTube fast path     → ytInitialPlayerResponse 正则
-3. scraper::Html::parse  → 通用 HTML 解析
-4. metadata::extract     → OG/Twitter Card/meta
-5. extractor::extract_content → Readability 评分
-6. 三层 fallback:
-   - 放宽 only_main_content
-   - 用 body 选择器
-   - data_island JSON 数据岛
-   - QuickJS 执行内联脚本
-7. domain::detect        → 域类型检测
-8. structured_data       → JSON-LD / __NEXT_DATA__ / SvelteKit
+```mermaid
+flowchart TD
+    START([输入 HTML + URL]) --> FAST{快速路径匹配?}
+    FAST -->|"reddit.com"| REDDIT[Reddit fast path<br/>old.reddit.com SSR 解析]
+    FAST -->|"youtube.com"| YT[YouTube fast path<br/>ytInitialPlayerResponse 正则]
+    FAST -->|"其他"| PARSE[scraper::Html::parse_document]
+
+    REDDIT --> RESULT
+    YT --> RESULT
+
+    PARSE --> META[metadata::extract<br/>OG / Twitter Card / meta]
+    META --> SCORE[extractor::extract_content<br/>Readability 评分]
+    SCORE --> REFINE[refine → expandWrappers<br/>→ chooseBestRoot 三段式精修]
+    REFINE --> BLOCKS{有内容?}
+    BLOCKS -->|"是"| DOMAIN
+    BLOCKS -->|"否"| FB1[Fallback 1: 放宽 only_main_content]
+    FB1 --> FB2[Fallback 2: body 选择器]
+    FB2 --> FB3[Fallback 3: data_island JSON 数据岛]
+    FB3 --> FB4[Fallback 4: QuickJS 执行内联脚本]
+    FB4 --> DOMAIN
+
+    DOMAIN[domain::detect 域类型检测]
+    DOMAIN --> STRUCT[structured_data<br/>JSON-LD / __NEXT_DATA__ / SvelteKit]
+    STRUCT --> RESULT([ExtractionResult])
 ```
 
 ### 3.2 评分函数
@@ -122,21 +185,42 @@ Cookie 同意平台通过 ID 前缀识别（onetrust/optanon/cookiebot/sp_messag
 
 ### 3.4 LLM 优化流水线（llm/body.rs）
 
-24+ 步管线，顺序至关重要：
+24+ 步管线，顺序至关重要（先解码实体才能让后续正则命中，先去图片再处理链接才能正确识别嵌套图片链接）：
 
-```
-decode_html_entities          → strip_invisible_unicode
-  → strip_leaked_js           → strip_a11y_link_chrome
-  → collapse_spaced_text      → convert_linked_images
-  → collapse_logo_images      → strip_remaining_images
-  → strip_emphasis            → strip_ui_control_text
-  → strip_css_artifacts       → collapse_word_lists
-  → dedup_adjacent_descriptions
-  → extract_and_strip_links   → strip_bare_number_lines
-  → dedup_repeated_phrases    → dedup_heading_paragraph
-  → dedup_duplicate_headings  → strip_empty_headings
-  → collapse_whitespace       → dedup_content_blocks
-  → dedup_comma_lists         → merge_stat_lines
+```mermaid
+flowchart LR
+    subgraph Phase1["阶段 1: 实体与不可见字符"]
+        A[decode_html_entities] --> B[strip_invisible_unicode]
+    end
+    subgraph Phase2["阶段 2: JS/CSS 残留"]
+        B --> C[strip_leaked_js]
+        C --> D[strip_a11y_link_chrome]
+        D --> E[collapse_spaced_text]
+    end
+    subgraph Phase3["阶段 3: 图片处理"]
+        E --> F[convert_linked_images]
+        F --> G[collapse_logo_images]
+        G --> H[strip_remaining_images]
+    end
+    subgraph Phase4["阶段 4: 噪声文本"]
+        H --> I[strip_emphasis]
+        I --> J[strip_ui_control_text]
+        J --> K[strip_css_artifacts]
+        K --> L[collapse_word_lists]
+    end
+    subgraph Phase5["阶段 5: 链接与去重"]
+        L --> M[extract_and_strip_links]
+        M --> N[dedup_repeated_phrases]
+        N --> O[dedup_heading_paragraph]
+        O --> P[dedup_duplicate_headings]
+    end
+    subgraph Phase6["阶段 6: 最终整理"]
+        P --> Q[collapse_whitespace]
+        Q --> R[dedup_content_blocks]
+        R --> S[dedup_comma_lists]
+        S --> T[merge_stat_lines]
+    end
+    T --> OUT([LLM-ready text])
 ```
 
 精巧的清洗子模块：
@@ -179,14 +263,31 @@ pub trait Fetcher: Send + Sync {
 
 **关键设计**：HTTP/2 HEADERS 帧的 `StreamDependency` priority flag 才是 DataDome 真正校验的字段——这是花钱买来的经验。
 
-**云端升级**（cloud.rs）：
+**云端升级**（cloud.rs）——分层 fallback：
 
-```
-L0: fetch           → 普通页面（wreq HTTP + TLS 指纹）
-L1: fetch_smart     → Reddit/Akamai 挑战（URL 重写 + cookie warm）
-L2: fetch_and_extract → PDF/Office/LinkedIn（Content-Type 路由）
-L3: smart_fetch_html → 检测到 bot 防护（升级到 api.webclaw.io）
-L4: smart_fetch     → L3 + 检测到 SPA（再升级 + cloud markdown）
+```mermaid
+flowchart TD
+    REQ([请求 URL]) --> L0[L0: fetch<br/>wreq HTTP + TLS 指纹<br/>2 次重试]
+    L0 --> CHK0{成功?}
+    CHK0 -->|"是"| OK([返回 HTML])
+    CHK0 -->|"Reddit/Akamai"| L1[L1: fetch_smart<br/>URL 重写到 old.reddit.com<br/>cookie warm 后 retry]
+    CHK0 -->|"PDF/Office"| L2[L2: fetch_and_extract<br/>Content-Type 路由到 PDF/DOCX/CSV]
+    CHK0 -->|"失败"| L3
+
+    L1 --> CHK1{成功?}
+    CHK1 -->|"是"| OK
+    CHK1 -->|"否"| L3
+
+    L2 --> OK
+
+    L3[L3: smart_fetch_html<br/>检测 bot 防护] --> BOT{is_bot_protected?}
+    BOT -->|"否"| OK
+    BOT -->|"是 (Cloudflare/DataDome/WAF)"| CLOUD1[api.webclaw.io/v1/scrape<br/>云端 CDP + antibot]
+    CLOUD1 --> SYN[synthesize_html<br/>重组 meta + JSON-LD + markdown]
+    SYN --> CHK2{SPA 需 JS?}
+    CHK2 -->|"否"| OK
+    CHK2 -->|"是 (needs_js_rendering)"| L4[L4: smart_fetch<br/>cloud + cloud markdown]
+    L4 --> OK
 ```
 
 `is_bot_protected` 检测 Cloudflare（`_cf_chl_opt`/Turnstile/`just a moment`）、DataDome、AWS WAF、hCaptcha。
@@ -273,6 +374,50 @@ impl LlmProvider for ProviderChain {
 3. Gemini（Google Cloud credits 优先于 Anthropic）
 4. Anthropic（最后兜底）
 
+```mermaid
+sequenceDiagram
+    participant Caller as 调用方
+    participant Chain as ProviderChain
+    participant Ollama as Ollama<br/>(本地)
+    participant OpenAI as OpenAI
+    participant Gemini as Gemini
+    participant Anthropic as Anthropic
+
+    Caller->>Chain: complete(request)
+    Note over Chain: providers 非空检查
+
+    Chain->>Ollama: complete(request)
+    alt 成功
+        Ollama-->>Chain: Ok(response)
+        Chain-->>Caller: Ok(response)
+    else 失败
+        Ollama-->>Chain: Err(e1)
+        Note over Chain: warn + 记录错误
+        Chain->>OpenAI: complete(request)
+        alt 成功
+            OpenAI-->>Chain: Ok(response)
+            Chain-->>Caller: Ok(response)
+        else 失败
+            OpenAI-->>Chain: Err(e2)
+            Chain->>Gemini: complete(request)
+            alt 成功
+                Gemini-->>Chain: Ok(response)
+                Chain-->>Caller: Ok(response)
+            else 失败
+                Gemini-->>Chain: Err(e3)
+                Chain->>Anthropic: complete(request)
+                alt 成功
+                    Anthropic-->>Chain: Ok(response)
+                    Chain-->>Caller: Ok(response)
+                else 失败
+                    Anthropic-->>Chain: Err(e4)
+                    Chain-->>Caller: Err(AllProvidersFailed<br/>"e1; e2; e3; e4")
+                end
+            end
+        end
+    end
+```
+
 ### 5.3 思考标签清洗
 
 `strip_thinking_tags` 处理 qwen3 等模型的 `<think>...</think>` 标签。extract.rs 和 summarize.rs 在解析前**再次**调用此函数（"defense in depth"）。
@@ -336,6 +481,95 @@ enum ApiError {
 
 `NotImplemented` 区分"部署配置缺失"（501）与"服务端错误"（500）。
 
+### 6.5 请求处理时序图
+
+以 `POST /v1/scrape` 为例，展示从入站鉴权到响应输出的完整链路。`POST /v1/extract` 和 `/v1/summarize` 在 fetch 之后会进入 LLM chain，时序图中用虚线标注。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as HTTP 客户端
+    participant Axum as Axum 路由层
+    participant Auth as 鉴权中间件
+    participant Route as scrape 路由 handler
+    participant Fetcher as Fetcher trait
+    participant Core as webclaw-core
+    participant LLM as LLM ProviderChain
+    participant Cloud as api.webclaw.io
+
+    Client->>Axum: POST /v1/scrape<br/>{url, format, options}
+    Axum->>Auth: 提取 Bearer token
+    Note over Auth: subtle::ConstantTimeEq<br/>常量时间比较防时序攻击
+    alt token 无效
+        Auth-->>Client: 401 Unauthorized
+    else 0.0.0.0 无鉴权绑定
+        Auth-->>Client: 403 拒绝（除非 ALLOW_OPEN_PUBLIC）
+    else 通过
+        Auth->>Route: 进入 handler
+    end
+
+    Route->>Route: 校验 body<br/>format ∈ {markdown,json,text,llm,html}
+    alt 参数错误
+        Route-->>Client: 400 BadRequest
+    end
+
+    Route->>Fetcher: fetch(url)
+    Note over Fetcher: SSRF 三层防护<br/>URL 解析 → DNS 过滤 → 重定向再校验
+
+    alt 本地成功
+        Fetcher-->>Route: FetchResult(html)
+    else Reddit/Akamai
+        Fetcher->>Fetcher: fetch_smart URL 重写
+        Fetcher-->>Route: FetchResult
+    else 反爬命中
+        Fetcher->>Cloud: /v1/scrape 云端 CDP
+        Cloud-->>Fetcher: structured data
+        Fetcher->>Fetcher: synthesize_html 重组
+        Fetcher-->>Route: FetchResult
+    else 失败
+        Fetcher-->>Route: FetchError
+        Route-->>Client: 502 Fetch
+    end
+
+    Route->>Core: extract_with_options(html, url)
+    Core-->>Route: ExtractionResult
+
+    alt format == "llm" OR /v1/extract OR /v1/summarize
+        Route->>LLM: complete(prompt)
+        Note over LLM: Ollama → OpenAI → Gemini → Anthropic
+        LLM-->>Route: LLM 响应
+        alt 全部 provider 失败
+            LLM-->>Route: AllProvidersFailed
+            Route-->>Client: 422 Llm
+        end
+    end
+
+    Route->>Route: 按 format 序列化<br/>+ 响应体 5MB 封顶
+    Route-->>Client: 200 OK + body
+```
+
+### 6.6 错误码分流图
+
+```mermaid
+flowchart LR
+    IN([入站请求]) --> AUTH{鉴权通过?}
+    AUTH -->|"否"| E401[401 Unauthorized]
+    AUTH -->|"是"| VALID{参数校验?}
+    VALID -->|"否"| E400[400 BadRequest]
+    VALID -->|"是"| IMPL{路由已部署?<br/>环境变量配置?}
+    IMPL -->|"否"| E501[501 NotImplemented]
+    IMPL -->|"是"| FETCH{抓取成功?}
+    FETCH -->|"否"| E502[502 Fetch]
+    FETCH -->|"是"| EXT{提取成功?}
+    EXT -->|"否"| E422A[422 Extract]
+    EXT -->|"是"| LLM{需要 LLM?}
+    LLM -->|"是 且失败"| E422B[422 Llm]
+    LLM -->|"否 或 成功"| OK([200 OK])
+    IN -.->|"未捕获"| E500[500 Internal]
+```
+
+关键点：501 区分"配置缺失"与 500"服务端 bug"，422 区分"上游数据问题"（Extract/Llm）与 502"上游不可达"。
+
 ---
 
 ## 七、MCP Server（webclaw-mcp）
@@ -359,6 +593,122 @@ enum ApiError {
 
 **Research 工具**：唯一需要 cloud 的异步 job，轮询 ~10min，结果落盘 `~/.webclaw/research/` + 缓存。slugify 是 char-safe 的（CJK 多字节字符不会 panic）。
 
+### 7.3 MCP 工具调用时序图
+
+以 `scrape` 工具为例，展示 MCP 客户端 → stdio → server → fetcher/core 的完整调用链。stdio 是传输通道，所以日志必须走 stderr。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as AI Agent<br/>(Claude Desktop / Cursor)
+    participant Stdio as stdio 传输
+    participant Server as webclaw-mcp<br/>Server handler
+    participant Tools as tools::scrape
+    participant Fetcher as Fetcher trait
+    participant Core as webclaw-core
+
+    Agent->>Stdio: tools/call {name:"scrape", args:{url,...}}
+    Note over Stdio: stdout 是 MCP 通道<br/>日志必须走 stderr
+
+    Stdio->>Server: JSON-RPC 消息
+    Server->>Server: deser_opt_u32_or_str<br/>容错数字传成字符串
+    Server->>Tools: 分发到 scrape handler
+
+    Tools->>Tools: 校验 url + options
+    alt 参数错误
+        Tools-->>Server: Err(BadRequest)
+        Server-->>Stdio: error response
+        Stdio-->>Agent: ❌ 工具调用失败
+    end
+
+    Tools->>Fetcher: fetch(url)
+    Note over Fetcher: OnceLock 懒构建<br/>Chrome client 复用<br/>Firefox client 懒构建<br/>Random 每次新建
+
+    alt 反爬命中
+        Fetcher->>Fetcher: 走 cloud fallback<br/>(research 工具显式 cloud)
+        Fetcher-->>Tools: FetchResult
+    else 本地成功
+        Fetcher-->>Tools: FetchResult
+    else 失败
+        Fetcher-->>Tools: FetchError
+        Tools-->>Server: Err
+        Server-->>Stdio: error response
+        Stdio-->>Agent: ❌
+    end
+
+    Tools->>Core: extract_with_options
+    Core-->>Tools: ExtractionResult
+
+    alt format == "llm"
+        Tools->>Tools: LLM chain complete<br/>(启动时构造一次)
+    end
+
+    Tools-->>Server: Ok(ScrapeResult)
+    Server-->>Stdio: JSON-RPC response
+    Stdio-->>Agent: ✅ markdown/json/text/llm/html
+```
+
+### 7.4 Research 异步 job 时序图
+
+`research` 是唯一需要 cloud 的异步工具，单次轮询 ~10 分钟。结果落盘 `~/.webclaw/research/` 后再次调用直接命中缓存。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as AI Agent
+    participant Server as webclaw-mcp
+    participant FS as ~/.webclaw/research/
+    participant Cloud as api.webclaw.io<br/>(async research)
+    participant Target as 目标站点群
+
+    Agent->>Server: tools/call research {query, depth}
+    Server->>Server: slugify(query)<br/>char-safe，CJK 多字节不 panic
+    Server->>FS: 检查缓存文件
+
+    alt 缓存命中
+        FS-->>Server: cached markdown
+        Server-->>Agent: ✅ 立即返回
+    else 缓存未命中
+        Server->>Cloud: POST /v1/research<br/>{query, depth, callback}
+        Cloud-->>Server: {job_id, status:"queued"}
+
+        loop 轮询 ~10min
+            Server->>Cloud: GET /v1/research/{job_id}
+            Cloud->>Target: 多步抓取 + LLM 综合
+            Target-->>Cloud: 原始 HTML
+            Cloud-->>Server: {status:"running", progress:N%}
+        end
+
+        Cloud-->>Server: {status:"done", markdown}
+        Server->>FS: 落盘 result.md
+        Server-->>Agent: ✅ 返回综合 markdown
+    end
+```
+
+### 7.5 三种客户端构建策略对比
+
+```mermaid
+flowchart LR
+    subgraph Chrome["Chrome 客户端"]
+        C1[复用 fetch_client<br/>进程内单例] --> C2[JA3 Chrome 133]
+    end
+    subgraph Firefox["Firefox 客户端"]
+        F1[OnceLock 懒构建] --> F2[场景: Reddit 封<br/>Chrome TLS 指纹]
+    end
+    subgraph Random["Random 客户端"]
+        R1[每次新建] --> R2[指纹轮换<br/>反指纹追踪]
+    end
+
+    ROUTE{路由决策} --> Chrome
+    ROUTE --> Firefox
+    ROUTE --> Random
+    Chrome --> EXTRACT[统一 FetchResult shape]
+    Firefox --> EXTRACT
+    Random --> EXTRACT
+```
+
+三个客户端产出 shape 一致，extractor 无需感知后端差异。
+
 ---
 
 ## 八、设计思想总结
@@ -373,6 +723,52 @@ enum ApiError {
 6. **防御性编程** — SSRF 三层防护、响应体 5MB 封顶、Gemini model name 路径注入防御、bearer 常量时间比较
 7. **明确区分 OSS vs Hosted** — server 注释反复强调"stateless, no DB, no job queue"
 8. **BYO-key 哲学** — search 用操作者自己的 Serper key，LLM 用操作者自己的 OpenAI/Anthropic key
+
+### 8.1.1 核心设计模式关系图
+
+8 个核心模式按"架构 / 解耦 / 容错 / 边界"四层组织，模式之间相互支撑：
+
+```mermaid
+graph TB
+    subgraph Layer1["架构层: crate 切分"]
+        P1["① 按 I/O 边界切 crate<br/>core 零网络 / fetch 独占 wreq / llm 独立 reqwest"]
+        P7["⑦ OSS vs Hosted 分界<br/>server 无状态 / cloud 闭源"]
+    end
+
+    subgraph Layer2["解耦层: trait 抽象"]
+        P2["② Trait 解耦<br/>Fetcher trait + LlmProvider trait"]
+        P8["⑧ BYO-key 哲学<br/>操作者自带 Serper / OpenAI key"]
+    end
+
+    subgraph Layer3["容错层: 多层 fallback"]
+        P3["③ Local-first + 云端兜底<br/>Ollama→OpenAI / 本地 fetch→cloud"]
+        P4["④ 多层安全阀<br/>5000 字符 / 200 DOM 深度 / 8MB / 50MB PDF"]
+    end
+
+    subgraph Layer4["边界层: 防御性匹配"]
+        P5["⑤ 精确匹配优先于子串<br/>class token / cookie ID 前缀"]
+        P6["⑥ 防御性编程<br/>SSRF 三层 / 5MB 响应 / 常量时间比较"]
+    end
+
+    P1 --> P2
+    P1 --> P7
+    P2 --> P3
+    P2 --> P8
+    P3 --> P4
+    P3 --> P6
+    P4 --> P5
+    P4 --> P6
+    P5 --> P6
+
+    style P1 fill:#e1f5ff
+    style P7 fill:#e1f5ff
+    style P2 fill:#fff4e1
+    style P8 fill:#fff4e1
+    style P3 fill:#e8f5e9
+    style P4 fill:#e8f5e9
+    style P5 fill:#fce4ec
+    style P6 fill:#fce4ec
+```
 
 ### 8.2 工程化亮点
 
