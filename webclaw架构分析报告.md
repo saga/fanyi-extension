@@ -793,6 +793,212 @@ webclaw-core 的多个设计与 fanyi-extension 踩过的坑高度一致：
 
 ---
 
+## 九、对 fanyi-extension / vocal-saga 的借鉴
+
+> 章节定位：把 webclaw 报告里"看着不错"的设计落到 fanyi-extension / vocal-saga 的具体改动上，按优先级分级。
+> P0 = 修复已知 bug 风险；P1 = 提升鲁棒性；P2 = 边际收益可选。
+
+### 9.1 核心抽取引擎（webclaw-core）
+
+#### P0 · data_island fallback（缺失路径）
+
+webclaw 抽取流水线的 fallback 链：放宽 only_main_content → body → **data_island JSON 数据岛** → QuickJS 执行内联脚本。
+
+fanyi-extension 当前只有"fallback 到 body"。许多 SPA 站点（Next.js / Nuxt / SvelteKit）把真正的内容塞在 `<script type="application/json">` / `__NEXT_DATA__` / `__NUXT__` 里，DOM 是空的。当前实现会 miss，导致翻译失败。
+
+建议：在 contentHelper.ts 的 fallback 路径加 `extractFromDataIsland()`，扫描 `script[type="application/json"]` + `#__NEXT_DATA__` + `#__NUXT_DATA__`，解析后从结构化数据回填 textContent。
+
+#### P0 · collapse_spaced_text（已知现象未处理）
+
+CSS `letter-spacing` 渲染的 "S t a r t" → "Start"。hero section、CTA 按钮、品牌名常见此样式。当前 fanyi-extension 直接 textContent 抽取，会把 "S t a r t" 作为独立 block 翻译成 "开 始"，apply 回 DOM 后中文字符间也保留空格，视觉错乱。
+
+建议：在 blockExtractor.ts 抽取后加 `collapseSpacedText()`：检测连续单字符 + 空格模式，合并为单词。阈值：≥4 个连续单字符 + 空格序列。
+
+#### P1 · noise.rs 三层策略（当前只有一层）
+
+webclaw 噪声过滤三层：精确 token 匹配 + ≤6 字符 word-boundary 正则 + 5000 字符安全阀。
+
+fanyi-extension 的 `isConsentSdkContainer` 已有 ID 前缀匹配（一层），但缺：
+- **短模式词边界**：`nav` 这种 3 字符模式若用子串匹配会误伤 `navy`/`gnave`。建议在 contentHelper 的 class token 匹配处统一用 `\bnav\b`。
+- **5000 字符安全阀**：噪声类元素若 `text > 5000` 字符则不视为噪声，防误杀长 FAQ。fanyi-extension 已踩过 `#cookiesModal` 50k 字符反超的坑，但当前是靠规则修复单点，缺统一安全阀。
+
+#### P1 · structured_data 路由
+
+webclaw 在 metadata 之后并行跑 `structured_data`（JSON-LD / __NEXT_DATA__ / SvelteKit）。fanyi-extension 当前完全不消费结构化数据，SPA 站点（如 vercel.com 文档站）正文 0 字符时无降级路径。
+
+建议：与 9.1 的 data_island fallback 合并实现——data_island 是结构化数据的一种，统一一个 `extractStructured()` 入口。
+
+#### P2 · ln() vs 线性封顶（已接近，不建议改）
+
+webclaw `score = text_len.ln()`；fanyi-extension `Math.min(30, textLength / 800)`。
+
+数学上：ln(8000) ≈ 8.99，ln(24000) ≈ 10.09；fanyi-extension 8000 字 +10、24000 字 +30（封顶）。两者在中等长度接近，但 fanyi-extension 封顶后长 nav 仍可能拿满 +30 反超短 article 的 +50 tag bonus。
+
+借鉴价值：**有限**。fanyi-extension 的分段线性已覆盖 90% 场景，改 ln() 收益小且会破坏现有 reasons 日志可读性。
+
+#### P2 · 24 步 LLM 清洗管线（过度工程风险）
+
+webclaw llm/body.rs 24+ 步顺序清洗：decode_html_entities → strip_invisible_unicode → strip_leaked_js → strip_a11y_link_chrome → collapse_spaced_text → convert_linked_images → collapse_logo_images → strip_remaining_images → strip_emphasis → strip_ui_control_text → strip_css_artifacts → collapse_word_lists → extract_and_strip_links → dedup_repeated_phrases → dedup_heading_paragraph → dedup_duplicate_headings → collapse_whitespace → dedup_content_blocks → dedup_comma_lists → merge_stat_lines。
+
+顺序约束：先解码实体才能让后续正则命中；先去图片再处理链接才能识别嵌套图片链接。
+
+借鉴价值：**部分借鉴**。fanyi-extension 翻译的是 block 文本而非整页 markdown，不需要这么多步。但以下几步独立价值高：
+- `strip_leaked_js`：处理 `self.__wrap_n` 框架水合残留
+- `collapse_logo_images`：logo 通常是品牌名，翻译破坏识别
+- `dedup_content_blocks`：SEO 站点重复段落去重，省 LLM token
+- `collapse_word_lists`：200+ 字符、20+ 词、<5% 功能词 → "... and N more"，导航/标签云翻译无意义且占 token
+
+建议：按需 cherry-pick，不整套移植。
+
+### 9.2 LLM 集成
+
+#### P0 · strip_thinking_tags defense in depth
+
+webclaw extract.rs 和 summarize.rs 在 JSON.parse 前**再次**调用 `strip_thinking_tags`，注释写 "defense in depth"。
+
+fanyi-extension 当前只在 NVIDIA 服务里调 `stripMarkdownCodeBlock`，没处理 qwen3 / deepseek-r1 等推理模型的 `<think>...</think>` 标签泄漏。一旦模型把 thinking 内容包进 ```json 块，JSON.parse 立刻爆炸。
+
+建议：在 shared.ts 加 `stripThinkingTags()`，所有 service 的 callApi 在 stripMarkdownCodeBlock 之前调用。
+
+#### P0 · 响应体 5MB 封顶
+
+webclaw client 和 server 都对响应体封顶 5MB，防内存爆炸。fanyi-extension 的 serverTranslation.ts 直接 `fetch().text()` 无封顶，恶意/异常服务端返回超大 body 会 OOM。
+
+建议：在 shared.ts 的 callApi 加 `MAX_RESPONSE_CHARS = 5_000_000`，超过则截断 + warn。
+
+#### P0 · 501 NotImplemented 错误码
+
+webclaw 区分 501（配置缺失）vs 500（服务端 bug）。fanyi-extension 当前所有 server 错误都 500，客户端无法区分"服务端没配 NVIDIA key"（用户应换 provider）vs"NVIDIA 真的挂了"（应重试）。
+
+建议：vocal-saga 在 router 层加 `NotImplementedError`，环境变量缺失时返回 501，客户端据此自动切换 provider。
+
+#### P1 · detect_empty 早期 bail
+
+webclaw 当所有 block 翻译后与原文相同时 warn。fanyi-extension 的 NvidiaTranslationService 已有类似 warn，但仍把结果 apply 到 DOM。
+
+建议：检测到 ALL unchanged 时直接 throw，让客户端走 fallback（切 provider 或显示原错误），避免用户看到"翻译成功但页面没变"的诡异状态。
+
+#### P2 · ProviderChain 装饰器（架构性改动）
+
+webclaw ProviderChain 自身实现 LlmProvider trait，nvidia 失败自动 fallback 到 deepseek。
+
+fanyi-extension 当前是 service 字段显式路由（`provider: 'nvidia' | 'deepseek' | 'openrouter'`），无 fallback。改成 chain 是架构性改动，收益是单点故障容错，成本是配置面变复杂。
+
+建议：**暂缓**。当前用户手动选 provider 已能满足需求，引入 chain 后"为什么用了 nvidia 但扣了 deepseek 钱"会成为新支持成本。
+
+#### P2 · temperature 分层
+
+webclaw 抽取=0.0（确定），摘要=0.3（略创造）。fanyi-extension 翻译固定 0.1。
+
+借鉴价值：**有限**。glossaryExtractor 抽取术语可降到 0.0 提升一致性；标题翻译可升到 0.3 提升文采。但 0.1 已是合理默认值，分层收益小。
+
+### 9.3 工程化
+
+#### P1 · 基准测试双轨
+
+webclaw benchmarks 双轨：CLI 微基准（近似 tokenizer，快速反馈）+ 完整跨工具对比（真实 tiktoken，权威）+ facts.json（18 站点 90 facts，commit 数据资产）。
+
+fanyi-extension 当前只有单元测试，每个站点改动靠手动验证。claude.com 7 层嵌套修复后没有跨站点回归保护，下次重构可能再次踩坑。
+
+建议：建立"已知难站点"快照目录 `tests/fixtures/sites/`，每个站点存 HTML 快照 + 期望 block 列表 + 期望根节点。PR 跑抽取回归。优先收录：openai.com / claude.com / tailwindcss.com / vercel.com / reddit.com。
+
+#### P1 · slugify char-safe
+
+webclaw slugify 是 char-safe 的，CJK 多字节字符不会 panic。vocal-saga 的缓存 key 可能用到 slugify（按 URL 缓存翻译）。
+
+建议：检查 vocal-saga 的 cache key 生成，确认 CJK URL 不会因 char index 越界 panic。
+
+#### P2 · deser_opt_u32_or_str 容错
+
+webclaw 应对不同 MCP 客户端序列化差异，数字字段同时接受 number 和 string。
+
+fanyi-extension config 面板从 `browser.storage` 读数字时也有类似问题——用户手动改 storage 或扩展版本升级后 schema 不匹配，数字字段可能变成 string。
+
+建议：config loader 加 `asNumberOrDefault()`，宽容处理。收益小但成本低。
+
+#### P2 · 注释解释"为什么"
+
+webclaw 每个设计决策都有注释说明动机（"HTTP/2 HEADERS 帧的 StreamDependency priority flag 才是 DataDome 真正校验的字段——这是花钱买来的经验"）。
+
+fanyi-extension 已有此风格（contentHelper 的 reasons 数组），可推广到 serverTranslation.ts、shared.ts 等文件。
+
+### 9.4 反爬/网络（按需借鉴）
+
+#### P1 · synthesize_html 桥接（vocal-saga 服务端）
+
+webclaw 云端返回结构化数据，本地 `synthesize_html` 重组为最小 HTML（meta tags + JSON-LD + markdown in `<pre>`），让 HTML-based extractor 零改动跑云输出。
+
+vocal-saga 服务端翻译当前直接处理 fetch 回来的 HTML，遇到 SPA（DOM 空）时无降级。可借鉴：服务端 fetch 失败时检测是否 SPA，若是则调 cloud API 拿结构化数据，synthesize 后走现有 pipeline。
+
+#### P2 · fetch_smart URL 重写（vocal-saga reddit）
+
+Reddit 翻译时 vocal-saga 可考虑走 `old.reddit.com`——稳定 SSR HTML，无 JS 反爬。webclaw 已验证此路径。
+
+#### P2 · is_bot_protected 错误信息
+
+vocal-saga 服务端 fetch 失败时检测 Cloudflare/DataDome 关键字（`_cf_chl_opt`/Turnstile/`just a moment`），给用户更明确的错误信息（"目标站点启用了反爬，请尝试其他源"）而非泛泛的"fetch failed"。
+
+### 9.5 借鉴优先级矩阵
+
+```mermaid
+quadrantChart
+    title 借鉴优先级 × 实现成本
+    x-axis "低成本" --> "高成本"
+    y-axis "低收益" --> "高收益"
+    quadrant-1 "立即做 (高收益低成本)"
+    quadrant-2 "暂缓 (高收益高成本)"
+    quadrant-3 "可选 (低收益低成本)"
+    quadrant-4 "不做 (低收益高成本)"
+    "strip_thinking_tags": [0.15, 0.9]
+    "响应体 5MB 封顶": [0.2, 0.85]
+    "501 NotImplemented": [0.25, 0.8]
+    "detect_empty bail": [0.2, 0.7]
+    "collapse_spaced_text": [0.3, 0.85]
+    "data_island fallback": [0.55, 0.9]
+    "noise 三层策略": [0.4, 0.75]
+    "structured_data 路由": [0.5, 0.8]
+    "基准测试双轨": [0.6, 0.75]
+    "slugify char-safe": [0.2, 0.5]
+    "24 步清洗管线": [0.9, 0.6]
+    "ln() 评分": [0.7, 0.3]
+    "ProviderChain": [0.85, 0.55]
+    "synthesize_html": [0.8, 0.65]
+    "temperature 分层": [0.3, 0.35]
+```
+
+### 9.6 建议落地路径
+
+```mermaid
+flowchart LR
+    subgraph P0["P0: 立即做（1-2 周内）"]
+        A1[strip_thinking_tags<br/>shared.ts]
+        A2[响应体 5MB 封顶<br/>shared.ts callApi]
+        A3[501 NotImplemented<br/>vocal-saga router]
+        A4[collapse_spaced_text<br/>blockExtractor.ts]
+        A5[detect_empty bail<br/>NvidiaTranslationService]
+    end
+
+    subgraph P1["P1: 短期（1 个月内）"]
+        B1[data_island fallback<br/>contentHelper.ts]
+        B2[structured_data 路由<br/>与 B1 合并实现]
+        B3[noise 三层策略<br/>contentHelper.ts]
+        B4[基准测试双轨<br/>tests/fixtures/sites/]
+        B5[synthesize_html<br/>vocal-saga 服务端]
+        B6[slugify char-safe<br/>vocal-saga cache]
+    end
+
+    subgraph P2["P2: 可选（按需）"]
+        C1[24 步清洗<br/>cherry-pick 4 步]
+        C2[deser_opt_u32_or_str<br/>config loader]
+        C3[fetch_smart<br/>reddit.com 翻译]
+        C4[is_bot_protected<br/>错误信息]
+    end
+
+    P0 --> P1 --> P2
+```
+
+---
+
 ## 关键文件路径
 
 ```
