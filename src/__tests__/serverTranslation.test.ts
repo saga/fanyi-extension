@@ -303,6 +303,25 @@ describe('translateViaServer', () => {
     expect(body.apiKey).toBeUndefined();
   });
 
+  it('sends provider=opencode and no apiKey when provider is opencode', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'opencode' };
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(config, blocks, nodeMap);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.provider).toBe('opencode');
+    expect(body.apiKey).toBeUndefined();
+  });
+
   it('sends provider=deepseek and apiKey when provider is deepseek', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,

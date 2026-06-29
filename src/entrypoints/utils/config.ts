@@ -7,7 +7,7 @@ export interface ShortcutConfig {
   toggleTranslation: string;
 }
 
-export type Provider = 'deepseek' | 'cloudflare' | 'openrouter' | 'nvidia' | 'gemini';
+export type Provider = 'deepseek' | 'cloudflare' | 'openrouter' | 'nvidia' | 'gemini' | 'opencode';
 
 export interface Config {
   sourceLang: string;

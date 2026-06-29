@@ -105,6 +105,7 @@ function buildPanelHtml(isMobile: boolean): string {
             <option value="nvidia">NVIDIA</option>
             <option value="cloudflare">Cloudflare</option>
             <option value="gemini">Gemini</option>
+            <option value="opencode">OpenCode</option>
           </select>
         </div>
       </div>
