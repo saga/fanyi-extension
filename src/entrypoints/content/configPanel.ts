@@ -104,6 +104,7 @@ function buildPanelHtml(isMobile: boolean): string {
             <option value="openrouter">OpenRouter</option>
             <option value="nvidia">NVIDIA</option>
             <option value="cloudflare">Cloudflare</option>
+            <option value="gemini">Gemini</option>
           </select>
         </div>
       </div>

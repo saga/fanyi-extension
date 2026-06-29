@@ -59,6 +59,7 @@
             <option value="openrouter">OpenRouter</option>
             <option value="nvidia">NVIDIA</option>
             <option value="cloudflare">Cloudflare</option>
+            <option value="gemini">Gemini</option>
           </select>
           <span class="hint-text">选择服务端翻译使用的 LLM Provider，仅对"通过远程服务器翻译"生效。</span>
         </div>

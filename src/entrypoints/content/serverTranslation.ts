@@ -128,7 +128,7 @@ export async function translateViaServer(
   const serverUrl = getDefaultServerUrl(config);
   const url = window.location.href;
   // 服务端翻译使用的 LLM 提供方，直接复用本地 provider 配置
-  // （deepseek/openrouter/nvidia/cloudflare）。
+  // （deepseek/openrouter/nvidia/cloudflare/gemini）。
   // 服务端 /fanyi/page 根据 provider 字段选择对应的 LLM。
   const provider = config.provider || 'deepseek';
 

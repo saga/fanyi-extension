@@ -284,6 +284,25 @@ describe('translateViaServer', () => {
     expect(body.apiKey).toBeUndefined();
   });
 
+  it('sends provider=gemini and no apiKey when provider is gemini', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'gemini' };
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(config, blocks, nodeMap);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.provider).toBe('gemini');
+    expect(body.apiKey).toBeUndefined();
+  });
+
   it('sends provider=deepseek and apiKey when provider is deepseek', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
