@@ -21,6 +21,7 @@ const defaultConfig: Config = {
   targetLang: 'zh',
   deepseekApiKey: '',
   provider: 'deepseek',
+  promptStyle: 'default',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',

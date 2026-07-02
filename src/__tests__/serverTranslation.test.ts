@@ -19,6 +19,7 @@ const baseConfig: Config = {
   targetLang: 'zh',
   deepseekApiKey: 'sk-test-api-key',
   provider: 'deepseek',
+  promptStyle: 'default',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -98,6 +99,8 @@ describe('translateViaServer', () => {
     expect(body.target).toBe('zh');
     expect(body.mode).toBe('bilingual');
     expect(body.provider).toBe('deepseek');
+    // promptStyle 端到端传递：config.promptStyle 应原样写入请求 body
+    expect(body.promptStyle).toBe('default');
 
     expect(result.size).toBe(2);
     expect(result.has('b1')).toBe(true);
@@ -339,6 +342,25 @@ describe('translateViaServer', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.provider).toBe('deepseek');
     expect(body.apiKey).toBe('sk-test');
+  });
+
+  it('端到端传递 promptStyle 到服务端请求 body', async () => {
+    // 验证非默认文风（jinyong）能从 config 正确传递到 /fanyi/page 请求体
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const config: Config = { ...baseConfig, promptStyle: 'jinyong' };
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(config, blocks, nodeMap);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.promptStyle).toBe('jinyong');
   });
 
   it('throws when server responds with non-OK status', async () => {

@@ -1,5 +1,5 @@
 import browser from 'webextension-polyfill';
-import { DeepSeekTranslationService } from './service/deepseek';
+import { DeepSeekTranslationService, type PromptStyle } from './service/deepseek';
 import { getConfig } from './utils/config';
 import {
   getCachedTranslation,
@@ -24,8 +24,8 @@ export default defineBackground({
     const isCommandsSupported = !!browser.commands;
 
     // Service instances are lightweight; create per request.
-    function getService(apiKey: string): DeepSeekTranslationService {
-      return new DeepSeekTranslationService(apiKey);
+    function getService(apiKey: string, style?: PromptStyle): DeepSeekTranslationService {
+      return new DeepSeekTranslationService(apiKey, style);
     }
 
     browser.runtime.onInstalled.addListener(() => {
@@ -161,7 +161,7 @@ export default defineBackground({
           return;
         }
 
-        const service = getService(config.deepseekApiKey);
+        const service = getService(config.deepseekApiKey, config.promptStyle);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
         // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
@@ -304,7 +304,7 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
-        const service = getService(config.deepseekApiKey);
+        const service = getService(config.deepseekApiKey, config.promptStyle);
 
         const stream = service.translateStream(
           jsonContent,
@@ -381,7 +381,7 @@ export default defineBackground({
         const config = await getConfig();
         console.log('[Background] Validating API Key, length:', apiKey.length);
 
-        const service = new DeepSeekTranslationService(apiKey);
+        const service = new DeepSeekTranslationService(apiKey, config.promptStyle);
         const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
 
         const timeout = new Promise((_, reject) => {

@@ -153,6 +153,8 @@ export async function translateViaServer(
     // 扩展端只支持双语对照模式，服务端也已强制此模式
     mode: 'bilingual' as const,
     provider,
+    // 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话
+    promptStyle: config.promptStyle,
   };
   // 仅当 provider=deepseek 时才把客户端的 API Key 发给服务端；
   // 其他 provider 的凭据由服务端自行管理。

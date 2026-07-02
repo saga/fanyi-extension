@@ -35,6 +35,16 @@
         </div>
       </div>
 
+      <div class="select-item">
+        <label>翻译文风</label>
+        <select v-model="config.promptStyle" @change="saveConfig">
+          <option value="default">通用直译</option>
+          <option value="jinyong">金庸武侠</option>
+          <option value="acheng">阿城白描</option>
+          <option value="wangxiaobo">王小波大白话</option>
+        </select>
+      </div>
+
       <label class="switch-item">
         <input type="checkbox" v-model="config.useServerTranslation" @change="saveConfig" />
         <span>通过远程服务器翻译当前页面（发送 HTML）</span>
@@ -84,6 +94,7 @@ const config = ref<Config>({
   targetLang: 'zh',
   deepseekApiKey: '',
   provider: 'deepseek',
+  promptStyle: 'default',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',

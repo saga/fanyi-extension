@@ -1,11 +1,17 @@
 import type { TranslationService, Glossary } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
+import { buildJinyongSystemContent } from './jinyong-prompt';
+import { buildAchengSystemContent } from './acheng-prompt';
+import { buildWangxiaoboSystemContent } from './wangxiaobo-prompt';
 
 const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 const USER_ID = 'fanyi-extension';
 const TRANSLATION_TEMPERATURE = 0.1;
+
+/** 翻译文风选项：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话 */
+export type PromptStyle = 'default' | 'jinyong' | 'acheng' | 'wangxiaobo';
 
 /**
  * Estimate max output tokens for translation.
@@ -47,9 +53,53 @@ function buildHeaders(apiKey: string): Record<string, string> {
 }
 
 /**
+ * 根据 style 选择对应的 system prompt 构建函数。
+ * - default: 通用直译风格（保留 sitePrompt 追加逻辑）
+ * - jinyong / acheng / wangxiaobo: 对应文学风格 prompt，
+ *   sitePrompt 在调用后追加到末尾。
+ */
+export function buildSystemContent(
+  sourceLang: string,
+  targetLang: string,
+  sitePrompt?: string,
+  glossary?: Glossary,
+  style?: PromptStyle
+): string {
+  switch (style) {
+    case 'jinyong': {
+      // 武侠风格：先构建风格 prompt，再追加站点规则
+      let content = buildJinyongSystemContent(sourceLang, targetLang, glossary);
+      if (sitePrompt) {
+        content += '\n\nSite-specific rules:\n' + sitePrompt;
+      }
+      return content;
+    }
+    case 'acheng': {
+      // 阿城白描风格：先构建风格 prompt，再追加站点规则
+      let content = buildAchengSystemContent(sourceLang, targetLang, glossary);
+      if (sitePrompt) {
+        content += '\n\nSite-specific rules:\n' + sitePrompt;
+      }
+      return content;
+    }
+    case 'wangxiaobo': {
+      // 王小波大白话风格：先构建风格 prompt，再追加站点规则
+      let content = buildWangxiaoboSystemContent(sourceLang, targetLang, glossary);
+      if (sitePrompt) {
+        content += '\n\nSite-specific rules:\n' + sitePrompt;
+      }
+      return content;
+    }
+    default:
+      // 通用直译风格
+      return buildDefaultSystemContent(sourceLang, targetLang, sitePrompt, glossary);
+  }
+}
+
+/**
  * 默认 system prompt：通用直译风格。
  */
-function buildSystemContent(
+function buildDefaultSystemContent(
   sourceLang: string,
   targetLang: string,
   sitePrompt?: string,
@@ -112,7 +162,8 @@ function buildTranslationBody(
   sourceLang: string,
   targetLang: string,
   sitePrompt?: string,
-  glossary?: Glossary
+  glossary?: Glossary,
+  style?: PromptStyle
 ) {
   const blocksJson = JSON.stringify(
     blocks.map((b) => ({ id: b.id, text: b.text })),
@@ -122,7 +173,7 @@ function buildTranslationBody(
 
   // user message 精简到 "JSON:" + blocks — 比 "Output JSON only."
   // 更短，同时 "JSON" 字样满足 response_format: json_object 硬约束。
-  const systemContent = buildSystemContent(sourceLang, targetLang, sitePrompt, hasGlossaryEntries(glossary) ? glossary : undefined);
+  const systemContent = buildSystemContent(sourceLang, targetLang, sitePrompt, hasGlossaryEntries(glossary) ? glossary : undefined, style);
   console.log('[DeepSeek] System prompt built:\n' + systemContent);
   return {
     model: MODEL,
@@ -220,9 +271,12 @@ function hasGlossaryEntries(glossary?: Glossary): boolean {
 
 export class DeepSeekTranslationService implements TranslationService {
   private apiKey: string;
+  /** 翻译文风，默认 undefined 表示使用通用直译风格 */
+  private style?: PromptStyle;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, style?: PromptStyle) {
     this.apiKey = apiKey;
+    this.style = style;
   }
 
   async translate(
@@ -239,7 +293,8 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      hasGlossaryEntries(glossary) ? glossary : undefined
+      hasGlossaryEntries(glossary) ? glossary : undefined,
+      this.style
     );
 
     const raw = await callApi(this.apiKey, JSON.stringify(body));
@@ -260,7 +315,8 @@ export class DeepSeekTranslationService implements TranslationService {
       sourceLang,
       targetLang,
       context,
-      hasGlossaryEntries(glossary) ? glossary : undefined
+      hasGlossaryEntries(glossary) ? glossary : undefined,
+      this.style
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);

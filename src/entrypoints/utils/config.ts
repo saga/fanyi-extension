@@ -1,4 +1,5 @@
 import { storage } from '@wxt-dev/storage';
+import type { PromptStyle } from '../service/deepseek';
 
 export interface ShortcutConfig {
   translatePage: string;
@@ -15,6 +16,8 @@ export interface Config {
   deepseekApiKey: string;
   /** 服务端翻译使用的 LLM Provider（仅对"通过远程服务器翻译"生效，本地翻译固定 DeepSeek） */
   provider: Provider;
+  /** 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话 */
+  promptStyle: PromptStyle;
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
   /** 是否使用服务端翻译（发送到 /fanyi/page） */
@@ -28,6 +31,7 @@ const defaultConfig: Config = {
   targetLang: 'zh',
   deepseekApiKey: '',
   provider: 'deepseek',
+  promptStyle: 'default',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
