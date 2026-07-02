@@ -195,7 +195,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
     const fetchCall = globalFetch.mock.calls[0];
     const body = JSON.parse(fetchCall[1].body);
     expect(body.messages[0].content).toContain('React');
-      expect(body.messages[0].content).toContain('Preserve only proper nouns and named entities.');
+    expect(body.messages[0].content).toContain('Preserve only proper nouns and named entities.');
     });
 
   it('should handle multiple document_terms in stream', async () => {

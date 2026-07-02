@@ -51,7 +51,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     const body = await captureRequestBody();
     const system = body.messages[0].content as string;
     // 不再写 "NOT equal input" — 品牌名/代号就是要保留原文，写了反而
-    // 跟 "Keep URLs, code, version numbers, and protected terms unchanged" 冲突。
+    // 跟 "Keep URLs, code, version numbers, and protected terms unchanged" 冲突，让模型困惑。
     // 取而代之用 "For translatable text, provide a translation." 暗示不要 no-op。
     expect(system).toMatch(/For translatable text/i);
   });

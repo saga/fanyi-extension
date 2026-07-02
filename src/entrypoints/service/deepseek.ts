@@ -46,6 +46,9 @@ function buildHeaders(apiKey: string): Record<string, string> {
   };
 }
 
+/**
+ * 默认 system prompt：通用直译风格。
+ */
 function buildSystemContent(
   sourceLang: string,
   targetLang: string,

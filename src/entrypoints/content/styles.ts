@@ -107,5 +107,12 @@ export function getStyles(isMobile: boolean): string {
       visibility: hidden !important;
       pointer-events: none !important;
     }
+
+    /* 动态注入的通知/订阅弹窗兜底隐藏（InfoWorld 等站点的 subscribers notification prompt） */
+    [class*="notification"], [id*="notification"],
+    [class*="subscribers"], [id*="subscribers"],
+    [class*="push-notification"], [id*="push-notification"] {
+      display: none !important;
+    }
   `;
 }

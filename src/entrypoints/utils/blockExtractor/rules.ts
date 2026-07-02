@@ -552,8 +552,13 @@ const OVERLAY_PATTERNS = [
   { idPattern: /\bpopup\b|\bmodal\b|overlay|\bdialog\b/i },
   { role: 'dialog' },
 
-  // Substack 系列
+  // Substack / 订阅 / Newsletter
   { classPattern: /subscription-popup|paywall|subscribe-popup|newsletter-modal/i },
+
+  // 浏览器通知订阅弹窗（InfoWorld 等站点的 subscribers notification prompt）
+  { classPattern: /notification|notifications|push-notification|browser-notification|notification-prompt|subscribers/i },
+  { idPattern: /notification|notifications|push-notification|browser-notification|notification-prompt|subscribers/i },
+  { role: 'alertdialog' },
 
   // 固定定位的干扰性 banner（顶部/底部 fixed bar）
   {
