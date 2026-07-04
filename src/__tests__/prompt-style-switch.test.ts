@@ -18,7 +18,7 @@ describe('buildSystemContent prompt style 切换', () => {
     expect(content).toContain('Translate English to Simplified Chinese');
     expect(content).toContain('Return {"translations":[{"id":"x","translated_text":"y"}]}');
     // 不应包含文学风格标签
-    expect(content).not.toContain('<role_definition>');
+    expect(content).not.toContain('<role>');
     expect(content).not.toContain('Jin Yong');
     expect(content).not.toContain('Acheng');
     expect(content).not.toContain('Wang Xiaobo');
@@ -26,20 +26,20 @@ describe('buildSystemContent prompt style 切换', () => {
 
   it('jinyong 风格包含武侠标签', () => {
     const content = buildSystemContent(sourceLang, targetLang, undefined, undefined, 'jinyong');
-    expect(content).toContain('<role_definition>');
+    expect(content).toContain('<role>');
     expect(content).toContain('Jin Yong');
     expect(content).toContain('金庸');
-    expect(content).toContain('<wuxia_style_profile>');
-    expect(content).toContain('<output_format>');
+    expect(content).toContain('<style>');
+    expect(content).toContain('<output>');
   });
 
   it('acheng 风格包含阿城标签', () => {
     const content = buildSystemContent(sourceLang, targetLang, undefined, undefined, 'acheng');
-    expect(content).toContain('<role_definition>');
+    expect(content).toContain('<role>');
     expect(content).toContain('Acheng');
     expect(content).toContain('阿城');
-    expect(content).toContain('<acheng_style_profile>');
-    expect(content).toContain('<output_format>');
+    expect(content).toContain('<style>');
+    expect(content).toContain('<output>');
   });
 
   it('wangxiaobo 风格包含王小波标签', () => {
@@ -55,7 +55,7 @@ describe('buildSystemContent prompt style 切换', () => {
     // 不传 style 参数 → 走 default 分支
     const content = buildSystemContent(sourceLang, targetLang, undefined);
     expect(content).toContain('Translate English to Simplified Chinese');
-    expect(content).not.toContain('<role_definition>');
+    expect(content).not.toContain('<role>');
   });
 
   it('glossary 在 default 风格中使用 Preserve only proper nouns', () => {
