@@ -25,10 +25,10 @@
  */
 import type { CaptionEvent, StatusCallback } from './types';
 import {
-  extractYtInitialPlayerResponse,
   getCaptionTrackUrl,
   fetchCaptions,
   extractVideoId,
+  fetchPlayerResponse,
 } from './provider';
 import { translateAhead, DEFAULT_AHEAD_MS } from './translator';
 import { CaptionOverlay } from './overlay';
@@ -200,12 +200,12 @@ export class YouTubeCaptionManager {
   /**
    * 获取当前视频的字幕（带缓存写入）。
    *
-   * 关键：YouTube SPA 导航时，DOM 中的 ytInitialPlayerResponse <script> 标签
-   * 可能还是旧视频的数据（需要等 YouTube 重新渲染）。如果不验证 videoId，
-   * 会拿到旧视频的字幕 → "缓存匹配错误"（用户看到视频 A 但字幕是视频 B 的）。
+   * 使用 fetchPlayerResponse(videoId) 确保 videoId 匹配：
+   *   - 先从 DOM 提取 playerResponse（快）
+   *   - 如果 videoId 不匹配（SPA 导航后 DOM 过期），fetch 当前页面 HTML 作为 fallback
+   *   - 服务器返回的 HTML 一定基于当前 URL，包含正确的 ytInitialPlayerResponse
    *
-   * 修复：验证 playerResponse.videoDetails.videoId 与 this.currentVideoId 匹配，
-   * 不匹配则等待重试（最多 5 次，每次间隔 500ms）。
+   * 这解决了 SPA 导航后拿到旧视频字幕的问题（用户看到视频 A 但字幕是视频 B 的）。
    */
   private async fetchCaptionsForCurrent(
     onStatus?: StatusCallback,
@@ -214,52 +214,12 @@ export class YouTubeCaptionManager {
 
     const videoId = this.currentVideoId;
     const signal = this.abortController?.signal;
+    if (signal?.aborted) return false;
 
-    // 重试：等待 YouTube SPA 重新渲染 <script> 标签
-    const MAX_RETRIES = 5;
-    const RETRY_INTERVAL_MS = 500;
-
-    let playerResponse: any = null;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      if (signal?.aborted) return false;
-
-      playerResponse = extractYtInitialPlayerResponse();
-      if (playerResponse) {
-        // 验证 videoId 匹配，防止拿到旧视频的字幕
-        const responseVideoId = playerResponse?.videoDetails?.videoId;
-        if (responseVideoId === videoId) {
-          break; // 匹配成功
-        }
-        // videoId 不匹配：DOM 中的 script 还是旧视频的，等一下重试
-        console.log(
-          '[YouTubeCaptions] videoId mismatch: expected=' + videoId +
-          ', got=' + responseVideoId + ', retry ' + (attempt + 1) + '/' + MAX_RETRIES,
-        );
-      } else {
-        console.log(
-          '[YouTubeCaptions] ytInitialPlayerResponse not found, retry ' +
-          (attempt + 1) + '/' + MAX_RETRIES,
-        );
-      }
-
-      if (attempt < MAX_RETRIES - 1) {
-        await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS));
-      }
-    }
-
+    // 获取 playerResponse（DOM + fetch HTML fallback，确保 videoId 匹配）
+    const playerResponse = await fetchPlayerResponse(videoId);
     if (!playerResponse) {
       onStatus?.('未找到视频字幕数据（可能不是视频页）', 'error');
-      return false;
-    }
-
-    // 最终 videoId 检查（重试后仍不匹配）
-    const responseVideoId = playerResponse?.videoDetails?.videoId;
-    if (responseVideoId !== videoId) {
-      onStatus?.('视频数据不匹配，请重试', 'error');
-      console.error(
-        '[YouTubeCaptions] Final videoId mismatch: expected=' + videoId +
-        ', got=' + responseVideoId,
-      );
       return false;
     }
 
@@ -278,7 +238,6 @@ export class YouTubeCaptionManager {
       }
       console.log('[YouTubeCaptions] Captions loaded:', captions.length, 'for video', videoId);
       this.captions = captions;
-      // 写入缓存（此时还没有翻译，但 fetch 过的字幕可以缓存）
       this.cache.set(videoId, this.captions);
       return true;
     } catch (e) {

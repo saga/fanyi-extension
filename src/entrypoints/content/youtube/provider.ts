@@ -17,40 +17,128 @@ import type { CaptionEvent } from './types';
 // =============================================================================
 
 /**
- * 从页面 <script> 标签提取 ytInitialPlayerResponse。
+ * 获取当前播放器的 playerResponse。
  *
- * content script 运行在隔离的 JS 环境中，不能直接访问
- * window.ytInitialPlayerResponse，需要从 DOM 的 <script> 标签解析。
+ * YouTube 是 SPA，切视频时 URL 会立即变化，但 DOM 里的
+ * <script>ytInitialPlayerResponse = {...}</script> 标签不会更新
+ * （YouTube 用 AJAX 更新内容，不重新加载 <script>）。
+ * 所以从 <script> 解析拿到的是页面初始加载时的数据，SPA 导航后是旧视频的。
  *
- * YouTube 页面的 <script> 里有 `ytInitialPlayerResponse = {...};` 赋值。
- * 用括号计数提取完整 JSON 对象（正则无法匹配嵌套大括号）。
+ * 解决方案：
+ *   1. 优先用 movie_player.getPlayerResponse() — YouTube 播放器组件的实时 API，
+ *      返回当前正在播放的视频数据（videoDetails.videoId 是实时的）
+ *   2. 回退到 DOM <script> 标签解析 — 仅在首次加载或 movie_player 不可用时使用
+ *
+ * 注意：content script 的 JS 环境与 page 隔离，不能访问 window.ytInitialPlayerResponse，
+ * 但可以访问 DOM 元素（movie_player）的方法，因为 DOM 是共享的。
+ *
+ * ⚠️ 本函数是同步的，SPA 导航后可能返回旧视频数据。
+ *    调用方需要 videoId 匹配时，应使用异步的 fetchPlayerResponse()，
+ *    它会在 DOM 失败时 fetch 当前页面 HTML 作为 fallback。
  */
 export function extractYtInitialPlayerResponse(): any | null {
+  // 1. 优先：movie_player.getPlayerResponse()（实时，SPA 友好）
+  try {
+    const player = document.getElementById('movie_player') as any;
+    if (player && typeof player.getPlayerResponse === 'function') {
+      const resp = player.getPlayerResponse();
+      if (resp && resp.videoDetails && resp.videoDetails.videoId) {
+        return resp;
+      }
+    }
+  } catch {
+    // movie_player 不存在或 getPlayerResponse 不可用，回退到 DOM 解析
+  }
+
+  // 2. 回退：从 DOM <script> 标签解析
   for (const script of document.querySelectorAll('script')) {
     const text = script.textContent || '';
-    const marker = 'ytInitialPlayerResponse';
-    const markerIdx = text.indexOf(marker);
-    if (markerIdx < 0) continue;
+    const resp = extractPlayerResponseFromText(text);
+    if (resp) return resp;
+  }
+  return null;
+}
 
-    // 找到 marker 后第一个 '{' 的位置
-    let jsonStart = -1;
-    for (let i = markerIdx + marker.length; i < text.length; i++) {
-      if (text[i] === '{') {
-        jsonStart = i;
-        break;
-      }
-    }
-    if (jsonStart < 0) continue;
+/**
+ * 从文本中提取 ytInitialPlayerResponse JSON 对象（括号计数法）。
+ *
+ * 用于两种场景：
+ *   1. DOM <script> 标签的 textContent
+ *   2. fetch 当前页面 HTML 后的响应文本（SPA 导航后 DOM script 过期时的 fallback）
+ */
+function extractPlayerResponseFromText(text: string): any | null {
+  const marker = 'ytInitialPlayerResponse';
+  const markerIdx = text.indexOf(marker);
+  if (markerIdx < 0) return null;
 
-    const jsonStr = extractJSONObject(text, jsonStart);
-    if (jsonStr) {
-      try {
-        return JSON.parse(jsonStr);
-      } catch {
-        // JSON 解析失败，继续找下一个 script 标签
-      }
+  // 找到 marker 后第一个 '{' 的位置
+  let jsonStart = -1;
+  for (let i = markerIdx + marker.length; i < text.length; i++) {
+    if (text[i] === '{') {
+      jsonStart = i;
+      break;
     }
   }
+  if (jsonStart < 0) return null;
+
+  const jsonStr = extractJSONObject(text, jsonStart);
+  if (!jsonStr) return null;
+
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 获取当前视频的 playerResponse，确保 videoId 匹配。
+ *
+ * YouTube SPA 导航后，DOM 里的 <script> 标签和 movie_player.getPlayerResponse()
+ * 都可能返回旧视频的数据（YouTube 用 AJAX 更新内容，不重新加载 <script>）。
+ * 本函数在 DOM 提取的 videoId 不匹配时，fetch 当前页面 HTML 作为 fallback——
+ * 服务器返回的 HTML 一定是基于当前 URL 的，包含正确的 ytInitialPlayerResponse。
+ *
+ * @param expectedVideoId 期望的 videoId（从 window.location.href 提取）
+ * @returns playerResponse 或 null
+ */
+export async function fetchPlayerResponse(
+  expectedVideoId: string,
+): Promise<any | null> {
+  // 1. 先从 DOM 提取（快，同步）
+  const fromDom = extractYtInitialPlayerResponse();
+  if (fromDom) {
+    const videoId = fromDom?.videoDetails?.videoId;
+    if (videoId === expectedVideoId) {
+      console.log('[YouTubeCaptions] playerResponse from DOM, videoId=' + videoId);
+      return fromDom;
+    }
+    console.log('[YouTubeCaptions] DOM videoId mismatch: expected=' + expectedVideoId + ', got=' + videoId);
+  } else {
+    console.log('[YouTubeCaptions] playerResponse not found in DOM');
+  }
+
+  // 2. fetch 当前页面 HTML（SPA 导航后 DOM 过期时的 fallback）
+  //    window.location.href 是当前视频的 URL，服务器返回的 HTML 一定是最新的
+  console.log('[YouTubeCaptions] Fetching page HTML for playerResponse');
+  try {
+    const resp = await fetch(window.location.href);
+    const html = await resp.text();
+    const fromHtml = extractPlayerResponseFromText(html);
+    if (fromHtml) {
+      const videoId = fromHtml?.videoDetails?.videoId;
+      if (videoId === expectedVideoId) {
+        console.log('[YouTubeCaptions] playerResponse from fetched HTML, videoId=' + videoId);
+        return fromHtml;
+      }
+      console.log('[YouTubeCaptions] fetched HTML videoId mismatch: expected=' + expectedVideoId + ', got=' + videoId);
+    } else {
+      console.log('[YouTubeCaptions] playerResponse not found in fetched HTML');
+    }
+  } catch (e) {
+    console.log('[YouTubeCaptions] fetch page HTML failed:', e);
+  }
+
   return null;
 }
 

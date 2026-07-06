@@ -189,7 +189,8 @@ describe('fetchCaptions', () => {
     };
     globalFetch.mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue(mockJson3),
+      text: vi.fn().mockResolvedValue(JSON.stringify(mockJson3)),
+      headers: new Map(),
     });
 
     const captions = await fetchCaptions('https://example.com/api/timedtext?v=abc');
@@ -211,7 +212,8 @@ describe('fetchCaptions', () => {
     };
     globalFetch.mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue(mockJson3),
+      text: vi.fn().mockResolvedValue(JSON.stringify(mockJson3)),
+      headers: new Map(),
     });
 
     const captions = await fetchCaptions('https://example.com/api/timedtext?v=abc');
@@ -222,7 +224,8 @@ describe('fetchCaptions', () => {
   it('appends fmt=json3 if not present', async () => {
     globalFetch.mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ events: [] }),
+      text: vi.fn().mockResolvedValue(JSON.stringify({ events: [] })),
+      headers: new Map(),
     });
 
     await fetchCaptions('https://example.com/api/timedtext?v=abc');
@@ -231,13 +234,16 @@ describe('fetchCaptions', () => {
     );
   });
 
-  it('does not append fmt if already present', async () => {
+  it('overrides existing fmt=srv3 to json3', async () => {
+    // baseUrl 可能已带 fmt=srv3/vtt，必须强制覆盖为 json3
+    // （旧实现用 includes('fmt=') 检测会漏掉，导致返回 XML）
     globalFetch.mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ events: [] }),
+      text: vi.fn().mockResolvedValue(JSON.stringify({ events: [] })),
+      headers: new Map(),
     });
 
-    await fetchCaptions('https://example.com/api/timedtext?v=abc&fmt=json3');
+    await fetchCaptions('https://example.com/api/timedtext?v=abc&fmt=srv3');
     expect(globalFetch).toHaveBeenCalledWith(
       'https://example.com/api/timedtext?v=abc&fmt=json3',
     );

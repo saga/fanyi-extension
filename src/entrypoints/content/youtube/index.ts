@@ -26,6 +26,7 @@ export {
   extractJSONObject,
   getCaptionTrackUrl,
   fetchCaptions,
+  fetchPlayerResponse,
   extractVideoId,
 } from './provider';
 export {
