@@ -30,7 +30,11 @@ import {
   type TranslationController,
   type TranslationState,
 } from './content/translation';
-import { isYouTubeWatchPage, startYouTubeCaptionTranslation } from './content/youtubeCaptions';
+import {
+  isYouTubeWatchPage,
+  startYouTubeCaptionTranslation,
+  onYouTubeNavigate,
+} from './content/youtube';
 
 // ============================================================
 // 设备检测
@@ -76,6 +80,23 @@ export default defineContentScript({
     );
     setupTouchEvents(() => handleAction('translate'));
 
+    // === YouTube SPA 导航监听 ===
+    // YouTube 是 SPA，切视频不会刷新页面。监听 yt-navigate-finish 事件，
+    // 在用户切换视频时自动重新启动字幕翻译（仅当之前已经启动过）。
+    // 使用 capture 阶段确保在 YouTube 自己的处理之前捕获。
+    let youTubeStarted = false;
+    document.addEventListener('yt-navigate-finish', () => {
+      if (!youTubeStarted) return;
+      if (!isYouTubeWatchPage()) return;
+      void getConfig().then((config) => {
+        if (config.deepseekApiKey) {
+          void onYouTubeNavigate(config.deepseekApiKey, (msg, type) => {
+            if (type === 'error') console.log('[YouTubeCaptions]', msg);
+          });
+        }
+      });
+    }, true);
+
     // === 消息路由：来自 background、popup、keyboard shortcut ===
     browser.runtime.onMessage.addListener((message: any) => {
       switch (message.action) {
@@ -108,6 +129,7 @@ export default defineContentScript({
           void ctrl.start();
           // YouTube 视频页：同时启动字幕翻译（独立于整页翻译流程）
           if (isYouTubeWatchPage()) {
+            youTubeStarted = true;
             void getConfig().then((config) => {
               if (config.deepseekApiKey) {
                 void startYouTubeCaptionTranslation(

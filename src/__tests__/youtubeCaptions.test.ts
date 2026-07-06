@@ -1,16 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// 导入被测函数（注意：youtubeCaptions.ts 有 DOM 依赖，需要 jsdom 环境）
+// 导入被测函数（注意：youtube 模块有 DOM 依赖，需要 jsdom 环境）
 import {
   extractYtInitialPlayerResponse,
   extractJSONObject,
   getCaptionTrackUrl,
   fetchCaptions,
   translateCaptions,
+  translateAhead,
+  translateBatch,
   isYouTubeWatchPage,
   CaptionOverlay,
+  YouTubeCaptionManager,
   type CaptionEvent,
-} from '../entrypoints/content/youtubeCaptions';
+} from '../entrypoints/content/youtube';
 
 // Mock global fetch
 const globalFetch = vi.fn();
@@ -351,7 +354,9 @@ describe('translateCaptions', () => {
     expect(onProgress).toHaveBeenCalledWith(1, 1);
   });
 
-  it('handles API error', async () => {
+  it('handles API error by marking batch as failed', async () => {
+    // 重构后 translateCaptions 内部走 translateAhead，错误被 catch 后标记为 failed，
+    // 不再抛出（resilient design：单批失败不影响其他批次）
     globalFetch.mockResolvedValue({
       ok: false,
       status: 401,
@@ -359,12 +364,11 @@ describe('translateCaptions', () => {
     });
 
     const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello' },
+      { startMs: 0, durationMs: 1000, text: 'Hello', status: 'pending' },
     ];
 
-    await expect(
-      translateCaptions(captions, 'bad-key'),
-    ).rejects.toThrow('DeepSeek API error: HTTP 401');
+    await translateCaptions(captions, 'bad-key');
+    expect(captions[0].status).toBe('failed');
   });
 });
 
@@ -446,5 +450,264 @@ describe('CaptionOverlay', () => {
 
     overlay.stop();
     expect(document.getElementById('fanyi-caption-overlay')).toBeNull();
+  });
+
+  it('updateCaptions refreshes display when translation arrives', () => {
+    const video = document.createElement('video');
+    video.className = 'html5-main-video';
+    Object.defineProperty(video, 'currentTime', { value: 0, writable: true });
+    const player = document.createElement('div');
+    player.className = 'html5-video-player';
+    player.appendChild(video);
+    document.body.appendChild(player);
+
+    const captions: CaptionEvent[] = [
+      { startMs: 0, durationMs: 5000, text: 'Hello' },
+    ];
+
+    overlay.start(captions);
+    // 初始状态：只显示原文（无 translatedText）
+    const el = document.getElementById('fanyi-caption-overlay')!;
+    expect(el.textContent).toBe('Hello');
+
+    // 模拟 Ahead Buffer 翻译完成后调用 updateCaptions
+    captions[0].translatedText = '你好';
+    overlay.updateCaptions(captions);
+
+    // 更新后应显示双语（原文 + 译文）
+    expect(el.children.length).toBe(2);
+    expect(el.children[0].textContent).toBe('Hello');
+    expect(el.children[1].textContent).toBe('你好');
+  });
+});
+
+// =============================================================================
+// translateAhead — Ahead Buffer 增量翻译
+// =============================================================================
+
+describe('translateAhead', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('only translates captions within the ahead window', async () => {
+    const mockResponse = {
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [{
+          message: {
+            content: '{"translations":[{"id":"0","translated_text":"你好"}]}',
+          },
+        }],
+      }),
+    };
+    globalFetch.mockResolvedValue(mockResponse);
+
+    const captions: CaptionEvent[] = [
+      { startMs: 0, durationMs: 2000, text: 'Hello', status: 'pending' },
+      { startMs: 100_000, durationMs: 2000, text: 'Far away', status: 'pending' },
+    ];
+
+    // ahead 窗口：0 ~ 90 秒，只翻译第一条
+    await translateAhead(captions, 0, 90_000, 'test-api-key');
+
+    expect(captions[0].translatedText).toBe('你好');
+    expect(captions[0].status).toBe('done');
+    // 第二条在 100 秒，超出 90 秒窗口，不应翻译
+    expect(captions[1].translatedText).toBeUndefined();
+    expect(captions[1].status).toBe('pending');
+  });
+
+  it('skips already translated captions', async () => {
+    const mockResponse = {
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [{ message: { content: '{"translations":[]}' } }],
+      }),
+    };
+    globalFetch.mockResolvedValue(mockResponse);
+
+    const captions: CaptionEvent[] = [
+      { startMs: 0, durationMs: 2000, text: 'Hello', translatedText: '已翻译', status: 'done' },
+      { startMs: 2000, durationMs: 2000, text: 'World', status: 'pending' },
+    ];
+
+    await translateAhead(captions, 0, 90_000, 'test-api-key');
+
+    // 第一条已翻译，不应再调用 API（mockResponse 返回空 translations）
+    expect(captions[0].translatedText).toBe('已翻译');
+    // 第二条未翻译，会调用 API 但 mockResponse 返回空，所以标记为 failed
+    expect(captions[1].status).toBe('failed');
+  });
+
+  it('aborts when signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const captions: CaptionEvent[] = [
+      { startMs: 0, durationMs: 1000, text: 'Hello', status: 'pending' },
+    ];
+
+    await translateAhead(captions, 0, 90_000, 'test-api-key', controller.signal);
+
+    // abort 后不应调用 fetch
+    expect(globalFetch).not.toHaveBeenCalled();
+    // 字幕状态保持 pending
+    expect(captions[0].status).toBe('pending');
+  });
+
+  it('aborts mid-batch when signal fires', async () => {
+    const controller = new AbortController();
+
+    // 第一批通过 setTimeout（macrotask）resolve，让 abort 在两批之间触发：
+    // microtask（Promise 继续）先于 macrotask（setTimeout）执行，
+    // 所以必须让 fetch 本身也走 macrotask 才能让 abort 插入
+    let callCount = 0;
+    globalFetch.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            controller.abort();
+            resolve({
+              ok: true,
+              json: () => Promise.resolve({
+                choices: [{ message: { content: '{"translations":[{"id":"0","translated_text":"你好"}]}' } }],
+              }),
+            });
+          }, 0);
+        });
+      }
+      // 第二批应该不会被调用（因为 abort 了）
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ choices: [{ message: { content: '{"translations":[]}' } }] }),
+      });
+    });
+
+    const captions: CaptionEvent[] = [];
+    // 构造超过 BATCH_SIZE (50) 的字幕，确保需要两批
+    for (let i = 0; i < 60; i++) {
+      captions.push({ startMs: i * 2000, durationMs: 2000, text: 'Line ' + i, status: 'pending' });
+    }
+
+    await translateAhead(captions, 0, Number.MAX_SAFE_INTEGER, 'test-api-key', controller.signal);
+
+    // 第一批 50 条应该被翻译（第一条验证）
+    expect(captions[0].translatedText).toBe('你好');
+    // fetch 只应被调用一次（第一批），第二批因 abort 不调用
+    expect(callCount).toBe(1);
+  });
+
+  it('calls progress callback', async () => {
+    const mockResponse = {
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [{
+          message: {
+            content: '{"translations":[{"id":"0","translated_text":"你好"}]}',
+          },
+        }],
+      }),
+    };
+    globalFetch.mockResolvedValue(mockResponse);
+
+    const captions: CaptionEvent[] = [
+      { startMs: 0, durationMs: 1000, text: 'Hello', status: 'pending' },
+    ];
+    const onProgress = vi.fn();
+
+    await translateAhead(captions, 0, 90_000, 'test-api-key', undefined, onProgress);
+    expect(onProgress).toHaveBeenCalledWith(1, 1);
+  });
+});
+
+// =============================================================================
+// translateBatch — 单批翻译（带 AbortSignal）
+// =============================================================================
+
+describe('translateBatch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns empty map when signal already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await translateBatch(
+      'test-api-key',
+      [{ id: '0', text: 'Hello' }],
+      controller.signal,
+    );
+
+    expect(result.size).toBe(0);
+    expect(globalFetch).not.toHaveBeenCalled();
+  });
+
+  it('passes signal to fetch', async () => {
+    const controller = new AbortController();
+    const mockResponse = {
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [{ message: { content: '{"translations":[{"id":"0","translated_text":"你好"}]}' } }],
+      }),
+    };
+    globalFetch.mockResolvedValue(mockResponse);
+
+    await translateBatch('test-api-key', [{ id: '0', text: 'Hello' }], controller.signal);
+
+    const fetchCall = globalFetch.mock.calls[0];
+    expect(fetchCall[1].signal).toBe(controller.signal);
+  });
+
+  it('handles empty blocks array', async () => {
+    const result = await translateBatch('test-api-key', []);
+    expect(result.size).toBe(0);
+    expect(globalFetch).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// YouTubeCaptionManager — 生命周期 / 缓存 / 取消
+// =============================================================================
+
+describe('YouTubeCaptionManager', () => {
+  let manager: YouTubeCaptionManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+    // 重置单例（通过 destroy + 重新 getInstance）
+    (YouTubeCaptionManager as any)._instance = null;
+    manager = YouTubeCaptionManager.getInstance();
+  });
+
+  afterEach(() => {
+    manager.destroy();
+  });
+
+  it('is a singleton', () => {
+    const a = YouTubeCaptionManager.getInstance();
+    const b = YouTubeCaptionManager.getInstance();
+    expect(a).toBe(b);
+  });
+
+  it('start returns false when not on YouTube watch page', async () => {
+    // jsdom 默认 location 是 about:blank，extractVideoId 返回 null
+    const result = await manager.start('test-api-key');
+    expect(result).toBe(false);
+  });
+
+  it('stop clears running state', () => {
+    // stop 应该不抛错，即使没启动过
+    expect(() => manager.stop()).not.toThrow();
+  });
+
+  it('destroy clears cache and removes listeners', () => {
+    expect(() => manager.destroy()).not.toThrow();
+    // destroy 后 getInstance 应该返回新实例
+    const newManager = YouTubeCaptionManager.getInstance();
+    expect(newManager).not.toBe(manager);
   });
 });
