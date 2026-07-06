@@ -52,10 +52,13 @@ export class YouTubeCaptionManager {
   private currentVideoId: string | null = null;
   private captions: CaptionEvent[] = [];
   private overlay: CaptionOverlay | null = null;
+  private video: HTMLVideoElement | null = null;
   private abortController: AbortController | null = null;
   private pumpTimer: number | null = null;
   private navigateHandler: (() => void) | null = null;
   private isRunning = false;
+  /** pumpAheadBuffer 并发保护：防止多个 pump 同时执行 translateAhead */
+  private pumping = false;
 
   /** 内存缓存：videoId -> 已翻译的字幕数组（含 translatedText + status='done'） */
   private readonly cache = new Map<string, CaptionEvent[]>();
@@ -128,6 +131,9 @@ export class YouTubeCaptionManager {
       this.abortController = null;
       return false;
     }
+    // 保存 video 引用（避免 pumpAheadBuffer 每次 querySelector，问题 7）
+    this.video = document.querySelector('video.html5-main-video') as HTMLVideoElement | null
+              || document.querySelector('video') as HTMLVideoElement | null;
     console.log('[CaptionManager] overlay started, captions=' + this.captions.length);
 
     // 4. 启动 Ahead Buffer 调度
@@ -178,7 +184,9 @@ export class YouTubeCaptionManager {
 
     this.currentVideoId = null;
     this.captions = [];
+    this.video = null;
     this.isRunning = false;
+    this.pumping = false;
   }
 
   /** 销毁 Manager（移除 SPA 事件监听）。通常在页面卸载时调用。 */
@@ -274,79 +282,92 @@ export class YouTubeCaptionManager {
   /**
    * Ahead Buffer 泵：检查是否需要预取，需要则触发 translateAhead。
    *
+   * 并发保护（问题 3）：
+   *   - 用 pumping 标志防止多个 pump 同时执行 translateAhead
+   *   - 如果上一次 pump 还在 await fetch，新的 pump 直接返回
+   *
    * 触发条件：
    *   - 当前播放位置 + PREFETCH_THRESHOLD_MS 内有未翻译字幕
-   *   - 或者首次启动时（lastTranslatedEndMs === 0）
+   *   - 或者首次启动时
    */
   private async pumpAheadBuffer(
     apiKey: string,
     onStatus?: StatusCallback,
   ): Promise<void> {
-    const signal = this.abortController?.signal;
-    if (!signal || signal.aborted) return;
-    if (!this.overlay || this.captions.length === 0) return;
-
-    const video = document.querySelector('video.html5-main-video') as HTMLVideoElement | null
-                 || document.querySelector('video') as HTMLVideoElement | null;
-    if (!video) return;
-
-    const currentMs = video.currentTime * 1000;
-
-    // 找到当前播放位置附近第一个未翻译的字幕
-    // 如果它距离当前位置 < PREFETCH_THRESHOLD_MS，触发预取
-    let needPump = false;
-    for (const c of this.captions) {
-      if (c.status === 'done' || c.status === 'translating') continue;
-      // 第一个未翻译的字幕
-      if (c.startMs - currentMs < PREFETCH_THRESHOLD_MS) {
-        needPump = true;
-      }
-      break;
-    }
-
-    if (!needPump) return;
-
-    const beforeCount = this.captions.filter(c => c.translatedText).length;
-    console.log('[CaptionManager] pump: currentMs=' + Math.floor(currentMs) +
-      ', beforeCount=' + beforeCount + ', total=' + this.captions.length);
-
+    // 并发保护：防止多个 pump 同时执行（问题 3）
+    if (this.pumping) return;
+    this.pumping = true;
     try {
-      await translateAhead(
-        this.captions,
-        Math.max(0, currentMs - 5000), // 从当前位置往前 5 秒开始
-        DEFAULT_AHEAD_MS,
-        apiKey,
-        signal,
-        (done, total) => {
-          const afterCount = beforeCount + done;
-          onStatus?.(
-            '正在翻译字幕 (' + afterCount + '/' + this.captions.length + ')',
-            'loading',
-          );
-        },
-      );
+      const signal = this.abortController?.signal;
+      if (!signal || signal.aborted) return;
+      if (!this.overlay || this.captions.length === 0) return;
 
-      // 翻译完成后更新 Overlay
-      const afterCount = this.captions.filter(c => c.translatedText).length;
-      console.log('[CaptionManager] pump done: beforeCount=' + beforeCount +
-        ', afterCount=' + afterCount + ', calling overlay.updateCaptions()');
-      this.overlay?.updateCaptions(this.captions);
+      // 用保存的 video 引用，避免每次 querySelector（问题 7）
+      const video = this.video;
+      if (!video) return;
 
-      // 更新缓存
-      if (this.currentVideoId) {
-        this.cache.set(this.currentVideoId, this.captions);
+      const currentMs = video.currentTime * 1000;
+
+      // 找到当前播放位置附近第一个未翻译的字幕
+      // 如果它距离当前位置 < PREFETCH_THRESHOLD_MS，触发预取
+      let needPump = false;
+      for (const c of this.captions) {
+        if (c.status === 'done' || c.status === 'translating') continue;
+        // 第一个未翻译的字幕
+        if (c.startMs - currentMs < PREFETCH_THRESHOLD_MS) {
+          needPump = true;
+        }
+        break;
       }
 
-      const translated = this.captions.filter(c => c.translatedText).length;
-      if (translated > beforeCount) {
-        onStatus?.(
-          '字幕翻译进度 (' + translated + '/' + this.captions.length + ')',
-          'success',
+      if (!needPump) return;
+
+      const beforeCount = this.captions.filter(c => c.translatedText).length;
+      console.log('[CaptionManager] pump: currentMs=' + Math.floor(currentMs) +
+        ', beforeCount=' + beforeCount + ', total=' + this.captions.length);
+
+      try {
+        await translateAhead(
+          this.captions,
+          Math.max(0, currentMs - 5000), // 从当前位置往前 5 秒开始
+          DEFAULT_AHEAD_MS,
+          apiKey,
+          signal,
+          (done, total) => {
+            const afterCount = beforeCount + done;
+            onStatus?.(
+              '正在翻译字幕 (' + afterCount + '/' + this.captions.length + ')',
+              'loading',
+            );
+          },
         );
+
+        // await 后检查 signal（stop() 可能在 await 期间触发，问题 8）
+        if (signal.aborted) return;
+
+        // 翻译完成后更新 Overlay
+        const afterCount = this.captions.filter(c => c.translatedText).length;
+        console.log('[CaptionManager] pump done: beforeCount=' + beforeCount +
+          ', afterCount=' + afterCount + ', calling overlay.updateCaptions()');
+        this.overlay?.updateCaptions(this.captions);
+
+        // 更新缓存
+        if (this.currentVideoId) {
+          this.cache.set(this.currentVideoId, this.captions);
+        }
+
+        if (afterCount > beforeCount) {
+          onStatus?.(
+            '字幕翻译进度 (' + afterCount + '/' + this.captions.length + ')',
+            'success',
+          );
+        }
+      } catch (e) {
+        if (signal.aborted) return; // 正常取消
+        console.error('[YouTubeCaptions] pump failed:', e);
       }
-    } catch (e) {
-      if (signal.aborted) return; // 正常取消
-      console.error('[YouTubeCaptions] pump failed:', e);
+    } finally {
+      this.pumping = false;
     }
   }
 }
