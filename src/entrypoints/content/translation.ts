@@ -3,6 +3,7 @@ import { buildNodeMap } from '../utils/blockExtractor';
 import { getConfig } from '../utils/config';
 import { DOMObserverManager } from '../utils/domObserver';
 import { extractGlossaryLocal } from '../utils/glossaryExtractor';
+import { matchSiteRule } from '../../rules';
 import { showStatus, hideStatus } from './statusOverlay';
 import { updateButtonState } from './floatingButton';
 import { translateChunksViaBackground } from './chunkTranslation';
@@ -139,9 +140,16 @@ async function handleFullTranslation(
     return { translated: true, observer: null };
   }
 
+  // 站点规则：forceDirectTranslation 强制走 direct deepseek，跳过服务端翻译。
+  // YouTube 等重 SPA 站点 clone 整页 HTML 又慢又容易抓到动态内容。
+  const siteRule = matchSiteRule(window.location.href)?.siteRule;
+  const forceDirect = siteRule?.forceDirectTranslation === true;
+  const skipGlossary = siteRule?.skipGlossary === true;
+  const useServer = config.useServerTranslation && !forceDirect;
+
   // 服务端翻译模式下，先查询服务端缓存，命中即可跳过 prepareHtmlForServer 等重计算。
   let cachedHtml: string | null = null;
-  if (config.useServerTranslation) {
+  if (useServer) {
     showStatus('正在检查服务端缓存...', 'loading');
     try {
       cachedHtml = await checkServerCache(config);
@@ -167,7 +175,7 @@ async function handleFullTranslation(
   saveOriginalTexts(blocks, nodeMap, state);
 
   // 使用服务端翻译
-  if (config.useServerTranslation) {
+  if (useServer) {
     let translatedIds: Set<string>;
     if (cachedHtml) {
       showStatus('正在应用服务端缓存...', 'loading');
@@ -194,7 +202,7 @@ async function handleFullTranslation(
     return { translated: true, observer: null };
   }
 
-  const glossary = await extractGlossary(fullText);
+  const glossary = skipGlossary ? {} : await extractGlossary(fullText);
 
   showStatus(`翻译进度: 0/${chunks.length}`, 'loading');
   const { translatedIds } = await translateChunksViaBackground(

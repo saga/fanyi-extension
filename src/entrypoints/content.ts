@@ -30,6 +30,7 @@ import {
   type TranslationController,
   type TranslationState,
 } from './content/translation';
+import { isYouTubeWatchPage, startYouTubeCaptionTranslation } from './content/youtubeCaptions';
 
 // ============================================================
 // 设备检测
@@ -98,11 +99,28 @@ export default defineContentScript({
      *
      * translate 用 start()（异步），restore/toggle 同步即可。
      * 第一次调用会懒加载控制器。
+     *
+     * YouTube 视频页：translate 同时启动整页翻译 + 字幕翻译。
      */
     function handleAction(action: 'translate' | 'restore' | 'toggle'): void {
       void ensureController().then((ctrl) => {
         if (action === 'translate') {
           void ctrl.start();
+          // YouTube 视频页：同时启动字幕翻译（独立于整页翻译流程）
+          if (isYouTubeWatchPage()) {
+            void getConfig().then((config) => {
+              if (config.deepseekApiKey) {
+                void startYouTubeCaptionTranslation(
+                  config.deepseekApiKey,
+                  (msg, type) => {
+                    if (type === 'error') {
+                      console.log('[YouTubeCaptions]', msg);
+                    }
+                  },
+                );
+              }
+            });
+          }
         } else if (action === 'restore') {
           ctrl.restore();
           updateButtonState(false);

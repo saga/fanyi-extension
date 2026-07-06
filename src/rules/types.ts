@@ -43,6 +43,26 @@ export interface SiteRule {
    * expandIfFragmented（站点选择器是显式的，不需要启发式扩展）。
    */
   articleRootSelector?: string;
+
+  /**
+   * 强制使用 direct DeepSeek 翻译（跳过服务端翻译路径）。
+   *
+   * 适用场景：YouTube 等动态内容多、页面大的站点。服务端翻译需要 clone
+   * 整页 HTML（prepareHtmlForServer），对 YouTube 这种 SPA 页面既慢又
+   * 容易抓到动态内容。direct deepseek 走分块翻译，更适合。
+   *
+   * 命中后 handleFullTranslation 跳过 useServerTranslation 分支，即使
+   * 用户配置了 useServerTranslation=true 也走 direct deepseek 路径。
+   */
+  forceDirectTranslation?: boolean;
+
+  /**
+   * 跳过术语表（glossary）提取。
+   *
+   * 适用场景：字幕、评论等简单内容，不需要 extractGlossaryLocal 的开销。
+   * YouTube 字幕是短文本口语化内容，术语表价值低，跳过可加速返回。
+   */
+  skipGlossary?: boolean;
 }
 
 export interface MatchedRule {
