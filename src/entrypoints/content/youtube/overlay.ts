@@ -25,8 +25,14 @@ export class CaptionOverlay {
   private video: HTMLVideoElement | null = null;
   private captions: CaptionEvent[] = [];
   private overlayEl: HTMLElement | null = null;
+  /** 预建的原文容器（start 时创建，update 时只改 textContent） */
+  private origEl: HTMLElement | null = null;
+  /** 预建的译文容器（start 时创建，update 时只改 textContent） */
+  private transEl: HTMLElement | null = null;
   private timeUpdateHandler: (() => void) | null = null;
   private lastShownIdx = -1;
+  /** 上次渲染的译文文本，用于判断是否需要刷新 DOM（解决 Bug 5：翻译完成后 Overlay 不刷新） */
+  private renderedTranslation: string | undefined = undefined;
 
   /**
    * 初始化字幕 Overlay。
@@ -56,15 +62,16 @@ export class CaptionOverlay {
    * 动态更新字幕数据（Ahead Buffer 翻译新字幕后调用）。
    *
    * 不重新创建 Overlay DOM，只更新内部 captions 引用。
-   * 重置 lastShownIdx 让下次 timeupdate 重新查找当前字幕。
+   * 重置 lastShownIdx 和 renderedTranslation 强制下次 update 刷新 DOM。
    */
   updateCaptions(captions: CaptionEvent[]): void {
+    const translatedCount = captions.filter(c => c.translatedText).length;
+    console.log('[Overlay] updateCaptions called, captions=' + captions.length +
+      ', translated=' + translatedCount);
     this.captions = captions;
-    // 不重置 lastShownIdx=-1：如果当前正在显示某条字幕，且它的 translatedText
-    // 刚刚被填充，下次 timeupdate 会自然刷新（idx 相同会触发 return 早退，
-    // 但 translatedText 已经在 caption 对象上，下次切换到新字幕时自然会显示）
-    // 但为了让"刚翻译好的当前字幕"立即显示译文，这里需要强制刷新一次
+    // 强制刷新：重置 lastShownIdx 和 renderedTranslation
     this.lastShownIdx = -1;
+    this.renderedTranslation = undefined;
     this.update();
   }
 
@@ -76,9 +83,12 @@ export class CaptionOverlay {
     this.timeUpdateHandler = null;
     this.overlayEl?.remove();
     this.overlayEl = null;
+    this.origEl = null;
+    this.transEl = null;
     this.video = null;
     this.captions = [];
     this.lastShownIdx = -1;
+    this.renderedTranslation = undefined;
   }
 
   /** 是否已翻译完成（至少有一条字幕有 translatedText）。 */
@@ -110,14 +120,24 @@ export class CaptionOverlay {
       'display: none',
     ].join('; ');
 
+    // 预建原文和译文容器（避免每次 update 时 innerHTML='' + createElement）
+    const orig = document.createElement('div');
+    orig.style.opacity = '0.7';
+    orig.style.fontSize = '14px';
+    const trans = document.createElement('div');
+    el.appendChild(orig);
+    el.appendChild(trans);
+
     // 挂到视频播放器容器上
     const player = document.querySelector('.html5-video-player');
     (player || document.body).appendChild(el);
     this.overlayEl = el;
+    this.origEl = orig;
+    this.transEl = trans;
   }
 
   private update(): void {
-    if (!this.video || !this.overlayEl) return;
+    if (!this.video || !this.overlayEl || !this.origEl || !this.transEl) return;
 
     const currentMs = this.video.currentTime * 1000;
 
@@ -148,46 +168,40 @@ export class CaptionOverlay {
     if (idx < 0) {
       this.overlayEl.style.display = 'none';
       this.lastShownIdx = -1;
+      this.renderedTranslation = undefined;
       return;
     }
 
-    // 如果 idx 相同但 translatedText 刚被填充，也要刷新显示
     const caption = this.captions[idx];
-    const needRefresh = idx !== this.lastShownIdx || this.shouldShowTranslated(caption);
 
-    if (!needRefresh) return; // 同一条字幕，状态未变化，不更新 DOM
+    // 判断是否需要刷新 DOM：
+    // 1. idx 变了（切换到新字幕）
+    // 2. translatedText 变了（翻译完成，从 undefined -> "你好"）
+    // 用 renderedTranslation 跟踪，比 children.length 可靠
+    const needRefresh =
+      idx !== this.lastShownIdx ||
+      caption.translatedText !== this.renderedTranslation;
+
+    if (!needRefresh) return; // 同一条字幕，翻译状态未变化，不更新 DOM
 
     this.lastShownIdx = idx;
+    this.renderedTranslation = caption.translatedText;
 
+    // 只更新 textContent，不重建 DOM（解决 Bug 6：性能问题）
+    this.origEl.textContent = caption.text;
     if (caption.translatedText) {
       // 双语显示：原文 + 译文
-      this.overlayEl.innerHTML = '';
-      const orig = document.createElement('div');
-      orig.textContent = caption.text;
-      orig.style.opacity = '0.7';
-      orig.style.fontSize = '14px';
-      const trans = document.createElement('div');
-      trans.textContent = caption.translatedText;
-      this.overlayEl.appendChild(orig);
-      this.overlayEl.appendChild(trans);
-      this.overlayEl.style.display = 'block';
+      this.transEl.textContent = caption.translatedText;
+      this.transEl.style.display = 'block';
     } else {
-      // 译文还没翻好，只显示原文
-      this.overlayEl.textContent = caption.text;
-      this.overlayEl.style.display = 'block';
+      // 译文还没翻好，隐藏译文容器
+      this.transEl.textContent = '';
+      this.transEl.style.display = 'none';
     }
-  }
-
-  /**
-   * 判断当前字幕是否应该显示译文（已翻译但 Overlay 还没显示译文时返回 true）。
-   *
-   * 用一个简单的标记：如果 overlayEl 当前只显示原文（textContent，没有子 div），
-   * 但 caption 已经有 translatedText，则需要刷新。
-   */
-  private shouldShowTranslated(caption: CaptionEvent): boolean {
-    if (!caption.translatedText) return false;
-    // 如果 overlay 当前没有子元素（说明只显示了原文 textContent），
-    // 但 caption 已有译文，需要刷新
-    return this.overlayEl !== null && this.overlayEl.children.length === 0;
+    this.overlayEl.style.display = 'block';
+    console.log('[Overlay] render idx=' + idx +
+      ', translated=' + (caption.translatedText ? 'yes' : 'no') +
+      ', text="' + caption.text.substring(0, 30) + '"' +
+      (caption.translatedText ? ', trans="' + caption.translatedText.substring(0, 30) + '"' : ''));
   }
 }

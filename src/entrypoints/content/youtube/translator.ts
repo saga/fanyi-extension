@@ -119,7 +119,10 @@ export async function translateBatch(
   if (signal?.aborted) return new Map();
 
   const blocksJson = JSON.stringify(blocks, null, 2);
-  const maxTokens = Math.max(1024, Math.ceil(blocksJson.length * 0.5 * 4));
+  // 估算输入 token 数（英文 ≈ 4 字符/token，JSON 结构开销另算）
+  // 输出通常和输入差不多（中文翻译可能更短，但留余量 ×2）
+  const estimatedInputTokens = Math.ceil(blocksJson.length / 4);
+  const maxTokens = Math.max(2048, estimatedInputTokens * 2);
 
   const body = {
     model: CAPTION_MODEL,
@@ -155,16 +158,23 @@ export async function translateBatch(
     throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
   }
 
+  // 调试日志：查看 API 实际返回的内容（定位"字幕不翻译"问题的关键证据）
+  console.log('[YouTubeCaptions] API returned (blocks=' + blocks.length + '):', content.substring(0, 300));
+
   let cleaned = stripThinkingTags(content);
   cleaned = stripMarkdownCodeBlock(cleaned);
   try {
     const parsed = JSON.parse(cleaned);
-    return parseTranslations(parsed);
+    const result = parseTranslations(parsed);
+    console.log('[YouTubeCaptions] Parsed:', result.size, 'translations from', blocks.length, 'blocks');
+    return result;
   } catch {
     const repaired = repairTruncatedJson(cleaned);
     try {
       const parsed = JSON.parse(repaired);
-      return parseTranslations(parsed);
+      const result = parseTranslations(parsed);
+      console.log('[YouTubeCaptions] Parsed (after repair):', result.size, 'translations from', blocks.length, 'blocks');
+      return result;
     } catch {
       console.error('[YouTubeCaptions] Failed to parse translation:', cleaned.substring(0, 200));
       return new Map();
@@ -172,12 +182,40 @@ export async function translateBatch(
   }
 }
 
+/**
+ * 从 DeepSeek 返回的 JSON 中提取翻译结果。
+ *
+ * 兼容多种返回格式（防止模型不严格遵守 prompt 指令导致静默失败）：
+ *   - {"translations": [{"id":"0","translated_text":"你好"}]}
+ *   - {"results": [...]}
+ *   - {"data": [...]}
+ *   - [{"id":"0","translated_text":"你好"}, ...]  （直接返回数组）
+ *
+ * 字段名也兼容：
+ *   - translated_text / translation / translatedText
+ *   - id 可能是 number 或 string
+ */
 function parseTranslations(parsed: any): Map<string, string> {
-  const translations: TranslationEntry[] = parsed?.translations || [];
+  // 兼容多种容器字段名
+  let translations: any[] = [];
+  if (Array.isArray(parsed)) {
+    // 直接返回数组
+    translations = parsed;
+  } else if (Array.isArray(parsed?.translations)) {
+    translations = parsed.translations;
+  } else if (Array.isArray(parsed?.results)) {
+    translations = parsed.results;
+  } else if (Array.isArray(parsed?.data)) {
+    translations = parsed.data;
+  }
+
   const map = new Map<string, string>();
   for (const t of translations) {
-    if (t.id != null && t.translated_text != null) {
-      map.set(t.id, t.translated_text);
+    if (t == null || typeof t !== 'object') continue;
+    // 兼容多种字段名
+    const translated = t.translated_text || t.translation || t.translatedText || t.text;
+    if (t.id != null && translated != null) {
+      map.set(String(t.id), String(translated));
     }
   }
   return map;
@@ -229,18 +267,25 @@ export async function translateAhead(
 
   // 收集需要翻译的字幕（在 [fromMs - 5s, endMs] 范围内，状态为 pending 或 failed）
   // -5s 是为了包含刚开始播放但还没翻完的字幕
+  //
+  // 同时记录每条字幕在 captions 数组中的全局索引（globalIdx），
+  // 避免后续用 captions.indexOf(c) 做 O(N) 查找（旧实现是 O(N²)）。
   const lookbackMs = 5000;
-  const toTranslate: CaptionEvent[] = [];
-  for (const c of captions) {
+  const toTranslate: Array<{ caption: CaptionEvent; globalIdx: number }> = [];
+  for (let i = 0; i < captions.length; i++) {
     if (signal?.aborted) return;
+    const c = captions[i];
     if (c.status === 'done' || c.status === 'translating') continue;
     // 字幕在 [fromMs-lookback, endMs] 范围内
     if (c.startMs + c.durationMs < fromMs - lookbackMs) continue;
     if (c.startMs > endMs) break; // captions 按时间排序，可以提前 break
-    toTranslate.push(c);
+    toTranslate.push({ caption: c, globalIdx: i });
   }
 
   if (toTranslate.length === 0) return;
+
+  console.log('[YouTubeCaptions] translateAhead: need=' + toTranslate.length +
+    ', fromMs=' + fromMs + ', aheadMs=' + aheadMs);
 
   // 分批翻译
   const total = toTranslate.length;
@@ -252,37 +297,36 @@ export async function translateAhead(
     const batch = toTranslate.slice(i, i + BATCH_SIZE);
 
     // 标记为 translating（避免重复翻译）
-    batch.forEach((c) => { c.status = 'translating'; });
+    batch.forEach(({ caption }) => { caption.status = 'translating'; });
 
-    // 用 captions 数组中的索引作为 id（保证全局唯一）
-    const blocks = batch.map((c) => {
-      const idx = captions.indexOf(c);
-      return { id: String(idx), text: c.text };
-    });
+    // 用 globalIdx 作为 id（保证全局唯一，O(1) 无需 indexOf）
+    const blocks = batch.map(({ caption, globalIdx }) => ({
+      id: String(globalIdx),
+      text: caption.text,
+    }));
 
     try {
       const resultMap = await translateBatch(apiKey, blocks, signal);
 
-      // 回填翻译结果
-      for (const c of batch) {
-        const idx = captions.indexOf(c);
-        const id = String(idx);
+      // 回填翻译结果（用 globalIdx 直接查 map，无需 indexOf）
+      for (const { caption, globalIdx } of batch) {
+        const id = String(globalIdx);
         const translated = resultMap.get(id);
         if (translated) {
-          c.translatedText = translated;
-          c.status = 'done';
+          caption.translatedText = translated;
+          caption.status = 'done';
         } else {
-          c.status = 'failed';
+          caption.status = 'failed';
         }
       }
     } catch (e) {
       // fetch 抛 AbortError 时停止；其他错误标记为 failed 继续下一批
       if (signal?.aborted) {
-        batch.forEach((c) => { c.status = 'pending'; });
+        batch.forEach(({ caption }) => { caption.status = 'pending'; });
         return;
       }
       console.error('[YouTubeCaptions] Batch failed:', e);
-      batch.forEach((c) => { c.status = 'failed'; });
+      batch.forEach(({ caption }) => { caption.status = 'failed'; });
     }
 
     done += batch.length;

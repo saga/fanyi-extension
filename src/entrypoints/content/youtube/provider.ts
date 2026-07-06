@@ -126,21 +126,63 @@ export function getCaptionTrackUrl(
  * }
  *
  * 同源请求（youtube.com → youtube.com/api/timedtext），content script 可直接 fetch。
+ *
+ * 关键：用 URL.searchParams.set 强制 fmt=json3，覆盖 baseUrl 可能已带的 fmt=srv3/vtt。
+ * （字符串拼接 includes('fmt=') 检测会漏掉已有的非 json3 fmt，导致返回 XML 报错。）
  */
 export async function fetchCaptions(
   trackUrl: string,
 ): Promise<CaptionEvent[]> {
-  const url =
-    trackUrl + (trackUrl.includes('fmt=') ? '' : '&fmt=json3');
+  // 用 URL API 强制设置 fmt=json3，覆盖任何已有的 fmt 值
+  let url: string;
+  try {
+    const parsed = new URL(trackUrl);
+    parsed.searchParams.set('fmt', 'json3');
+    url = parsed.toString();
+  } catch {
+    // URL 解析失败（理论上不会发生，baseUrl 总是合法 URL）
+    url = trackUrl + (trackUrl.includes('fmt=') ? '' : '&fmt=json3');
+  }
+
+  console.log('[YouTubeCaptions] Fetching captions, URL:', url.substring(0, 200));
 
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`字幕获取失败: HTTP ${response.status}`);
   }
 
-  const data = await response.json();
+  // 用 text() 而不是 json()，先拿到文本用于诊断
+  // （response.json() 在 body 为空或 XML/HTML 时直接抛 "Unexpected end of JSON input"，
+  //   看不到实际返回内容，无法定位问题）
+  const text = await response.text();
+  console.log('[YouTubeCaptions] Response:', {
+    status: response.status,
+    contentType: response.headers.get('content-type'),
+    bodyLength: text.length,
+    bodyFirst300: text.substring(0, 300),
+  });
+
+  if (text.length === 0) {
+    throw new Error('字幕获取失败: 响应为空（可能需要登录或视频无字幕）');
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(
+      '字幕获取失败: JSON 解析失败 (content-type=' +
+      response.headers.get('content-type') +
+      ', bodyLength=' + text.length +
+      ', first200="' + text.substring(0, 200) + '")',
+    );
+  }
+
   const events = data?.events;
-  if (!Array.isArray(events)) return [];
+  if (!Array.isArray(events)) {
+    console.log('[YouTubeCaptions] No events array in response, top-level keys:', Object.keys(data || {}));
+    return [];
+  }
 
   return events
     .filter((e: any) => e.segs && Array.isArray(e.segs))

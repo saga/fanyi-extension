@@ -80,19 +80,35 @@ export default defineContentScript({
     );
     setupTouchEvents(() => handleAction('translate'));
 
-    // === YouTube SPA 导航监听 ===
-    // YouTube 是 SPA，切视频不会刷新页面。监听 yt-navigate-finish 事件，
-    // 在用户切换视频时自动重新启动字幕翻译（仅当之前已经启动过）。
-    // 使用 capture 阶段确保在 YouTube 自己的处理之前捕获。
-    let youTubeStarted = false;
+    // === YouTube 字幕翻译：自动启动 + SPA 导航监听 ===
+    // YouTube 视频页打开时自动启动字幕翻译，不需要用户点击翻译按钮。
+    // 原因：字幕翻译独立于整页翻译流水线，用户看视频时通常只需要字幕翻译，
+    // 不希望被强制点"翻译"按钮才出字幕。
+    //
+    // SPA 导航（yt-navigate-finish）：YouTube 切视频不刷新页面，
+    // 监听此事件自动重启字幕翻译（manager.onNavigate 内部会判断 videoId 是否变化）。
+    const youTubeStatusCallback = (msg: string, type: string) => {
+      // 统一打印所有状态，方便定位问题
+      console.log('[YouTubeCaptions]', type, msg);
+    };
+
+    if (isYouTubeWatchPage()) {
+      console.log('[ContentScript] YouTube watch page detected, auto-starting caption translation');
+      void getConfig().then((config) => {
+        if (config.deepseekApiKey) {
+          void startYouTubeCaptionTranslation(config.deepseekApiKey, youTubeStatusCallback);
+        } else {
+          console.log('[YouTubeCaptions] No DeepSeek API key configured, skipping caption translation');
+        }
+      });
+    }
+
     document.addEventListener('yt-navigate-finish', () => {
-      if (!youTubeStarted) return;
+      console.log('[ContentScript] yt-navigate-finish fired, href:', window.location.href);
       if (!isYouTubeWatchPage()) return;
       void getConfig().then((config) => {
         if (config.deepseekApiKey) {
-          void onYouTubeNavigate(config.deepseekApiKey, (msg, type) => {
-            if (type === 'error') console.log('[YouTubeCaptions]', msg);
-          });
+          void onYouTubeNavigate(config.deepseekApiKey, youTubeStatusCallback);
         }
       });
     }, true);
@@ -121,28 +137,13 @@ export default defineContentScript({
      * translate 用 start()（异步），restore/toggle 同步即可。
      * 第一次调用会懒加载控制器。
      *
-     * YouTube 视频页：translate 同时启动整页翻译 + 字幕翻译。
+     * 注意：YouTube 字幕翻译已改为页面加载时自动启动（见上方），
+     * 这里只处理整页翻译。字幕翻译的 SPA 导航由 yt-navigate-finish 监听器负责。
      */
     function handleAction(action: 'translate' | 'restore' | 'toggle'): void {
       void ensureController().then((ctrl) => {
         if (action === 'translate') {
           void ctrl.start();
-          // YouTube 视频页：同时启动字幕翻译（独立于整页翻译流程）
-          if (isYouTubeWatchPage()) {
-            youTubeStarted = true;
-            void getConfig().then((config) => {
-              if (config.deepseekApiKey) {
-                void startYouTubeCaptionTranslation(
-                  config.deepseekApiKey,
-                  (msg, type) => {
-                    if (type === 'error') {
-                      console.log('[YouTubeCaptions]', msg);
-                    }
-                  },
-                );
-              }
-            });
-          }
         } else if (action === 'restore') {
           ctrl.restore();
           updateButtonState(false);
