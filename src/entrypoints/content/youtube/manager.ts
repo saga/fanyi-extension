@@ -14,7 +14,7 @@
  *   5. pumping 标志：防止并发 translateAhead
  */
 import type { CaptionEvent, StatusCallback } from './types';
-import { extractVideoId, fetchCaptions } from './provider';
+import { extractVideoId, fetchCaptions, disableNativeCaptions } from './provider';
 import { translateAhead, DEFAULT_AHEAD_MS } from './translator';
 import { CaptionOverlay } from './overlay';
 
@@ -119,6 +119,13 @@ export class YouTubeCaptionManager {
 
     this.video = document.querySelector('video.html5-main-video') as HTMLVideoElement | null
               || document.querySelector('video') as HTMLVideoElement | null;
+
+    // 关闭 YouTube 原生英文字幕，避免与翻译字幕重复显示
+    void disableNativeCaptions().then((success) => {
+      if (success) {
+        console.log('[YouTubeCaptions] Native captions disabled');
+      }
+    });
 
     // 4. 挂载 timeupdate 监听，驱动 Ahead Buffer 翻译
     this.timeUpdateHandler = () => {

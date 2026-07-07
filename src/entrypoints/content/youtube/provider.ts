@@ -26,6 +26,8 @@ const WAIT_TIMEDTEXT_REQUEST_TYPE = 'FANYI_YT_WAIT_TIMEDTEXT_REQUEST';
 const WAIT_TIMEDTEXT_RESPONSE_TYPE = 'FANYI_YT_WAIT_TIMEDTEXT_RESPONSE';
 const ENSURE_SUBTITLES_REQUEST_TYPE = 'FANYI_YT_ENSURE_SUBTITLES_REQUEST';
 const ENSURE_SUBTITLES_RESPONSE_TYPE = 'FANYI_YT_ENSURE_SUBTITLES_RESPONSE';
+const DISABLE_NATIVE_CAPTIONS_REQUEST_TYPE = 'FANYI_YT_DISABLE_NATIVE_CAPTIONS_REQUEST';
+const DISABLE_NATIVE_CAPTIONS_RESPONSE_TYPE = 'FANYI_YT_DISABLE_NATIVE_CAPTIONS_RESPONSE';
 
 const POST_MESSAGE_TIMEOUT_MS = 5000;
 const TIMEDTEXT_WAIT_TIMEOUT_MS = 8000;
@@ -167,6 +169,25 @@ export async function fetchCaptions(videoId: string): Promise<CaptionEvent[]> {
     text: f.text,
     status: 'pending',
   }));
+}
+
+/**
+ * 请求 MAIN world 注入脚本关闭 YouTube 原生字幕显示。
+ *
+ * 在我们开始显示翻译字幕后，原生的英文字幕不再需要，关闭它避免重复显示。
+ *
+ * @returns 是否成功发送关闭请求
+ */
+export async function disableNativeCaptions(): Promise<boolean> {
+  try {
+    const response = await postMessageRequest(
+      DISABLE_NATIVE_CAPTIONS_RESPONSE_TYPE,
+      { type: DISABLE_NATIVE_CAPTIONS_REQUEST_TYPE },
+    );
+    return response?.success === true;
+  } catch {
+    return false;
+  }
 }
 
 // =============================================================================

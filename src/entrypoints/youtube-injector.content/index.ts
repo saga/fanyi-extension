@@ -21,6 +21,8 @@ const WAIT_TIMEDTEXT_REQUEST_TYPE = 'FANYI_YT_WAIT_TIMEDTEXT_REQUEST';
 const WAIT_TIMEDTEXT_RESPONSE_TYPE = 'FANYI_YT_WAIT_TIMEDTEXT_RESPONSE';
 const ENSURE_SUBTITLES_REQUEST_TYPE = 'FANYI_YT_ENSURE_SUBTITLES_REQUEST';
 const ENSURE_SUBTITLES_RESPONSE_TYPE = 'FANYI_YT_ENSURE_SUBTITLES_RESPONSE';
+const DISABLE_NATIVE_CAPTIONS_REQUEST_TYPE = 'FANYI_YT_DISABLE_NATIVE_CAPTIONS_REQUEST';
+const DISABLE_NATIVE_CAPTIONS_RESPONSE_TYPE = 'FANYI_YT_DISABLE_NATIVE_CAPTIONS_RESPONSE';
 
 const POST_MESSAGE_TIMEOUT_MS = 5000;
 const TIMEDTEXT_WAIT_TIMEOUT_MS = 8000;
@@ -64,6 +66,7 @@ interface YouTubePlayer extends HTMLElement {
   getPlayerState?: () => number;
   getWebPlayerContextConfig?: () => any;
   getOption?: (module: string, option: string) => any;
+  setOption?: (module: string, option: string, value: any) => void;
   toggleSubtitles?: () => void;
 }
 
@@ -252,6 +255,19 @@ function handleMessage(event: MessageEvent): void {
       window.location.origin,
     );
   }
+
+  if (event.data.type === DISABLE_NATIVE_CAPTIONS_REQUEST_TYPE) {
+    const { requestId } = event.data;
+    const success = disableNativeCaptions();
+    window.postMessage(
+      {
+        type: DISABLE_NATIVE_CAPTIONS_RESPONSE_TYPE,
+        requestId,
+        success,
+      },
+      window.location.origin,
+    );
+  }
 }
 
 // =============================================================================
@@ -353,6 +369,30 @@ function ensureSubtitlesEnabled(): void {
     player.toggleSubtitles();
   } else {
     button.click();
+  }
+}
+
+function disableNativeCaptions(): boolean {
+  try {
+    const player = findYoutubePlayer();
+    if (player?.setOption) {
+      // 关闭字幕轨道（传入空对象会禁用当前字幕）
+      player.setOption('captions', 'track', {});
+      return true;
+    }
+
+    // 降级：点击 CC 按钮关闭
+    const button = document.querySelector('.ytp-subtitles-button') as HTMLElement | null;
+    if (button && button.getAttribute('aria-pressed') === 'true') {
+      if (player?.toggleSubtitles) {
+        player.toggleSubtitles();
+      } else {
+        button.click();
+      }
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 

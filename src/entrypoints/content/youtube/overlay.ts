@@ -120,8 +120,8 @@ export class CaptionOverlay {
     // 预建译文容器（避免每次 update 时 innerHTML='' + createElement）
     const trans = document.createElement('div');
     trans.style.cssText = [
-      'font-size: clamp(20px, 2.6vw, 36px)',
-      'font-weight: 600',
+      'font-size: clamp(20px, 2.4vw, 32px)',
+      'font-weight: 500',
       'line-height: 1.2',
       'color: #ffeb3b',
       'text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9)',
