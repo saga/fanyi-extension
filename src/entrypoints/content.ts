@@ -69,6 +69,8 @@ export default defineContentScript({
     };
     // 翻译控制器懒加载：第一次收到翻译消息才创建
     let translation: TranslationController | null = null;
+    // 记录整页翻译对应的 videoId，用于 SPA 切换视频时检测是否需要清理
+    let translatedVideoId: string | null = null;
 
     // === 注入样式 ===
     const style = document.createElement('style');
@@ -91,19 +93,28 @@ export default defineContentScript({
       }
     };
 
-    // YouTube SPA 导航：切视频时停止旧翻译，需要用户重新点击翻译按钮
+    // YouTube SPA 导航：切视频时停止旧翻译（字幕 + 整页），需要用户重新点击翻译按钮
     document.addEventListener('yt-navigate-finish', () => {
-      if (!isYouTubeWatchPage()) {
+      const newVideoId = extractVideoId();
+      if (!isYouTubeWatchPage() || !newVideoId) {
+        // 离开 watch 页：清理字幕翻译与整页翻译状态
         stopYouTubeCaptionTranslation();
+        if (translatedVideoId) {
+          translation?.restore();
+          translatedVideoId = null;
+        }
         return;
       }
-      // 检测 videoId 是否变化，变化则停止旧翻译
+      // 检测 videoId 是否变化（字幕翻译或整页翻译任一对应的 videoId）
       const runningVideoId = YouTubeCaptionManager.getInstance().runningVideoId;
-      if (runningVideoId) {
-        const newVideoId = extractVideoId();
-        if (newVideoId && newVideoId !== runningVideoId) {
-          stopYouTubeCaptionTranslation();
-        }
+      const videoChanged =
+        (runningVideoId !== null && newVideoId !== runningVideoId) ||
+        (translatedVideoId !== null && newVideoId !== translatedVideoId);
+      if (videoChanged) {
+        // 清理字幕翻译 + 整页翻译状态，避免新视频复用旧译文缓存
+        stopYouTubeCaptionTranslation();
+        translation?.restore();
+        translatedVideoId = null;
       }
     }, true);
 
@@ -140,6 +151,8 @@ export default defineContentScript({
         await ctrl.start();
 
         if (isYouTubeWatchPage()) {
+          // 记录当前整页翻译对应的 videoId，供 SPA 导航时检测是否需要清理
+          translatedVideoId = extractVideoId();
           const config = await getConfig();
           if (config.deepseekApiKey) {
             void startYouTubeCaptionTranslation(config.deepseekApiKey, youTubeStatusCallback);
@@ -148,6 +161,7 @@ export default defineContentScript({
       } else if (action === 'restore') {
         ctrl.restore();
         stopYouTubeCaptionTranslation();
+        translatedVideoId = null;
         updateButtonState(false);
       } else {
         ctrl.toggle();
