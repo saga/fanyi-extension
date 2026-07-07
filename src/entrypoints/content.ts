@@ -34,6 +34,8 @@ import {
   isYouTubeWatchPage,
   startYouTubeCaptionTranslation,
   stopYouTubeCaptionTranslation,
+  YouTubeCaptionManager,
+  extractVideoId,
 } from './content/youtube';
 
 // ============================================================
@@ -88,6 +90,22 @@ export default defineContentScript({
         console.warn('[YouTubeCaptions]', msg);
       }
     };
+
+    // YouTube SPA 导航：切视频时停止旧翻译，需要用户重新点击翻译按钮
+    document.addEventListener('yt-navigate-finish', () => {
+      if (!isYouTubeWatchPage()) {
+        stopYouTubeCaptionTranslation();
+        return;
+      }
+      // 检测 videoId 是否变化，变化则停止旧翻译
+      const runningVideoId = YouTubeCaptionManager.getInstance().runningVideoId;
+      if (runningVideoId) {
+        const newVideoId = extractVideoId();
+        if (newVideoId && newVideoId !== runningVideoId) {
+          stopYouTubeCaptionTranslation();
+        }
+      }
+    }, true);
 
     // === 消息路由：来自 background、popup、keyboard shortcut ===
     browser.runtime.onMessage.addListener((message: any) => {

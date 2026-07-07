@@ -45,6 +45,11 @@ export class YouTubeCaptionManager {
   private pumping = false;
   private isRunning = false;
 
+  /** 当前是否正在运行，以及运行中的 videoId（供外部检测 SPA 导航是否需要停止） */
+  get runningVideoId(): string | null {
+    return this.isRunning ? this.currentVideoId : null;
+  }
+
   private constructor() {
     // 监听 YouTube SPA 导航事件
     this.navigateHandler = () => {
