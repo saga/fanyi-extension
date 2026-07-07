@@ -158,25 +158,22 @@ export async function translateBatch(
     throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
   }
 
-  // 调试日志：查看 API 实际返回的内容（定位"字幕不翻译"问题的关键证据）
-  console.log('[YouTubeCaptions] API returned (blocks=' + blocks.length + '):', content.substring(0, 300));
-
   let cleaned = stripThinkingTags(content);
   cleaned = stripMarkdownCodeBlock(cleaned);
   try {
     const parsed = JSON.parse(cleaned);
     const result = parseTranslations(parsed);
-    console.log('[YouTubeCaptions] Parsed:', result.size, 'translations from', blocks.length, 'blocks');
+    if (result.size === 0) {
+      console.warn('[YouTubeCaptions] Parsed 0 translations from', blocks.length, 'blocks');
+    }
     return result;
   } catch {
     const repaired = repairTruncatedJson(cleaned);
     try {
       const parsed = JSON.parse(repaired);
-      const result = parseTranslations(parsed);
-      console.log('[YouTubeCaptions] Parsed (after repair):', result.size, 'translations from', blocks.length, 'blocks');
-      return result;
+      return parseTranslations(parsed);
     } catch {
-      console.error('[YouTubeCaptions] Failed to parse translation:', cleaned.substring(0, 200));
+      console.warn('[YouTubeCaptions] Failed to parse translation:', cleaned.substring(0, 120));
       return new Map();
     }
   }
@@ -284,9 +281,6 @@ export async function translateAhead(
 
   if (toTranslate.length === 0) return;
 
-  console.log('[YouTubeCaptions] translateAhead: need=' + toTranslate.length +
-    ', fromMs=' + fromMs + ', aheadMs=' + aheadMs);
-
   // 分批翻译
   const total = toTranslate.length;
   let done = 0;
@@ -325,7 +319,7 @@ export async function translateAhead(
         batch.forEach(({ caption }) => { caption.status = 'pending'; });
         return;
       }
-      console.error('[YouTubeCaptions] Batch failed:', e);
+      console.warn('[YouTubeCaptions] Batch failed:', e instanceof Error ? e.message : e);
       batch.forEach(({ caption }) => { caption.status = 'failed'; });
     }
 

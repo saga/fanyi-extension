@@ -83,7 +83,6 @@ export class YouTubeCaptionManager {
    */
   async start(apiKey: string, onStatus?: StatusCallback): Promise<boolean> {
     const videoId = extractVideoId();
-    console.log('[CaptionManager] start called, videoId=' + videoId + ', isRunning=' + this.isRunning);
     if (!videoId) {
       onStatus?.('非 YouTube 视频页', 'error');
       return false;
@@ -91,13 +90,11 @@ export class YouTubeCaptionManager {
 
     // 幂等：同一视频不重复启动
     if (this.isRunning && this.currentVideoId === videoId) {
-      console.log('[CaptionManager] already running for same videoId, skip');
       return true;
     }
 
     // 切视频：先清理旧资源
     if (this.isRunning) {
-      console.log('[CaptionManager] switching video, stopping old session');
       this.stop();
     }
 
@@ -109,8 +106,6 @@ export class YouTubeCaptionManager {
     const cached = this.cache.get(videoId);
     if (cached) {
       this.captions = cached;
-      const translatedCount = cached.filter(c => c.translatedText).length;
-      console.log('[CaptionManager] cache hit, captions=' + cached.length + ', translated=' + translatedCount);
       onStatus?.('字幕已缓存，直接显示', 'success');
     } else {
       // 2. 获取字幕
@@ -134,11 +129,9 @@ export class YouTubeCaptionManager {
     // 保存 video 引用（避免 pumpAheadBuffer 每次 querySelector，问题 7）
     this.video = document.querySelector('video.html5-main-video') as HTMLVideoElement | null
               || document.querySelector('video') as HTMLVideoElement | null;
-    console.log('[CaptionManager] overlay started, captions=' + this.captions.length);
 
     // 4. 启动 Ahead Buffer 调度
     this.startAheadBufferPump(apiKey, onStatus);
-    console.log('[CaptionManager] ahead buffer pump started');
 
     const translated = this.captions.filter(c => c.translatedText).length;
     onStatus?.(
@@ -230,10 +223,6 @@ export class YouTubeCaptionManager {
       onStatus?.('未找到视频字幕数据（可能不是视频页）', 'error');
       return false;
     }
-
-    // 打印完整 captionTracks（用于诊断 baseUrl 过期 / variant=gemini 等问题）
-    const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-    console.log('[YouTubeCaptions] captionTracks:', JSON.stringify(tracks, null, 2));
 
     const trackUrl = getCaptionTrackUrl(playerResponse);
     if (!trackUrl) {
@@ -327,8 +316,6 @@ export class YouTubeCaptionManager {
       if (!needPump) return;
 
       const beforeCount = this.captions.filter(c => c.translatedText).length;
-      console.log('[CaptionManager] pump: currentMs=' + Math.floor(currentMs) +
-        ', beforeCount=' + beforeCount + ', total=' + this.captions.length);
 
       try {
         await translateAhead(
@@ -350,9 +337,6 @@ export class YouTubeCaptionManager {
         if (signal.aborted) return;
 
         // 翻译完成后更新 Overlay
-        const afterCount = this.captions.filter(c => c.translatedText).length;
-        console.log('[CaptionManager] pump done: beforeCount=' + beforeCount +
-          ', afterCount=' + afterCount + ', calling overlay.updateCaptions()');
         this.overlay?.updateCaptions(this.captions);
 
         // 更新缓存
@@ -360,6 +344,7 @@ export class YouTubeCaptionManager {
           this.cache.set(this.currentVideoId, this.captions);
         }
 
+        const afterCount = this.captions.filter(c => c.translatedText).length;
         if (afterCount > beforeCount) {
           onStatus?.(
             '字幕翻译进度 (' + afterCount + '/' + this.captions.length + ')',

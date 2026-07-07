@@ -90,8 +90,10 @@ export default defineContentScript({
     // SPA 导航（yt-navigate-finish）：YouTube 切视频不刷新页面，
     // 监听此事件自动重启字幕翻译（manager.onNavigate 内部会判断 videoId 是否变化）。
     const youTubeStatusCallback = (msg: string, type: string) => {
-      // 统一打印所有状态，方便定位问题
-      console.log('[YouTubeCaptions]', type, msg);
+      // 只把 error 状态打印到 console，避免正常流程刷屏
+      if (type === 'error') {
+        console.warn('[YouTubeCaptions]', msg);
+      }
     };
 
     if (isYouTubeWatchPage()) {

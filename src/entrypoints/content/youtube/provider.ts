@@ -102,32 +102,27 @@ async function extractInnertubeConfig(): Promise<InnertubeConfig | null> {
  *
  * 参考 youtube-transcript-api：
  *   - URL: https://www.youtube.com/youtubei/v1/player?key=API_KEY
- *   - client: ANDROID
+ *   - client: ANDROID（强制，不跟随页面 WEB client）
  *   - credentials: include
  */
 export async function fetchInnertubePlayer(videoId: string): Promise<any | null> {
   const cfg = await extractInnertubeConfig();
-  if (!cfg) {
-    console.log('[YouTubeCaptions] Innertube config not found');
-    return null;
-  }
+  if (!cfg || !cfg.apiKey) return null;
 
-  console.log('[YouTubeCaptions] Innertube config:', {
-    clientName: cfg.clientName,
-    clientVersion: cfg.clientVersion,
-    visitorData: cfg.visitorData ? 'present' : 'missing',
-  });
-
+  const clientName = 'ANDROID';
+  const clientVersion = '20.10.38';
   const url = `https://www.youtube.com/youtubei/v1/player?key=${cfg.apiKey}`;
   const body = {
     context: {
       client: {
-        clientName: cfg.clientName,
-        clientVersion: cfg.clientVersion,
+        clientName,
+        clientVersion,
         ...(cfg.visitorData ? { visitorData: cfg.visitorData } : {}),
       },
     },
     videoId,
+    contentCheckOk: true,
+    racyCheckOk: true,
   };
 
   try {
@@ -135,35 +130,29 @@ export async function fetchInnertubePlayer(videoId: string): Promise<any | null>
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-YouTube-Client-Name': cfg.clientName,
-        'X-YouTube-Client-Version': cfg.clientVersion,
+        'X-YouTube-Client-Name': clientName,
+        'X-YouTube-Client-Version': clientVersion,
       },
       credentials: 'include',
       body: JSON.stringify(body),
     });
 
     const text = await response.text();
-    console.log('[YouTubeCaptions] Innertube response:', {
-      status: response.status,
-      contentType: response.headers.get('content-type'),
-      bodyLength: text.length,
-    });
-
     if (!response.ok) {
-      console.error('[YouTubeCaptions] Innertube API error:', text.substring(0, 200));
+      console.warn('[YouTubeCaptions] Innertube v1 HTTP', response.status, text.substring(0, 120));
       return null;
     }
 
     const data = JSON.parse(text);
     const respVideoId = data?.videoDetails?.videoId;
     if (respVideoId === videoId) {
-      console.log('[YouTubeCaptions] playerResponse from Innertube API (v1), videoId=' + respVideoId);
+      console.log('[YouTubeCaptions] playerResponse from Innertube v1');
       return data;
     }
-    console.log('[YouTubeCaptions] Innertube videoId mismatch: expected=' + videoId + ', got=' + respVideoId);
+    console.warn('[YouTubeCaptions] Innertube v1 no videoId, got:', Object.keys(data).slice(0, 8).join(','));
     return null;
   } catch (e) {
-    console.error('[YouTubeCaptions] Innertube fetch failed:', e);
+    console.warn('[YouTubeCaptions] Innertube v1 failed:', e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -178,55 +167,47 @@ export async function fetchInnertubePlayer(videoId: string): Promise<any | null>
  *   - 不需要从 HTML 提取 API key
  */
 export async function fetchInnertubePlayerV2(videoId: string): Promise<any | null> {
-  const INNERTUBE_CLIENT_VERSION = '20.10.38';
+  const clientName = 'ANDROID';
+  const clientVersion = '20.10.38';
   const url = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
   const body = {
     context: {
-      client: {
-        clientName: 'ANDROID',
-        clientVersion: INNERTUBE_CLIENT_VERSION,
-      },
+      client: { clientName, clientVersion },
     },
     videoId,
+    contentCheckOk: true,
+    racyCheckOk: true,
   };
-
-  console.log('[YouTubeCaptions] Trying Innertube API v2 (no api key, android UA)');
 
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`,
-        'X-YouTube-Client-Name': 'ANDROID',
-        'X-YouTube-Client-Version': INNERTUBE_CLIENT_VERSION,
+        'User-Agent': `com.google.android.youtube/${clientVersion} (Linux; U; Android 14)`,
+        'X-YouTube-Client-Name': clientName,
+        'X-YouTube-Client-Version': clientVersion,
       },
       credentials: 'include',
       body: JSON.stringify(body),
     });
 
     const text = await response.text();
-    console.log('[YouTubeCaptions] Innertube v2 response:', {
-      status: response.status,
-      contentType: response.headers.get('content-type'),
-      bodyLength: text.length,
-    });
-
     if (!response.ok) {
-      console.error('[YouTubeCaptions] Innertube v2 API error:', text.substring(0, 200));
+      console.warn('[YouTubeCaptions] Innertube v2 HTTP', response.status, text.substring(0, 120));
       return null;
     }
 
     const data = JSON.parse(text);
     const respVideoId = data?.videoDetails?.videoId;
     if (respVideoId === videoId) {
-      console.log('[YouTubeCaptions] playerResponse from Innertube API v2, videoId=' + respVideoId);
+      console.log('[YouTubeCaptions] playerResponse from Innertube v2');
       return data;
     }
-    console.log('[YouTubeCaptions] Innertube v2 videoId mismatch: expected=' + videoId + ', got=' + respVideoId);
+    console.warn('[YouTubeCaptions] Innertube v2 no videoId, got:', Object.keys(data).slice(0, 8).join(','));
     return null;
   } catch (e) {
-    console.error('[YouTubeCaptions] Innertube v2 fetch failed:', e);
+    console.warn('[YouTubeCaptions] Innertube v2 failed:', e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -327,33 +308,28 @@ export async function fetchPlayerResponse(
   // 3. DOM ytInitialPlayerResponse（同步，快）
   const fromDom = extractYtInitialPlayerResponseFromDom();
   if (fromDom?.videoDetails?.videoId === expectedVideoId) {
-    console.log('[YouTubeCaptions] playerResponse from DOM, videoId=' + expectedVideoId);
+    console.log('[YouTubeCaptions] playerResponse from DOM');
     return fromDom;
-  }
-  if (fromDom) {
-    console.log('[YouTubeCaptions] DOM videoId mismatch: expected=' + expectedVideoId + ', got=' + fromDom?.videoDetails?.videoId);
   }
 
   // 4. 页面配置对象
   const fromConfig = extractPlayerResponseFromPageConfig();
   if (fromConfig?.videoDetails?.videoId === expectedVideoId) {
-    console.log('[YouTubeCaptions] playerResponse from page config, videoId=' + expectedVideoId);
+    console.log('[YouTubeCaptions] playerResponse from page config');
     return fromConfig;
   }
 
   // 5. fetch 当前页面 HTML（兜底）
-  console.log('[YouTubeCaptions] Fetching page HTML for playerResponse');
   try {
     const resp = await fetch(window.location.href);
     const html = await resp.text();
     const fromHtml = extractPlayerResponseFromText(html);
     if (fromHtml?.videoDetails?.videoId === expectedVideoId) {
-      console.log('[YouTubeCaptions] playerResponse from fetched HTML, videoId=' + expectedVideoId);
+      console.log('[YouTubeCaptions] playerResponse from fetched HTML');
       return fromHtml;
     }
-    console.log('[YouTubeCaptions] fetched HTML videoId mismatch: expected=' + expectedVideoId + ', got=' + fromHtml?.videoDetails?.videoId);
   } catch (e) {
-    console.log('[YouTubeCaptions] fetch page HTML failed:', e);
+    console.warn('[YouTubeCaptions] fetch HTML failed:', e instanceof Error ? e.message : e);
   }
 
   return null;
@@ -465,19 +441,22 @@ export async function fetchCaptions(
     url = trackUrl.replace(/[?&]fmt=[^&]*/g, '');
   }
 
-  // 打印完整 URL（不截断，便于手动验证）
-  console.log('[YouTubeCaptions] Fetching captions, URL:', url);
-
   // 方案 A：默认请求（带 Cookie，无特殊 User-Agent）
   const eventsA = await fetchCaptionsOnce(url, {});
-  if (eventsA.length > 0) return eventsA;
+  if (eventsA.length > 0) {
+    console.log('[YouTubeCaptions] Captions loaded:', eventsA.length);
+    return eventsA;
+  }
 
   // 方案 B：带桌面 User-Agent 重试（参考 Kakulukian/youtube-transcript）
-  console.log('[YouTubeCaptions] Default fetch returned no captions, retrying with desktop User-Agent');
+  console.warn('[YouTubeCaptions] Default fetch no captions, retrying with desktop UA');
   const eventsB = await fetchCaptionsOnce(url, {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36,gzip(gfe)',
   });
-  if (eventsB.length > 0) return eventsB;
+  if (eventsB.length > 0) {
+    console.log('[YouTubeCaptions] Captions loaded (desktop UA):', eventsB.length);
+    return eventsB;
+  }
 
   throw new Error('字幕获取失败: 默认请求和带 User-Agent 重试均未返回有效字幕');
 }
@@ -497,19 +476,8 @@ async function fetchCaptionsOnce(
     throw new Error(`字幕获取失败: HTTP ${response.status}`);
   }
 
-  // 打印最终 URL（可能被重定向）和关键响应头
-  console.log('[YouTubeCaptions] Response URL:', response.url);
-
   const text = await response.text();
   const contentType = response.headers.get('content-type') || '';
-  console.log('[YouTubeCaptions] Response:', {
-    status: response.status,
-    contentType,
-    bodyLength: text.length,
-    userAgent: extraHeaders['User-Agent'] ? 'desktop' : 'default',
-  });
-  console.log('[YouTubeCaptions] Body first 300:', text.substring(0, 300));
-
   if (text.length === 0) {
     return [];
   }
