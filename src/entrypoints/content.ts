@@ -59,9 +59,11 @@ export default defineContentScript({
     // === 共享状态 ===
     // - originalTexts: 块 id → 原文（恢复时用）
     // - translatedBlocks: 动态内容已翻译的 block id 集合
+    // - translatedTexts: 块 id → 译文（React/Next.js 重新渲染后恢复翻译）
     const state: TranslationState = {
       originalTexts: new Map<string, string>(),
       translatedBlocks: new Set<string>(),
+      translatedTexts: new Map<string, string>(),
     };
     // 翻译控制器懒加载：第一次收到翻译消息才创建
     let translation: TranslationController | null = null;

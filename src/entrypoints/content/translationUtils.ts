@@ -141,6 +141,7 @@ export function restoreOriginal(state?: TranslationState): void {
   if (state) {
     state.originalTexts.clear();
     state.translatedBlocks.clear();
+    state.translatedTexts.clear();
   }
   updateButtonState(false);
   showStatus('已恢复原文', 'success');
@@ -184,12 +185,99 @@ export function setupDynamicContentObserver(
           console.error('Dynamic content translation failed:', error);
         }
       }
+      // 新增内容处理完后，也尝试恢复被 React/Next.js 重新渲染覆盖的翻译
+      reapplyLostTranslations(state);
     },
     () => {},
     /* debounceMs */ 1500,
   );
   observer.startMutationObserver();
+
+  // 监听滚动：React/Next.js 站点在滚动时可能重新渲染可见段落，导致译文消失。
+  // 这里加一个轻量节流，滚动停止后尝试恢复已保存的译文。
+  let scrollTimer: number | null = null;
+  const onScroll = () => {
+    if (scrollTimer) window.clearTimeout(scrollTimer);
+    scrollTimer = window.setTimeout(() => {
+      reapplyLostTranslations(state);
+    }, 500);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+
+  // 包装 observer，在 stop 时也移除 scroll 监听
+  const originalStop = observer.stopMutationObserver.bind(observer);
+  const originalDestroy = observer.destroy.bind(observer);
+  observer.stopMutationObserver = () => {
+    window.removeEventListener('scroll', onScroll);
+    if (scrollTimer) window.clearTimeout(scrollTimer);
+    originalStop();
+  };
+  observer.destroy = () => {
+    window.removeEventListener('scroll', onScroll);
+    if (scrollTimer) window.clearTimeout(scrollTimer);
+    originalDestroy();
+  };
+
   return observer;
+}
+
+/**
+ * 恢复被 React/Next.js 重新渲染覆盖的翻译。
+ *
+ * 某些前端框架（如 Next.js App Router）会在滚动或交互后重新渲染 DOM，
+ * 把我们插入的 .fanyi-translation / .fanyi-original 等节点清除掉。
+ * 这里根据保存的 originalTexts + translatedTexts 映射，重新把译文应用回去。
+ */
+export function reapplyLostTranslations(state: TranslationState): void {
+  if (state.originalTexts.size === 0 || state.translatedTexts.size === 0) return;
+
+  // 建立 originalText -> blockId 的反向索引（取第一个匹配）。
+  // 注意：同一原文可能出现多次，这里只恢复至少一次。
+  const textToIds = new Map<string, string[]>();
+  for (const [blockId, originalText] of state.originalTexts) {
+    const list = textToIds.get(originalText);
+    if (list) {
+      list.push(blockId);
+    } else {
+      textToIds.set(originalText, [blockId]);
+    }
+  }
+
+  const REAPPLYABLE_TAGS = new Set([
+    'P', 'LI', 'DD', 'BLOCKQUOTE', 'FIGCAPTION',
+    'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+  ]);
+
+  const candidates = document.querySelectorAll(
+    Array.from(REAPPLYABLE_TAGS).join(','),
+  );
+
+  let reapplied = 0;
+  for (const el of Array.from(candidates)) {
+    if (!(el instanceof HTMLElement)) continue;
+    // 已经翻译的跳过
+    if (el.classList.contains('fanyi-translated')) continue;
+
+    const text = (el.textContent || '').trim();
+    if (!text) continue;
+
+    const ids = textToIds.get(text);
+    if (!ids || ids.length === 0) continue;
+
+    // 找到第一个有译文的 blockId
+    for (const blockId of ids) {
+      const translated = state.translatedTexts.get(blockId);
+      if (translated) {
+        applyBlockTranslation(el, translated);
+        reapplied++;
+        break;
+      }
+    }
+  }
+
+  if (reapplied > 0) {
+    console.log(`[ContentScript] Reapplied ${reapplied} lost translation(s)`);
+  }
 }
 
 function findNodeByText(text: string): HTMLElement | null {

@@ -8,6 +8,7 @@ import {
   shouldRetryMissing,
 } from '../utils/chunkRetry';
 import { applyBlockTranslation } from '../utils/translationDisplay';
+import type { TranslationState } from './translationTypes';
 
 // ============================================================
 // Error categorisation for [SessionSummary]
@@ -65,6 +66,7 @@ export async function translateChunksViaBackground(
   glossary: Glossary,
   onProgress?: (current: number, total: number) => void,
   isMobile: boolean = false,
+  state?: TranslationState,
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
   console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
 
@@ -102,7 +104,7 @@ export async function translateChunksViaBackground(
           glossary,
           onFailure: () => { hasFailure = true; },
           onApply: (chunkMap) =>
-            applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap)),
+            applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, state)),
           onChunkComplete: (outcome, recovered, stillMissing, errMsg) => {
             if (outcome === 'fully-ok') stats.fullyOk++;
             else if (outcome === 'needed-retry') {
@@ -287,11 +289,16 @@ async function translateChunkPayload(
 function applyTranslations(
   translationMap: Map<string, string>,
   nodeMap: Map<string, Node>,
+  state?: TranslationState,
 ): void {
   for (const [blockId, translatedText] of translationMap) {
     const node = nodeMap.get(blockId);
     if (!node || !(node instanceof HTMLElement)) continue;
     applyBlockTranslation(node, translatedText);
+    // 保存译文映射，用于 React/Next.js 重新渲染后恢复
+    if (state && state.translatedTexts) {
+      state.translatedTexts.set(blockId, translatedText);
+    }
   }
 }
 
@@ -302,18 +309,19 @@ function applyTranslations(
 export function applyTranslationsWithRAF(
   translationMap: Map<string, string>,
   nodeMap: Map<string, Node>,
+  state?: TranslationState,
 ): Promise<void> {
   return new Promise((resolve) => {
     let applied = false;
     const frameId = requestAnimationFrame(() => {
       applied = true;
-      applyTranslations(translationMap, nodeMap);
+      applyTranslations(translationMap, nodeMap, state);
       resolve();
     });
     setTimeout(() => {
       if (applied) return;
       cancelAnimationFrame(frameId);
-      applyTranslations(translationMap, nodeMap);
+      applyTranslations(translationMap, nodeMap, state);
       resolve();
     }, 5000);
   });

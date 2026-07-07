@@ -213,6 +213,7 @@ async function handleFullTranslation(
     glossary,
     (current, total) => showStatus(`翻译进度: ${current}/${total}`, 'loading'),
     isMobile,
+    state,
   );
 
   await retryGlobalMissing(blocks, nodeMap, translatedIds, config, isMobile);
