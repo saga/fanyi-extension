@@ -47,7 +47,7 @@
 
       <label class="switch-item">
         <input type="checkbox" v-model="config.useServerTranslation" @change="saveConfig" />
-        <span>通过远程服务器翻译当前页面（发送 HTML）</span>
+        <span>通过远程服务翻译当前页面</span>
       </label>
 
       <div v-if="config.useServerTranslation" class="server-group">
@@ -59,7 +59,7 @@
             placeholder="https://s.sunxiunan.com/fanyi/page"
             @input="onServerUrlChange"
           />
-          <span class="hint-text">把当前页面发送到远程服务器翻译</span>
+          <span class="hint-text">把当前页面发送到远程翻译</span>
         </div>
 
         <div class="select-item">
@@ -72,7 +72,7 @@
             <option value="gemini">Gemini</option>
             <option value="opencode">OpenCode</option>
           </select>
-          <span class="hint-text">选择服务端翻译使用的 LLM Provider，仅对"通过远程服务器翻译"生效。</span>
+          <span class="hint-text">选择服务端翻译使用的 LLM Provider</span>
         </div>
       </div>
 
