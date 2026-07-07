@@ -224,12 +224,16 @@ export class YouTubeCaptionManager {
     const signal = this.abortController?.signal;
     if (signal?.aborted) return false;
 
-    // 获取 playerResponse（DOM + fetch HTML fallback，确保 videoId 匹配）
+    // 获取 playerResponse（等待 movie_player 出现，确保 videoId 匹配 + baseUrl 不过期）
     const playerResponse = await fetchPlayerResponse(videoId);
     if (!playerResponse) {
       onStatus?.('未找到视频字幕数据（可能不是视频页）', 'error');
       return false;
     }
+
+    // 打印完整 captionTracks（用于诊断 baseUrl 过期 / variant=gemini 等问题）
+    const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    console.log('[YouTubeCaptions] captionTracks:', JSON.stringify(tracks, null, 2));
 
     const trackUrl = getCaptionTrackUrl(playerResponse);
     if (!trackUrl) {

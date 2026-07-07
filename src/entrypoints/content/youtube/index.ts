@@ -22,11 +22,12 @@ export type { CaptionEvent, StatusCallback, ProgressCallback } from './types';
 export { CaptionOverlay } from './overlay';
 export { YouTubeCaptionManager } from './manager';
 export {
-  extractYtInitialPlayerResponse,
   extractJSONObject,
   getCaptionTrackUrl,
   fetchCaptions,
   fetchPlayerResponse,
+  fetchInnertubePlayer,
+  fetchInnertubePlayerV2,
   extractVideoId,
 } from './provider';
 export {
