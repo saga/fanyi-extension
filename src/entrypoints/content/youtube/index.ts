@@ -1,6 +1,11 @@
 /**
  * YouTube 字幕翻译模块入口。
  *
+ * 当前采用 read-frog 风格的字幕抓取方案：
+ *   - MAIN world 注入脚本读取 movie_player.getPlayerResponse()
+ *   - 通过 postMessage 与 ISOLATED world 通信
+ *   - 用 POT/timedtext 抓取完整字幕时间轴
+ *
  * 公共 API：
  *   - isYouTubeWatchPage(url?)            检测是否是 YouTube 视频页
  *   - startYouTubeCaptionTranslation(...) 启动字幕翻译（内部走 Manager 单例）
@@ -10,7 +15,7 @@
  * 内部模块（./youtube/）：
  *   types.ts       共享类型
  *   provider.ts    字幕获取
- *   translator.ts  增量翻译 + Ahead Buffer + AbortSignal
+ *   translator.ts  批量翻译 + AbortSignal + Ahead Buffer
  *   overlay.ts     CaptionOverlay
  *   manager.ts     YouTubeCaptionManager 生命周期 / 缓存 / SPA 导航
  */
@@ -22,13 +27,14 @@ export type { CaptionEvent, StatusCallback, ProgressCallback } from './types';
 export { CaptionOverlay } from './overlay';
 export { YouTubeCaptionManager } from './manager';
 export {
-  extractJSONObject,
-  getCaptionTrackUrl,
-  fetchCaptions,
-  fetchPlayerResponse,
-  fetchInnertubePlayer,
-  fetchInnertubePlayerV2,
   extractVideoId,
+  fetchCaptions,
+  type CaptionTrack,
+  type AudioCaptionTrack,
+  type PlayerData,
+  type YoutubeTimedText,
+  type YoutubeSubtitlesResponse,
+  type PotToken,
 } from './provider';
 export {
   translateBatch,
@@ -67,9 +73,8 @@ export function isYouTubeWatchPage(
  *
  * 内部使用 YouTubeCaptionManager 单例：
  *   - 幂等：同一视频不重复启动
- *   - 切视频：自动清理旧资源（AbortController + Overlay + pumpTimer）
- *   - 内存缓存：切回已翻译视频 0 API 调用
- *   - Ahead Buffer：只翻译当前播放位置后 90 秒的字幕，不一次性翻译整集
+ *   - 切视频：自动清理旧资源（AbortController + Overlay + 监听）
+ *   - 抓取完整时间轴后通过 Ahead Buffer 增量翻译
  *
  * @param apiKey DeepSeek API Key
  * @param onStatus 状态回调（用于 UI 显示进度）

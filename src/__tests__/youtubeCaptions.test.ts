@@ -2,12 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // 导入被测函数（注意：youtube 模块有 DOM 依赖，需要 jsdom 环境）
 import {
-  extractJSONObject,
-  getCaptionTrackUrl,
   fetchCaptions,
-  fetchPlayerResponse,
-  fetchInnertubePlayer,
-  fetchInnertubePlayerV2,
   translateCaptions,
   translateAhead,
   translateBatch,
@@ -22,366 +17,363 @@ const globalFetch = vi.fn();
 Object.defineProperty(globalThis, 'fetch', { value: globalFetch, writable: true });
 
 // =============================================================================
-// extractJSONObject — 括号计数法提取 JSON
+// postMessage Mock 工具
 // =============================================================================
 
-describe('extractJSONObject', () => {
-  it('extracts simple JSON object', () => {
-    const text = 'var x = {"key": "value"};';
-    const result = extractJSONObject(text, text.indexOf('{'));
-    expect(result).toBe('{"key": "value"}');
-  });
+const PLAYER_DATA_REQUEST_TYPE = 'FANYI_YT_PLAYER_DATA_REQUEST';
+const PLAYER_DATA_RESPONSE_TYPE = 'FANYI_YT_PLAYER_DATA_RESPONSE';
+const WAIT_TIMEDTEXT_REQUEST_TYPE = 'FANYI_YT_WAIT_TIMEDTEXT_REQUEST';
+const WAIT_TIMEDTEXT_RESPONSE_TYPE = 'FANYI_YT_WAIT_TIMEDTEXT_RESPONSE';
+const ENSURE_SUBTITLES_REQUEST_TYPE = 'FANYI_YT_ENSURE_SUBTITLES_REQUEST';
+const ENSURE_SUBTITLES_RESPONSE_TYPE = 'FANYI_YT_ENSURE_SUBTITLES_RESPONSE';
 
-  it('extracts nested JSON object', () => {
-    const text = 'var x = {"a": {"b": [1, 2, {"c": "}"}]}};';
-    const result = extractJSONObject(text, text.indexOf('{'));
-    expect(result).toBe('{"a": {"b": [1, 2, {"c": "}"}]}}');
-    expect(() => JSON.parse(result!)).not.toThrow();
-  });
+function setupPostMessageMock(
+  responder: (message: any) => { type: string; [key: string]: any } | null,
+): () => void {
+  const originalPostMessage = window.postMessage;
+  window.postMessage = vi.fn((message: any) => {
+    const response = responder(message);
+    setTimeout(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: window.location.origin,
+          data: response ? { ...response, requestId: message.requestId } : null,
+        }),
+      );
+    }, 0);
+  }) as any;
+  return () => {
+    window.postMessage = originalPostMessage;
+  };
+}
 
-  it('handles braces inside strings', () => {
-    const text = '{"str": "has { and } inside"}';
-    const result = extractJSONObject(text, 0);
-    expect(result).toBe('{"str": "has { and } inside"}');
-  });
+function buildPlayerDataResponse(data: any) {
+  return {
+    type: PLAYER_DATA_RESPONSE_TYPE,
+    success: true,
+    data,
+  };
+}
 
-  it('handles escaped quotes in strings', () => {
-    const text = '{"str": "has \\"quoted\\" {braces}"}';
-    const result = extractJSONObject(text, 0);
-    expect(result).toBe('{"str": "has \\"quoted\\" {braces}"}');
-  });
+function buildTimedtextResponse(url: string | null) {
+  return {
+    type: WAIT_TIMEDTEXT_RESPONSE_TYPE,
+    url,
+  };
+}
 
-  it('returns null for unbalanced braces', () => {
-    const text = '{"key": "value"';
-    const result = extractJSONObject(text, 0);
-    expect(result).toBeNull();
-  });
-});
-
-// =============================================================================
-// fetchPlayerResponse — 降级链：Innertube → DOM → HTML fetch
-// =============================================================================
-
-describe('fetchPlayerResponse', () => {
-  beforeEach(() => {
-    document.head.innerHTML = '';
-    document.body.innerHTML = '';
-    vi.clearAllMocks();
-  });
-
-  it('returns Innertube playerResponse when API succeeds', async () => {
-    const videoId = 'test123';
-    const innertubeResponse = {
-      videoDetails: { videoId },
-      captions: {
-        playerCaptionsTracklistRenderer: {
-          captionTracks: [{ baseUrl: 'https://www.youtube.com/api/timedtext?v=' + videoId, languageCode: 'en' }],
-        },
-      },
-    };
-
-    // Mock: 第一次 fetch 是 Innertube config 请求（HTML），第二次是 Innertube API
-    globalFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue('"INNERTUBE_API_KEY":"AIzaTest"'),
-        headers: new Map(),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify(innertubeResponse)),
-        headers: new Map([['content-type', 'application/json']]),
-      });
-
-    const result = await fetchPlayerResponse(videoId);
-    expect(result).not.toBeNull();
-    expect(result.videoDetails.videoId).toBe(videoId);
-  });
-
-  it('falls back to Innertube v2 when v1 fails', async () => {
-    const videoId = 'v2fallback';
-    const v2Response = { videoDetails: { videoId }, videoId };
-
-    // v1 第一次 fetch（提取 config）失败，v2 成功
-    globalFetch
-      .mockRejectedValueOnce(new Error('network error'))
-      .mockResolvedValueOnce({
-        ok: true,
-        text: vi.fn().mockResolvedValue(JSON.stringify(v2Response)),
-        headers: new Map([['content-type', 'application/json']]),
-      });
-
-    const result = await fetchPlayerResponse(videoId);
-    expect(result).not.toBeNull();
-    expect(result.videoDetails.videoId).toBe(videoId);
-  });
-
-  it('falls back to DOM ytInitialPlayerResponse when both Innertube fail', async () => {
-    const videoId = 'dom123';
-    const mockData = { videoDetails: { videoId }, videoId };
-    const script = document.createElement('script');
-    script.textContent = `var ytInitialPlayerResponse = ${JSON.stringify(mockData)};`;
-    document.head.appendChild(script);
-
-    // Innertube v1/v2 都失败
-    globalFetch.mockRejectedValue(new Error('network error'));
-
-    const result = await fetchPlayerResponse(videoId);
-    expect(result).not.toBeNull();
-    expect(result.videoDetails.videoId).toBe(videoId);
-  });
-
-  it('falls back to fetched HTML when DOM data is stale', async () => {
-    const videoId = 'html123';
-    const staleData = { videoDetails: { videoId: 'old123' }, videoId: 'old123' };
-    const freshData = { videoDetails: { videoId }, videoId };
-
-    const script = document.createElement('script');
-    script.textContent = `var ytInitialPlayerResponse = ${JSON.stringify(staleData)};`;
-    document.head.appendChild(script);
-
-    globalFetch.mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue(`var ytInitialPlayerResponse = ${JSON.stringify(freshData)};`),
-      headers: new Map(),
-    });
-
-    const result = await fetchPlayerResponse(videoId);
-    expect(result).not.toBeNull();
-    expect(result.videoDetails.videoId).toBe(videoId);
-  });
-
-  it('returns null when all sources fail', async () => {
-    globalFetch.mockRejectedValue(new Error('network error'));
-    const result = await fetchPlayerResponse('none123');
-    expect(result).toBeNull();
-  });
-});
+function buildEnsureSubtitlesResponse() {
+  return {
+    type: ENSURE_SUBTITLES_RESPONSE_TYPE,
+  };
+}
 
 // =============================================================================
-// getCaptionTrackUrl — 字幕 track URL 选择
-// =============================================================================
-
-describe('getCaptionTrackUrl', () => {
-  it('returns English track URL when available', () => {
-    const playerResponse = {
-      captions: {
-        playerCaptionsTracklistRenderer: {
-          captionTracks: [
-            { baseUrl: 'https://example.com/api/timedtext?lang=es', languageCode: 'es' },
-            { baseUrl: 'https://example.com/api/timedtext?lang=en', languageCode: 'en' },
-          ],
-        },
-      },
-    };
-    const url = getCaptionTrackUrl(playerResponse);
-    expect(url).toContain('lang=en');
-  });
-
-  it('returns first track when English not available', () => {
-    const playerResponse = {
-      captions: {
-        playerCaptionsTracklistRenderer: {
-          captionTracks: [
-            { baseUrl: 'https://example.com/api/timedtext?lang=fr', languageCode: 'fr' },
-            { baseUrl: 'https://example.com/api/timedtext?lang=de', languageCode: 'de' },
-          ],
-        },
-      },
-    };
-    const url = getCaptionTrackUrl(playerResponse);
-    expect(url).toContain('lang=fr');
-  });
-
-  it('returns null when no caption tracks', () => {
-    expect(getCaptionTrackUrl({})).toBeNull();
-    expect(getCaptionTrackUrl({ captions: {} })).toBeNull();
-    expect(getCaptionTrackUrl({
-      captions: { playerCaptionsTracklistRenderer: { captionTracks: [] } },
-    })).toBeNull();
-  });
-
-  it('prefers non-gemini track over gemini track', () => {
-    // YouTube 真实场景：有两条 track
-    // 1. kind=asr, lang=en, variant=gemini（不支持 fmt=json3）
-    // 2. lang=en-US（普通 track，支持 fmt=json3）
-    // 应该选择第二条（非 gemini），即使 languageCode 不是 'en'
-    const playerResponse = {
-      captions: {
-        playerCaptionsTracklistRenderer: {
-          captionTracks: [
-            {
-              baseUrl: 'https://example.com/api/timedtext?lang=en&kind=asr&variant=gemini',
-              languageCode: 'en',
-              kind: 'asr',
-            },
-            {
-              baseUrl: 'https://example.com/api/timedtext?lang=en-US',
-              languageCode: 'en-US',
-            },
-          ],
-        },
-      },
-    };
-    const url = getCaptionTrackUrl(playerResponse);
-    expect(url).toContain('lang=en-US');
-    expect(url).not.toContain('variant=gemini');
-  });
-
-  it('falls back to gemini track if only option', () => {
-    // 如果只有 gemini track，还是要用
-    const playerResponse = {
-      captions: {
-        playerCaptionsTracklistRenderer: {
-          captionTracks: [
-            {
-              baseUrl: 'https://example.com/api/timedtext?lang=en&variant=gemini',
-              languageCode: 'en',
-              kind: 'asr',
-            },
-          ],
-        },
-      },
-    };
-    const url = getCaptionTrackUrl(playerResponse);
-    expect(url).toContain('variant=gemini');
-  });
-});
-
-// =============================================================================
-// fetchCaptions — 请求 timedtext API
+// extractVideoId / fetchCaptions
 // =============================================================================
 
 describe('fetchCaptions', () => {
+  let restorePostMessage: (() => void) | null = null;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    globalFetch.mockReset();
   });
 
-  it('parses JSON3 format correctly', async () => {
-    const mockJson3 = {
-      events: [
-        {
-          tStartMs: 1000,
-          dDurationMs: 2000,
-          segs: [{ utf8: 'Hello ' }, { utf8: 'world' }],
-        },
-        {
-          tStartMs: 3000,
-          dDurationMs: 1500,
-          segs: [{ utf8: 'Second subtitle' }],
-        },
-      ],
-    };
-    globalFetch.mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify(mockJson3)),
-      headers: new Map([['content-type', 'application/json']]),
+  afterEach(() => {
+    restorePostMessage?.();
+    restorePostMessage = null;
+  });
+
+  it('fetches captions with POT from audioCaptionTracks', async () => {
+    restorePostMessage = setupPostMessageMock((message) => {
+      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
+        return buildPlayerDataResponse({
+          videoId: 'abc123',
+          captionTracks: [
+            {
+              baseUrl: 'https://www.youtube.com/api/timedtext?v=abc123&caps=asr',
+              languageCode: 'en',
+              kind: 'asr',
+              vssId: 'a.en',
+            },
+          ],
+          audioCaptionTracks: [
+            {
+              url: 'https://www.youtube.com/api/timedtext?v=abc123&lang=en&pot=TOKEN&potc=SIG',
+              vssId: 'a.en',
+              languageCode: 'en',
+              kind: 'asr',
+            },
+          ],
+          device: null,
+          cver: null,
+          playerState: 1,
+          selectedTrackLanguageCode: null,
+          selectedTrackVssId: null,
+          cachedTimedtextUrl: null,
+        });
+      }
+      return null;
     });
 
-    const captions = await fetchCaptions('https://example.com/api/timedtext?v=abc');
+    globalFetch.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        events: [
+          {
+            tStartMs: 0,
+            dDurationMs: 2000,
+            segs: [{ utf8: 'Hello world' }],
+          },
+          {
+            tStartMs: 2500,
+            dDurationMs: 2000,
+            segs: [{ utf8: 'Second line' }],
+          },
+        ],
+      }),
+    });
+
+    const captions = await fetchCaptions('abc123');
     expect(captions).toHaveLength(2);
-    expect(captions[0]).toEqual({
-      startMs: 1000,
-      durationMs: 2000,
-      text: 'Hello world',
-    });
-    expect(captions[1].text).toBe('Second subtitle');
+    expect(captions[0].text).toBe('Hello world');
+    expect(captions[0].startMs).toBe(0);
+    expect(captions[0].durationMs).toBe(2000);
+    expect(captions[1].text).toBe('Second line');
+
+    // 验证 URL 构造：包含 pot/potc 和 json3
+    const fetchUrl = globalFetch.mock.calls[0][0];
+    expect(fetchUrl).toContain('fmt=json3');
+    expect(fetchUrl).toContain('pot=TOKEN');
+    expect(fetchUrl).toContain('potc=SIG');
   });
 
-  it('filters out empty text segments', async () => {
-    const mockJson3 = {
-      events: [
-        { tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: '   ' }] },
-        { tStartMs: 1000, dDurationMs: 1000, segs: [{ utf8: 'Real text' }] },
-      ],
-    };
-    globalFetch.mockResolvedValue({
-      ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify(mockJson3)),
-      headers: new Map([['content-type', 'application/json']]),
+  it('falls back to timedtext URL interception when no POT in audio tracks', async () => {
+    restorePostMessage = setupPostMessageMock((message) => {
+      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
+        return buildPlayerDataResponse({
+          videoId: 'abc123',
+          captionTracks: [
+            {
+              baseUrl: 'https://www.youtube.com/api/timedtext?v=abc123&caps=asr',
+              languageCode: 'en',
+              kind: 'asr',
+              vssId: 'a.en',
+            },
+          ],
+          audioCaptionTracks: [],
+          device: null,
+          cver: null,
+          playerState: 1,
+          selectedTrackLanguageCode: null,
+          selectedTrackVssId: null,
+          cachedTimedtextUrl: null,
+        });
+      }
+      if (message.type === ENSURE_SUBTITLES_REQUEST_TYPE) {
+        return buildEnsureSubtitlesResponse();
+      }
+      if (message.type === WAIT_TIMEDTEXT_REQUEST_TYPE) {
+        return buildTimedtextResponse(
+          'https://www.youtube.com/api/timedtext?v=abc123&pot=TOKEN2&potc=SIG2',
+        );
+      }
+      return null;
     });
 
-    const captions = await fetchCaptions('https://example.com/api/timedtext?v=abc');
+    // 第一次 fetch 无 POT，模拟 YouTube 拒绝，触发 fallback 流程
+    globalFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      text: vi.fn().mockResolvedValue('Forbidden'),
+    });
+
+    // fallback 后第二次 fetch 成功
+    globalFetch.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        events: [
+          {
+            tStartMs: 0,
+            dDurationMs: 1500,
+            segs: [{ utf8: 'Fallback line' }],
+          },
+        ],
+      }),
+    });
+
+    const captions = await fetchCaptions('abc123');
     expect(captions).toHaveLength(1);
-    expect(captions[0].text).toBe('Real text');
+    expect(captions[0].text).toBe('Fallback line');
+
+    // 第二次 fetch 使用拦截到的 timedtext URL（含 POT）
+    const fetchUrl = globalFetch.mock.calls[1][0];
+    expect(fetchUrl).toContain('pot=TOKEN2');
+    expect(fetchUrl).toContain('potc=SIG2');
+  }, 10000);
+
+  it('throws when no caption tracks available', async () => {
+    restorePostMessage = setupPostMessageMock((message) => {
+      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
+        return buildPlayerDataResponse({
+          videoId: 'abc123',
+          captionTracks: [],
+          audioCaptionTracks: [],
+          device: null,
+          cver: null,
+          playerState: 1,
+          selectedTrackLanguageCode: null,
+          selectedTrackVssId: null,
+          cachedTimedtextUrl: null,
+        });
+      }
+      return null;
+    });
+
+    await expect(fetchCaptions('abc123')).rejects.toThrow('未找到可用字幕');
   });
 
-  it('removes fmt parameter from URL', async () => {
-    // 参考 youtube-transcript-api：不强制 fmt=json3，而是删除 fmt 参数
-    globalFetch.mockResolvedValue({
+  it('filters noise annotations from captions', async () => {
+    restorePostMessage = setupPostMessageMock((message) => {
+      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
+        return buildPlayerDataResponse({
+          videoId: 'abc123',
+          captionTracks: [
+            {
+              baseUrl: 'https://www.youtube.com/api/timedtext?v=abc123',
+              languageCode: 'en',
+              vssId: 'a.en',
+            },
+          ],
+          audioCaptionTracks: [
+            {
+              url: 'https://www.youtube.com/api/timedtext?v=abc123&pot=POT',
+              vssId: 'a.en',
+            },
+          ],
+          device: null,
+          cver: null,
+          playerState: 1,
+          selectedTrackLanguageCode: null,
+          selectedTrackVssId: null,
+          cachedTimedtextUrl: null,
+        });
+      }
+      return null;
+    });
+
+    globalFetch.mockResolvedValueOnce({
       ok: true,
-      text: vi.fn().mockResolvedValue(JSON.stringify({
-        events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'Hello' }] }],
-      })),
-      headers: new Map([['content-type', 'application/json']]),
-      url: 'https://example.com/api/timedtext?v=abc',
+      json: vi.fn().mockResolvedValue({
+        events: [
+          {
+            tStartMs: 0,
+            dDurationMs: 2000,
+            segs: [{ utf8: '[Music] Hello' }],
+          },
+        ],
+      }),
     });
 
-    await fetchCaptions('https://example.com/api/timedtext?v=abc&fmt=srv3');
-    expect(globalFetch).toHaveBeenCalledWith(
-      'https://example.com/api/timedtext?v=abc',
-      { credentials: 'include' },
-    );
+    const captions = await fetchCaptions('abc123');
+    expect(captions[0].text).toBe('Hello');
   });
 
-  it('parses XML srv3 format correctly', async () => {
-    const mockXml = `<?xml version="1.0" encoding="utf-8" ?>
-<transcript>
-  <text start="1.000" dur="2.000">Hello world</text>
-  <text start="3.500" dur="1.500">Second subtitle</text>
-</transcript>`;
-    globalFetch.mockResolvedValue({
+  it('parses scrolling ASR subtitles into sentence fragments', async () => {
+    restorePostMessage = setupPostMessageMock((message) => {
+      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
+        return buildPlayerDataResponse({
+          videoId: 'asr123',
+          captionTracks: [
+            {
+              baseUrl: 'https://www.youtube.com/api/timedtext?v=asr123',
+              languageCode: 'en',
+              kind: 'asr',
+              vssId: 'a.en',
+            },
+          ],
+          audioCaptionTracks: [
+            {
+              url: 'https://www.youtube.com/api/timedtext?v=asr123&pot=POT',
+              vssId: 'a.en',
+            },
+          ],
+          device: null,
+          cver: null,
+          playerState: 1,
+          selectedTrackLanguageCode: null,
+          selectedTrackVssId: null,
+          cachedTimedtextUrl: null,
+        });
+      }
+      return null;
+    });
+
+    globalFetch.mockResolvedValueOnce({
       ok: true,
-      text: vi.fn().mockResolvedValue(mockXml),
-      headers: new Map([['content-type', 'text/xml']]),
+      json: vi.fn().mockResolvedValue({
+        events: [
+          { tStartMs: 0, segs: [{ utf8: 'Hello' }], wWinId: 1 },
+          { tStartMs: 200, segs: [{ utf8: ' world.' }], wWinId: 1 },
+          { tStartMs: 400, aAppend: 1, dDurationMs: 100, wWinId: 1 },
+          { tStartMs: 1500, segs: [{ utf8: 'Second' }], wWinId: 1 },
+          { tStartMs: 1700, segs: [{ utf8: ' line.' }], wWinId: 1 },
+          { tStartMs: 1900, aAppend: 1, dDurationMs: 100, wWinId: 1 },
+        ],
+      }),
     });
 
-    const captions = await fetchCaptions('https://example.com/api/timedtext?v=abc');
-    expect(captions).toHaveLength(2);
-    expect(captions[0]).toEqual({
-      startMs: 1000,
-      durationMs: 2000,
-      text: 'Hello world',
-    });
-    expect(captions[1]).toEqual({
-      startMs: 3500,
-      durationMs: 1500,
-      text: 'Second subtitle',
-    });
+    const captions = await fetchCaptions('asr123');
+    expect(captions.length).toBeGreaterThanOrEqual(2);
+    expect(captions[0].text).toBe('Hello world.');
+    expect(captions[1].text).toBe('Second line.');
   });
 
-  it('parses XML srv3 <p t="ms" d="ms"> format', async () => {
-    const mockXml = `<?xml version="1.0" encoding="utf-8" ?>
-<transcript>
-  <p t="1234" d="2500"><s>Hello </s><s>world</s></p>
-  <p t="5000" d="1500">Second &amp; subtitle</p>
-</transcript>`;
-    globalFetch.mockResolvedValue({
+  it('parses karaoke subtitles by selecting main kanji track', async () => {
+    restorePostMessage = setupPostMessageMock((message) => {
+      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
+        return buildPlayerDataResponse({
+          videoId: 'kara123',
+          captionTracks: [
+            {
+              baseUrl: 'https://www.youtube.com/api/timedtext?v=kara123',
+              languageCode: 'ja',
+              kind: 'asr',
+              vssId: '.ja',
+            },
+          ],
+          audioCaptionTracks: [
+            {
+              url: 'https://www.youtube.com/api/timedtext?v=kara123&pot=POT',
+              vssId: '.ja',
+            },
+          ],
+          device: null,
+          cver: null,
+          playerState: 1,
+          selectedTrackLanguageCode: null,
+          selectedTrackVssId: null,
+          cachedTimedtextUrl: null,
+        });
+      }
+      return null;
+    });
+
+    globalFetch.mockResolvedValueOnce({
       ok: true,
-      text: vi.fn().mockResolvedValue(mockXml),
-      headers: new Map([['content-type', 'text/xml']]),
+      json: vi.fn().mockResolvedValue({
+        events: [
+          { tStartMs: 0, dDurationMs: 1000, wpWinPosId: 3, segs: [{ utf8: 'こんにちは' }] },
+          { tStartMs: 0, dDurationMs: 1000, wpWinPosId: 4, segs: [{ utf8: 'konnichiwa' }] },
+          { tStartMs: 1200, dDurationMs: 1000, wpWinPosId: 3, segs: [{ utf8: 'こんにちは' }] },
+        ],
+      }),
     });
 
-    const captions = await fetchCaptions('https://example.com/api/timedtext?v=abc');
-    expect(captions).toHaveLength(2);
-    expect(captions[0]).toEqual({
-      startMs: 1234,
-      durationMs: 2500,
-      text: 'Hello world',
-    });
-    expect(captions[1]).toEqual({
-      startMs: 5000,
-      durationMs: 1500,
-      text: 'Second & subtitle',
-    });
-  });
-
-  it('throws on HTTP error', async () => {
-    globalFetch.mockResolvedValue({ ok: false, status: 403 });
-
-    await expect(
-      fetchCaptions('https://example.com/api/timedtext?v=abc'),
-    ).rejects.toThrow('字幕获取失败: HTTP 403');
+    const captions = await fetchCaptions('kara123');
+    expect(captions.length).toBe(1);
+    expect(captions[0].text).toBe('こんにちは');
   });
 });
 
@@ -392,6 +384,7 @@ describe('fetchCaptions', () => {
 describe('translateCaptions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalFetch.mockReset();
   });
 
   it('translates captions and fills translatedText', async () => {
@@ -488,8 +481,6 @@ describe('translateCaptions', () => {
   });
 
   it('handles API error by marking batch as failed', async () => {
-    // 重构后 translateCaptions 内部走 translateAhead，错误被 catch 后标记为 failed，
-    // 不再抛出（resilient design：单批失败不影响其他批次）
     globalFetch.mockResolvedValue({
       ok: false,
       status: 401,
@@ -599,15 +590,12 @@ describe('CaptionOverlay', () => {
     ];
 
     overlay.start(captions);
-    // 初始状态：只显示原文（无 translatedText）
     const el = document.getElementById('fanyi-caption-overlay')!;
     expect(el.textContent).toBe('Hello');
 
-    // 模拟 Ahead Buffer 翻译完成后调用 updateCaptions
     captions[0].translatedText = '你好';
     overlay.updateCaptions(captions);
 
-    // 更新后应显示双语（原文 + 译文）
     expect(el.children.length).toBe(2);
     expect(el.children[0].textContent).toBe('Hello');
     expect(el.children[1].textContent).toBe('你好');
@@ -621,6 +609,7 @@ describe('CaptionOverlay', () => {
 describe('translateAhead', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalFetch.mockReset();
   });
 
   it('only translates captions within the ahead window', async () => {
@@ -641,12 +630,10 @@ describe('translateAhead', () => {
       { startMs: 100_000, durationMs: 2000, text: 'Far away', status: 'pending' },
     ];
 
-    // ahead 窗口：0 ~ 90 秒，只翻译第一条
     await translateAhead(captions, 0, 90_000, 'test-api-key');
 
     expect(captions[0].translatedText).toBe('你好');
     expect(captions[0].status).toBe('done');
-    // 第二条在 100 秒，超出 90 秒窗口，不应翻译
     expect(captions[1].translatedText).toBeUndefined();
     expect(captions[1].status).toBe('pending');
   });
@@ -667,9 +654,7 @@ describe('translateAhead', () => {
 
     await translateAhead(captions, 0, 90_000, 'test-api-key');
 
-    // 第一条已翻译，不应再调用 API（mockResponse 返回空 translations）
     expect(captions[0].translatedText).toBe('已翻译');
-    // 第二条未翻译，会调用 API 但 mockResponse 返回空，所以标记为 failed
     expect(captions[1].status).toBe('failed');
   });
 
@@ -683,18 +668,13 @@ describe('translateAhead', () => {
 
     await translateAhead(captions, 0, 90_000, 'test-api-key', controller.signal);
 
-    // abort 后不应调用 fetch
     expect(globalFetch).not.toHaveBeenCalled();
-    // 字幕状态保持 pending
     expect(captions[0].status).toBe('pending');
   });
 
   it('aborts mid-batch when signal fires', async () => {
     const controller = new AbortController();
 
-    // 第一批通过 setTimeout（macrotask）resolve，让 abort 在两批之间触发：
-    // microtask（Promise 继续）先于 macrotask（setTimeout）执行，
-    // 所以必须让 fetch 本身也走 macrotask 才能让 abort 插入
     let callCount = 0;
     globalFetch.mockImplementation(() => {
       callCount++;
@@ -711,7 +691,6 @@ describe('translateAhead', () => {
           }, 0);
         });
       }
-      // 第二批应该不会被调用（因为 abort 了）
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({ choices: [{ message: { content: '{"translations":[]}' } }] }),
@@ -719,16 +698,13 @@ describe('translateAhead', () => {
     });
 
     const captions: CaptionEvent[] = [];
-    // 构造超过 BATCH_SIZE (50) 的字幕，确保需要两批
     for (let i = 0; i < 60; i++) {
       captions.push({ startMs: i * 2000, durationMs: 2000, text: 'Line ' + i, status: 'pending' });
     }
 
     await translateAhead(captions, 0, Number.MAX_SAFE_INTEGER, 'test-api-key', controller.signal);
 
-    // 第一批 50 条应该被翻译（第一条验证）
     expect(captions[0].translatedText).toBe('你好');
-    // fetch 只应被调用一次（第一批），第二批因 abort 不调用
     expect(callCount).toBe(1);
   });
 
@@ -762,6 +738,7 @@ describe('translateAhead', () => {
 describe('translateBatch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalFetch.mockReset();
   });
 
   it('returns empty map when signal already aborted', async () => {
@@ -811,7 +788,6 @@ describe('YouTubeCaptionManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     document.body.innerHTML = '';
-    // 重置单例（通过 destroy + 重新 getInstance）
     (YouTubeCaptionManager as any)._instance = null;
     manager = YouTubeCaptionManager.getInstance();
   });
@@ -827,19 +803,16 @@ describe('YouTubeCaptionManager', () => {
   });
 
   it('start returns false when not on YouTube watch page', async () => {
-    // jsdom 默认 location 是 about:blank，extractVideoId 返回 null
     const result = await manager.start('test-api-key');
     expect(result).toBe(false);
   });
 
   it('stop clears running state', () => {
-    // stop 应该不抛错，即使没启动过
     expect(() => manager.stop()).not.toThrow();
   });
 
   it('destroy clears cache and removes listeners', () => {
     expect(() => manager.destroy()).not.toThrow();
-    // destroy 后 getInstance 应该返回新实例
     const newManager = YouTubeCaptionManager.getInstance();
     expect(newManager).not.toBe(manager);
   });
