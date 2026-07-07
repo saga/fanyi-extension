@@ -591,14 +591,16 @@ describe('CaptionOverlay', () => {
 
     overlay.start(captions);
     const el = document.getElementById('fanyi-caption-overlay')!;
-    expect(el.textContent).toBe('Hello');
+    // 未翻译完成时不显示
+    expect(el.textContent).toBe('');
+    expect(el.style.display).toBe('none');
 
     captions[0].translatedText = '你好';
     overlay.updateCaptions(captions);
 
-    expect(el.children.length).toBe(2);
-    expect(el.children[0].textContent).toBe('Hello');
-    expect(el.children[1].textContent).toBe('你好');
+    expect(el.children.length).toBe(1);
+    expect(el.children[0].textContent).toBe('你好');
+    expect(el.style.display).toBe('block');
   });
 });
 

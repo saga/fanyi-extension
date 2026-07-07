@@ -2,7 +2,7 @@
  * CaptionOverlay — 字幕 Overlay 渲染器。
  *
  * 监听 <video> 的 timeupdate 事件，按当前播放时间找到对应字幕，
- * 在视频底部显示双语字幕（原文 + 译文）。
+ * 在视频底部显示译文。
  *
  * 重构要点（解决问题 1 的显示侧）：
  *   - 新增 updateCaptions(captions) 方法：当 Ahead Buffer 翻译了新字幕后，
@@ -25,8 +25,6 @@ export class CaptionOverlay {
   private video: HTMLVideoElement | null = null;
   private captions: CaptionEvent[] = [];
   private overlayEl: HTMLElement | null = null;
-  /** 预建的原文容器（start 时创建，update 时只改 textContent） */
-  private origEl: HTMLElement | null = null;
   /** 预建的译文容器（start 时创建，update 时只改 textContent） */
   private transEl: HTMLElement | null = null;
   private timeUpdateHandler: (() => void) | null = null;
@@ -83,7 +81,6 @@ export class CaptionOverlay {
     this.timeUpdateHandler = null;
     this.overlayEl?.remove();
     this.overlayEl = null;
-    this.origEl = null;
     this.transEl = null;
     this.video = null;
     this.captions = [];
@@ -108,7 +105,7 @@ export class CaptionOverlay {
       'left: 50%',
       'transform: translateX(-50%)',
       'max-width: 90%',
-      'padding: 6px 12px',
+      'padding: 8px 16px',
       'background: rgba(0, 0, 0, 0.75)',
       'color: #fff',
       'font-size: 16px',
@@ -120,24 +117,26 @@ export class CaptionOverlay {
       'display: none',
     ].join('; ');
 
-    // 预建原文和译文容器（避免每次 update 时 innerHTML='' + createElement）
-    const orig = document.createElement('div');
-    orig.style.opacity = '0.7';
-    orig.style.fontSize = '14px';
+    // 预建译文容器（避免每次 update 时 innerHTML='' + createElement）
     const trans = document.createElement('div');
-    el.appendChild(orig);
+    trans.style.cssText = [
+      'font-size: clamp(20px, 2.6vw, 36px)',
+      'font-weight: 600',
+      'line-height: 1.2',
+      'color: #ffeb3b',
+      'text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9)',
+    ].join('; ');
     el.appendChild(trans);
 
     // 挂到视频播放器容器上
     const player = document.querySelector('.html5-video-player');
     (player || document.body).appendChild(el);
     this.overlayEl = el;
-    this.origEl = orig;
     this.transEl = trans;
   }
 
   private update(): void {
-    if (!this.video || !this.overlayEl || !this.origEl || !this.transEl) return;
+    if (!this.video || !this.overlayEl || !this.transEl) return;
 
     const currentMs = this.video.currentTime * 1000;
 
@@ -187,21 +186,15 @@ export class CaptionOverlay {
     this.lastShownIdx = idx;
     this.renderedTranslation = caption.translatedText;
 
-    // 只更新 textContent，不重建 DOM（解决 Bug 6：性能问题）
-    this.origEl.textContent = caption.text;
+    // 只显示译文；未翻译完成时不显示
     if (caption.translatedText) {
-      // 双语显示：原文 + 译文
       this.transEl.textContent = caption.translatedText;
-      this.transEl.style.display = 'block';
+      this.overlayEl.style.display = 'block';
+      console.log('[Overlay] render idx=' + idx +
+        ', trans="' + caption.translatedText.substring(0, 30) + '"');
     } else {
-      // 译文还没翻好，隐藏译文容器
       this.transEl.textContent = '';
-      this.transEl.style.display = 'none';
+      this.overlayEl.style.display = 'none';
     }
-    this.overlayEl.style.display = 'block';
-    console.log('[Overlay] render idx=' + idx +
-      ', translated=' + (caption.translatedText ? 'yes' : 'no') +
-      ', text="' + caption.text.substring(0, 30) + '"' +
-      (caption.translatedText ? ', trans="' + caption.translatedText.substring(0, 30) + '"' : ''));
   }
 }
