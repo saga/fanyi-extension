@@ -101,7 +101,7 @@ export class CaptionOverlay {
     el.id = OVERLAY_ID;
     el.style.cssText = [
       'position: absolute',
-      'bottom: 18px',
+      'bottom: 24px',
       'left: 50%',
       'transform: translateX(-50%)',
       'max-width: 90%',
@@ -120,10 +120,10 @@ export class CaptionOverlay {
     // 预建译文容器（避免每次 update 时 innerHTML='' + createElement）
     const trans = document.createElement('div');
     trans.style.cssText = [
-      'font-size: clamp(14px, 1.4vw, 24px)',
+      'font-size: clamp(14px, 1.4vw, 32px)',
       'font-weight: 400',
       'line-height: 1.3',
-      'color: #fff',
+      'color: #ffffffff',
       'text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9)',
     ].join('; ');
     el.appendChild(trans);
