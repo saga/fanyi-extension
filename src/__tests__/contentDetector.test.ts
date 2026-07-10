@@ -347,5 +347,37 @@ describe('contentDetector', () => {
       expect(root!.className).toContain('blog-detail-container');
       expect(root!.className).not.toContain('inner-block-content');
     });
+
+    // Readability fallback: 当评分算法因 body 噪声过大 + 真正容器链接多
+    // 而选中高密度碎片时，Readability 应作为 fallback 纠正回真正的文章容器。
+    it('falls back to Readability when scoring picks a tiny fragment due to body noise', () => {
+      const articleText = 'We are excited to announce our new product. It brings powerful features to developers around the world. This article explains the motivation, design, and usage of the new release.';
+      const denseFragment = 'To validate performance we ran comprehensive benchmarks across multiple configurations and observed significant improvements in latency and throughput metrics.';
+      // 大量噪声脚本让真正容器占 body 比例降到 <5%，触发 Readability fallback 路径
+      const noise = 'noise '.repeat(20000);
+      // 大量链接稀释真正容器的 density score
+      const manyLinks = Array.from({ length: 40 }, (_, i) => `<a href="/ref-${i}">reference ${i}</a>`).join(' ');
+
+      document.body.innerHTML = `
+        <script>/* ${noise} */</script>
+        <header><a href="/">Home</a><a href="/about">About</a></header>
+        <div class="main-content">
+          <h1>Product Announcement</h1>
+          <p>${articleText}</p>
+          <p>Developers can integrate the library using a simple npm install command and start building immediately.</p>
+          <p>${manyLinks}</p>
+          <div class="rich-content">
+            <p>${denseFragment}</p>
+          </div>
+          <p>The release includes comprehensive documentation, examples, and community support channels.</p>
+        </div>
+        <footer><p>Terms & Privacy</p></footer>
+      `;
+
+      const root = detectArticleRoot(document);
+      expect(root).not.toBeNull();
+      expect(root!.className).toContain('main-content');
+      expect(root!.className).not.toContain('rich-content');
+    });
   });
 });

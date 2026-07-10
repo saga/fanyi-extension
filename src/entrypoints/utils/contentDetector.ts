@@ -9,12 +9,15 @@
  *   - 用 token / compound / id 信号替代模糊的 regex
  *   - 引入 structure boost、container penalty、sibling normalization、
  *     depth normalization 压制 wrapper dominance 和 sidebar/article 混排误判
+ *   - 当评分算法无法选出可靠根节点时，使用 @mozilla/readability 作为 fallback
  *
  * 特点：
  *   - no layout dependency
  *   - deterministic scoring
  *   - SPA / CMS / blog 全覆盖
  */
+
+import { Readability } from '@mozilla/readability';
 
 // =============================================================================
 // 常量
@@ -347,7 +350,7 @@ export function scoreElement(el: Element): number {
       } else if (ratio >= 0.25) {
         globalRatioBoost = 1.15;
       } else if (ratio < 0.05) {
-        globalRatioBoost = Math.max(0.5, ratio / 0.05);
+        globalRatioBoost = Math.max(0.1, ratio / 0.05);
       }
     }
   }
@@ -426,6 +429,93 @@ export function collectCandidates(doc: Document): Element[] {
 }
 
 // =============================================================================
+// Readability fallback
+// =============================================================================
+
+/**
+ * 当评分算法无法给出可靠根节点时，使用 @mozilla/readability 提取正文，
+ * 并在原始 DOM 中定位对应的容器作为 fallback 根节点。
+ *
+ * 适用场景：页面没有 article/main 语义标签，且内容被切成多个高密度小碎片
+ * （如 developers.googleblog.com 的 .inner-block-content.rich-content），
+ * 评分算法容易选错。Readability 的启发式规则能更稳定地找到主文章区域。
+ */
+function tryReadabilityRoot(doc: Document): Element | null {
+  try {
+    // Readability 会修改传入的文档树，因此必须在克隆的文档上运行，
+    // 避免破坏原始 DOM 导致后续 extractBlocks / apply 失败。
+    const clone = doc.documentElement.cloneNode(true) as HTMLElement;
+    const cloneDoc = doc.implementation.createHTMLDocument(doc.title);
+    cloneDoc.documentElement.replaceWith(clone);
+
+    const reader = new Readability(cloneDoc);
+    const article = reader.parse();
+    if (!article || !article.textContent || article.textContent.trim().length < 200) {
+      return null;
+    }
+
+    // 取 Readability 正文中的第一个较长段落作为定位签名
+    const paragraphs = article.textContent
+      .split(/\n+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const signature =
+      paragraphs.find((p) => p.length >= 40) || paragraphs[0];
+    if (!signature) return null;
+
+    // 在原始 DOM 中定位 Readability 提取的段落。
+    // 清理后的文本可能跨多个后代节点（如 <span>LiteRT.js</span> 被单独包裹），
+    // 因此先尝试完整签名，再逐步缩短到词前缀，直到在某个文本节点中命中。
+    let matchedTextNode: Text | null = null;
+    const signatureCandidates: string[] = [signature];
+    const words = signature.split(/\s+/);
+    for (let i = Math.min(words.length - 1, 6); i >= 2; i--) {
+      const prefix = words.slice(0, i).join(' ');
+      if (prefix.length >= 12) signatureCandidates.push(prefix);
+    }
+
+    for (const candidate of signatureCandidates) {
+      const treeWalker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, null);
+      while (treeWalker.nextNode()) {
+        const node = treeWalker.currentNode as Text;
+        if (node.textContent && node.textContent.includes(candidate)) {
+          matchedTextNode = node;
+          break;
+        }
+      }
+      if (matchedTextNode) break;
+    }
+    if (!matchedTextNode) return null;
+
+    // 从文本节点向上走到一个稳定的容器（div/section/article/main），最多 5 层
+    let root: Element | null = matchedTextNode.parentElement;
+    let candidate: Element | null = matchedTextNode.parentElement;
+    let steps = 0;
+    while (
+      candidate &&
+      candidate !== doc.body &&
+      candidate !== doc.documentElement &&
+      steps < 6
+    ) {
+      const tag = candidate.tagName.toLowerCase();
+      if (tag === 'article' || tag === 'main' || tag === 'section' || tag === 'div') {
+        root = candidate;
+      }
+      candidate = candidate.parentElement;
+      steps++;
+    }
+
+    // 排除 consent SDK 容器，避免误把 cookie 弹窗当正文
+    if (root && isConsentSdkContainer(root)) return null;
+
+    return root;
+  } catch (e) {
+    console.warn('[ContentDetector] Readability fallback failed:', e);
+    return null;
+  }
+}
+
+// =============================================================================
 // entry
 // =============================================================================
 
@@ -441,6 +531,36 @@ export function detectArticleRoot(doc: Document): Element | null {
     if (s > bestScore) {
       bestScore = s;
       best = el;
+    }
+  }
+
+  // 判断当前最佳候选是否可靠：分数不足或占 body 文本比例过低时，启用 Readability fallback
+  let shouldTryReadability = false;
+  if (best && doc.body) {
+    const bodyText = (doc.body.textContent || '').length;
+    const ratio = bodyText > 0 ? (best.textContent || '').length / bodyText : 0;
+    if (bestScore < SCORE_THRESHOLD || ratio < 0.15) {
+      shouldTryReadability = true;
+    }
+  } else {
+    shouldTryReadability = true;
+  }
+
+  if (shouldTryReadability) {
+    const readabilityRoot = tryReadabilityRoot(doc);
+    if (readabilityRoot) {
+      // Readability 已经是一个相对可靠的正文提取器；
+      // 当现有评分算法不可靠时才启用 fallback，因此直接采用其结果，
+      // 并用保底分数确保能跨过阈值。
+      const s = scoreElement(readabilityRoot);
+      const readabilityScore = Math.max(s, SCORE_THRESHOLD + 1);
+      if (readabilityScore > bestScore) {
+        bestScore = readabilityScore;
+        best = readabilityRoot;
+        console.log(
+          `[ContentDetector] Readability fallback root: <${best.tagName}> .${(best.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)})`,
+        );
+      }
     }
   }
 
