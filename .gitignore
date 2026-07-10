@@ -9,6 +9,8 @@
 
 other-ref/
 
+.playwright-profile/
+
 output/
 
 temp/

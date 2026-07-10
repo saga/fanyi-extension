@@ -333,13 +333,33 @@ export function scoreElement(el: Element): number {
   if (depth < 3) depthBoost = 0.95;
   if (depth > 7) depthBoost *= 0.9;
 
+  // global ratio boost: 真正文章根通常占 body 文本大部分；
+  // 压制只占 body 很小比例的高密度碎片（如 .inner-block-content.rich-content）。
+  let globalRatioBoost = 1;
+  const ownerDoc = el.ownerDocument;
+  const bodyEl = ownerDoc?.body;
+  if (bodyEl && bodyEl !== el) {
+    const bodyText = (bodyEl.textContent || '').length;
+    if (bodyText > 0) {
+      const ratio = text.length / bodyText;
+      if (ratio >= 0.4) {
+        globalRatioBoost = 1.3;
+      } else if (ratio >= 0.25) {
+        globalRatioBoost = 1.15;
+      } else if (ratio < 0.05) {
+        globalRatioBoost = Math.max(0.5, ratio / 0.05);
+      }
+    }
+  }
+
   return (
     score *
     structureBoost *
     classMultiplier *
     containerPenalty *
     siblingBoost *
-    depthBoost
+    depthBoost *
+    globalRatioBoost
   );
 }
 
