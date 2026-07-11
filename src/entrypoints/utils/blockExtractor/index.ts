@@ -66,10 +66,13 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   // 跨段落去重: 同一文本多次出现只取第一个 (HBR summary callout 模式)。
   const seenTexts = new Set<string>();
 
-  const startNode =
-    rootNode instanceof Document
-      ? rootNode.body || rootNode.documentElement
-      : rootNode;
+  const isDocumentLike =
+    typeof Document !== 'undefined'
+      ? rootNode instanceof Document
+      : !!(rootNode as Document).body || !!(rootNode as Document).documentElement;
+  const startNode = isDocumentLike
+    ? (rootNode as Document).body || (rootNode as Document).documentElement
+    : rootNode;
   if (!startNode) {
     console.warn('[BlockExtractor] No valid start node found');
     return [];
