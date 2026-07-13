@@ -129,6 +129,7 @@ export function buildNodeMap(
 export { PATTERNS, MIN_TEXT_LENGTH, MAX_TEXT_LENGTH } from './constants';
 export {
   isMetadataClass,
+  hasContentTokens,
   shouldSkipByClass,
   shouldSkipBySiteRules,
   isElementHidden,

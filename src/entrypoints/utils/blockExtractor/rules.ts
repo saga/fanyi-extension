@@ -14,6 +14,7 @@ import {
   AD_IFRAME_PATTERNS,
   AD_SIZE_PATTERNS,
   ARTICLE_CONTAINER_CLASS_PATTERNS,
+  CONTENT_TOKENS,
   COOKIE_BANNER_TEXT_PATTERNS,
   DIRECT_SET,
   DYNAMIC_NOISE_CONTAINER_TAGS,
@@ -148,6 +149,24 @@ export function isMetadataClass(el: Element): boolean {
   for (const token of tokens) {
     for (const sub of token.split(/[_\-]+/)) {
       if (METADATA_TOKENS.has(sub)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 元素是否同时拥有内容容器 token (post/content/article/story/entry/rich)。
+ *
+ * WordPress 等CMS 会在正文容器上叠加 category-* / tag-* 等 metadata class
+ * (如 <section class="post__content category-ai-and-ml">)。
+ * 当元素同时命中 metadata 和 content token 时, 它是正文容器, 不应被拒绝。
+ */
+export function hasContentTokens(el: Element): boolean {
+  const tokens = tokenizeClass(el);
+  if (tokens.length === 0) return false;
+  for (const token of tokens) {
+    for (const sub of token.split(/[_\-]+/)) {
+      if (CONTENT_TOKENS.has(sub)) return true;
     }
   }
   return false;
