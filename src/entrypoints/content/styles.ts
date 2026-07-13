@@ -10,8 +10,6 @@
  *   fanyi-status-overlay  状态提示条
  *   fanyi-loading/success/error 状态条颜色
  *   fanyi-original/translation/missing  翻译渲染
- *   fanyi-floating-btn   浮动按钮
- *   fanyi-btn-translated 已翻译时按钮变绿
  *   fanyi-config-panel   配置面板
  *   fanyi-btn-save/translate/restore 配置面板按钮
  */
@@ -84,10 +82,6 @@ export function getStyles(isMobile: boolean): string {
     .fanyi-btn-restore:active {
       opacity: 0.8;
       transform: scale(0.98);
-    }
-    .fanyi-floating-btn.fanyi-btn-translated {
-      background: linear-gradient(135deg, #67c23a, #85ce61);
-      color: white;
     }
 
     /* 低优先级元素视觉弱化（保留 DOM，hover 恢复） */

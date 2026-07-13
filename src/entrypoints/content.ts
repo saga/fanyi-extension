@@ -19,12 +19,7 @@ import browser from 'webextension-polyfill';
 import { getConfig } from './utils/config';
 import { getStyles } from './content/styles';
 import { showStatus, hideStatus } from './content/statusOverlay';
-import {
-  setupFloatingButton,
-  updateButtonState,
-  setupTouchEvents,
-} from './content/floatingButton';
-import { showConfigPanel } from './content/configPanel';
+import { updateButtonState } from './content/floatingButton';
 import {
   createTranslationController,
   type TranslationController,
@@ -78,13 +73,8 @@ export default defineContentScript({
     (document.head || document.documentElement).appendChild(style);
 
     // === 浮动按钮 + 触屏手势 ===
-    setupFloatingButton(
-      isMobile,
-      () => translation?.isTranslated() ?? false,
-      () => handleAction('translate'),
-      () => handleAction('restore'),
-    );
-    setupTouchEvents(() => handleAction('translate'));
+    // 用户反馈：底部绿色浮动按钮影响阅读，已移除。
+    // 翻译仍可通过 popup、快捷键、右键菜单触发。
 
     // === YouTube 字幕翻译：改为与整页翻译一致，需要点击翻译按钮才启动 ===
     const youTubeStatusCallback = (msg: string, type: string) => {
