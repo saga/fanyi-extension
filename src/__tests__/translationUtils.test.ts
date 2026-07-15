@@ -17,6 +17,7 @@ describe('translationUtils', () => {
   beforeEach(async () => {
     document.body.innerHTML = '';
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     // Re-import to get fresh module state
     mod = await import('../entrypoints/content/translationUtils');
   });
@@ -87,7 +88,7 @@ describe('translationUtils', () => {
       ['b1', el1],
       ['b2', el2],
     ]);
-    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set() };
+    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
 
     mod.saveOriginalTexts(blocks, nodeMap, state);
     expect(state.originalTexts.get('b1')).toBe('Hello world');
@@ -101,7 +102,7 @@ describe('translationUtils', () => {
       { id: 'b2', tag: 'p', text: 'World', xpath: '/div[2]' },
     ];
     const nodeMap = new Map<string, Node>([['b1', document.createElement('p')]]);
-    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set() };
+    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
 
     mod.saveOriginalTexts(blocks, nodeMap, state);
     expect(state.originalTexts.has('b1')).toBe(true);
@@ -159,7 +160,7 @@ describe('translationUtils', () => {
     const translationMap = new Map<string, string>([['b1', 'Translated']]);
     const nodeMap = new Map<string, Node>([['b1', el]]);
 
-    await applyTranslationsWithRAF(translationMap, nodeMap, 'target');
+    await applyTranslationsWithRAF(translationMap, nodeMap, { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() });
     // After rAF, the translation should be applied
     expect(el.textContent).toContain('Translated');
   });
@@ -175,7 +176,7 @@ describe('translationUtils', () => {
 
     // Should not throw when node is a text node
     await expect(
-      applyTranslationsWithRAF(translationMap, nodeMap, 'target'),
+      applyTranslationsWithRAF(translationMap, nodeMap, { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() }),
     ).resolves.toBeUndefined();
   });
 
@@ -184,7 +185,7 @@ describe('translationUtils', () => {
 
     const nodeMap = new Map<string, Node>();
     await expect(
-      applyTranslationsWithRAF(new Map(), nodeMap, 'target'),
+      applyTranslationsWithRAF(new Map(), nodeMap, { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() }),
     ).resolves.toBeUndefined();
   });
 
@@ -206,5 +207,43 @@ describe('translationUtils', () => {
     expect(el1.classList.contains('fanyi-translated')).toBe(false);
     expect(el2.classList.contains('fanyi-missing')).toBe(false);
     expect(el2.hasAttribute('title')).toBe(false);
+  });
+
+  it('restoreOriginal removes body dataset and clears state when provided', async () => {
+    document.body.dataset.fanyiTranslated = 'true';
+    const state: TranslationState = {
+      originalTexts: new Map([['b1', 'hello']]),
+      translatedBlocks: new Set(['b1']),
+      translatedTexts: new Map([['b1', '你好']]),
+    };
+
+    const utils = await import('../entrypoints/content/translationUtils');
+    utils.restoreOriginal(state);
+
+    expect(document.body.dataset.fanyiTranslated).toBeUndefined();
+    expect(state.originalTexts.size).toBe(0);
+    expect(state.translatedBlocks.size).toBe(0);
+    expect(state.translatedTexts.size).toBe(0);
+  });
+
+  it('restoreOriginal with silent=true does not call showStatus', async () => {
+    const { showStatus } = await import('../entrypoints/content/statusOverlay');
+    document.body.dataset.fanyiTranslated = 'true';
+
+    const utils = await import('../entrypoints/content/translationUtils');
+    utils.restoreOriginal(undefined, true);
+
+    expect(showStatus).not.toHaveBeenCalled();
+    expect(document.body.dataset.fanyiTranslated).toBeUndefined();
+  });
+
+  it('restoreOriginal with silent=false calls showStatus', async () => {
+    const { showStatus } = await import('../entrypoints/content/statusOverlay');
+    document.body.dataset.fanyiTranslated = 'true';
+
+    const utils = await import('../entrypoints/content/translationUtils');
+    utils.restoreOriginal(undefined, false);
+
+    expect(showStatus).toHaveBeenCalledWith('已恢复原文', 'success');
   });
 });

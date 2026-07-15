@@ -66,6 +66,8 @@ export default defineContentScript({
     let translation: TranslationController | null = null;
     // 记录整页翻译对应的 videoId，用于 SPA 切换视频时检测是否需要清理
     let translatedVideoId: string | null = null;
+    // SPA 导航检测：记录上一个 URL，popstate + 轮询 location.href
+    let lastLocationHref = window.location.href;
 
     // === 注入样式 ===
     const style = document.createElement('style');
@@ -107,6 +109,26 @@ export default defineContentScript({
         translatedVideoId = null;
       }
     }, true);
+
+    // === SPA 导航检测：Substack 等站点切换文章后 content script 不会重新注入，
+    // 需要主动清理上一个页面的翻译状态，否则新页面会被误判为"已翻译"。
+    // 注意：不 monkey patch history.pushState/replaceState（Claude.com 会因此风控），
+    // 改用 popstate + 轮询 location.href。
+    function onSpaNavigation(): void {
+      const currentHref = window.location.href;
+      if (currentHref === lastLocationHref) return;
+      lastLocationHref = currentHref;
+
+      // 静默恢复上一个页面的翻译状态（不弹状态条），避免新页面被误判
+      translation?.restore(true);
+      stopYouTubeCaptionTranslation();
+      translatedVideoId = null;
+      updateButtonState(false);
+      console.log('[ContentScript] SPA navigation detected, translation state reset:', currentHref);
+    }
+
+    window.addEventListener('popstate', onSpaNavigation);
+    setInterval(onSpaNavigation, 500);
 
     // === 消息路由：来自 background、popup、keyboard shortcut ===
     browser.runtime.onMessage.addListener((message: any) => {

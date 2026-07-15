@@ -45,8 +45,10 @@ export type { TranslationState };
 export interface TranslationController {
   /** 启动/恢复整页翻译（防重入：翻译中再次调用直接返回）。 */
   start(): Promise<void>;
-  /** 恢复原文，清理 .fanyi-translated / .fanyi-missing 标记。 */
-  restore(): void;
+  /** 恢复原文，清理 .fanyi-translated / .fanyi-missing 标记。
+   * @param silent 为 true 时不显示状态提示（用于 SPA 自动导航清理状态）。
+   */
+  restore(silent?: boolean): void;
   /** 切换译文显示/隐藏（不重新翻译，只 toggle .fanyi-translated 类）。 */
   toggle(): void;
   /** 当前是否处于"已翻译"状态。 */
@@ -103,9 +105,9 @@ export function createTranslationController(
       }
     },
 
-    restore() {
+    restore(silent = false) {
       isTranslatedState = false;
-      restoreOriginal(state);
+      restoreOriginal(state, silent);
     },
 
     toggle() {

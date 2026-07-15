@@ -125,7 +125,10 @@ function cleanupTempAttrs(): void {
   }
 }
 
-export function restoreOriginal(state?: TranslationState): void {
+export function restoreOriginal(
+  state?: TranslationState,
+  silent = false,
+): void {
   for (const node of Array.from(document.querySelectorAll('.fanyi-translated'))) {
     restoreBlock(node as HTMLElement);
   }
@@ -144,8 +147,10 @@ export function restoreOriginal(state?: TranslationState): void {
     state.translatedTexts.clear();
   }
   updateButtonState(false);
-  showStatus('已恢复原文', 'success');
-  setTimeout(hideStatus, 4000);
+  if (!silent) {
+    showStatus('已恢复原文', 'success');
+    setTimeout(hideStatus, 4000);
+  }
 }
 
 export function toggleTranslation(): void {
