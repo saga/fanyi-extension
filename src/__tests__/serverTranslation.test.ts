@@ -547,4 +547,56 @@ describe('applyServerTranslatedHtml', () => {
     expect(result.size).toBe(0);
     expect(applyBlockTranslation).not.toHaveBeenCalled();
   });
+
+  it('strips <base> tag from server HTML to avoid CSP base-uri violation (regression: aws.amazon.com)', () => {
+    // 服务端返回的 HTML 可能包含 <base href="...">，但某些站点 CSP 设置
+    // base-uri 'none'，DOMParser 解析 <base> 会触发违例。应移除后再解析。
+    const translatedHtml = `
+      <html><head>
+        <base href="https://aws.amazon.com/blogs/machine-learning/multi-agent-social-intelligence-with-strands-agents-and-amazon-bedrock/">
+      </head><body>
+        <h1 data-fanyi-block-id="b1" class="fanyi-translated">
+          <span class="fanyi-original">Hello World</span>
+          <span class="fanyi-translation">你好世界</span>
+        </h1>
+      </body></html>
+    `;
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
+    ];
+
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    // jsdom 不会触发 CSP 违例，这里验证 <base> 被移除后仍能正常提取译文
+    const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
+
+    expect(result.size).toBe(1);
+    expect(result.has('b1')).toBe(true);
+    expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
+  });
+
+  it('strips self-closing and uppercase <base> tags', () => {
+    const translatedHtml = `
+      <html><head>
+        <BASE HREF="https://example.com/">
+        <base href="https://example.com/" />
+      </head><body>
+        <h1 data-fanyi-block-id="b1" class="fanyi-translated">
+          <span class="fanyi-translation">你好世界</span>
+        </h1>
+      </body></html>
+    `;
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
+    ];
+
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
+
+    expect(result.size).toBe(1);
+    expect(result.has('b1')).toBe(true);
+  });
 });

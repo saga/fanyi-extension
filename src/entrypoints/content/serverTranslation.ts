@@ -92,7 +92,13 @@ export function applyServerTranslatedHtml(
   nodeMap: Map<string, Node>,
 ): Set<string> {
   const parser = new DOMParser();
-  const translatedDoc = parser.parseFromString(translatedHtml, 'text/html');
+  // 服务端返回的 HTML 可能包含 <base href="...">，用于相对路径解析。
+  // 但某些站点 CSP 设置 base-uri 'none'，DOMParser 解析 <base> 时会触发违例。
+  // 扩展端只提取 .fanyi-translation 文本回填，不需要 base URI，直接移除。
+  const sanitizedHtml = translatedHtml
+    .replace(/<base\b[^>]*>/gi, '')
+    .replace(/<\/base\b[^>]*>/gi, '');
+  const translatedDoc = parser.parseFromString(sanitizedHtml, 'text/html');
 
   const translatedIds = new Set<string>();
   for (const block of blocks) {
