@@ -331,8 +331,28 @@ export function isInsideArticle(el: Element): boolean {
   return false;
 }
 
+// =============================================================================
+// 段落类容器判定（用于把站点特定的 div 当作 <p> 同级处理）
+// =============================================================================
+
+const PARAGRAPH_LIKE_CLASS_PATTERNS: readonly string[] = [
+  // X (Twitter) 长文使用 Draft.js 渲染，段落是 <div class="public-DraftStyleDefault-block">。
+  // 这些 div 内部可能混有 <span> 和包裹 <a> 的 inline div，walker 会把它当成容器跳过，
+  // 导致一段正文被拆成多个 inline 块。把它们识别为段落类容器后可整体抓取。
+  'public-draftstyledefault-block',
+];
+
+/** 元素是否拥有站点/框架特定的段落类 class，应被视为段落级块。 */
+export function isParagraphLikeElement(el: Element): boolean {
+  const cls = (el.getAttribute('class') || '').toLowerCase();
+  for (const pattern of PARAGRAPH_LIKE_CLASS_PATTERNS) {
+    if (cls.includes(pattern)) return true;
+  }
+  return false;
+}
+
 /**
- * 元素是否有 DIRECT_SET 块级父 (p/li/dd/blockquote/...)。
+ * 元素是否有 DIRECT_SET 或段落类容器父 (p/li/dd/blockquote/... / public-DraftStyleDefault-block)。
  * 用在 INLINE_SET 元素上: 如果外层已是块级,内联不单独抓 (会碎片化句子);
  * 如果只在 inline 容器里 (e.g. <span class="highlight">单独成段</span>),可单独抓。
  */
@@ -341,6 +361,9 @@ export function hasBlockLevelParent(el: Element): boolean {
   while (current) {
     const tag = current.tagName.toLowerCase();
     if (DIRECT_SET.has(tag)) return true;
+    // 站点特定的段落类 div (如 X 长文的 Draft.js 段落) 也视为块级父,
+    // 避免其内部 <span>/<a> 碎片被单独提取。
+    if (isParagraphLikeElement(current)) return true;
     if (tag === 'body' || tag === 'html') return false;
     current = current.parentElement;
   }
@@ -402,12 +425,16 @@ export function classifyChildren(el: Element): ChildClassification {
 // 杂项
 // =============================================================================
 
-/** 元素是否处于可编辑状态 (contenteditable / isContentEditable)。 */
+/** 元素是否处于可编辑状态 (contenteditable / isContentEditable)。
+ *
+ * 注意：部分 DOM 实现会把 contenteditable="false" 的 isContentEditable 误判为 true，
+ * 导致 X (Twitter) 长文等只读 Draft.js 编辑器内容被整棵跳过。因此以显式属性值优先判断。
+ */
 export function isContentEditable(el: Element): boolean {
-  return (
-    !!(el as HTMLElement).isContentEditable ||
-    el.getAttribute('contenteditable') === 'true'
-  );
+  const attr = el.getAttribute('contenteditable');
+  if (attr === 'false') return false;
+  if (attr === 'true' || attr === '') return true;
+  return !!(el as HTMLElement).isContentEditable;
 }
 
 /** 元素是否被自身标记 "不要翻译" (fanyi-bilingual-block) 或 "notranslate"。 */

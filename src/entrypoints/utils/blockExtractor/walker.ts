@@ -31,6 +31,7 @@ import {
   isMetadataClass,
   isNonHTMLNamespace,
   isOverlayElement,
+  isParagraphLikeElement,
   isPopupByStyle,
   isValidText,
   shouldSkipByClass,
@@ -99,11 +100,13 @@ function grabNode(node: Node): Element | false {
   const el = node;
   const tag = el.tagName.toLowerCase();
 
-  // 1) 块级元素 (DIRECT_SET): 若子树还有 DIRECT_SET 元素,自身不算
-  //    (子块会被独立抓到,避免重复)
-  if (DIRECT_SET.has(tag)) {
-    const hasDirectSetDescendant = el.querySelector(DIRECT_SET_CSS_SELECTOR) !== null;
-    if (hasDirectSetDescendant) return false;
+  // 1) 块级元素 (DIRECT_SET) 或段落类容器 (如 Draft.js 段落): 若子树还有 DIRECT_SET 元素,自身不算
+  //    (子块会被独立抓到,避免重复)。段落类 div 自身作为整块返回。
+  if (DIRECT_SET.has(tag) || isParagraphLikeElement(el)) {
+    if (DIRECT_SET.has(tag)) {
+      const hasDirectSetDescendant = el.querySelector(DIRECT_SET_CSS_SELECTOR) !== null;
+      if (hasDirectSetDescendant) return false;
+    }
     return isValidText(el.textContent) ? el : false;
   }
 
@@ -262,12 +265,14 @@ function acceptWalkerNode(
   // ⭐ soft score hint: 给 walker 一个轻量倾向性判断，避免过早误杀。
   const hint = getSoftHint(el, scoreHint);
 
-  // 4) DIRECT_SET 元素: 自身评估, 若子树还有 DIRECT_SET 则跳过 (让子块独立抓)
-  if (DIRECT_SET.has(tag)) {
-    const hasDirectSetDescendant = el.querySelector(DIRECT_SET_CSS_SELECTOR) !== null;
-    if (hasDirectSetDescendant) {
-      counters.skipped++;
-      return NodeFilter.FILTER_SKIP;
+  // 4) DIRECT_SET 与段落类容器: 自身评估, 若子树还有 DIRECT_SET 则跳过 (让子块独立抓)
+  if (DIRECT_SET.has(tag) || isParagraphLikeElement(el)) {
+    if (DIRECT_SET.has(tag)) {
+      const hasDirectSetDescendant = el.querySelector(DIRECT_SET_CSS_SELECTOR) !== null;
+      if (hasDirectSetDescendant) {
+        counters.skipped++;
+        return NodeFilter.FILTER_SKIP;
+      }
     }
     // hint 为负（sidebar/nav/footer 里的 p/li）降权 skip，不抓成独立块
     if (hint < 0) {
