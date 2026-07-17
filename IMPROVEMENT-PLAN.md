@@ -71,7 +71,7 @@ type Response = TranslateChunkResponse | ValidateApiKeyResponse | ...;
 
 ---
 
-### P2. 删除死代码 floatingButton.ts ✅ 已完成 (2026-07-18)
+### P2. 删除死代码 floatingButton.ts ✅ 已完成 (2026-07-18，含回归修复)
 
 **现状**: `setupFloatingButton()` 调用已从 `content.ts` 移除，但 `floatingButton.ts` 仍然被 import，且 `updateButtonState()` 仍被 3 个文件调用。
 
@@ -97,6 +97,18 @@ type Response = TranslateChunkResponse | ValidateApiKeyResponse | ...;
 - ✅ 清理 `content.ts` 中未使用的 `showStatus/hideStatus` import（diagnostics 提示的连带清理）
 - ✅ 更新 `ARCHITECTURE.md` 文件树移除 `floatingButton.ts` 行
 - ✅ `npm test -- --run` 全量通过：762 / 762
+
+**⚠️ 回归修复 (2026-07-18)**:
+P2 删除 `floatingButton.ts` 时一并删除了 `setupTouchEvents`，导致 Firefox Android 上三击翻译手势失效。用户报告后从 git 历史恢复功能，独立为 `touchGesture.ts`：
+
+- ✅ 新建 `src/entrypoints/content/touchGesture.ts`：仅保留 TripleTap 手势（500ms 内 3 次单击触发翻译），移除浮动按钮相关代码（用户之前要求去掉绿色 banner）
+- ✅ 命中扩展自身 UI（`.fanyi-config-panel` / `.fanyi-status-overlay`）时不响应手势，避免误触
+- ✅ `content.ts` 在 `isMobile` 分支下调用 `setupTouchEvents(() => handleAction('translate'))`
+- ✅ 新建 `src/__tests__/touchGesture.test.ts`：10 个测试覆盖三击触发、窗口超时重置、多指忽略、UI 命中过滤、preventDefault 调用、连续两轮触发等
+- ✅ `npm test -- --run` 全量通过：783 / 783（762 + 11 logger + 10 touchGesture）
+- ✅ 更新 `ARCHITECTURE.md` 文件树加入 `touchGesture.ts`
+
+**教训**: 删除"无调用方"的导出函数时，需确认是否通过非 import 机制（运行时事件监听、动态加载、平台特定路径）被使用。`setupTouchEvents` 虽然在 `setupFloatingButton` 外部独立导出，但删除整个文件时连带丢失了平台特定功能。
 
 ---
 
@@ -360,13 +372,14 @@ if (cached && cached.checksum !== cacheKey.checksum) {
 | P3. 日志系统治理 | 中 | 生产环境性能 + 调试体验 | ✅ |
 
 **Phase 1 汇总**:
-- 新建 2 个文件：`src/types/messages.ts`（消息层联合类型）+ `src/utils/logger.ts`（统一日志门面）
+- 新建 3 个文件：`src/types/messages.ts`（消息层联合类型）+ `src/utils/logger.ts`（统一日志门面）+ `src/entrypoints/content/touchGesture.ts`（P2 回归修复后独立的三击手势模块）
 - 删除 2 个文件：`floatingButton.ts` + `floatingButton.test.ts`
-- 新增 1 个测试文件：`src/__tests__/logger.test.ts`（11 个测试）
-- 测试总数：773 → 773（删除 11 个 floatingButton 测试 + 新增 11 个 logger 测试，净增 0；现有测试 762 + 11 = 773 全部通过）
+- 新增 2 个测试文件：`src/__tests__/logger.test.ts`（11 个测试）+ `src/__tests__/touchGesture.test.ts`（10 个测试）
+- 测试总数：773 → 783（删除 11 个 floatingButton 测试 + 新增 11 个 logger 测试 + 新增 10 个 touchGesture 测试，净增 10；现有测试 762 + 11 + 10 = 783 全部通过）
 - 类型安全：消除 17 处消息相关 `any`，background.ts/content.ts 的 onMessage listener 现在有完整类型签名
 - 日志治理：17 个源文件 89 处 `console.*` 全部替换为 `logger.*`，生产环境静默 debug 级别
 - 顺手修复：`handleTranslateChunkStream` 中 `sender.tab?.id` 的 `number | undefined` 潜在 bug
+- 回归修复：P2 删除 floatingButton.ts 时误删 setupTouchEvents，Firefox Android 三击翻译手势失效；新建独立 `touchGesture.ts` 恢复，仅保留手势逻辑、不恢复浮动按钮 UI
 
 ### Phase 2: 中风险、中收益（建议下个迭代）
 

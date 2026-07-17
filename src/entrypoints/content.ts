@@ -28,6 +28,7 @@ import {
   YouTubeCaptionManager,
   extractVideoId,
 } from './content/youtube';
+import { setupTouchEvents } from './content/touchGesture';
 import type { ContentMessage } from '../types/messages';
 
 import { logger } from '../utils/logger';
@@ -69,9 +70,12 @@ export default defineContentScript({
     style.textContent = getStyles(isMobile);
     (document.head || document.documentElement).appendChild(style);
 
-    // === 浮动按钮 + 触屏手势 ===
-    // 用户反馈：底部绿色浮动按钮影响阅读，已移除。
-    // 翻译仍可通过 popup、快捷键、右键菜单触发。
+    // === 触屏手势（仅移动端） ===
+    // Firefox Android 没有 popup 右键菜单，固定用三击翻译手势启动。
+    // 桌面端走 popup / 快捷键 / 右键菜单。
+    if (isMobile) {
+      setupTouchEvents(() => handleAction('translate'));
+    }
 
     // === YouTube 字幕翻译：改为与整页翻译一致，需要点击翻译按钮才启动 ===
     const youTubeStatusCallback = (msg: string, type: string) => {

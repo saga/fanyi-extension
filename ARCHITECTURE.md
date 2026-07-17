@@ -46,6 +46,7 @@ fanyi-extension/
 │   │   │   ├── translationTypes.ts   # 翻译状态类型
 │   │   │   ├── configPanel.ts        # 页面内配置面板
 │   │   │   ├── statusOverlay.ts      # 状态提示条
+│   │   │   ├── touchGesture.ts       # 触屏三击翻译手势 (Firefox Android)
 │   │   │   ├── styles.ts             # CSS 模板
 │   │   │   └── youtube/              # YouTube 字幕翻译
 │   │   │       ├── index.ts              # 公共 API

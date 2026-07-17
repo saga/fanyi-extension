@@ -33,6 +33,7 @@ declare global {
   const isReadonly: typeof import('vue').isReadonly
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
+  const logger: typeof import('/Users/saga/code-repos/fanyi-extension/src/utils/logger').logger
   const markRaw: typeof import('vue').markRaw
   const nextTick: typeof import('vue').nextTick
   const onActivated: typeof import('vue').onActivated
@@ -109,6 +110,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { Logger } from '/Users/saga/code-repos/fanyi-extension/src/utils/logger'
+  import('/Users/saga/code-repos/fanyi-extension/src/utils/logger')
 }
 // for vue template auto import
 import { UnwrapRef } from 'vue'
@@ -146,6 +150,7 @@ declare module 'vue' {
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
+    readonly logger: UnwrapRef<typeof import('/Users/saga/code-repos/fanyi-extension/src/utils/logger')['logger']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
