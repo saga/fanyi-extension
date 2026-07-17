@@ -22,6 +22,7 @@
 import { ref } from 'vue';
 import { translateText } from '@/entrypoints/utils/translateApi';
 
+import { logger } from '../utils/logger';
 const visible = ref(false);
 const position = ref({ x: 0, y: 0 });
 const sourceText = ref('');
@@ -53,7 +54,7 @@ const handleSelection = async () => {
 
     visible.value = true;
   } catch (error) {
-    console.error('Translation failed:', error);
+    logger.error('Translation failed:', error);
   }
 };
 

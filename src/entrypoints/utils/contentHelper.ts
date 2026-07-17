@@ -3,6 +3,7 @@ import { buildChunks, type Chunk } from './chunkBuilder';
 import { detectArticleRoot } from './contentDetector';
 import { matchSiteRule } from '../../rules';
 
+import { logger } from '../../utils/logger';
 // 优先级：先 class 后标签，先更具体的子容器再更通用的包裹元素。
 // 像 bankingdive.com 把 <article> 用作整页 wrapper、正文放在
 // .article-body 的站点，会直接定位到 .article-body。HBR 这种把整篇
@@ -72,7 +73,7 @@ function refineArticleRoot(candidate: Element): Element {
     if (articleAncestor && articleAncestor !== candidate) {
       const heading = hasValidHeadingOutside(candidate, articleAncestor);
       if (heading) {
-        console.log(
+        logger.debug(
           '[ContentHelper] Bumping root up to <article> to capture heading:',
           heading.textContent?.slice(0, 40)
         );
@@ -92,14 +93,14 @@ function refineArticleRoot(candidate: Element): Element {
       if (candidate.tagName.toLowerCase() === 'article') {
         const heading = hasValidHeadingOutside(inner, candidate);
         if (heading) {
-          console.log(
+          logger.debug(
             '[ContentHelper] Keeping outer <article> to preserve heading outside inner body:',
             heading.textContent?.slice(0, 40)
           );
           return candidate;
         }
       }
-      console.log('[ContentHelper] Refining article root to inner:', sel);
+      logger.debug('[ContentHelper] Refining article root to inner:', sel);
       return inner;
     }
   }
@@ -296,7 +297,7 @@ function chooseBestRoot(candidate: Element): Element {
   let bestScore = -Infinity;
   for (const node of list) {
     const result = scoreArticleContainer(node);
-    console.log(
+    logger.debug(
       `[ContentHelper] Candidate <${node.tagName}> .${(node.className || '').slice(0, 40)} score=${result.score.toFixed(1)}`,
       result.reasons,
     );
@@ -316,12 +317,12 @@ function findArticleRoot(doc: Document): Element {
   if (siteRule?.articleRootSelector) {
     const el = doc.querySelector(siteRule.articleRootSelector);
     if (el && hasMeaningfulContent(el)) {
-      console.log(
+      logger.debug(
         `[ContentHelper] Site rule articleRootSelector: ${siteRule.articleRootSelector} → <${el.tagName}> .${(el.className || '').slice(0, 40)}`,
       );
       return el;
     }
-    console.warn(
+    logger.warn(
       `[ContentHelper] Site rule articleRootSelector "${siteRule.articleRootSelector}" matched no meaningful element, falling back to Layer 1`,
     );
   }
@@ -346,7 +347,7 @@ function findArticleRoot(doc: Document): Element {
       const expanded = expandWrappers(refined);
       const best = chooseBestRoot(expanded);
       if (best !== expanded) {
-        console.log(
+        logger.debug(
           `[ContentHelper] Chose <${best.tagName}> .${(best.className || '').slice(0, 40)} over <${expanded.tagName}> .${(expanded.className || '').slice(0, 40)} by scoring`,
         );
       }
@@ -519,7 +520,7 @@ export function extractFromDataIsland(doc: Document): TextBlock[] {
 
   if (texts.length === 0) return [];
 
-  console.log(
+  logger.debug(
     `[ContentHelper] Extracted ${texts.length} blocks from data island (${candidates.length} script(s) scanned)`,
   );
 
@@ -553,7 +554,7 @@ export function prepareDocument(root: Document | Element): {
   // 走到 body 后, walker 仍会用 overlay/cookie 规则过滤掉同意 SDK, 真正的正文
   // 会被抓到。回归 case: databricks.com 博客。
   if (blocks.length === 0 && root instanceof Document && effectiveRoot !== root.body) {
-    console.warn(
+    logger.warn(
       `[ContentHelper] Detected root <${effectiveRoot.tagName}> yielded 0 blocks, falling back to <body>`,
     );
     blocks = extractBlocks(root.body || root.documentElement);

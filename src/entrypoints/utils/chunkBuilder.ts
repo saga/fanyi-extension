@@ -1,5 +1,6 @@
 import type { TextBlock } from './blockExtractor';
 
+import { logger } from '../../utils/logger';
 export interface Chunk {
   id: string;
   blocks: TextBlock[];
@@ -26,7 +27,7 @@ function isStructuralBoundary(block: TextBlock): boolean {
 }
 
 export function buildChunks(blocks: TextBlock[]): Chunk[] {
-  console.log('[ChunkBuilder] buildChunks called with', blocks.length, 'blocks');
+  logger.debug('[ChunkBuilder] buildChunks called with', blocks.length, 'blocks');
   if (blocks.length === 0) return [];
 
   const chunks: Chunk[] = [];
@@ -89,12 +90,12 @@ export function buildChunks(blocks: TextBlock[]): Chunk[] {
   }
 
   flushChunk();
-  console.log('[ChunkBuilder] Built', chunks.length, 'chunks');
+  logger.debug('[ChunkBuilder] Built', chunks.length, 'chunks');
   if (chunks.length > 0) {
     // chunk 级别 summary：id / block 数 / token 估算 / blockId 列表。
     // 排查 chunk 切分问题（chunk 太大/太小、blockIds 是否连续）时这就够。
     // 单块的 tag/text 不打：20 块就要 21 行，污染日志。
-    console.log(
+    logger.debug(
       '[ChunkBuilder] Chunk sizes:',
       chunks.map((c) => ({
         id: c.id,

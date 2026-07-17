@@ -2,6 +2,7 @@ import { applyBlockTranslation } from '../utils/translationDisplay';
 import type { TextBlock } from '../utils/blockExtractor';
 import type { Config } from '../utils/config';
 
+import { logger } from '../../utils/logger';
 // 大多数平台（Cloudflare Workers / Netlify Functions）请求体限制约 1MB。
 // 保守阈值：超过 900KB 时只发送 body，避免被网关截断导致服务端收到空 body 报 400。
 const MAX_FULL_HTML_CHARS = 900_000;
@@ -146,7 +147,7 @@ export async function translateViaServer(
   }
 
   const html = prepareHtmlForServer();
-  console.log(
+  logger.debug(
     `[ServerTranslation] url=${url} provider=${provider} sentHtml=${html.length} bytes ` +
       `(bodyFallback=${html.startsWith('<body')})`,
   );
@@ -176,7 +177,7 @@ export async function translateViaServer(
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    console.error('[ServerTranslation] server error body:', errorBody);
+    logger.error('[ServerTranslation] server error body:', errorBody);
     throw new Error(
       `服务端翻译失败: ${response.status} ${response.statusText}` +
         (errorBody ? ` — ${errorBody.substring(0, 500)}` : ''),

@@ -45,7 +45,6 @@ fanyi-extension/
 │   │   │   ├── translationUtils.ts   # 状态管理 + 动态监听
 │   │   │   ├── translationTypes.ts   # 翻译状态类型
 │   │   │   ├── configPanel.ts        # 页面内配置面板
-│   │   │   ├── floatingButton.ts     # 浮动按钮 (已移除调用)
 │   │   │   ├── statusOverlay.ts      # 状态提示条
 │   │   │   ├── styles.ts             # CSS 模板
 │   │   │   └── youtube/              # YouTube 字幕翻译

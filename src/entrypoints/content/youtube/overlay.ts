@@ -19,6 +19,7 @@
  */
 import type { CaptionEvent } from './types';
 
+import { logger } from '../../../utils/logger';
 const OVERLAY_ID = 'fanyi-caption-overlay';
 
 export class CaptionOverlay {
@@ -43,7 +44,7 @@ export class CaptionOverlay {
                   document.querySelector('video');
 
     if (!this.video) {
-      console.log('[YouTubeCaptions] No <video> element found');
+      logger.debug('[YouTubeCaptions] No <video> element found');
       return false;
     }
 
@@ -64,7 +65,7 @@ export class CaptionOverlay {
    */
   updateCaptions(captions: CaptionEvent[]): void {
     const translatedCount = captions.filter(c => c.translatedText).length;
-    console.log('[Overlay] updateCaptions called, captions=' + captions.length +
+    logger.debug('[Overlay] updateCaptions called, captions=' + captions.length +
       ', translated=' + translatedCount);
     this.captions = captions;
     // 强制刷新：重置 lastShownIdx 和 renderedTranslation
@@ -190,7 +191,7 @@ export class CaptionOverlay {
     if (caption.translatedText) {
       this.transEl.textContent = caption.translatedText;
       this.overlayEl.style.display = 'block';
-      console.log('[Overlay] render idx=' + idx +
+      logger.debug('[Overlay] render idx=' + idx +
         ', trans="' + caption.translatedText.substring(0, 30) + '"');
     } else {
       this.transEl.textContent = '';

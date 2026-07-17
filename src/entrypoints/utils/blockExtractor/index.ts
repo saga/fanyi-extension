@@ -74,7 +74,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
     ? (rootNode as Document).body || (rootNode as Document).documentElement
     : rootNode;
   if (!startNode) {
-    console.warn('[BlockExtractor] No valid start node found');
+    logger.warn('[BlockExtractor] No valid start node found');
     return [];
   }
 
@@ -142,3 +142,5 @@ export {
   hasTranslateBlockClass,
   isOverlayElement,
 } from './rules';
+
+import { logger } from '../../../utils/logger';

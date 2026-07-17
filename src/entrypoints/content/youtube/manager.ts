@@ -18,6 +18,7 @@ import { extractVideoId, fetchCaptions, disableNativeCaptions } from './provider
 import { translateAhead, DEFAULT_AHEAD_MS } from './translator';
 import { CaptionOverlay } from './overlay';
 
+import { logger } from '../../../utils/logger';
 /** timeupdate 轮询节流间隔（毫秒） */
 const TIMEUPDATE_THROTTLE_MS = 1000;
 
@@ -106,7 +107,7 @@ export class YouTubeCaptionManager {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         onStatus?.('字幕获取失败: ' + msg, 'error');
-        console.error('[YouTubeCaptions] fetchCaptions failed:', e);
+        logger.error('[YouTubeCaptions] fetchCaptions failed:', e);
         this.isRunning = false;
         this.abortController = null;
         return false;
@@ -128,7 +129,7 @@ export class YouTubeCaptionManager {
     // 关闭 YouTube 原生英文字幕，避免与翻译字幕重复显示
     void disableNativeCaptions().then((success) => {
       if (success) {
-        console.log('[YouTubeCaptions] Native captions disabled');
+        logger.debug('[YouTubeCaptions] Native captions disabled');
       }
     });
 
@@ -235,7 +236,7 @@ export class YouTubeCaptionManager {
       }
     } catch (e) {
       if (signal?.aborted) return;
-      console.warn('[YouTubeCaptions] translateAhead failed:', e);
+      logger.warn('[YouTubeCaptions] translateAhead failed:', e);
     } finally {
       // stop() 后 signal.aborted，但仍要重置 pumping，避免死锁
       this.pumping = false;

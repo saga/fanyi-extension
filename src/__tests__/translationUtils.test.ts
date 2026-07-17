@@ -7,9 +7,6 @@ vi.mock('../entrypoints/content/statusOverlay', () => ({
   showStatus: vi.fn(),
   hideStatus: vi.fn(),
 }));
-vi.mock('../entrypoints/content/floatingButton', () => ({
-  updateButtonState: vi.fn(),
-}));
 
 describe('translationUtils', () => {
   let mod: typeof import('../entrypoints/content/translationUtils');
@@ -190,7 +187,7 @@ describe('translationUtils', () => {
   });
 
   // ---- restoreOriginal ----
-  // These functions use showStatus/updateButtonState which need mocking.
+  // These functions use showStatus which is mocked above.
   // We test basic DOM cleanup behavior.
 
   it('restoreOriginal clears fanyi-translated and fanyi-missing classes', async () => {

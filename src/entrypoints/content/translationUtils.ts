@@ -9,10 +9,11 @@ import {
 import { DOMObserverManager } from '../utils/domObserver';
 import { getConfig } from '../utils/config';
 import { showStatus, hideStatus } from './statusOverlay';
-import { updateButtonState } from './floatingButton';
 import { translateChunksViaBackground } from './chunkTranslation';
 import type { TranslationState } from './translationTypes';
+import type { TranslateChunkResponse } from '../../types/messages';
 
+import { logger } from '../../utils/logger';
 // ============================================================
 // 全局 missing 兜底重试
 // ============================================================
@@ -30,7 +31,7 @@ export async function retryGlobalMissing(
   }
   if (stillMissingIds.length === 0) return;
 
-  console.log(
+  logger.debug(
     `[ContentScript] Global retry: ${stillMissingIds.length}/${nodeMap.size} blocks still missing`,
   );
 
@@ -57,7 +58,7 @@ export async function retryGlobalMissing(
       recoveredCount++;
     }
   }
-  console.log(`[ContentScript] Retry recovered ${recoveredCount}/${stillMissingIds.length} block(s)`);
+  logger.debug(`[ContentScript] Retry recovered ${recoveredCount}/${stillMissingIds.length} block(s)`);
 }
 
 // ============================================================
@@ -98,7 +99,7 @@ export function isPageTranslated(): boolean {
 
 export function warnOnNodeMapMismatch(blocks: TextBlock[], nodeMap: Map<string, Node>): void {
   if (nodeMap.size === blocks.length) return;
-  console.warn(
+  logger.warn(
     `[ContentScript] NodeMap mismatch: ${nodeMap.size}/${blocks.length} blocks mapped to DOM. ` +
     `This usually means some blocks share an xpath and were collapsed — see extractors.`,
   );
@@ -146,7 +147,6 @@ export function restoreOriginal(
     state.translatedBlocks.clear();
     state.translatedTexts.clear();
   }
-  updateButtonState(false);
   if (!silent) {
     showStatus('已恢复原文', 'success');
     setTimeout(hideStatus, 4000);
@@ -172,14 +172,14 @@ export function setupDynamicContentObserver(
       for (const block of newBlocks) {
         if (!block.text || block.text.length <= 10) continue;
         try {
-          const response: any = await browser.runtime.sendMessage({
+          const response = await browser.runtime.sendMessage({
             action: 'translateChunk',
             jsonContent: JSON.stringify([{ id: block.id, text: block.text }]),
             sourceLang: config.sourceLang,
             targetLang: config.targetLang,
             pageUrl: window.location.href,
-          });
-          if (response.success && response.result?.length > 0) {
+          }) as TranslateChunkResponse;
+          if (response.success && response.result.length > 0) {
             const node = findNodeByText(block.text);
             if (node) {
               applyBlockTranslation(node, response.result[0][1]);
@@ -187,7 +187,7 @@ export function setupDynamicContentObserver(
             }
           }
         } catch (error) {
-          console.error('Dynamic content translation failed:', error);
+          logger.error('Dynamic content translation failed:', error);
         }
       }
       // 新增内容处理完后，也尝试恢复被 React/Next.js 重新渲染覆盖的翻译
@@ -281,7 +281,7 @@ export function reapplyLostTranslations(state: TranslationState): void {
   }
 
   if (reapplied > 0) {
-    console.log(`[ContentScript] Reapplied ${reapplied} lost translation(s)`);
+    logger.debug(`[ContentScript] Reapplied ${reapplied} lost translation(s)`);
   }
 }
 

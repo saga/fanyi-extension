@@ -5,7 +5,6 @@ import { DOMObserverManager } from '../utils/domObserver';
 import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { matchSiteRule } from '../../rules';
 import { showStatus, hideStatus } from './statusOverlay';
-import { updateButtonState } from './floatingButton';
 import { translateChunksViaBackground } from './chunkTranslation';
 import { translateViaServer, checkServerCache, applyServerTranslatedHtml } from './serverTranslation';
 import {
@@ -20,6 +19,7 @@ import {
 } from './translationUtils';
 import type { TranslationState } from './translationTypes';
 
+import { logger } from '../../utils/logger';
 export type { TranslationState };
 
 /**
@@ -98,7 +98,7 @@ export function createTranslationController(
           void domObserver;
         }
       } catch (error) {
-        console.error('Translation failed:', error);
+        logger.error('Translation failed:', error);
         showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
       } finally {
         isTranslating = false;
@@ -138,7 +138,7 @@ async function handleFullTranslation(
   // 防御性检查：即使 start() 已经判断过，在真正发送请求前再确认一次，
   // 防止 content script 重新注入、或多入口同时触发导致重复翻译。
   if (isPageTranslated()) {
-    console.log('[ContentScript] Page already translated, skip sending request.');
+    logger.debug('[ContentScript] Page already translated, skip sending request.');
     return { translated: true, observer: null };
   }
 
@@ -156,10 +156,10 @@ async function handleFullTranslation(
     try {
       cachedHtml = await checkServerCache(config);
       if (cachedHtml) {
-        console.log('[ContentScript] Server cache hit, skip heavy HTML preparation.');
+        logger.debug('[ContentScript] Server cache hit, skip heavy HTML preparation.');
       }
     } catch (e) {
-      console.error('[ContentScript] Server cache check failed:', e);
+      logger.error('[ContentScript] Server cache check failed:', e);
       // 缓存检查失败不阻塞，继续走正常翻译流程
     }
   }
@@ -187,9 +187,8 @@ async function handleFullTranslation(
       translatedIds = await translateViaServer(config, blocks, nodeMap);
     }
     const missingIds = markMissingBlocks(nodeMap, translatedIds);
-    updateButtonState(true);
     cleanupTempAttrs();
-    console.log(
+    logger.debug(
       `[ContentScript] Server translation end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
     );
     const statusMsg =
@@ -221,14 +220,13 @@ async function handleFullTranslation(
   await retryGlobalMissing(blocks, nodeMap, translatedIds, config, isMobile);
 
   const missingIds = markMissingBlocks(nodeMap, translatedIds);
-  updateButtonState(true);
 
   const observer = setupDynamicContentObserver(state);
   setObserver(observer);
 
   cleanupTempAttrs();
 
-  console.log(
+  logger.debug(
     `[ContentScript] Session end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
   );
 

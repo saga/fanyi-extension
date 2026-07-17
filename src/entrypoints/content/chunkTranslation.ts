@@ -9,7 +9,9 @@ import {
 } from '../utils/chunkRetry';
 import { applyBlockTranslation } from '../utils/translationDisplay';
 import type { TranslationState } from './translationTypes';
+import type { TranslateChunkResponse } from '../../types/messages';
 
+import { logger } from '../../utils/logger';
 // ============================================================
 // Error categorisation for [SessionSummary]
 // ============================================================
@@ -68,10 +70,10 @@ export async function translateChunksViaBackground(
   isMobile: boolean = false,
   state?: TranslationState,
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
-  console.log('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
+  logger.debug('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
 
   const maxConcurrency = isMobile ? 2 : 4;
-  console.log(
+  logger.debug(
     `[ContentScript] Warmup serial, then parallel=${maxConcurrency} (isMobile=${isMobile})`,
   );
 
@@ -135,7 +137,7 @@ export async function translateChunksViaBackground(
         .map(([k, v]) => `${k}=${v}`)
         .join(',')
     : '';
-  console.log(
+  logger.debug(
     `[ContentScript][SessionSummary] total=${chunks.length} ` +
     `fullyOk=${stats.fullyOk} ` +
     `neededRetry=${stats.neededRetry}(recovered=${stats.neededRetryRecovered},stillMissing=${stats.neededRetryStillMissing}) ` +
@@ -162,24 +164,23 @@ async function translateChunkPayload(
   let recoveredIds: string[] = [];
 
   try {
-    const response: any = await browser.runtime.sendMessage({
+    const response = await browser.runtime.sendMessage({
       action: 'translateChunk',
       jsonContent: chunk.jsonContent,
       sourceLang: ctx.sourceLang,
       targetLang: ctx.targetLang,
       pageUrl: window.location.href,
       glossary: ctx.glossary,
-    });
+    }) as TranslateChunkResponse;
 
     if (!response.success) {
       ctx.onFailure();
-      console.error(
+      logger.error(
         `[ContentScript] ${label} translation FAILED — full response:`,
         {
           success: response.success,
           error: response.error,
           debugInfo: response.debugInfo ?? null,
-          resultKeys: response.result ? Object.keys(response.result) : null,
           rawResponse: response,
         },
       );
@@ -192,12 +193,12 @@ async function translateChunkPayload(
     const outputIds: string[] = [];
     for (const entry of response.result) {
       if (!Array.isArray(entry) || entry.length !== 2) {
-        console.warn('[ContentScript]   Skipping malformed entry:', entry);
+        logger.warn('[ContentScript]   Skipping malformed entry:', entry);
         continue;
       }
       const [id, text] = entry;
       if (typeof text !== 'string') {
-        console.warn(
+        logger.warn(
           `[ContentScript]   Skipping block ${id}: translated_text is not a string (${typeof text})`,
         );
         continue;
@@ -213,18 +214,18 @@ async function translateChunkPayload(
       chunkMissing.length > 0
         ? ` (e.g. ${chunkMissing.slice(0, 3).join(',')}${chunkMissing.length > 3 ? `,+${chunkMissing.length - 3}` : ''})`
         : '';
-    console.log(
+    logger.debug(
       `[ContentScript][ChunkTrace] chunk=${label}`,
       `inputIds=[${inputIds.join(',')}]`,
       `outputIds=[${outputIds.join(',')}]`,
       `missing=${chunkMissing.length}${missingHint}`,
     );
     if (chunkMissing.length > 0) {
-      console.warn(
+      logger.warn(
         `[ContentScript][ChunkTrace] chunk=${label} model returned ${outputIds.length}/${inputIds.length} entries — root cause in [Background][ChunkTrace] OUTPUT/MISSING`,
       );
       if (response.trace) {
-        console.warn(
+        logger.warn(
           `[ContentScript][ChunkTrace] chunk=${label} trace from background:\n` +
             JSON.stringify(response.trace, null, 2),
         );
@@ -241,7 +242,7 @@ async function translateChunkPayload(
       })
     ) {
       const retryChunk = buildRetryChunk(chunk, chunkMissing);
-      console.log(
+      logger.debug(
         `[ContentScript] ${label} missing ${chunkMissing.length} block(s), retrying as ${retryChunk.id}`,
       );
       const retryMap = await translateChunkPayload(retryChunk, true, ctx);
@@ -251,7 +252,7 @@ async function translateChunkPayload(
           recoveredIds.push(id);
         }
       }
-      console.log(
+      logger.debug(
         `[ContentScript] ${label} retry recovered ${recoveredIds.length}/${chunkMissing.length} block(s)`,
       );
     }
@@ -266,7 +267,7 @@ async function translateChunkPayload(
     }
   } catch (error) {
     ctx.onFailure();
-    console.error(
+    logger.error(
       `[ContentScript] ${label} threw — runtime/network error (no response):`,
       {
         name: error instanceof Error ? error.name : 'unknown',

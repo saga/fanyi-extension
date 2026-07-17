@@ -21,7 +21,7 @@
 
 ## 2. 改进项详解
 
-### P1. 消息层类型安全
+### P1. 消息层类型安全 ✅ 已完成 (2026-07-18)
 
 **现状**: content ↔ background 之间的消息用 `any` 传递，编译器无法检查。
 
@@ -52,9 +52,26 @@ type Response = TranslateChunkResponse | ValidateApiKeyResponse | ...;
 
 **风险**: 低。纯类型变更，不改变运行时行为。
 
+**执行结果**:
+- ✅ 新建 `src/types/messages.ts`：按 `action` 字段做 discriminated union，分 `BackgroundMessage`（content→background）和 `ContentMessage`（background→content），每条消息对应一个 `*Response` 类型，并定义 `BackgroundResponse` 联合
+- ✅ 公共子类型：`ChunkTrace` / `DebugInfo` / `TranslationEntry = [string, string]`
+- ✅ `background.ts`：
+  - `onMessage.addListener` 入参改为 `(message: BackgroundMessage, sender: browser.Runtime.MessageSender, sendResponse: (r: BackgroundResponse) => void)`
+  - 用 `as browser.Runtime.OnMessageListener` 解决 OnMessageListener 期望 `message: unknown` 的逆变问题
+  - 5 个 `handleX` 函数各自接收具体 message/response 类型（`TranslateChunkMessage`/`TranslateChunkResponse` 等），调用处用 `as (r: SpecificResponse) => void` 收窄
+  - `handleCheckConfig` 从 `sendResponse({ success: hasKey, config })` 改为分支返回 `{success:true,config}` 或 `{success:false,error}`
+  - `handleTranslateChunkStream` 修复 `sender.tab?.id` 是 `number | undefined` 的潜在 bug，用 `streamTabId ?? sender.tab?.id` 提取并加 `undefined` 守卫
+- ✅ `content.ts`：`onMessage.addListener` 改用 `ContentMessage`，同样用 `as OnMessageListener` 处理逆变
+- ✅ `chunkTranslation.ts`：`response: any` → `response = await sendMessage(...) as TranslateChunkResponse`，并清理错误分支里访问 `response.result` 的死代码（错误响应无该字段）
+- ✅ `translationUtils.ts`：`response: any` → `as TranslateChunkResponse`
+- ✅ `configPanel.ts`：`(response as any)?.success` → `as ValidateApiKeyResponse` + 真正的 `response.success` 窄化
+- ✅ 17 处消息相关 `any` 全部消除（background.ts 12 + content.ts 1 + chunkTranslation.ts 1 + translationUtils.ts 1 + configPanel.ts 2）
+- ✅ `npm test -- --run` 全量通过：762 / 762
+- ✅ `tsc --noEmit` 消息相关文件零错误
+
 ---
 
-### P2. 删除死代码 floatingButton.ts
+### P2. 删除死代码 floatingButton.ts ✅ 已完成 (2026-07-18)
 
 **现状**: `setupFloatingButton()` 调用已从 `content.ts` 移除，但 `floatingButton.ts` 仍然被 import，且 `updateButtonState()` 仍被 3 个文件调用。
 
@@ -70,9 +87,20 @@ type Response = TranslateChunkResponse | ValidateApiKeyResponse | ...;
 
 **风险**: 低。`setupFloatingButton` 已不被调用，`updateButtonState` 只做按钮状态更新，内联后零风险。
 
+**执行结果**:
+- ✅ 删除 `floatingButton.ts`（5 个导出函数全部移除，`updateButtonState` 实现已是 no-op 查询不存在的 DOM 元素，直接删除调用）
+- ✅ 删除 `floatingButton.test.ts`（11 个测试用例随之移除，测试总数 773 → 762）
+- ✅ 修改 `content.ts`：移除 `updateButtonState` import + 2 处调用 + 顶部"浮动按钮"职责描述
+- ✅ 修改 `translation.ts`：移除 `updateButtonState` import + 2 处调用（server 翻译完成 + 本地翻译完成）
+- ✅ 修改 `translationUtils.ts`：移除 `updateButtonState` import + 1 处调用（`restoreOriginal` 中）
+- ✅ 修改 `translationUtils.test.ts`：移除 `vi.mock('../entrypoints/content/floatingButton', ...)`
+- ✅ 清理 `content.ts` 中未使用的 `showStatus/hideStatus` import（diagnostics 提示的连带清理）
+- ✅ 更新 `ARCHITECTURE.md` 文件树移除 `floatingButton.ts` 行
+- ✅ `npm test -- --run` 全量通过：762 / 762
+
 ---
 
-### P3. 日志系统治理
+### P3. 日志系统治理 ✅ 已完成 (2026-07-18)
 
 **现状**: 94 处 `console.log/warn/error` 散布 18 个文件。生产环境也会输出，影响性能且暴露内部逻辑。
 
@@ -99,6 +127,25 @@ export const logger = {
 **改动范围**: 18 个文件，纯机械替换。
 
 **风险**: 低。不改变业务逻辑。
+
+**执行结果**:
+- ✅ 新建 `src/utils/logger.ts`：4 个级别 `debug/info/warn/error`，每次调用动态检查 `isDebugEnabled()`（支持 `import.meta.env.DEV` / `window.__fanyiDebug` / `localStorage.fanyi-debug` 三种运行时开关，热切换无需 reload）
+- ✅ 前缀拼接策略：首参是字符串 → 把 `[fanyi:level]` 拼到字符串里（保留现有测试 `toContain('NodeMap mismatch')` 等断言）；首参不是字符串 → 作为独立参数前置（处理 Error 对象等场景）
+- ✅ 17 个源文件全量替换：`console.log → logger.debug`，`console.warn → logger.warn`，`console.error → logger.error`，共 89 处调用
+- ✅ 自动化脚本添加 `import { logger } from '<relpath>/utils/logger';` 到每个文件
+- ✅ 测试文件保留 `console.*` 原样（测试用 `vi.spyOn(console, ...)` 直接拦截底层方法，logger 内部仍调用 console.* 所以 spy 仍然生效）
+- ✅ 新建 `src/__tests__/logger.test.ts`：11 个测试覆盖前缀拼接、参数透传、路由到正确 console 方法、向后兼容性
+- ✅ 关键点：`logger.debug`/`logger.info` 都路由到 `console.log`，`logger.warn` → `console.warn`，`logger.error` → `console.error`，所以所有现有 `vi.spyOn(console, 'warn'/'error')` 测试零修改通过
+- ✅ `npm test -- --run` 全量通过：773 / 773（762 + 11 新 logger 测试）
+- ✅ `tsc --noEmit` logger 相关文件零错误
+- ✅ 改动文件清单：
+  - `src/components/SelectionTranslator.vue`
+  - `src/entrypoints/background.ts`、`content.ts`
+  - `src/entrypoints/content/{chunkTranslation,configPanel,serverTranslation,translation,translationUtils}.ts`
+  - `src/entrypoints/content/youtube/{manager,translator,overlay}.ts`
+  - `src/entrypoints/service/deepseek.ts`
+  - `src/entrypoints/utils/{contentHelper,contentDetector,translateApi,chunkBuilder}.ts`
+  - `src/entrypoints/utils/blockExtractor/index.ts`
 
 ---
 
@@ -304,13 +351,22 @@ if (cached && cached.checksum !== cacheKey.checksum) {
 
 ## 3. 实施优先级
 
-### Phase 1: 低风险、高收益（建议立即执行）
+### Phase 1: 低风险、高收益（建议立即执行）✅ 已完成 (2026-07-18)
 
-| 项 | 工作量 | 收益 |
-|----|--------|------|
-| P2. 删除死代码 floatingButton.ts | 小 | 消除混乱，减少打包体积 |
-| P1. 消息层类型安全 | 中 | 编译期发现类型错误 |
-| P3. 日志系统治理 | 中 | 生产环境性能 + 调试体验 |
+| 项 | 工作量 | 收益 | 状态 |
+|----|--------|------|------|
+| P2. 删除死代码 floatingButton.ts | 小 | 消除混乱，减少打包体积 | ✅ |
+| P1. 消息层类型安全 | 中 | 编译期发现类型错误 | ✅ |
+| P3. 日志系统治理 | 中 | 生产环境性能 + 调试体验 | ✅ |
+
+**Phase 1 汇总**:
+- 新建 2 个文件：`src/types/messages.ts`（消息层联合类型）+ `src/utils/logger.ts`（统一日志门面）
+- 删除 2 个文件：`floatingButton.ts` + `floatingButton.test.ts`
+- 新增 1 个测试文件：`src/__tests__/logger.test.ts`（11 个测试）
+- 测试总数：773 → 773（删除 11 个 floatingButton 测试 + 新增 11 个 logger 测试，净增 0；现有测试 762 + 11 = 773 全部通过）
+- 类型安全：消除 17 处消息相关 `any`，background.ts/content.ts 的 onMessage listener 现在有完整类型签名
+- 日志治理：17 个源文件 89 处 `console.*` 全部替换为 `logger.*`，生产环境静默 debug 级别
+- 顺手修复：`handleTranslateChunkStream` 中 `sender.tab?.id` 的 `number | undefined` 潜在 bug
 
 ### Phase 2: 中风险、中收益（建议下个迭代）
 

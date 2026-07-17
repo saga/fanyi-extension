@@ -12,6 +12,7 @@
  */
 import type { CaptionEvent, ProgressCallback } from './types';
 
+import { logger } from '../../../utils/logger';
 // =============================================================================
 // JSON 清理工具（内联，避免依赖 vocal-saga 的 shared.ts）
 // =============================================================================
@@ -164,7 +165,7 @@ export async function translateBatch(
     const parsed = JSON.parse(cleaned);
     const result = parseTranslations(parsed);
     if (result.size === 0) {
-      console.warn('[YouTubeCaptions] Parsed 0 translations from', blocks.length, 'blocks');
+      logger.warn('[YouTubeCaptions] Parsed 0 translations from', blocks.length, 'blocks');
     }
     return result;
   } catch {
@@ -173,7 +174,7 @@ export async function translateBatch(
       const parsed = JSON.parse(repaired);
       return parseTranslations(parsed);
     } catch {
-      console.warn('[YouTubeCaptions] Failed to parse translation:', cleaned.substring(0, 120));
+      logger.warn('[YouTubeCaptions] Failed to parse translation:', cleaned.substring(0, 120));
       return new Map();
     }
   }
@@ -319,7 +320,7 @@ export async function translateAhead(
         batch.forEach(({ caption }) => { caption.status = 'pending'; });
         return;
       }
-      console.warn('[YouTubeCaptions] Batch failed:', e instanceof Error ? e.message : e);
+      logger.warn('[YouTubeCaptions] Batch failed:', e instanceof Error ? e.message : e);
       batch.forEach(({ caption }) => { caption.status = 'failed'; });
     }
 

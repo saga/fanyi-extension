@@ -3,23 +3,19 @@
  *
  * 职责（精简后只做"接线"，业务逻辑已拆分到 ./content/*）：
  *   1. 注入样式（getStyles）
- *   2. 创建浮动按钮 + 触屏手势
- *   3. 创建翻译控制器（lazily，首次 translate 动作时实例化）
- *   4. 路由来自 background / popup / keyboard shortcut 的消息
- *   5. 维护"是否已翻译"的小型状态（originalTexts / translatedBlocks / isTranslated）
+ *   2. 创建翻译控制器（lazily，首次 translate 动作时实例化）
+ *   3. 路由来自 background / popup / keyboard shortcut 的消息
+ *   4. 维护"是否已翻译"的小型状态（originalTexts / translatedBlocks / isTranslated）
  *
  * 文件结构（见 ./content/）：
  *   styles.ts        CSS 模板字符串
  *   statusOverlay.ts 状态条 + HTML 转义
- *   floatingButton.ts 浮动按钮 + 触屏手势
  *   configPanel.ts   配置面板（API Key / 语言 / 模式 / 手势）
  *   translation.ts   翻译编排（核心：handleFullTranslation / translateChunkPayload / 动态监听）
  */
 import browser from 'webextension-polyfill';
 import { getConfig } from './utils/config';
 import { getStyles } from './content/styles';
-import { showStatus, hideStatus } from './content/statusOverlay';
-import { updateButtonState } from './content/floatingButton';
 import {
   createTranslationController,
   type TranslationController,
@@ -32,7 +28,9 @@ import {
   YouTubeCaptionManager,
   extractVideoId,
 } from './content/youtube';
+import type { ContentMessage } from '../types/messages';
 
+import { logger } from '../utils/logger';
 // ============================================================
 // 设备检测
 // ============================================================
@@ -51,7 +49,7 @@ const isMobile = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(navigator.userAgen
 export default defineContentScript({
   matches: ['*://*/*'],
   main() {
-    console.log('[ContentScript] Initializing on:', window.location.href, 'isMobile:', isMobile);
+    logger.debug('[ContentScript] Initializing on:', window.location.href, 'isMobile:', isMobile);
 
     // === 共享状态 ===
     // - originalTexts: 块 id → 原文（恢复时用）
@@ -78,7 +76,7 @@ export default defineContentScript({
     // === YouTube 字幕翻译：改为与整页翻译一致，需要点击翻译按钮才启动 ===
     const youTubeStatusCallback = (msg: string, type: string) => {
       if (type === 'error') {
-        console.warn('[YouTubeCaptions]', msg);
+        logger.warn('[YouTubeCaptions]', msg);
       }
     };
 
@@ -121,15 +119,14 @@ export default defineContentScript({
       translation?.restore(true);
       stopYouTubeCaptionTranslation();
       translatedVideoId = null;
-      updateButtonState(false);
-      console.log('[ContentScript] SPA navigation detected, translation state reset:', window.location.href);
+      logger.debug('[ContentScript] SPA navigation detected, translation state reset:', window.location.href);
     }
 
     window.addEventListener('popstate', onSpaNavigation);
     setInterval(onSpaNavigation, 500);
 
     // === 消息路由：来自 background、popup、keyboard shortcut ===
-    browser.runtime.onMessage.addListener((message: any) => {
+    browser.runtime.onMessage.addListener(((message: ContentMessage) => {
       switch (message.action) {
         case 'translatePage':
           void handleAction('translate');
@@ -144,7 +141,7 @@ export default defineContentScript({
           // 预留：流式翻译当前未启用，保留接口以便后续接入
           return undefined;
       }
-    });
+    }) as browser.Runtime.OnMessageListener);
 
     /**
      * 统一处理三种动作（translate / restore / toggle）。
@@ -172,7 +169,6 @@ export default defineContentScript({
         ctrl.restore();
         stopYouTubeCaptionTranslation();
         translatedVideoId = null;
-        updateButtonState(false);
       } else {
         ctrl.toggle();
       }

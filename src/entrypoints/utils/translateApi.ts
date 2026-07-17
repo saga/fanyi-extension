@@ -1,5 +1,6 @@
 import { translationCache } from './cacheManager';
 
+import { logger } from '../../utils/logger';
 export async function getCachedTranslation(cacheKey: string): Promise<Map<string, string> | null> {
   const raw = await translationCache.get<Record<string, string>>(cacheKey);
   if (!raw) return null;
@@ -84,7 +85,7 @@ export function logUnchangedBlocks(
       }
       if (translatedText !== null && translatedText === original) {
         unchanged++;
-        console.warn(
+        logger.warn(
           '[TranslateApi] Block',
           item.id,
           'came back unchanged (LLM refused / no-op). Original:',
@@ -97,13 +98,13 @@ export function logUnchangedBlocks(
     const totalMissing = extraIds + inputMissing;
     const total = originalBlocks.length;
     if (total > 0 && unchanged === translations.length) {
-      console.error(
+      logger.error(
         '[TranslateApi] ALL',
         translations.length,
         'translated blocks came back unchanged — prompt may be too weak or content was filtered'
       );
     } else if (totalMissing > 0) {
-      console.warn(
+      logger.warn(
         '[TranslateApi]',
         totalMissing,
         'blocks missing from response (input had',
@@ -111,7 +112,7 @@ export function logUnchangedBlocks(
         'blocks)'
       );
     } else if (unchanged > 0) {
-      console.warn(
+      logger.warn(
         '[TranslateApi]',
         unchanged,
         '/',

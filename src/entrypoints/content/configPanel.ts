@@ -1,7 +1,9 @@
 import browser from 'webextension-polyfill';
 import { getConfig, setConfig, type Config } from '../utils/config';
 import { showStatus, hideStatus } from './statusOverlay';
+import type { ValidateApiKeyResponse } from '../../types/messages';
 
+import { logger } from '../../utils/logger';
 /**
  * 配置面板（点击浮动按钮长按出现）。
  *
@@ -211,19 +213,19 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
       const response = await browser.runtime.sendMessage({
         action: 'validateApiKey',
         apiKey,
-      });
-      console.log('[ContentScript] Validation response:', response);
+      }) as ValidateApiKeyResponse;
+      logger.debug('[ContentScript] Validation response:', response);
 
-      if (!(response as any)?.success) {
-        const errorMsg = (response as any)?.error || '未知错误';
-        console.error('[ContentScript] Validation failed:', errorMsg);
+      if (!response.success) {
+        const errorMsg = response.error || '未知错误';
+        logger.error('[ContentScript] Validation failed:', errorMsg);
         showStatus('API Key 无效: ' + errorMsg, 'error');
         setTimeout(hideStatus, 5000);
         return;
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '网络错误';
-      console.error('[ContentScript] Validation error:', error);
+      logger.error('[ContentScript] Validation error:', error);
       showStatus('验证失败: ' + errorMsg, 'error');
       setTimeout(hideStatus, 5000);
       return;

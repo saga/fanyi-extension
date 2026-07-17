@@ -5,6 +5,7 @@ import { buildJinyongSystemContent } from './jinyong-prompt';
 import { buildAchengSystemContent } from './acheng-prompt';
 import { buildWangxiaoboSystemContent } from './wangxiaobo-prompt';
 
+import { logger } from '../../utils/logger';
 const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 const USER_ID = 'fanyi-extension';
@@ -175,7 +176,7 @@ function buildTranslationBody(
   // user message 精简到 "JSON:" + blocks — 比 "Output JSON only."
   // 更短，同时 "JSON" 字样满足 response_format: json_object 硬约束。
   const systemContent = buildSystemContent(sourceLang, targetLang, sitePrompt, hasGlossaryEntries(glossary) ? glossary : undefined, style);
-  console.log('[DeepSeek] System prompt built:\n' + systemContent);
+  logger.debug('[DeepSeek] System prompt built:\n' + systemContent);
   return {
     model: MODEL,
     messages: [
@@ -208,7 +209,7 @@ async function callApi(
       body,
     });
 
-    console.log('[DeepSeek] Response status:', response.status);
+    logger.debug('[DeepSeek] Response status:', response.status);
 
     const responseText = await response.text().catch(() => '');
 
@@ -248,14 +249,14 @@ async function callApi(
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
-      console.error('[DeepSeek] Invalid response structure:', JSON.stringify(data).substring(0, 500));
+      logger.error('[DeepSeek] Invalid response structure:', JSON.stringify(data).substring(0, 500));
       throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
     }
 
     return content;
   } catch (error) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
-      console.error('[DeepSeek] Fetch error - possible network/CORS issue:', error);
+      logger.error('[DeepSeek] Fetch error - possible network/CORS issue:', error);
       throw new Error(`网络请求失败: ${error.message}\n\n可能原因:\n1. 网络连接问题\n2. Firefox 扩展权限不足\n3. 被防火墙/代理拦截`);
     }
     throw error;

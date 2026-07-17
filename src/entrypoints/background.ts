@@ -11,13 +11,26 @@ import { globalQueue } from './utils/translationQueue';
 import { generateTranslationCacheKey } from './utils/cacheKey';
 import { matchSiteRule, buildSitePrompt } from '../rules';
 import type { SiteRule } from '../rules/types';
+import type {
+  BackgroundMessage,
+  BackgroundResponse,
+  TranslateChunkMessage,
+  TranslateChunkStreamMessage,
+  TranslateChunkResponse,
+  TranslateChunkStreamResponse,
+  ValidateApiKeyMessage,
+  ValidateApiKeyResponse,
+  ClearCacheResponse,
+  CheckConfigResponse,
+} from '../types/messages';
 
+import { logger } from '../utils/logger';
 export default defineBackground({
   persistent: {
     safari: false,
   },
   main() {
-    console.log('Background script loaded');
+    logger.debug('Background script loaded');
 
     // Check which APIs are supported
     const isContextMenuSupported = !!browser.contextMenus;
@@ -29,7 +42,7 @@ export default defineBackground({
     }
 
     browser.runtime.onInstalled.addListener(() => {
-      console.log('Extension installed');
+      logger.debug('Extension installed');
 
       if (isContextMenuSupported) {
         try {
@@ -51,7 +64,7 @@ export default defineBackground({
             contexts: ['page'],
           });
         } catch (error) {
-          console.warn('Context menu creation failed:', error);
+          logger.warn('Context menu creation failed:', error);
         }
       }
 
@@ -78,11 +91,11 @@ export default defineBackground({
                 break;
             }
           } catch (error) {
-            console.warn('Command handling failed:', error);
+            logger.warn('Command handling failed:', error);
           }
         });
       } catch (error) {
-        console.warn('Commands API not available:', error);
+        logger.warn('Commands API not available:', error);
       }
     }
 
@@ -104,40 +117,40 @@ export default defineBackground({
           }
         });
       } catch (error) {
-        console.warn('Context menu click listener failed:', error);
+        logger.warn('Context menu click listener failed:', error);
       }
     }
 
-    browser.runtime.onMessage.addListener((message: any, sender: any, sendResponse: (response: any) => void) => {
+    browser.runtime.onMessage.addListener(((message: BackgroundMessage, sender: browser.Runtime.MessageSender, sendResponse: (response: BackgroundResponse) => void) => {
       // Handle messages asynchronously, ensuring config is loaded first
       (async () => {
         try {
           if (message.action === 'translateChunk') {
-            await handleTranslateChunk(message, sendResponse);
+            await handleTranslateChunk(message, sendResponse as (r: TranslateChunkResponse) => void);
           } else if (message.action === 'translateChunkStream') {
-            await handleTranslateChunkStream(message, sender, sendResponse);
+            await handleTranslateChunkStream(message, sender, sendResponse as (r: TranslateChunkStreamResponse) => void);
           } else if (message.action === 'validateApiKey') {
-            await handleValidateApiKey(message, sendResponse);
+            await handleValidateApiKey(message, sendResponse as (r: ValidateApiKeyResponse) => void);
           } else if (message.action === 'clearCache') {
-            await handleClearCache(sendResponse);
+            await handleClearCache(sendResponse as (r: ClearCacheResponse) => void);
           } else if (message.action === 'checkConfig') {
-            await handleCheckConfig(sendResponse);
+            await handleCheckConfig(sendResponse as (r: CheckConfigResponse) => void);
           } else {
             // Unknown action, don't keep port open
             sendResponse({ success: false, error: 'Unknown action' });
           }
         } catch (error) {
-          console.error('[Background] Message handler error:', error);
+          logger.error('[Background] Message handler error:', error);
           sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
         }
       })();
       // Return true to keep the message channel open for async response
       return true;
-    });
+    }) as browser.Runtime.OnMessageListener);
 
     async function handleTranslateChunk(
-      message: any,
-      sendResponse: (response: any) => void
+      message: TranslateChunkMessage,
+      sendResponse: (response: TranslateChunkResponse) => void
     ) {
       try {
         const config = await getConfig();
@@ -175,7 +188,7 @@ export default defineBackground({
         const inputBytes = jsonContent.length;
         const estInputTokens = Math.ceil(inputBytes / 4);
         const reservedMaxTokens = Math.max(256, Math.ceil(estInputTokens * 2 * 1.2));
-        console.log(
+        logger.debug(
           '[Background][ChunkTrace] INPUT',
           `inputBlocks=${inputBlocks.length}`,
           `inputIds=[${inputIds.join(',')}]`,
@@ -213,7 +226,7 @@ export default defineBackground({
           outputBytes = jsonResult.length;
           outputTail = jsonResult.slice(-200);
           parseErrorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-          console.error(
+          logger.error(
             '[Background][ChunkTrace] OUTPUT NOT VALID JSON — likely truncated at max_tokens ceiling',
             {
               inputBlocks: inputBlocks.length,
@@ -225,14 +238,14 @@ export default defineBackground({
           );
         }
         const missingInResponse = inputIds.filter((id) => !outputIds.includes(id));
-        console.log(
+        logger.debug(
           '[Background][ChunkTrace] OUTPUT',
           `outputBlocks=${outputIds.length}`,
           `outputBytes=${outputBytes}`,
           `missingInResponse=${JSON.stringify(missingInResponse)}`,
         );
         if (missingInResponse.length > 0) {
-          console.warn(
+          logger.warn(
             '[Background][ChunkTrace] MISSING — model did not return entries for:',
             missingInResponse,
             'reservedMaxTokens was',
@@ -270,8 +283,8 @@ export default defineBackground({
         };
         sendResponse({ success: true, result: Array.from(result.entries()), trace });
       } catch (error) {
-        console.error('[Background] translateChunk error:', error);
-        console.error('[Background] Full error details:', {
+        logger.error('[Background] translateChunk error:', error);
+        logger.error('[Background] Full error details:', {
           name: error instanceof Error ? error.name : 'unknown',
           message: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack?.substring(0, 500) : null,
@@ -288,9 +301,9 @@ export default defineBackground({
     }
 
     async function handleTranslateChunkStream(
-      message: any,
-      sender: any,
-      sendResponse: (response: any) => void
+      message: TranslateChunkStreamMessage,
+      sender: browser.Runtime.MessageSender,
+      sendResponse: (response: TranslateChunkStreamResponse) => void
     ) {
       try {
         const config = await getConfig();
@@ -315,11 +328,13 @@ export default defineBackground({
         );
 
         let finalContent = '';
+        const streamTabId = message.tabId ?? sender.tab?.id;
         for await (const partial of stream) {
           finalContent = partial;
           // 发送中间结果到 content script
+          if (streamTabId === undefined) continue;
           try {
-            await browser.tabs.sendMessage(message.tabId || sender.tab?.id, {
+            await browser.tabs.sendMessage(streamTabId, {
               action: 'translationStreamUpdate',
               partial,
             });
@@ -347,7 +362,7 @@ export default defineBackground({
               const inputBlock = streamInputIds[i];
               return inputBlock && t.translated_text === inputBlock.text;
             }).length;
-            console.log(
+            logger.debug(
               '[Background][StreamTrace] sample=',
               JSON.stringify(sample),
               `noOpCount=${noOpCount}/${translations.length}`,
@@ -359,7 +374,7 @@ export default defineBackground({
 
         sendResponse({ success: true, result: Array.from(result.entries()) });
       } catch (error) {
-        console.error('[Background] translateChunkStream error:', error);
+        logger.error('[Background] translateChunkStream error:', error);
         sendResponse({
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
@@ -368,8 +383,8 @@ export default defineBackground({
     }
 
     async function handleValidateApiKey(
-      message: any,
-      sendResponse: (response: any) => void
+      message: ValidateApiKeyMessage,
+      sendResponse: (response: ValidateApiKeyResponse) => void
     ) {
       try {
         const { apiKey } = message;
@@ -379,7 +394,7 @@ export default defineBackground({
         }
 
         const config = await getConfig();
-        console.log('[Background] Validating API Key, length:', apiKey.length);
+        logger.debug('[Background] Validating API Key, length:', apiKey.length);
 
         const service = new DeepSeekTranslationService(apiKey, config.promptStyle);
         const testContent = JSON.stringify([{ id: 'test', text: 'Hello' }]);
@@ -395,9 +410,9 @@ export default defineBackground({
         
         sendResponse({ success: true });
       } catch (error) {
-        console.error('[Background] API Key validation failed:', error);
+        logger.error('[Background] API Key validation failed:', error);
         const errorMsg = error instanceof Error ? error.message : '验证失败';
-        console.error('[Background] Full error stack:', error);
+        logger.error('[Background] Full error stack:', error);
         sendResponse({
           success: false,
           error: errorMsg,
@@ -410,7 +425,7 @@ export default defineBackground({
       }
     }
 
-    async function handleClearCache(sendResponse: (response: any) => void) {
+    async function handleClearCache(sendResponse: (response: ClearCacheResponse) => void) {
       try {
         await clearAllCache();
         sendResponse({ success: true });
@@ -422,13 +437,16 @@ export default defineBackground({
       }
     }
 
-    async function handleCheckConfig(sendResponse: (response: any) => void) {
+    async function handleCheckConfig(sendResponse: (response: CheckConfigResponse) => void) {
       try {
         const config = await getConfig();
-        const hasKey = !!config.deepseekApiKey;
-        sendResponse({ success: hasKey, config });
+        if (config.deepseekApiKey) {
+          sendResponse({ success: true, config });
+        } else {
+          sendResponse({ success: false, error: 'API Key 未配置' });
+        }
       } catch (error) {
-        console.error('[Background] checkConfig error:', error);
+        logger.error('[Background] checkConfig error:', error);
         sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
@@ -437,9 +455,9 @@ export default defineBackground({
       if (!isCommandsSupported) return;
       try {
         const commands = await browser.commands.getAll();
-        console.log('Registered commands:', commands);
+        logger.debug('Registered commands:', commands);
       } catch (error) {
-        console.warn('Commands API not available:', error);
+        logger.warn('Commands API not available:', error);
       }
     }
   },

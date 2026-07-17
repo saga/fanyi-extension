@@ -19,6 +19,7 @@
 
 import { Readability } from '@mozilla/readability';
 
+import { logger } from '../../utils/logger';
 // =============================================================================
 // 常量
 // =============================================================================
@@ -551,7 +552,7 @@ function tryReadabilityRoot(doc: Document): Element | null {
 
     return root;
   } catch (e) {
-    console.warn('[ContentDetector] Readability fallback failed:', e);
+    logger.warn('[ContentDetector] Readability fallback failed:', e);
     return null;
   }
 }
@@ -587,7 +588,7 @@ export function detectArticleRoot(doc: Document): Element | null {
     } else if (isFragmentedArticleRoot(best, doc)) {
       // 页面由多个同级 section 构成，best 可能只是其中一个小节。
       // Readability 更擅长把整篇文章聚合起来。
-      console.log(
+      logger.debug(
         `[ContentDetector] Best candidate looks like a fragmented section, trying Readability fallback`,
       );
       shouldTryReadability = true;
@@ -610,7 +611,7 @@ export function detectArticleRoot(doc: Document): Element | null {
       if (readabilityTextLen >= bestTextLen * 0.5) {
         bestScore = Math.max(s, SCORE_THRESHOLD + 1);
         best = readabilityRoot;
-        console.log(
+        logger.debug(
           `[ContentDetector] Readability fallback root: <${best.tagName}> .${(best.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${readabilityTextLen})`,
         );
       }
@@ -618,7 +619,7 @@ export function detectArticleRoot(doc: Document): Element | null {
   }
 
   if (bestScore < SCORE_THRESHOLD) {
-    console.log(
+    logger.debug(
       `[ContentDetector] Best score ${bestScore.toFixed(1)} < threshold ${SCORE_THRESHOLD}, fallback to body`,
     );
     return null;
@@ -627,13 +628,13 @@ export function detectArticleRoot(doc: Document): Element | null {
   // 防御: 即便通过了 collectCandidates 过滤, 也再校验一次冠军不是 consent SDK
   // (理论上不会命中, 但 collectCandidates 的祖先展开可能引入外层包装)。
   if (best && isConsentSdkContainer(best)) {
-    console.log(
+    logger.debug(
       `[ContentDetector] Best candidate is a consent/cookie SDK container, ignoring (score: ${bestScore.toFixed(1)})`,
     );
     return null;
   }
 
-  console.log(
+  logger.debug(
     `[ContentDetector] Best: <${best!.tagName}> .${(best!.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)})`,
   );
   return best;
