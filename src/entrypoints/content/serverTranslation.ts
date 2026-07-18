@@ -71,6 +71,17 @@ function prepareHtmlForServer(): string {
     }
   }
 
+  // 中和不安全的 form action：把 http:// 升级为 https://。
+  // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS 把
+  // form action 改成 http://，这会触发 Mixed Content 警告并污染发送给
+  // 服务端的 HTML。升级到 https 既消除警告又不破坏表单语义。
+  for (const form of Array.from(clone.querySelectorAll('form[action^="http://"]'))) {
+    const action = form.getAttribute('action');
+    if (action) {
+      form.setAttribute('action', action.replace(/^http:\/\//i, 'https://'));
+    }
+  }
+
   const fullHtml = clone.outerHTML;
   const bodyHtml = clone.querySelector('body')?.outerHTML ?? fullHtml;
   return fullHtml.length > MAX_FULL_HTML_CHARS ? bodyHtml : fullHtml;

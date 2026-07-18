@@ -615,6 +615,20 @@ const OVERLAY_PATTERNS = [
       return pos === 'fixed' || pos === 'sticky';
     },
   },
+
+  // 表单 action 指向 http://（Mixed Content 来源）。
+  // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS
+  // 把 form action 改成 http://，这会触发 Mixed Content 警告且污染
+  // 发往服务端的 HTML。这类表单通常是订阅/登录/搜索小部件，不属于正文，
+  // 直接隐藏。
+  {
+    tag: 'form',
+    styleCheck: (el: Element) => {
+      const action = el.getAttribute('action');
+      if (!action) return false;
+      return /^http:\/\//i.test(action);
+    },
+  },
 ];
 
 function matchSelectorRule(

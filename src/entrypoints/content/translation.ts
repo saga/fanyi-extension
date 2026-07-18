@@ -8,6 +8,12 @@ import { showStatus, hideStatus } from './statusOverlay';
 import { translateChunksViaBackground } from './chunkTranslation';
 import { translateViaServer, checkServerCache, applyServerTranslatedHtml, ServerTranslationError } from './serverTranslation';
 import {
+  isPdfJsViewer,
+  translatePdfJsViewer,
+  restorePdfJsViewer,
+  togglePdfJsViewer,
+} from './pdfjs';
+import {
   retryGlobalMissing,
   markMissingBlocks,
   isPageTranslated,
@@ -102,6 +108,44 @@ export function createTranslationController(
         setTimeout(hideStatus, 5000);
         return;
       }
+
+      // PDF.js viewer：走独立的 canvas 覆盖层翻译流程。
+      // PDF.js 把 PDF 内容渲染为 canvas 位图，.textLayer span 是透明的文字选择层，
+      // 普通的 inline 双语翻译对它无效（译文继承 color: transparent，用户看不到）。
+      // 这里改为在每段下方渲染可见的 div.fanyi-pdfjs-translation 覆盖层。
+      if (isPdfJsViewer(document)) {
+        isTranslating = true;
+        showStatus('正在提取文本...', 'loading');
+        try {
+          const result = await translatePdfJsViewer(
+            config,
+            state,
+            (msg, type) => {
+              showStatus(msg, type);
+            },
+          );
+          isTranslatedState = result.translated;
+          if (result.translated) {
+            showStatus(
+              result.skippedCount > 0
+                ? `翻译完成（${result.paragraphCount} 段，${result.skippedCount} 段过短已跳过）`
+                : `翻译完成（${result.paragraphCount} 段）`,
+              'success',
+            );
+            setTimeout(hideStatus, 5000);
+          } else {
+            showStatus('翻译失败：没有段落被翻译', 'error');
+            setTimeout(hideStatus, 5000);
+          }
+        } catch (error) {
+          logger.error('[PdfJs] Translation failed:', error);
+          showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
+        } finally {
+          isTranslating = false;
+        }
+        return;
+      }
+
       isTranslating = true;
       showStatus('正在提取文本...', 'loading');
 
@@ -127,10 +171,27 @@ export function createTranslationController(
 
     restore(silent = false) {
       isTranslatedState = false;
+      // PDF.js viewer：移除覆盖层 div（不需要恢复 span 文本，原文 span 始终未修改）
+      if (isPdfJsViewer(document)) {
+        restorePdfJsViewer(document);
+        state.originalTexts.clear();
+        state.translatedBlocks.clear();
+        state.translatedTexts.clear();
+        if (!silent) {
+          showStatus('已恢复原文', 'success');
+          setTimeout(hideStatus, 4000);
+        }
+        return;
+      }
       restoreOriginal(state, silent);
     },
 
     toggle() {
+      // PDF.js viewer：toggle 覆盖层 div 的 display
+      if (isPdfJsViewer(document)) {
+        togglePdfJsViewer(document);
+        return;
+      }
       toggleTranslation();
     },
 

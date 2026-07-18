@@ -49,6 +49,29 @@ export function getStyles(isMobile: boolean): string {
       cursor: help;
     }
 
+    /*
+     * PDF.js viewer 译文覆盖层。
+     * PDF.js 把 PDF 渲染为 canvas 位图，.textLayer span 是透明的文字选择层，
+     * 普通的 inline 双语翻译对它无效（译文继承 color: transparent 不可见）。
+     * 这里改为在每段下方渲染独立 div.fanyi-pdfjs-translation，作为可见的译文层。
+     * inline style 已在 pdfjs/index.ts 的 renderOverlay 中设置，这里作为兜底，
+     * 防止扩展 CSS 未加载时译文不可见。
+     */
+    .fanyi-pdfjs-translation {
+      position: absolute;
+      color: #1a73e8;
+      background: rgba(255, 255, 255, 0.9);
+      border-left: 2px solid #1a73e8;
+      padding: 1px 6px;
+      border-radius: 2px;
+      line-height: 1.3;
+      white-space: normal;
+      word-break: break-word;
+      pointer-events: none;
+      z-index: 1;
+      box-sizing: border-box;
+    }
+
     .fanyi-btn-save,
     .fanyi-btn-translate,
     .fanyi-btn-restore {

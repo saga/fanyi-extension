@@ -179,6 +179,33 @@ describe('prepareDocument', () => {
     expect(() => prepareDocument(document)).toThrow('No translatable content found');
   });
 
+  // PDF.js viewer pages render content as <canvas> bitmaps via JavaScript.
+  // Server-side (vocal-saga) fetches only the HTML shell (#viewer.pdfViewer),
+  // which has no translatable text. The error message should be specific and
+  // actionable, telling the user to use the browser extension instead.
+  it('throws PDF.js-specific error for PDF.js viewer pages with no translatable content', () => {
+    document.body.innerHTML = `
+      <div id="outerContainer">
+        <div id="mainContainer">
+          <div class="toolbar"></div>
+          <div id="viewerContainer">
+            <div id="viewer" class="pdfViewer"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    expect(() => prepareDocument(document)).toThrow('PDF.js viewer pages render content client-side');
+  });
+
+  it('throws PDF.js-specific error when only #viewerContainer is present (no .pdfViewer class)', () => {
+    document.body.innerHTML = `
+      <div id="viewerContainer"></div>
+    `;
+
+    expect(() => prepareDocument(document)).toThrow('PDF.js viewer pages render content client-side');
+  });
+
   // Regression: databricks.com blog. A consent/cookie SDK banner that gets picked as
   // the article root yields 0 blocks (every descendant is pruned by overlay/cookie
   // rules). prepareDocument must fall back to <body> so the real article still gets

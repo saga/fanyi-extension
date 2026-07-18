@@ -6275,6 +6275,43 @@ describe('blockExtractor - short pattern word boundary (\\b)', () => {
     document.body.appendChild(el);
     expect(isOverlayElement(el)).toBe(true);
   });
+
+  // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS
+  // 把 form action 改成 http://，触发 Mixed Content 警告。这类表单
+  // 通常在侧边栏，不属于正文，应当被识别为 overlay 隐藏掉。
+  it('isOverlayElement matches form with insecure http:// action', () => {
+    const form = document.createElement('form');
+    form.setAttribute('action', 'http://app.feedblitz.com/f/f.Fbz?AddNewUserDirect');
+    form.setAttribute('method', 'POST');
+    document.body.appendChild(form);
+    expect(isOverlayElement(form)).toBe(true);
+    form.remove();
+  });
+
+  it('isOverlayElement does NOT match form with secure https:// action', () => {
+    const form = document.createElement('form');
+    form.setAttribute('action', 'https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect');
+    form.setAttribute('method', 'POST');
+    document.body.appendChild(form);
+    expect(isOverlayElement(form)).toBe(false);
+    form.remove();
+  });
+
+  it('isOverlayElement does NOT match form with no action', () => {
+    const form = document.createElement('form');
+    form.setAttribute('method', 'POST');
+    document.body.appendChild(form);
+    expect(isOverlayElement(form)).toBe(false);
+    form.remove();
+  });
+
+  it('isOverlayElement does NOT match form with relative action', () => {
+    const form = document.createElement('form');
+    form.setAttribute('action', '/submit');
+    document.body.appendChild(form);
+    expect(isOverlayElement(form)).toBe(false);
+    form.remove();
+  });
 });
 
 

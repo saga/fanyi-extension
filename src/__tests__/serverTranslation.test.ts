@@ -167,6 +167,56 @@ describe('translateViaServer', () => {
     expect(body.html).not.toContain('data-original-text');
   });
 
+  // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS 把
+  // form action 改成 http://，这会触发 Mixed Content 警告并污染发往服务端
+  // 的 HTML。prepareHtmlForServer 应把 http:// 升级为 https://。
+  it('upgrades insecure http:// form actions to https:// before sending HTML', async () => {
+    document.body.innerHTML += `
+      <form name="FeedBlitz_test" method="POST" action="http://app.feedblitz.com/f/f.Fbz?AddNewUserDirect">
+        <input name="EMAIL" type="text" />
+      </form>
+    `;
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(baseConfig, blocks, nodeMap);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    // 发送给服务端的 HTML 不应再包含 http://app.feedblitz.com
+    expect(body.html).not.toContain('http://app.feedblitz.com');
+    // 应升级为 https://
+    expect(body.html).toContain('https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect');
+  });
+
+  it('leaves secure https:// form actions untouched', async () => {
+    document.body.innerHTML += `
+      <form method="POST" action="https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect">
+        <input name="EMAIL" type="text" />
+      </form>
+    `;
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body></body></html>',
+    });
+
+    const blocks: TextBlock[] = [];
+    const nodeMap = new Map<string, Node>();
+
+    await translateViaServer(baseConfig, blocks, nodeMap);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).toContain('https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect');
+  });
+
   it('skips blocks whose translation span is missing', async () => {
     const translatedHtml = `
       <html><body>

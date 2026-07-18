@@ -378,7 +378,11 @@ function hideBodyOverlays(doc: Document, articleRoot: Element): void {
     '[class*="modal"], [class*="popup"], [class*="overlay"], ' +
       '[class*="dialog"], [class*="backdrop"], [class*="lightbox"], ' +
       '[class*="cookie"], [id*="modal"], [id*="popup"], [id*="overlay"], ' +
-      '[id*="dialog"], [id*="cookie"], [role="dialog"]',
+      '[id*="dialog"], [id*="cookie"], [role="dialog"], ' +
+      // form action 指向 http:// 的订阅/搜索表单（Mixed Content 来源，
+      // 通常在侧边栏，不属于正文）。isOverlayElement 中的 form+http 规则
+      // 会精确判定，这里只做候选圈定。
+      'form[action^="http://"]',
   );
   for (const el of candidates) {
     const tag = el.tagName.toLowerCase();
@@ -532,6 +536,28 @@ export function extractFromDataIsland(doc: Document): TextBlock[] {
   }));
 }
 
+/**
+ * 检测文档是否是 PDF.js viewer 页面。
+ *
+ * PDF.js viewer 把 PDF 内容渲染为 <canvas> 位图，.textLayer span 是透明的
+ * 文字选择层。服务端（vocal-saga）不执行 JavaScript，抓取到的 HTML 只有
+ * 空壳（#viewer.pdfViewer + <canvas>），没有可翻译的文本。
+ *
+ * 检测信号（按可靠性排序）：
+ *   1. #viewer.pdfViewer — PDF.js viewer 初始化时加的 class，在初始 HTML 中就存在
+ *   2. #viewerContainer — PDF.js viewer 的页面容器，ID 足够独特
+ *
+ * 注：.textLayer 在服务端抓取的 HTML 中不存在（由 JavaScript 在客户端创建），
+ * 所以不作为服务端检测信号。
+ */
+function isPdfJsViewerHtml(root: Document | Element): boolean {
+  const doc = root instanceof Document ? root : root.ownerDocument;
+  if (!doc) return false;
+  const viewer = doc.getElementById('viewer');
+  if (viewer && viewer.classList.contains('pdfViewer')) return true;
+  return doc.getElementById('viewerContainer') !== null;
+}
+
 export function prepareDocument(root: Document | Element): {
   blocks: TextBlock[];
   chunks: Chunk[];
@@ -569,6 +595,13 @@ export function prepareDocument(root: Document | Element): {
   }
 
   if (blocks.length === 0) {
+    if (isPdfJsViewerHtml(root)) {
+      throw new Error(
+        'PDF.js viewer pages render content client-side as canvas bitmap. ' +
+        'Server-side translation cannot extract text. ' +
+        'Please use the browser extension directly on this URL for client-side PDF translation.',
+      );
+    }
     throw new Error('No translatable content found');
   }
 
