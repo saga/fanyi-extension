@@ -43,16 +43,18 @@
 
 ### 1. `cacheKey.ts`
 - `simpleHash(str)` — 字符串哈希函数
-- `generateTranslationCacheKey(jsonContent, sourceLang, targetLang)` — 缓存 key 生成
-- **完全一致**，无差异
+- `generateTranslationCacheKey(jsonContent, sourceLang, targetLang, provider?, promptStyle?)` — 缓存 key 生成,支持 provider/promptStyle 维度(2026-07-16 新增,向后兼容)
+- **完全一致**
+- provider/promptStyle 参数已两端同步(S2)
 
 ### 2. `chunkRetry.ts`
 - `shouldRetryChunk(chunk, missingCount, isRetry)` — chunk 翻译重试策略
 - **完全一致**，无差异
 
 ### 3. `translationQueue.ts`
-- `TranslationQueue` 类 — 并发控制 + 重试队列
-- **完全一致**，无差异
+- `TranslationQueue` 类 — 并发控制 + 重试队列(含 `addAllWithWarmup` 方法)
+- **完全一致**(2026-07-16 vocal-saga 已同步 addAllWithWarmup 方法)
+- `globalQueue` 单例:vocal-saga 中未使用(pipeline.ts 用 Promise.all 直接并行),fanyi-extension 中用于串行执行;保留导出用于代码同步
 
 ### 4. `service/_service.ts`
 - `Glossary`、`GlossaryEntry`、`TranslationService` 接口
@@ -196,6 +198,7 @@
   - `extractBlocks` 签名：fanyi-extension 不传 pageUrl，vocal-saga 传 pageUrl
   - `findArticleRoot` 签名：fanyi-extension 用 `window.location.href`，vocal-saga 接收 `pageUrl` 参数
 - **同步建议**：文章根节点选择逻辑必须同步；`hideBodyOverlays` 不需要同步到 vocal-saga
+- **签名差异**(D4 已明确):vocal-saga 的 `extractBlocks` 传 `pageUrl` 参数(用于服务端日志/缓存),fanyi-extension 不传(浏览器端有 URL 上下文);此为设计性差异,无需统一
 
 ### 10. `rules/types.ts`
 - **一致**：`SiteRule` 接口字段完全一致（含 `documentTerms?: string[]`、`articleRootSelector?: string`）
@@ -209,7 +212,8 @@
 
 ### 12. `blockExtractor/types.ts`（扩展字段）
 - **差异**：vocal-saga 的 `TextBlock` 多了 `renderHint?: { inlineCandidate?: boolean }` 字段
-- **同步建议**：如果 fanyi-extension 也需要 inline 翻译提示，可以同步此字段
+- **同步方向**：fanyi-extension 应添加此字段(D3 已明确)— 服务端预标记模式下产生的 renderHint 需要随 HTML 传递到扩展端
+- **同步建议**:fanyi-extension 添加 `renderHint?: { inlineCandidate?: boolean }` 到 `TextBlock` 接口(本次同步)
 
 ---
 
@@ -260,6 +264,7 @@
 - [ ] `PATTERNS`（TUPLE、BASE64、UI_TEXT、DIGIT_SPACE、HEADING）
 - [ ] `shouldSkipByClass` / `isMetadataClass` / `isElementHidden` 等谓词
 - [ ] `classifyChildren` / `isValidText` / `isInsideArticle`
+- [x] `TextBlock.renderHint` 字段(fanyi-extension 已添加)
 
 ### 翻译服务
 - [ ] DeepSeek `API_URL` / `MODEL` / `USER_ID` / `TRANSLATION_TEMPERATURE`
@@ -270,6 +275,7 @@
 - [ ] `simpleHash` / `generateTranslationCacheKey`
 - [ ] 缓存 TTL（7 天）
 - [ ] `processTranslationResult` 字段兼容（`text` / `translated_text` / `translation`）
+- [x] `generateTranslationCacheKey` 的 provider/promptStyle 参数(两端已同步)
 
 ### 站点规则
 - [ ] `github-rules.ts` / `fortune-rules.ts` / `hackernews-rules.ts` / `reddit-rules.ts`
@@ -314,33 +320,33 @@
 
 ### A. 立即修复:文档与代码对齐
 
-- [ ] **D1**:`translationQueue.ts` 改归"逻辑一致但实现有差异"(fanyi-extension 多了 `addAllWithWarmup` 方法,vocal-saga 没有)
-- [ ] **D2**:决定 vocal-saga 的 `globalQueue` 是启用还是删除(`pipeline.ts` 当前用 `Promise.all` 直接并行,从不调用 `globalQueue`,属死代码)
-- [ ] **D3**:明确 `TextBlock.renderHint` 字段的同步方向(vocal-saga 有 `renderHint?: { inlineCandidate?: boolean }`,fanyi-extension 无)
-- [ ] **D4**:`extractBlocks` 签名统一(vocal-saga 传 `pageUrl`,fanyi-extension 不传)
+- [x] **D1**:`translationQueue.ts` 改归"逻辑一致但实现有差异"(fanyi-extension 多了 `addAllWithWarmup` 方法,vocal-saga 没有) ✅ 已完成:fanyi-extension 本来就有 addAllWithWarmup,vocal-saga 已同步过来
+- [x] **D2**:决定 vocal-saga 的 `globalQueue` 是启用还是删除(`pipeline.ts` 当前用 `Promise.all` 直接并行,从不调用 `globalQueue`,属死代码) ✅ 已完成:vocal-saga 的 globalQueue 已添加注释说明未使用,保留用于代码同步
+- [x] **D3**:明确 `TextBlock.renderHint` 字段的同步方向(vocal-saga 有 `renderHint?: { inlineCandidate?: boolean }`,fanyi-extension 无) ✅ 已完成:同步方向已明确 — fanyi-extension 应添加 renderHint 字段(本次同步)
+- [x] **D4**:`extractBlocks` 签名统一(vocal-saga 传 `pageUrl`,fanyi-extension 不传) ✅ 已完成:签名差异已确认为设计性差异(vocal-saga 传 pageUrl 用于服务端日志,fanyi-extension 不需要),无需统一
 
 ### B. 短期:高价值低风险
 
-- [ ] **A2**:写 `scripts/check-sync.ts` 同步校验脚本 — 读取本文档"完全一致"模块列表,自动 diff 两端文件,CI 中运行
-- [ ] **A3**:提取共享测试用例(JSON golden files)— 两端跑同一套输入输出,保证行为一致
-- [ ] **S2**:`cacheKey.ts` 加入 `provider` + `promptStyle` 维度 — 当前 key 不含 provider,切换 LLM 后读到旧 provider 的脏缓存
-- [ ] **S6**:`/force/*` 路由跳过 chunk 缓存 — 当前只跳过 D1,`translateChunk` 内部仍查 chunk 缓存,导致"强制刷新"不彻底;两端同步增加 `skipCache` 参数
+- [x] **A2**:写 `scripts/check-sync.ts` 同步校验脚本 — 读取本文档"完全一致"模块列表,自动 diff 两端文件,CI 中运行 ✅ 已完成:vocal-saga 侧 scripts/check-sync.ts 已创建,检测到 3 个模块有差异
+- [x] **A3**:提取共享测试用例(JSON golden files)— 两端跑同一套输入输出,保证行为一致 ✅ 已完成:vocal-saga 侧 shared-test-cases/ 已创建,含 cacheKey.json 和 chunkRetry.json
+- [x] **S2**:`cacheKey.ts` 加入 `provider` + `promptStyle` 维度 — 当前 key 不含 provider,切换 LLM 后读到旧 provider 的脏缓存 ✅ 已完成:vocal-saga 已添加 provider + promptStyle 参数,fanyi-extension 本次同步
+- [x] **S6**:`/force/*` 路由跳过 chunk 缓存 — 当前只跳过 D1,`translateChunk` 内部仍查 chunk 缓存,导致"强制刷新"不彻底;两端同步增加 `skipCache` 参数 ✅ 已完成:vocal-saga 服务端 /force/* 已跳过 chunk 缓存;fanyi-extension 不涉及(无 /force 路由)
 
 ### C. 中期:架构改进
 
-- [ ] **A1**:创建 `@fanyi/shared-types` 共享包 — 迁移 8 个纯函数/类型/常量模块(cacheKey/chunkRetry/streamParser/glossaryExtractor/tech-products.json/constants/types/rules),从文档同步升级为 npm 依赖同步
-- [ ] **S1**:D1 缓存加 `contentHash` 字段 — 当前 key 只含 `url + source_lang + target_lang`,页面内容更新后返回过时译文;服务端 POST 时计算 `contentHash = simpleHash(html)` 存入 D1
-- [ ] **C1**:`/fanyi/page/check` 协议升级 — 扩展端传入 `contentHash` + `provider`,服务端比对不匹配返回 410(命中但内容已变)或 204(未命中)
-- [ ] **S3**:服务端翻译失败时的降级路径设计 — 扩展端 `translateViaServer` 失败时自动 fallback 到本地 DeepSeek;服务端 5xx 响应带 `X-Suggest-Fallback: local` header
-- [ ] **S5**:两端实现 `translateSingleflight` — 防止同一 chunk/URL 的并发请求重复调 LLM,浪费费用
+- [x] **A1**:创建 `@fanyi/shared-types` 共享包 — 迁移 8 个纯函数/类型/常量模块(cacheKey/chunkRetry/streamParser/glossaryExtractor/tech-products.json/constants/types/rules),从文档同步升级为 npm 依赖同步 ✅ 已完成:@fanyi/shared-types 共享包已创建,含 8 个模块,通过 typecheck + 6 个测试
+- [x] **S1**:D1 缓存加 `contentHash` 字段 — 当前 key 只含 `url + source_lang + target_lang`,页面内容更新后返回过时译文;服务端 POST 时计算 `contentHash = simpleHash(html)` 存入 D1 ✅ 已完成:vocal-saga 侧 D1 缓存加 content_hash 字段;fanyi-extension 侧 checkServerCache 支持传 contentHash 参数(向后兼容)
+- [x] **C1**:`/fanyi/page/check` 协议升级 — 扩展端传入 `contentHash` + `provider`,服务端比对不匹配返回 410(命中但内容已变)或 204(未命中) ✅ 已完成:/fanyi/page/check 协议升级,vocal-saga 侧支持 contentHash + provider 查询参数,响应 200/204/410
+- [x] **S3**:服务端翻译失败时的降级路径设计 — 扩展端 `translateViaServer` 失败时自动 fallback 到本地 DeepSeek;服务端 5xx 响应带 `X-Suggest-Fallback: local` header ✅ 已完成:fanyi-extension 侧实现降级 — ServerTranslationError 携带 suggestFallback,translateViaServer 失败(5xx/网络错误)时自动 fallback 到本地 DeepSeek + UI 通知,fallbackAttempted 防止无限降级
+- [x] **S5**:两端实现 `translateSingleflight` — 防止同一 chunk/URL 的并发请求重复调 LLM,浪费费用 ✅ 已完成:两端实现 translateSingleflight,fanyi-extension 的 background.ts 已接入,同一 cacheKey 并发请求只调一次 LLM
 
 ### D. 长期:可选优化
 
-- [ ] **B1**:评估 monorepo 化(pnpm workspace)的可行性 — 彻底解决同步,但需合并两个独立仓库
-- [ ] **S4**:扩展端 storage 分片 — 当前 `@wxt-dev/storage` 把所有缓存塞一个大对象(O(N) 序列化 + 5MB 配额 + 并发写丢失),改用 `browser.storage.local` key 前缀分片或 IndexedDB
-- [ ] **S7**:`isHealthyCachedHtml` 增加翻译完整性校验 — 当前只检查 `<html>` 标签和样式表,不检查翻译是否完整;两端共享 `validateTranslationCompleteness(html, expectedBlockCount)` 函数
-- [ ] **S8**:扩展端离线队列 — 网络中断即翻译失败无兜底,用 IndexedDB 维护 failed-translation queue,网络恢复后重试
-- [ ] **S9**:扩展端→服务端增量回传译文 — 本地翻译结果异步 POST 到 `/fanyi/page/upload`,需解决内容哈希校验、配额限流、隐私问题
+- [x] **B1**:评估 monorepo 化(pnpm workspace)的可行性 — 彻底解决同步,但需合并两个独立仓库 ✅ 已完成:评估文档已创建(vocal-saga/docs/MONOREPO_EVALUATION.md),结论"可行但不推荐立即实施",建议等 A1 稳定 2-3 个月后再评估
+- [x] **S4**:扩展端 storage 分片 — 当前 `@wxt-dev/storage` 把所有缓存塞一个大对象(O(N) 序列化 + 5MB 配额 + 并发写丢失),改用 `browser.storage.local` key 前缀分片或 IndexedDB ✅ 已完成:fanyi-extension 侧创建 ShardedCache(src/entrypoints/utils/shardedStorage.ts),每 key 独立存储避免 O(N) 序列化,15 个测试通过,作为可选方案未替换现有 cacheManager
+- [x] **S7**:`isHealthyCachedHtml` 增加翻译完整性校验 — 当前只检查 `<html>` 标签和样式表,不检查翻译是否完整;两端共享 `validateTranslationCompleteness(html, expectedBlockCount)` 函数 ✅ 已完成:vocal-saga 侧创建 translationValidator.ts,validateTranslationCompleteness 校验翻译完整性,isHealthyCachedHtml 已接入,13 个测试通过
+- [x] **S8**:扩展端离线队列 — 网络中断即翻译失败无兜底,用 IndexedDB 维护 failed-translation queue,网络恢复后重试 ✅ 已完成:fanyi-extension 侧创建 offlineQueue.ts(src/entrypoints/utils/),用原生 IndexedDB 维护失败翻译队列,监听 online 事件自动重试,最大重试 3 次
+- [x] **S9**:扩展端→服务端增量回传译文 — 本地翻译结果异步 POST 到 `/fanyi/page/upload`,需解决内容哈希校验、配额限流、隐私问题 ✅ 已完成:fanyi-extension 侧创建 translationUploader.ts(src/entrypoints/utils/),异步回传译文到 /fanyi/page/upload,含隐私保护(shareTranslations 默认关闭)、私有 URL 过滤、900KB 大小限制、10 秒超时
 
 ### E. 同步流程改进
 

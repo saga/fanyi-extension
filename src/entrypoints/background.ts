@@ -9,6 +9,7 @@ import {
 } from './utils/translateApi';
 import { globalQueue } from './utils/translationQueue';
 import { generateTranslationCacheKey } from './utils/cacheKey';
+import { translateSingleflight } from './utils/singleflight';
 import { matchSiteRule, buildSitePrompt } from '../rules';
 import type { SiteRule } from '../rules/types';
 import type {
@@ -164,7 +165,7 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
-        const cacheKey = providedCacheKey || generateTranslationCacheKey(jsonContent, sourceLang, targetLang);
+        const cacheKey = providedCacheKey || generateTranslationCacheKey(jsonContent, sourceLang, targetLang, config.provider, config.promptStyle);
 
         const cached = await getCachedTranslation(cacheKey);
         const hasValidCache = cached && cached.size > 0;
@@ -199,8 +200,10 @@ export default defineBackground({
           `targetLang=${targetLang}`,
         );
 
-        const jsonResult = await globalQueue.add(() =>
-          service.translate(jsonContent, sourceLang, targetLang, glossary, sitePrompt)
+        const jsonResult = await translateSingleflight(cacheKey, () =>
+          globalQueue.add(() =>
+            service.translate(jsonContent, sourceLang, targetLang, glossary, sitePrompt)
+          )
         );
 
         // [ChunkTrace] 出参快照：成功解析 → 对比 inputIds 找出 response 里

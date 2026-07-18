@@ -6,7 +6,7 @@ import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { matchSiteRule } from '../../rules';
 import { showStatus, hideStatus } from './statusOverlay';
 import { translateChunksViaBackground } from './chunkTranslation';
-import { translateViaServer, checkServerCache, applyServerTranslatedHtml } from './serverTranslation';
+import { translateViaServer, checkServerCache, applyServerTranslatedHtml, ServerTranslationError } from './serverTranslation';
 import {
   retryGlobalMissing,
   markMissingBlocks,
@@ -36,7 +36,27 @@ export type { TranslationState };
  *   - 全局重试作为兜底：主循环后再次扫 missing，1-3 块小 chunk 走一次 fresh API
  *   - fanyi-missing class 标记：所有重试都失败时给用户视觉提示
  *   - 动态内容监听：翻译完成后，DOM 变化触发的新 block 走单块翻译
+ *   - 服务端翻译失败降级：5xx/网络错误时降级到本地 DeepSeek，避免直接抛错中断用户翻译
  */
+
+// 防止服务端翻译反复失败导致无限降级循环：每次成功或非降级错误后重置。
+// 模块级标志，在同一个 content script 生命周期内只允许降级一次。
+let fallbackAttempted = false;
+
+/**
+ * 显示降级通知（不阻塞用户）。
+ * 服务端翻译失败并降级到本地模式时，在页面右上角短暂提示。
+ */
+function showFallbackNotification(): void {
+  const banner = document.createElement('div');
+  banner.style.cssText =
+    'position:fixed;top:10px;right:10px;background:#fff3cd;color:#856404;' +
+    'padding:8px 16px;border-radius:4px;z-index:999999;font-size:14px;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.1);';
+  banner.textContent = '服务端翻译失败,已临时降级到本地模式';
+  document.body.appendChild(banner);
+  setTimeout(() => banner.remove(), 5000);
+}
 
 // ============================================================
 // 顶层 Controller：暴露给 index.ts 的三个动作
@@ -178,29 +198,50 @@ async function handleFullTranslation(
 
   // 使用服务端翻译
   if (useServer) {
-    let translatedIds: Set<string>;
+    // translatedIds 为 null 表示服务端翻译失败并已降级，需继续走本地翻译流程。
+    let translatedIds: Set<string> | null = null;
     if (cachedHtml) {
       showStatus('正在应用服务端缓存...', 'loading');
       translatedIds = applyServerTranslatedHtml(cachedHtml, blocks, nodeMap);
     } else {
       showStatus('正在发送到服务端翻译...', 'loading');
-      translatedIds = await translateViaServer(config, blocks, nodeMap);
+      try {
+        translatedIds = await translateViaServer(config, blocks, nodeMap);
+        fallbackAttempted = false; // 成功后重置，允许下次再次降级
+      } catch (err) {
+        if (err instanceof ServerTranslationError && err.suggestFallback && !fallbackAttempted) {
+          // 服务端 5xx / 网络错误：降级到本地 DeepSeek 模式，避免直接抛错中断翻译。
+          fallbackAttempted = true;
+          logger.warn(`服务端翻译失败(${err.statusCode}),降级到本地模式`);
+          config.useServerTranslation = false;
+          showFallbackNotification();
+          // translatedIds 保持 null，跳出 if 块进入下方本地翻译流程
+        } else {
+          // 4xx 等不可降级错误，或已经降级过一次，直接抛出避免无限循环
+          fallbackAttempted = false;
+          throw err;
+        }
+      }
     }
-    const missingIds = markMissingBlocks(nodeMap, translatedIds);
-    cleanupTempAttrs();
-    logger.debug(
-      `[ContentScript] Server translation end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
-    );
-    const statusMsg =
-      missingIds.length > 0
-        ? `翻译完成（${missingIds.length} 段未返回）`
-        : '翻译完成';
-    showStatus(statusMsg, 'success');
-    setTimeout(hideStatus, 5000);
-    if (document.body) {
-      document.body.dataset.fanyiTranslated = 'true';
+
+    if (translatedIds) {
+      const missingIds = markMissingBlocks(nodeMap, translatedIds);
+      cleanupTempAttrs();
+      logger.debug(
+        `[ContentScript] Server translation end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
+      );
+      const statusMsg =
+        missingIds.length > 0
+          ? `翻译完成（${missingIds.length} 段未返回）`
+          : '翻译完成';
+      showStatus(statusMsg, 'success');
+      setTimeout(hideStatus, 5000);
+      if (document.body) {
+        document.body.dataset.fanyiTranslated = 'true';
+      }
+      return { translated: true, observer: null };
     }
-    return { translated: true, observer: null };
+    // 降级路径：translatedIds === null，继续执行下方本地翻译
   }
 
   const glossary = skipGlossary ? {} : await extractGlossary(fullText);
