@@ -260,7 +260,10 @@ async function handleFullTranslation(
   // 启动动态弹层猎手：持续隐藏翻译开始后（如 Poptins 的
   // initiatePullPoptinsRequest 动态注入）才出现的全屏营销弹窗 / 通知层，
   // 避免其盖住整页造成"白屏"。restore 时停止。
-  const overlayHider = createOverlayHider();
+  // 传入正文根，让猎手跳过正文根的祖先（如 Drupal 的 dialog-off-canvas-main-canvas），
+  // 避免误藏整页容器 → 白屏。
+  const articleRoot = document.querySelector('main, article, [role="main"]');
+  const overlayHider = createOverlayHider(articleRoot);
   overlayHider.start();
   setOverlayHider(overlayHider);
 

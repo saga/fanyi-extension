@@ -394,6 +394,10 @@ function hideBodyOverlays(doc: Document, articleRoot: Element): void {
     if (tag === 'body' || tag === 'html') continue;
     if (articleRoot.contains(el)) continue;
     if (el === articleRoot) continue;
+    // 绝不隐藏正文根的祖先（如 Drupal 的 dialog-off-canvas-main-canvas）：
+    // 它虽然类名含 dialog/overlay 被 isOverlayElement 判为弹窗，却是包裹 <main>
+    // 的整页容器，隐藏它会把整页内容一起藏掉 → 白屏。
+    if (el.contains(articleRoot)) continue;
     if (el.hasAttribute('data-fanyi-remove')) continue;
     // 跳过扩展端自身注入的 UI 元素（class 以 fanyi- 开头或为 selection-translator），
     // 否则 hideBodyOverlays 的 [class*="overlay"] 会匹配到 .fanyi-status-overlay
@@ -448,7 +452,7 @@ export interface OverlayHider {
   stop(): void;
 }
 
-export function createOverlayHider(): OverlayHider {
+export function createOverlayHider(articleRoot?: Element | null): OverlayHider {
   let observer: MutationObserver | null = null;
 
   function isExtensionUi(el: Element): boolean {
@@ -466,6 +470,10 @@ export function createOverlayHider(): OverlayHider {
     if (tag === 'body' || tag === 'html') return;
     if (el.hasAttribute('data-fanyi-remove')) return;
     if (isExtensionUi(el)) return;
+    // 跳过正文根的祖先（如 Drupal 的 dialog-off-canvas-main-canvas），避免隐藏
+    // 整页容器 → 白屏。动态注入的弹层（Poptins 等）通常是 body 的直接子节点，
+    // 不会命中所指的祖先，因此这条保护不会误伤真正的弹层。
+    if (articleRoot && el !== articleRoot && el.contains(articleRoot)) return;
     if (isOverlayElement(el)) {
       el.setAttribute('data-fanyi-remove', 'true');
     }
