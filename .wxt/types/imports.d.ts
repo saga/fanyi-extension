@@ -20,7 +20,7 @@ declare global {
   const defineUnlistedScript: typeof import('wxt/utils/define-unlisted-script').defineUnlistedScript
   const defineWxtPlugin: typeof import('wxt/utils/define-wxt-plugin').defineWxtPlugin
   const effectScope: typeof import('vue').effectScope
-  const fakeBrowser: typeof import('wxt/testing').fakeBrowser
+  const fakeBrowser: typeof import('wxt/testing/fake-browser').fakeBrowser
   const getAppConfig: typeof import('wxt/utils/app-config').getAppConfig
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
@@ -137,7 +137,7 @@ declare module 'vue' {
     readonly defineUnlistedScript: UnwrapRef<typeof import('wxt/utils/define-unlisted-script')['defineUnlistedScript']>
     readonly defineWxtPlugin: UnwrapRef<typeof import('wxt/utils/define-wxt-plugin')['defineWxtPlugin']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
-    readonly fakeBrowser: UnwrapRef<typeof import('wxt/testing')['fakeBrowser']>
+    readonly fakeBrowser: UnwrapRef<typeof import('wxt/testing/fake-browser')['fakeBrowser']>
     readonly getAppConfig: UnwrapRef<typeof import('wxt/utils/app-config')['getAppConfig']>
     readonly getCurrentInstance: UnwrapRef<typeof import('vue')['getCurrentInstance']>
     readonly getCurrentScope: UnwrapRef<typeof import('vue')['getCurrentScope']>

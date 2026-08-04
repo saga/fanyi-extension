@@ -606,6 +606,19 @@ const OVERLAY_PATTERNS = [
   { idPattern: /notification|notifications|push-notification|browser-notification|notification-prompt|subscribers/i },
   { role: 'alertdialog' },
 
+  // Poptins 等营销弹窗 / 全屏通知层（poptins.com）。MIT Sloan 等站点集成，
+  // 点击翻译后才由页面脚本动态注入（initiatePullPoptinsRequest），会盖住整页
+  // 造成"白屏"。其节点 class/id 多为 "poptin*"，或以 iframe(src 含 popt.in) 形式加载。
+  { classPattern: /poptin/i },
+  { idPattern: /poptin/i },
+  {
+    tag: 'iframe',
+    styleCheck: (el: Element) => {
+      const src = (el as HTMLIFrameElement).src || '';
+      return /popt\.in/i.test(src);
+    },
+  },
+
   // 固定定位的干扰性 banner（顶部/底部 fixed bar）
   {
     tag: 'div',

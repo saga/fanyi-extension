@@ -377,8 +377,12 @@ function hideBodyOverlays(doc: Document, articleRoot: Element): void {
   const candidates = doc.querySelectorAll(
     '[class*="modal"], [class*="popup"], [class*="overlay"], ' +
       '[class*="dialog"], [class*="backdrop"], [class*="lightbox"], ' +
-      '[class*="cookie"], [id*="modal"], [id*="popup"], [id*="overlay"], ' +
-      '[id*="dialog"], [id*="cookie"], [role="dialog"], ' +
+      '[class*="cookie"], [class*="poptin"], ' +
+      '[id*="modal"], [id*="popup"], [id*="overlay"], ' +
+      '[id*="dialog"], [id*="cookie"], [id*="poptin"], ' +
+      '[role="dialog"], [role="alertdialog"], ' +
+      // Poptins 等以 iframe(src 含 popt.in) 形式加载的全屏弹层。
+      'iframe[src*="popt.in"], ' +
       // form action 指向 http:// 的订阅/搜索表单（Mixed Content 来源，
       // 通常在侧边栏，不属于正文）。isOverlayElement 中的 form+http 规则
       // 会精确判定，这里只做候选圈定。
@@ -411,6 +415,103 @@ function hideBodyOverlays(doc: Document, articleRoot: Element): void {
       el.setAttribute('data-fanyi-remove', 'true');
     }
   }
+}
+
+// =============================================================================
+// 动态弹层猎手（Dynamic Overlay Hider）
+// =============================================================================
+//
+// 问题：hideBodyOverlays() 只在翻译开始时同步跑一次。但 Poptins 等营销弹窗 /
+// 全屏通知层是页面脚本在**运行时动态注入**的（MIT Sloan 的
+// initiatePullPoptinsRequest() 即入口），往往恰好在点击翻译、正文翻译进行中
+// 才出现。它们盖住整页会造成"白屏"，而一次性 hideBodyOverlays 早已跑完，
+// 根本没机会捕获它们。
+//
+// 方案：翻译开始后持续监听 DOM，把新注入的 overlay/popup/modal/poptin 节点
+// 标记 data-fanyi-remove 隐藏（由 styles.ts 的 [data-fanyi-remove] 规则
+// display:none !important）。只监听 childList，且先用廉价 CSS 候选选择器收窄
+// 再调 isOverlayElement（避免对全树做 getComputedStyle），并对扩展自身 UI
+// （class 以 fanyi- 开头）直接跳过，不会误伤译文或状态提示条。
+
+/** 候选取子（与 hideBodyOverlays 对齐，再加 poptin）。先用它收窄，再调 isOverlayElement。 */
+const OVERLAY_CANDIDATE_SELECTOR =
+  '[class*="modal"], [class*="popup"], [class*="overlay"], ' +
+  '[class*="dialog"], [class*="backdrop"], [class*="lightbox"], ' +
+  '[class*="cookie"], [class*="poptin"], ' +
+  '[id*="modal"], [id*="popup"], [id*="overlay"], ' +
+  '[id*="dialog"], [id*="cookie"], [id*="poptin"], ' +
+  '[role="dialog"], [role="alertdialog"], ' +
+  'iframe[src*="popt.in"], form[action^="http://"]';
+
+export interface OverlayHider {
+  start(): void;
+  stop(): void;
+}
+
+export function createOverlayHider(): OverlayHider {
+  let observer: MutationObserver | null = null;
+
+  function isExtensionUi(el: Element): boolean {
+    const cls = el.classList;
+    if (cls.contains('selection-translator')) return true;
+    for (let i = 0; i < cls.length; i++) {
+      if (cls[i].startsWith('fanyi-')) return true;
+    }
+    return false;
+  }
+
+  function hideIfOverlay(el: Element): void {
+    if (!(el instanceof HTMLElement)) return;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'body' || tag === 'html') return;
+    if (el.hasAttribute('data-fanyi-remove')) return;
+    if (isExtensionUi(el)) return;
+    if (isOverlayElement(el)) {
+      el.setAttribute('data-fanyi-remove', 'true');
+    }
+  }
+
+  function sweep(node: Node): void {
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as Element;
+    if (typeof el.matches === 'function' && el.matches(OVERLAY_CANDIDATE_SELECTOR)) {
+      hideIfOverlay(el);
+    }
+    if (typeof el.querySelectorAll === 'function') {
+      for (const child of Array.from(el.querySelectorAll(OVERLAY_CANDIDATE_SELECTOR))) {
+        hideIfOverlay(child);
+      }
+    }
+  }
+
+  return {
+    start() {
+      if (observer) return;
+      // 兜底：启动时先扫一遍已存在的 poptin 弹层（可能在 hideBodyOverlays 之后才注入）。
+      try {
+        for (const el of Array.from(
+          document.querySelectorAll(OVERLAY_CANDIDATE_SELECTOR),
+        )) {
+          hideIfOverlay(el);
+        }
+      } catch {
+        // jsdom 等无 layout 环境，静默忽略
+      }
+      observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.type !== 'childList') continue;
+          m.addedNodes.forEach((n) => sweep(n));
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    },
+    stop() {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+    },
+  };
 }
 
 // =============================================================================

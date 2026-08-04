@@ -1,4 +1,4 @@
-import { prepareDocument } from '../utils/contentHelper';
+import { prepareDocument, createOverlayHider, type OverlayHider } from '../utils/contentHelper';
 import { buildNodeMap } from '../utils/blockExtractor';
 import { getConfig } from '../utils/config';
 import { DOMObserverManager } from '../utils/domObserver';
@@ -88,6 +88,7 @@ export function createTranslationController(
   let isTranslating = false;
   let isTranslatedState = false;
   let domObserver: DOMObserverManager | null = null;
+  let overlayHider: OverlayHider | null = null;
   const ctx = { isMobile };
 
   return {
@@ -149,12 +150,17 @@ export function createTranslationController(
       isTranslating = true;
       showStatus('正在提取文本...', 'loading');
 
+      // 清理上一次翻译遗留的弹层猎手，避免重复 MutationObserver 泄漏。
+      overlayHider?.stop();
+      overlayHider = null;
+
       try {
         const result = await handleFullTranslation(
           config,
           ctx.isMobile,
           state,
           (observer) => { domObserver = observer; },
+          (h) => { overlayHider = h; },
         );
         isTranslatedState = result.translated;
         if (result.observer) {
@@ -171,6 +177,9 @@ export function createTranslationController(
 
     restore(silent = false) {
       isTranslatedState = false;
+      // 停止动态弹层猎手（Poptins 等弹层不再需要隐藏）。
+      overlayHider?.stop();
+      overlayHider = null;
       // PDF.js viewer：移除覆盖层 div（不需要恢复 span 文本，原文 span 始终未修改）
       if (isPdfJsViewer(document)) {
         restorePdfJsViewer(document);
@@ -215,6 +224,7 @@ async function handleFullTranslation(
   isMobile: boolean,
   state: TranslationState,
   setObserver: (obs: DOMObserverManager | null) => void,
+  setOverlayHider: (h: OverlayHider | null) => void,
 ): Promise<TranslationResult> {
   // 防御性检查：即使 start() 已经判断过，在真正发送请求前再确认一次，
   // 防止 content script 重新注入、或多入口同时触发导致重复翻译。
@@ -246,6 +256,13 @@ async function handleFullTranslation(
   }
 
   const { blocks, chunks, fullText } = prepareDocument(document);
+
+  // 启动动态弹层猎手：持续隐藏翻译开始后（如 Poptins 的
+  // initiatePullPoptinsRequest 动态注入）才出现的全屏营销弹窗 / 通知层，
+  // 避免其盖住整页造成"白屏"。restore 时停止。
+  const overlayHider = createOverlayHider();
+  overlayHider.start();
+  setOverlayHider(overlayHider);
 
   if (blocks.length === 0) {
     throw new Error('没有找到可翻译的内容');
