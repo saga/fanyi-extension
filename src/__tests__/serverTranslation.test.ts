@@ -90,8 +90,12 @@ describe('translateViaServer', () => {
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe(baseConfig.serverUrl);
     expect(options.method).toBe('POST');
-    expect(options.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(options.headers['Content-Type']).toBe('application/json');
+    // 单次翻译会话标识随请求发出，用于服务端关联 check→page→报错 日志
+    expect(typeof options.headers['X-Session-Id']).toBe('string');
+    expect(options.headers['X-Session-Id'].length).toBeGreaterThan(0);
     const body = JSON.parse(options.body);
+    expect(body.sessionId).toBe(options.headers['X-Session-Id']);
     expect(body.html).toContain('data-fanyi-block-id="b1"');
     expect(body.url).toBe(window.location.href);
     expect(body.apiKey).toBe('sk-test-api-key');

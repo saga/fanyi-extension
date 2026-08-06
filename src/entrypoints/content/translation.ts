@@ -7,6 +7,7 @@ import { matchSiteRule } from '../../rules';
 import { showStatus, hideStatus } from './statusOverlay';
 import { translateChunksViaBackground } from './chunkTranslation';
 import { translateViaServer, checkServerCache, applyServerTranslatedHtml, ServerTranslationError } from './serverTranslation';
+import { rotateSessionId } from '../utils/session';
 import {
   isPdfJsViewer,
   translatePdfJsViewer,
@@ -243,6 +244,8 @@ async function handleFullTranslation(
   // 服务端翻译模式下，先查询服务端缓存，命中即可跳过 prepareHtmlForServer 等重计算。
   let cachedHtml: string | null = null;
   if (useServer) {
+    // 轮换新的翻译会话 id，让本次翻译的 check 与 page 两次请求共享同一 sid。
+    rotateSessionId();
     showStatus('正在检查服务端缓存...', 'loading');
     try {
       cachedHtml = await checkServerCache(config);

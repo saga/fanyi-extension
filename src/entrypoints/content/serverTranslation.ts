@@ -3,6 +3,7 @@ import type { TextBlock } from '../utils/blockExtractor';
 import type { Config } from '../utils/config';
 
 import { logger } from '../../utils/logger';
+import { getSessionId } from '../utils/session';
 
 /**
  * 服务端翻译失败时抛出的错误。
@@ -92,6 +93,35 @@ function getDefaultServerUrl(config: Config): string {
 }
 
 /**
+ * 采集当前浏览器/设备的精确信息，随请求发给服务端。
+ * 服务端据此在错误日志里标注「哪个浏览器、是否移动端、屏幕多大」，
+ * 用于定位「Firefox Android 失败、Chrome 成功」这类客户端差异问题。
+ * 只带运行时可测量的精确值（UA / 平台 / 触屏 / 真实屏幕与视口尺寸），
+ * browser / os / deviceType 由服务端统一从 UA 解析，避免两端解析逻辑不一致。
+ */
+function buildClientInfo() {
+  const ua = navigator.userAgent || '';
+  const isMobile =
+    /Android/i.test(ua) ||
+    /iPhone|iPad|iPod|Mobile/i.test(ua) ||
+    (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches);
+  const touch =
+    'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0;
+  const screenW = window.screen?.width;
+  const screenH = window.screen?.height;
+  return {
+    ua,
+    platform: navigator.platform ?? '',
+    isMobile,
+    touch,
+    ...(typeof screenW === 'number' ? { screenWidth: screenW } : {}),
+    ...(typeof screenH === 'number' ? { screenHeight: screenH } : {}),
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  };
+}
+
+/**
  * 查询服务端是否已有当前 URL 的翻译缓存。
  * @returns 命中的翻译后 HTML；未命中返回 null。
  */
@@ -103,7 +133,10 @@ export async function checkServerCache(config: Config): Promise<string | null> {
   checkUrl.searchParams.set('source', config.sourceLang || 'en');
   checkUrl.searchParams.set('target', config.targetLang || 'zh');
 
-  const response = await fetch(checkUrl.toString(), { method: 'GET' });
+  const response = await fetch(checkUrl.toString(), {
+    method: 'GET',
+    headers: { 'X-Session-Id': getSessionId() },
+  });
   if (!response.ok) {
     throw new Error(`服务端缓存检查失败: ${response.status} ${response.statusText}`);
   }
@@ -197,6 +230,10 @@ export async function translateViaServer(
     provider,
     // 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话
     promptStyle: config.promptStyle,
+    // 客户端浏览器/设备信息，供服务端错误日志标注（见 vocal-saga lib/clientInfo）
+    client: buildClientInfo(),
+    // 单次翻译会话标识，供服务端把 check→page→报错 整条链路关联到同一 sid
+    sessionId: getSessionId(),
   };
   // 仅当 provider=deepseek 时才把客户端的 API Key 发给服务端；
   // 其他 provider 的凭据由服务端自行管理。
@@ -210,7 +247,7 @@ export async function translateViaServer(
   try {
     response = await fetch(serverUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Session-Id': getSessionId() },
       body: JSON.stringify(body),
     });
   } catch (networkErr) {
