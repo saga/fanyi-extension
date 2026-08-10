@@ -37,11 +37,40 @@ export function getStyles(isMobile: boolean): string {
     .fanyi-success { border: 1px solid rgba(103, 194, 58, 0.3); }
     .fanyi-error { border: 1px solid rgba(245, 108, 108, 0.3); }
 
+    /*
+     * 翻译渲染：原文和译文都是 block 级元素，垂直排列。
+     * 用 !important + 高特异性选择器防止站点 CSS 覆盖。
+     *
+     * 已知冲突场景：
+     * - Medium / Netflix Tech Blog 等 Medium 托管站点的全局 span 规则
+     *   可能覆盖 display 属性或添加 position/float 导致重叠
+     * - 某些 CMS 对 p/h2 子元素设 flex/grid 改变子元素排列顺序
+     */
     .fanyi-original {
-      display: block;
+      display: block !important;
+      position: static !important;
+      float: none !important;
+      clear: both !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      /* flex 容器内固定顺序：原文在前 */
+      order: 0 !important;
     }
     .fanyi-translation {
-      display: block;
+      display: block !important;
+      position: static !important;
+      float: none !important;
+      clear: both !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      /* flex 容器内固定顺序：译文在后 */
+      order: 1 !important;
+      /* 译文与原文之间留间距 */
+      margin-top: 0.3em !important;
     }
     /* 未翻译成功的段落：黄色高亮 + help 光标，鼠标悬停时由 title 提示原因。 */
     .fanyi-missing {
