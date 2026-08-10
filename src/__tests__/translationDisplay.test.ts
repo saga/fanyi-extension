@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   applyBlockTranslation,
   restoreBlock,
   toggleBlockTranslation,
 } from '../entrypoints/utils/translationDisplay';
+import { logger } from '../utils/logger';
 
 function createP(text: string): HTMLParagraphElement {
   const p = document.createElement('p');
@@ -41,6 +42,55 @@ describe('applyBlockTranslation', () => {
 
     expect(p.querySelectorAll('.fanyi-original').length).toBe(originalSpanCount);
     expect(p.querySelector('.fanyi-translation')?.textContent).toBe('你好世界');
+  });
+
+  describe('mapping validation (suspect block-id misalignment)', () => {
+    it('warns when a short title gets a long paragraph translation', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const p = createP(
+        'AI financial advice is surprisingly good especially if you ask the right questions'
+      );
+      p.dataset.fanyiBlockId = 'b3';
+      applyBlockTranslation(
+        p,
+        '人们越来越多地转向人工智能寻求财务建议。最近的一项研究发现，当被正确引导时，人工智能给出的建议质量出奇地高。研究还表明，提问的方式会显著影响回答的质量。'
+      );
+
+      expect(warn).toHaveBeenCalled();
+      const allArgs = warn.mock.calls.flat().map(String).join(' | ');
+      expect(allArgs).toMatch(/suspect mapping/);
+      expect(allArgs).toContain('b3');
+      // 校验不应阻断翻译：译文照常注入
+      expect(p.querySelector('.fanyi-translation')?.textContent).toContain('人工智能');
+      expect(p.dataset.fanyiMappingSuspect).toBeTruthy();
+      warn.mockRestore();
+    });
+
+    it('does NOT warn on a normal title → short translation', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const p = createP('AI financial advice is surprisingly good');
+      applyBlockTranslation(p, '人工智能理财建议出奇地好');
+
+      const allArgs = warn.mock.calls.flat().map(String).join(' | ');
+      expect(allArgs).not.toMatch(/suspect mapping/);
+      expect(p.dataset.fanyiMappingSuspect).toBeUndefined();
+      warn.mockRestore();
+    });
+
+    it('does NOT warn on a normal body → body translation', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const p = createP(
+        'People are increasingly turning to AI for financial advice. A study found that the way questions are asked significantly affects answer quality.'
+      );
+      applyBlockTranslation(
+        p,
+        '人们越来越多地转向人工智能寻求财务建议。研究发现提问方式会显著影响回答质量。'
+      );
+
+      const allArgs = warn.mock.calls.flat().map(String).join(' | ');
+      expect(allArgs).not.toMatch(/suspect mapping/);
+      warn.mockRestore();
+    });
   });
 
   describe('DOM preservation (regression for link/formatting breakage)', () => {

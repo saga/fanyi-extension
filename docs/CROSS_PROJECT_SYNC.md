@@ -337,7 +337,7 @@
 - [x] **A1**:创建 `@fanyi/shared-types` 共享包 — 迁移 8 个纯函数/类型/常量模块(cacheKey/chunkRetry/streamParser/glossaryExtractor/tech-products.json/constants/types/rules),从文档同步升级为 npm 依赖同步 ✅ 已完成:@fanyi/shared-types 共享包已创建,含 8 个模块,通过 typecheck + 6 个测试
 - [x] **S1**:D1 缓存加 `contentHash` 字段 — 当前 key 只含 `url + source_lang + target_lang`,页面内容更新后返回过时译文;服务端 POST 时计算 `contentHash = simpleHash(html)` 存入 D1 ✅ 已完成:vocal-saga 侧 D1 缓存加 content_hash 字段;fanyi-extension 侧 checkServerCache 支持传 contentHash 参数(向后兼容)
 - [x] **C1**:`/fanyi/page/check` 协议升级 — 扩展端传入 `contentHash` + `provider`,服务端比对不匹配返回 410(命中但内容已变)或 204(未命中) ✅ 已完成:/fanyi/page/check 协议升级,vocal-saga 侧支持 contentHash + provider 查询参数,响应 200/204/410
-- [x] **S3**:服务端翻译失败时的降级路径设计 — 扩展端 `translateViaServer` 失败时自动 fallback 到本地 DeepSeek;服务端 5xx 响应带 `X-Suggest-Fallback: local` header ✅ 已完成:fanyi-extension 侧实现降级 — ServerTranslationError 携带 suggestFallback,translateViaServer 失败(5xx/网络错误)时自动 fallback 到本地 DeepSeek + UI 通知,fallbackAttempted 防止无限降级
+- [x] **S3**:服务端翻译失败时的降级路径设计 — 扩展端 `translateViaServer` 失败时自动 fallback 到本地 DeepSeek;服务端 5xx 响应带 `X-Suggest-Fallback: local` header ✅ **已移除(2026-08-10)**:用户要求去掉本地降级翻译路径,服务端翻译失败直接抛错展示给用户。ServerTranslationError 移除 suggestFallback 字段,X-Suggest-Fallback 处理与 fallbackAttempted/showFallbackNotification 一并删除;本地翻译仍可作为用户显式选择的主模式(useServerTranslation=false)保留
 - [x] **S5**:两端实现 `translateSingleflight` — 防止同一 chunk/URL 的并发请求重复调 LLM,浪费费用 ✅ 已完成:两端实现 translateSingleflight,fanyi-extension 的 background.ts 已接入,同一 cacheKey 并发请求只调一次 LLM
 
 ### D. 长期:可选优化

@@ -8,15 +8,12 @@ import { getSessionId } from '../utils/session';
 /**
  * 服务端翻译失败时抛出的错误。
  * - statusCode: HTTP 状态码；0 表示网络错误（未拿到响应）。
- * - suggestFallback: 为 true 时调用方应降级到本地翻译模式。
- *   仅 5xx / 网络错误 / 服务端显式 X-Suggest-Fallback: local 时为 true；
- *   4xx（如 401 认证失败）为 false，因为本地模式同样会失败。
+ * 调用方（content script）收到后直接展示错误给用户，不再降级到本地翻译。
  */
 export class ServerTranslationError extends Error {
   constructor(
     message: string,
     public statusCode: number,
-    public suggestFallback: boolean = false,
   ) {
     super(message);
     this.name = 'ServerTranslationError';
@@ -190,10 +187,8 @@ export function applyServerTranslatedHtml(
  * 发送包含 data-fanyi-block-id 的 HTML 到 /fanyi/page，
  * 解析返回的双语对照 HTML，提取 .fanyi-translation 文本并回填到当前 DOM。
  *
- * 失败语义：
- *   - 5xx / 网络错误 / X-Suggest-Fallback: local → 抛 ServerTranslationError(suggestFallback=true)，
- *     调用方可降级到本地翻译。
- *   - 4xx（如 401）→ 抛 ServerTranslationError(suggestFallback=false)，不应降级。
+ * 失败语义：任何错误（4xx / 5xx / 网络错误）都抛 ServerTranslationError，
+ * 由调用方直接展示给用户，不再静默降级到本地翻译。
  */
 export async function translateViaServer(
   config: Config,
@@ -242,7 +237,7 @@ export async function translateViaServer(
   }
 
   // 网络错误（DNS 失败、连接超时、CORS 拦截等）拿不到 HTTP 响应，
-  // 也应降级到本地模式，所以用 try/catch 包裹 fetch。
+  // 直接抛错由调用方展示给用户。
   let response: Response;
   try {
     response = await fetch(serverUrl, {
@@ -256,24 +251,16 @@ export async function translateViaServer(
     throw new ServerTranslationError(
       `服务端翻译网络请求失败: ${msg}`,
       0, // 0 表示未拿到 HTTP 响应
-      true, // 网络错误默认降级
     );
   }
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
     logger.error('[ServerTranslation] server error body:', errorBody);
-    // 5xx 或服务端显式通过 X-Suggest-Fallback: local header 提示时，降级到本地模式；
-    // 4xx（如 401 认证失败、400 参数错误）不降级，因为本地模式同样会失败。
-    // headers 可能在测试 mock 中缺失，用可选链兜底。
-    const suggestFallback =
-      response.status >= 500 ||
-      response.headers?.get('X-Suggest-Fallback') === 'local';
     throw new ServerTranslationError(
       `服务端翻译失败: ${response.status} ${response.statusText}` +
         (errorBody ? ` — ${errorBody.substring(0, 500)}` : ''),
       response.status,
-      suggestFallback,
     );
   }
 

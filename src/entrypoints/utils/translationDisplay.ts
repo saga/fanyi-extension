@@ -1,5 +1,8 @@
 export type TranslationMode = 'bilingual';
 
+import { logger } from '../../utils/logger';
+import { validateBlockMapping } from './mappingValidator';
+
 /**
  * Wrap translation around an element without destroying its existing children.
  *
@@ -25,6 +28,36 @@ export function applyBlockTranslation(
   const originalText = node.textContent || '';
   node.classList.add('fanyi-translated');
   node.dataset.originalText = originalText;
+
+  // 映射校验：原文/译文信息量严重不匹配 → 提示 block id 可能错配
+  // （覆盖本地翻译路径，以及服务端回填路径）。log-only，不改动展示。
+  try {
+    const verdict = validateBlockMapping(originalText, translatedText);
+    if (verdict.suspect) {
+      const blockId = node.dataset.fanyiBlockId || '(unknown)';
+      logger.warn(
+        '[MappingValidator] Block',
+        blockId,
+        'suspect mapping:',
+        verdict.reasons.join('; '),
+        '| origChars',
+        verdict.origChars,
+        'transChars',
+        verdict.transChars,
+        '| origSent',
+        verdict.origSentences,
+        'transSent',
+        verdict.transSentences,
+        '| orig=',
+        originalText.substring(0, 50),
+        '| trans=',
+        translatedText.substring(0, 50)
+      );
+      node.dataset.fanyiMappingSuspect = verdict.reasons.join('; ');
+    }
+  } catch {
+    // 校验不应影响翻译主流程
+  }
 
   // Move existing children into .fanyi-original so they survive translation.
   const originalSpan = document.createElement('span');
