@@ -205,7 +205,16 @@ function acceptWalkerNode(
     counters.rejected++;
     return NodeFilter.FILTER_REJECT;
   }
+  // 噪声类 (广告 / cookie / 侧边栏 / 推荐 等): 整棵子树拒绝。
+  // 但 article / main 例外 —— 仅跳过自身、继续下钻，避免 404media.co 的
+  // <article class="... has-sidebar"> 因 "sidebar" 模式被整棵误杀正文。
+  // （div/section 即使含内容 token 也不豁免，否则 ad-content / sponsored-content
+  // 等噪声 div 会被下钻提取。article/main 是语义内容根，可安全豁免。）
   if (shouldSkipByClass(el) || shouldSkipBySiteRules(el)) {
+    if (tag === 'article' || tag === 'main') {
+      counters.skipped++;
+      return NodeFilter.FILTER_SKIP;
+    }
     markLowPriorityIfNeeded(el, scoreHint);
     rejectedCache.add(el);
     counters.rejected++;

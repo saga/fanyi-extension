@@ -2,14 +2,16 @@
  * 智能正文识别：基于评分的容器选择算法（增强版）。
  *
  * 当 ARTICLE_SELECTORS 选择器快速路径全部 miss 时，
- * 对所有候选容器评分，选最高分的作为文章根节点。
+ * 作为「主条件」用 @mozilla/readability 定位正文根，失败再回到手写评分算法兜底。
  *
  * 相比 v1 的归一化加权平均，v2 使用绝对分数排名：
  *   - 以 bodyTextLength / (linkCount + 1) * log(textLength) 作为基础密度分
  *   - 用 token / compound / id 信号替代模糊的 regex
  *   - 引入 structure boost、container penalty、sibling normalization、
  *     depth normalization 压制 wrapper dominance 和 sidebar/article 混排误判
- *   - 当评分算法无法选出可靠根节点时，使用 @mozilla/readability 作为 fallback
+ *   - Readability 是主条件：成熟的启发式正文提取器，比手写评分更鲁棒
+ *     （如 404media.co 的 <article class="... has-sidebar">、googleblog 的碎片正文），
+ *     仅在 Readability 失败 / 返回 consent 容器时才回到评分算法兜底
  *
  * 特点：
  *   - no layout dependency
@@ -430,47 +432,18 @@ export function collectCandidates(doc: Document): Element[] {
 }
 
 // =============================================================================
-// Readability fallback
+// Readability 主条件（root 定位器）
 // =============================================================================
 
 /**
- * 当评分算法无法给出可靠根节点时，使用 @mozilla/readability 提取正文，
- * 并在原始 DOM 中定位对应的容器作为 fallback 根节点。
+ * 正文根定位的主条件：使用 @mozilla/readability 提取正文，
+ * 并在原始 DOM 中定位对应的容器作为 root 节点。
  *
- * 适用场景：页面没有 article/main 语义标签，且内容被切成多个高密度小碎片
- * （如 developers.googleblog.com 的 .inner-block-content.rich-content），
- * 评分算法容易选错。Readability 的启发式规则能更稳定地找到主文章区域。
+ * Readability 是成熟的正文提取器，比手写评分更鲁棒：能稳定聚合多 section /
+ * 缺少语义标签 / 被噪声容器干扰的站点正文（如 404media.co 的
+ * <article class="... has-sidebar">、developers.googleblog.com 的碎片正文）。
+ * detectArticleRoot 把它作为判断主条件，手写评分算法仅作兜底。
  */
-/**
- * 检测 best 是否只是“多个同级 section 构成文章”中的一个小节。
- *
- * 很多学术/技术站点把文章切成多个 <section> 或 <div> 同级块，
- * contentDetector 的评分会选中其中一个密度最高的小节，导致只翻译局部。
- * 当 best 的父容器包含 ≥3 个长度相当的文本块，且 best 仅占父容器一小部分时，
- * 认为页面是碎片化的，应启用 Readability fallback。
- */
-function isFragmentedArticleRoot(best: Element, doc: Document): boolean {
-  const parent = best.parentElement;
-  if (!parent || parent === doc.body || parent === doc.documentElement) return false;
-
-  const bestTag = best.tagName.toLowerCase();
-  if (bestTag !== 'section' && bestTag !== 'div') return false;
-
-  const siblings = Array.from(parent.children).filter((c) => {
-    const tag = c.tagName.toLowerCase();
-    return (tag === 'section' || tag === 'div') && (c.textContent || '').trim().length > 100;
-  });
-
-  if (siblings.length < 3) return false;
-
-  const bestLen = (best.textContent || '').length;
-  const totalLen = siblings.reduce((sum, c) => sum + (c.textContent || '').length, 0);
-  if (totalLen === 0) return false;
-
-  // best 占同类型兄弟总文本比例 < 30%，说明它只是多节文章的一部分
-  return bestLen / totalLen < 0.3;
-}
-
 function tryReadabilityRoot(doc: Document): Element | null {
   try {
     // Readability 会修改传入的文档树，因此必须在克隆的文档上运行，
@@ -562,6 +535,36 @@ function tryReadabilityRoot(doc: Document): Element | null {
 // =============================================================================
 
 export function detectArticleRoot(doc: Document): Element | null {
+  // 主条件：@mozilla/readability 定位正文根。
+  // Readability 比手写评分更鲁棒，能稳定聚合多 section / 缺少语义标签 /
+  // 被噪声容器干扰的站点正文。因此把它作为判断主条件，评分算法仅作兜底。
+  const readabilityRoot = tryReadabilityRoot(doc);
+  if (readabilityRoot) {
+    // tryReadabilityRoot 已校验：正文长度 >= 200、签名在原始 DOM 命中、
+    // 且返回根不是 consent SDK 容器（collectCandidates 的祖先展开可能引入
+    // 外层包装，这里再防御一次）。
+    // 但 Readability 有时只能定位到 body/html（覆盖率阈值让它跳过真正的文章
+    // 容器，如 OneTrust cookie 弹窗页的真实文章是 body 直接子节点），此时
+    // 交给评分算法取更精确的容器；若评分也找不到，仍会落到 body 兜底。
+    if (
+      !isConsentSdkContainer(readabilityRoot) &&
+      readabilityRoot !== doc.body &&
+      readabilityRoot !== doc.documentElement
+    ) {
+      // 直接采用 Readability 结果，打保底分数确保跨过阈值。
+      const s = scoreElement(readabilityRoot);
+      const bestScore = Math.max(s, SCORE_THRESHOLD + 1);
+      logger.debug(
+        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${(readabilityRoot.textContent || '').length})`,
+      );
+      return readabilityRoot;
+    }
+    logger.debug(
+      `[ContentDetector] Readability root is a consent/cookie SDK container, falling back to scoring`,
+    );
+  }
+
+  // 兜底：手写评分算法（处理 Readability 失败 / 返回 consent 容器的站点）。
   const candidates = collectCandidates(doc);
   if (!candidates.length) return null;
 
@@ -573,48 +576,6 @@ export function detectArticleRoot(doc: Document): Element | null {
     if (s > bestScore) {
       bestScore = s;
       best = el;
-    }
-  }
-
-  // 判断当前最佳候选是否可靠：分数不足、占 body 文本比例过低，
-  // 或者 best 是孤立的 section 等局部容器时，启用 Readability fallback。
-  let shouldTryReadability = false;
-  if (best && doc.body) {
-    const bodyText = (doc.body.textContent || '').length;
-    const bestTextLen = (best.textContent || '').length;
-    const ratio = bodyText > 0 ? bestTextLen / bodyText : 0;
-    if (bestScore < SCORE_THRESHOLD || ratio < 0.15) {
-      shouldTryReadability = true;
-    } else if (isFragmentedArticleRoot(best, doc)) {
-      // 页面由多个同级 section 构成，best 可能只是其中一个小节。
-      // Readability 更擅长把整篇文章聚合起来。
-      logger.debug(
-        `[ContentDetector] Best candidate looks like a fragmented section, trying Readability fallback`,
-      );
-      shouldTryReadability = true;
-    }
-  } else {
-    shouldTryReadability = true;
-  }
-
-  if (shouldTryReadability) {
-    const readabilityRoot = tryReadabilityRoot(doc);
-    if (readabilityRoot) {
-      // Readability 已经是一个相对可靠的正文提取器；
-      // 当现有评分算法不可靠时才启用 fallback，因此直接采用其结果，
-      // 并用保底分数确保能跨过阈值。
-      // 注意：这里不再和 bestScore 比较。原 best 本身已因分数不足 / 占比过低 /
-      // 碎片化被判定为不可靠，直接采用 Readability 结果才能聚合多 section 文章。
-      const s = scoreElement(readabilityRoot);
-      const readabilityTextLen = (readabilityRoot.textContent || '').length;
-      const bestTextLen = best ? (best.textContent || '').length : 0;
-      if (readabilityTextLen >= bestTextLen * 0.5) {
-        bestScore = Math.max(s, SCORE_THRESHOLD + 1);
-        best = readabilityRoot;
-        logger.debug(
-          `[ContentDetector] Readability fallback root: <${best.tagName}> .${(best.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${readabilityTextLen})`,
-        );
-      }
     }
   }
 
@@ -635,7 +596,7 @@ export function detectArticleRoot(doc: Document): Element | null {
   }
 
   logger.debug(
-    `[ContentDetector] Best: <${best!.tagName}> .${(best!.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)})`,
+    `[ContentDetector] Scoring fallback root: <${best!.tagName}> .${(best!.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)})`,
   );
   return best;
 }

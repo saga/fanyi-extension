@@ -348,12 +348,12 @@ describe('contentDetector', () => {
       expect(root!.className).not.toContain('inner-block-content');
     });
 
-    // Readability fallback: 当评分算法因 body 噪声过大 + 真正容器链接多
-    // 而选中高密度碎片时，Readability 应作为 fallback 纠正回真正的文章容器。
-    it('falls back to Readability when scoring picks a tiny fragment due to body noise', () => {
+    // Readability 主条件：body 噪声过大 + 真正容器链接多时，Readability 作为
+    // 判断主条件应能稳定定位到真正的文章容器（.main-content），而非高密度碎片。
+    it('locates the real article via Readability primary even with heavy body noise', () => {
       const articleText = 'We are excited to announce our new product. It brings powerful features to developers around the world. This article explains the motivation, design, and usage of the new release.';
       const denseFragment = 'To validate performance we ran comprehensive benchmarks across multiple configurations and observed significant improvements in latency and throughput metrics.';
-      // 大量噪声脚本让真正容器占 body 比例降到 <5%，触发 Readability fallback 路径
+      // 大量噪声脚本稀释真正容器的占比，验证 Readability 主条件仍能定位 .main-content
       const noise = 'noise '.repeat(20000);
       // 大量链接稀释真正容器的 density score
       const manyLinks = Array.from({ length: 40 }, (_, i) => `<a href="/ref-${i}">reference ${i}</a>`).join(' ');
@@ -378,6 +378,38 @@ describe('contentDetector', () => {
       expect(root).not.toBeNull();
       expect(root!.className).toContain('main-content');
       expect(root!.className).not.toContain('rich-content');
+    });
+
+    // Readability 主条件契约：404media.co 类结构（<article class="... has-sidebar">
+    // 含正文，h1 在兄弟 .post-hero）。手写评分在这种「语义标签 + 噪声类 has-sidebar」
+    // 组合上容易误判，而 Readability 作为主条件应稳定返回包含正文的容器。
+    // 此测试锁定 detectArticleRoot 必须优先采用 Readability 的结果，而非评分算法。
+    it('uses Readability as primary locator for article with has-sidebar noise class', () => {
+      document.body.innerHTML = `
+        <main>
+          <div class="post-hero">
+            <h1 class="post-hero__title">The Tokenpocalypse Is Here</h1>
+            <figcaption>Photo by Sebastian Herrmann</figcaption>
+          </div>
+          <article class="post tag-ai featured post-access-paid has-sidebar">
+            <div class="post__content no-overflow">
+              <div class="post-sneak-peek fading">
+                <p>Consulting giant Accenture is trying to figure out how to stop non-technical workers from using AI tools.</p>
+                <p>The news highlights a major shift in the tech industry and other companies that use AI.</p>
+                <p>It also undercuts the narrative that superpowered engineers generating mountains of code are behind the AI boom.</p>
+              </div>
+            </div>
+          </article>
+        </main>
+      `;
+
+      const root = detectArticleRoot(document);
+      expect(root).not.toBeNull();
+      // Readability 应定位到包含正文的 article / .post__content，而非只有 h1 的 hero。
+      const text = root!.textContent || '';
+      expect(text).toContain('Consulting giant Accenture');
+      expect(text).toContain('superpowered engineers');
+      expect(root!.className).not.toContain('post-hero__title');
     });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { prepareDocument, extractFromDataIsland } from '../entrypoints/utils/contentHelper';
+import { extractBlocks } from '../entrypoints/utils/blockExtractor';
 
 describe('prepareDocument', () => {
   beforeEach(() => {
@@ -452,6 +453,101 @@ describe('prepareDocument', () => {
     expect(fullText).not.toContain('Commoncog');
     expect(fullText).not.toContain('Subscribe to the newsletter');
     expect(fullText).not.toContain('Footer content');
+  });
+
+  it('should extract body paragraphs from 404media.co (Ghost BEM: .post__content, h1 in sibling .post-hero)', () => {
+    // 404media.com 使用 Ghost CMS + 自定义主题：
+    //   - H1 在 .post-hero（<article> 的兄弟节点），不在 <article> 内
+    //   - 正文 <p> 在 <article> > .post__content > .post-sneak-peek 内
+    //   - 使用 BEM 命名 .post__content（双下划线），不是 .post-content
+    // 必须同时提取到 hero 区域（标题/图片说明）和正文段落。
+    document.body.innerHTML = `
+      <header class="header">Site Header</header>
+      <main class="main">
+        <div class="post-hero">
+          <div class="post-hero__header">
+            <h1 class="post-hero__title">The Tokenpocalypse Is Here</h1>
+          </div>
+          <div class="post-hero__excerpt">Leaked audio from Accenture says...</div>
+          <figure class="post-hero__image">
+            <figcaption>Photo by Sebastian Herrmann on Unsplash</figcaption>
+          </figure>
+        </div>
+        <article class="post tag-ai featured post-access-paid has-sidebar">
+          <div class="post__content no-overflow">
+            <div class="post-sneak-peek fading">
+              <p>Consulting giant Accenture is trying to figure out how to stop non-technical workers from blowing through companies' AI token budget on trivial tasks like converting PDFs to presentation slides.</p>
+              <p>The news highlights a major shift in the tech industry and other companies that use AI: the wave of uninhibited AI growth is over.</p>
+              <p>It also undercuts the narrative that superpowered engineers generating mountains of code are behind the AI boom.</p>
+            </div>
+            <div class="post-access-cta paid">
+              <h2>This post is for paid members only</h2>
+              <div class="description">Become a paid member for unlimited access.</div>
+            </div>
+          </div>
+        </article>
+        <aside class="sidebar">
+          <h6>More like this</h6>
+          <div>Related article card</div>
+        </aside>
+      </main>
+      <footer>Site Footer</footer>
+    `;
+
+    const { blocks, fullText } = prepareDocument(document);
+
+    // 标题必须被提取到（在 .post-hero 中）
+    expect(fullText).toContain('The Tokenpocalypse Is Here');
+    // 图片说明必须被提取到
+    expect(fullText).toContain('Photo by Sebastian Herrmann');
+    // 正文段落必须被提取到（在 .post__content > .post-sneak-peek 中）—— 这是 bug 所在
+    expect(fullText).toContain('Consulting giant Accenture');
+    expect(fullText).toContain('wave of uninhibited AI growth');
+    expect(fullText).toContain('superpowered engineers generating mountains');
+    // 不应包含侧边栏/页眉/页脚噪声
+    expect(fullText).not.toContain('More like this');
+    expect(fullText).not.toContain('Site Header');
+    expect(fullText).not.toContain('Site Footer');
+    // 不应包含付费墙 CTA（或至少不应只有 CTA 而没有正文）
+    expect(blocks.length).toBeGreaterThanOrEqual(4); // 至少：h1 + figcaption + 3个 p
+  });
+
+  it('should extract blocks from <article> directly for 404media.co (walker-level test)', () => {
+    // 独立测试 walker：确认 extractBlocks 本身能从 <article> 内提取 <p>
+    document.body.innerHTML = `
+      <main class="main">
+        <div class="post-hero">
+          <h1 class="post-hero__title">The Tokenpocalypse Is Here</h1>
+          <figcaption>Photo by Sebastian Herrmann</figcaption>
+        </div>
+        <article class="post tag-ai featured post-access-paid has-sidebar">
+          <div class="post__content no-overflow">
+            <div class="post-sneak-peek fading">
+              <p>Consulting giant Accenture is trying to figure out workers.</p>
+              <p>The news highlights a major shift in the tech industry.</p>
+              <p>It also undercuts the narrative about superpowered engineers.</p>
+            </div>
+          </div>
+        </article>
+      </main>
+    `;
+
+    const article = document.querySelector('article')!;
+    const blocks = extractBlocks(article, 'https://www.404media.co/test');
+
+    // DEBUG: 输出所有提取到的块，帮助定位 walker 跳过了什么
+    console.log('[DEBUG] Total blocks:', blocks.length);
+    for (const b of blocks) {
+      console.log(`[DEBUG]   [${b.tag}] ${b.text.slice(0, 80)}`);
+    }
+
+    const texts = blocks.map((b) => b.text);
+    // 正文段落必须被提取到
+    expect(texts.some((t) => t.includes('Consulting giant Accenture'))).toBe(true);
+    expect(texts.some((t) => t.includes('major shift in the tech industry'))).toBe(true);
+    expect(texts.some((t) => t.includes('superpowered engineers'))).toBe(true);
+    // 应该有至少 3 个 p 块
+    expect(blocks.filter((b) => b.tag === 'p').length).toBeGreaterThanOrEqual(3);
   });
 });
 

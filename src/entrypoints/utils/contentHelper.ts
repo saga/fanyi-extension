@@ -18,6 +18,7 @@ const ARTICLE_SELECTORS = [
   '.rich-text',               // Generic rich text wrapper
   '.blog-content',            // Ghost CMS
   '.post-content',            // Common blog CMS (Jane Street, Hugo, Jekyll)
+  '.post__content',           // Ghost/WordPress BEM (404media.co, github.blog)
   '.entry-content',           // WordPress
   '.page-content',
   'article',
@@ -64,6 +65,7 @@ function refineArticleRoot(candidate: Element): Element {
     '.story-body',
     '.story-content',
     '.post-content',            // Jane Street, Hugo, Jekyll
+    '.post__content',           // Ghost/WordPress BEM (404media.co, github.blog)
   ];
 
   if (SPECIFIC_SELECTORS.some((sel) => candidate.matches?.(sel))) {
