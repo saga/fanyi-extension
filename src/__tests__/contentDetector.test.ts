@@ -132,7 +132,7 @@ describe('contentDetector', () => {
         </article>
         <footer><p>Footer content</p></footer>
       `;
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.tagName).toBe('ARTICLE');
     });
@@ -147,7 +147,7 @@ describe('contentDetector', () => {
           <p>Even more content to ensure the scoring algorithm picks this div.</p>
         </div>
       `;
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.className).toContain('post-content');
     });
@@ -157,7 +157,7 @@ describe('contentDetector', () => {
         <nav><a href="/">Home</a><a href="/about">About</a></nav>
         <div><a href="/link1">Link</a></div>
       `;
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).toBeNull();
     });
 
@@ -175,7 +175,7 @@ describe('contentDetector', () => {
           <p>It has multiple paragraphs and good text density.</p>
         </div>
       `;
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.textContent).toContain('main content');
     });
@@ -205,7 +205,7 @@ describe('contentDetector', () => {
         </div>
       `;
 
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       // Must pick the article, never any OneTrust container.
       expect(root!.id).not.toBe('ot-pc-content');
@@ -226,7 +226,7 @@ describe('contentDetector', () => {
           <p>Additional paragraphs ensure this scores well in the detection algorithm.</p>
         </div>
       `;
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.className).toContain('post-content');
     });
@@ -261,7 +261,7 @@ describe('contentDetector', () => {
           <p>You also need to explain how data is collected, how features are created, and how predictions are served.</p>
         </div>
       `;
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.id).toBe('article-start');
       expect(root!.closest('#cookiesModal')).toBeNull();
@@ -282,7 +282,7 @@ describe('contentDetector', () => {
         </div>
       `;
 
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       // 安全阀应让 cookie-policy 容器参与评分并胜出
       expect(root!.id).toBe('cookie-policy');
@@ -301,7 +301,7 @@ describe('contentDetector', () => {
         </div>
       `;
 
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.className).toContain('post-content');
       expect(root!.closest('#cookie-banner')).toBeNull();
@@ -342,7 +342,7 @@ describe('contentDetector', () => {
         <footer class="footer-utility__wrapper"><p>Terms & Privacy</p></footer>
       `;
 
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.className).toContain('blog-detail-container');
       expect(root!.className).not.toContain('inner-block-content');
@@ -374,7 +374,7 @@ describe('contentDetector', () => {
         <footer><p>Terms & Privacy</p></footer>
       `;
 
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       expect(root!.className).toContain('main-content');
       expect(root!.className).not.toContain('rich-content');
@@ -403,13 +403,37 @@ describe('contentDetector', () => {
         </main>
       `;
 
-      const root = detectArticleRoot(document);
+      const root = detectArticleRoot(document)?.element ?? null;
       expect(root).not.toBeNull();
       // Readability 应定位到包含正文的 article / .post__content，而非只有 h1 的 hero。
       const text = root!.textContent || '';
       expect(text).toContain('Consulting giant Accenture');
       expect(text).toContain('superpowered engineers');
       expect(root!.className).not.toContain('post-hero__title');
+    });
+
+    // ContentRoot 契约（ADR-001 P0）：detectArticleRoot 返回 ContentRoot，
+    // 携带 source / confidence / evidence，供调试与后续 Evidence Fusion 使用。
+    it('returns a ContentRoot contract (source/confidence/evidence)', () => {
+      document.body.innerHTML = `
+        <nav><a href="/">Home</a><a href="/about">About</a></nav>
+        <article>
+          <h1>Article Title</h1>
+          <p>This is a long article with multiple paragraphs of content.</p>
+          <p>The second paragraph continues the article with more text.</p>
+        </article>
+      `;
+
+      const root = detectArticleRoot(document);
+      expect(root).not.toBeNull();
+      // 必须携带契约字段
+      expect(root!.element).toBeInstanceOf(HTMLElement);
+      expect(['site-rule', 'selector', 'readability', 'scoring', 'body-fallback']).toContain(root!.source);
+      expect(typeof root!.confidence).toBe('number');
+      expect(root!.confidence).toBeGreaterThanOrEqual(0);
+      expect(root!.confidence).toBeLessThanOrEqual(1);
+      expect(typeof root!.evidence.textLength).toBe('number');
+      expect(root!.evidence.textLength).toBeGreaterThan(0);
     });
   });
 });

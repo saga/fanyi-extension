@@ -1,6 +1,6 @@
 import { extractBlocks, isOverlayElement, type TextBlock } from './blockExtractor';
 import { buildChunks, type Chunk } from './chunkBuilder';
-import { detectArticleRoot } from './contentDetector';
+import { detectArticleRoot, type ContentRoot } from './contentDetector';
 import { matchSiteRule } from '../../rules';
 
 import { logger } from '../../utils/logger';
@@ -311,7 +311,7 @@ function chooseBestRoot(candidate: Element): Element {
   return best;
 }
 
-function findArticleRoot(doc: Document): Element {
+function findArticleRoot(doc: Document): ContentRoot {
   // Layer 0: 站点特定 articleRootSelector（最高优先级）
   // 当通用选择器无法正确定位正文根时（如 claude.com 的 hero 和正文
   // 分属兄弟 section），用站点规则的 articleRootSelector 直接指定。
@@ -322,7 +322,7 @@ function findArticleRoot(doc: Document): Element {
       logger.debug(
         `[ContentHelper] Site rule articleRootSelector: ${siteRule.articleRootSelector} → <${el.tagName}> .${(el.className || '').slice(0, 40)}`,
       );
-      return el;
+      return { element: el, source: 'site-rule', confidence: 0.95, evidence: { textLength: (el.textContent || '').length } };
     }
     logger.warn(
       `[ContentHelper] Site rule articleRootSelector "${siteRule.articleRootSelector}" matched no meaningful element, falling back to Layer 1`,
@@ -353,16 +353,17 @@ function findArticleRoot(doc: Document): Element {
           `[ContentHelper] Chose <${best.tagName}> .${(best.className || '').slice(0, 40)} over <${expanded.tagName}> .${(expanded.className || '').slice(0, 40)} by scoring`,
         );
       }
-      return best;
+      return { element: best, source: 'selector', confidence: 0.9, evidence: { textLength: (best.textContent || '').length } };
     }
   }
 
-  // Layer 2: 智能评分（处理未知站点）
+  // Layer 2: 智能评分 / Readability（处理未知站点）
   const detected = detectArticleRoot(doc);
-  if (detected && hasMeaningfulContent(detected)) return detected;
+  if (detected && hasMeaningfulContent(detected.element)) return detected;
 
   // Layer 3: 兜底
-  return doc.body || doc.documentElement;
+  const body = doc.body || doc.documentElement;
+  return { element: body, source: 'body-fallback', confidence: 0.4, evidence: { textLength: (body.textContent || '').length } };
 }
 
 /**
@@ -675,7 +676,9 @@ export function prepareDocument(root: Document | Element): {
   fullText: string;
 } {
   // 优先使用文章容器，减少 TreeWalker 遍历范围
-  const effectiveRoot = root instanceof Document ? findArticleRoot(root) : root;
+  const rootOrContent = root instanceof Document ? findArticleRoot(root) : root;
+  const effectiveRoot: Element =
+    rootOrContent instanceof Element ? rootOrContent : rootOrContent.element;
 
   // 隐藏文章根节点之外的弹窗 / overlay / cookie banner。
   // walker 只遍历 effectiveRoot 子树, body 层级的 modal (如登录弹窗、

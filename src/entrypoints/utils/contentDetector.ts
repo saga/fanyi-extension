@@ -22,6 +22,10 @@
 import { Readability } from '@mozilla/readability';
 
 import { logger } from '../../utils/logger';
+import {
+  mapReadabilityToRoot,
+  type ReadabilityMappingResult,
+} from './readabilityRootMapper';
 // =============================================================================
 // 常量
 // =============================================================================
@@ -432,6 +436,40 @@ export function collectCandidates(doc: Document): Element[] {
 }
 
 // =============================================================================
+// ContentRoot 契约（Root Detection 的统一输出，ADR-001 P0）
+// =============================================================================
+
+/**
+ * Root Detection 的统一输出契约。
+ * findArticleRoot / detectArticleRoot 不再裸返回 Element，而是携带
+ * 来源、置信度与证据，便于调试（一个站点不翻译能直接看出是 root 问题还是
+ * extraction 问题）和后续 Evidence Fusion。
+ *
+ * confidence 初值为启发式映射（后续由 Evidence Fusion 产出更精确的值）；
+ * evidence 记录支撑该判定的关键信号。
+ */
+export interface ContentRoot {
+  /** 选中的根元素，供 extractBlocks 直接使用 */
+  element: Element;
+  /** root 来源 */
+  source: 'site-rule' | 'selector' | 'readability' | 'scoring' | 'body-fallback';
+  /** 置信度 0..1 */
+  confidence: number;
+  /** 支撑证据 */
+  evidence: {
+    textLength: number;
+    /** Readability 定位时：选中根覆盖 Readability 正文的比例 0..1 */
+    readabilityCoverage?: number;
+    /** Readability 多锚点映射时：锚段落命中率 0..1 */
+    anchorCoverage?: number;
+    /** 评分算法得分（scoring 路径） */
+    semanticScore?: number;
+    /** 子树噪声密度（可选，后续扩展） */
+    noiseDensity?: number;
+  };
+}
+
+// =============================================================================
 // Readability 主条件（root 定位器）
 // =============================================================================
 
@@ -444,7 +482,7 @@ export function collectCandidates(doc: Document): Element[] {
  * <article class="... has-sidebar">、developers.googleblog.com 的碎片正文）。
  * detectArticleRoot 把它作为判断主条件，手写评分算法仅作兜底。
  */
-function tryReadabilityRoot(doc: Document): Element | null {
+function tryReadabilityRoot(doc: Document): ReadabilityMappingResult | null {
   try {
     // Readability 会修改传入的文档树，因此必须在克隆的文档上运行，
     // 避免破坏原始 DOM 导致后续 extractBlocks / apply 失败。
@@ -458,72 +496,20 @@ function tryReadabilityRoot(doc: Document): Element | null {
       return null;
     }
 
-    // 取 Readability 正文中的第一个较长段落作为定位签名
-    const paragraphs = article.textContent
-      .split(/\n+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const signature =
-      paragraphs.find((p) => p.length >= 40) || paragraphs[0];
-    if (!signature) return null;
+    // 多锚点 + LCA 映射（共享算法，见 readabilityRootMapper.ts）。
+    // 替代旧版「单签名 + 祖先爬升 80%」：跨首/中/尾多段定位、取最低公共祖先、
+    // 以内容覆盖率（语义）衡量可信度，降低噪声区 collision 风险。
+    const result = mapReadabilityToRoot(doc, article, {
+      isConsent: isConsentSdkContainer,
+    });
+    if (!result) return null;
 
-    // 在原始 DOM 中定位 Readability 提取的段落。
-    // 清理后的文本可能跨多个后代节点（如 <span>LiteRT.js</span> 被单独包裹），
-    // 因此先尝试完整签名，再逐步缩短到词前缀，直到在某个文本节点中命中。
-    let matchedTextNode: Text | null = null;
-    const signatureCandidates: string[] = [signature];
-    const words = signature.split(/\s+/);
-    for (let i = Math.min(words.length - 1, 6); i >= 2; i--) {
-      const prefix = words.slice(0, i).join(' ');
-      if (prefix.length >= 12) signatureCandidates.push(prefix);
-    }
-
-    for (const candidate of signatureCandidates) {
-      const treeWalker = doc.createTreeWalker(
-        doc.body,
-        typeof NodeFilter !== 'undefined' ? NodeFilter.SHOW_TEXT : 4,
-        null,
-      );
-      while (treeWalker.nextNode()) {
-        const node = treeWalker.currentNode as Text;
-        if (node.textContent && node.textContent.includes(candidate)) {
-          matchedTextNode = node;
-          break;
-        }
-      }
-      if (matchedTextNode) break;
-    }
-    if (!matchedTextNode) return null;
-
-    // 从文本节点向上走到一个稳定的容器（div/section/article/main/body）。
-    // 对 sunxiunan 这类多 section 站点，Readability 正文可能直接位于 body 下的
-    // 多个 section 中，没有统一 wrapper；此时需要走到 body 才能聚合全文。
-    let root: Element | null = matchedTextNode.parentElement;
-    let candidate: Element | null = matchedTextNode.parentElement;
-    const readabilityTextLen = article.textContent.length;
-    const coverageThreshold = readabilityTextLen * 0.8;
-
-    while (
-      candidate &&
-      candidate !== doc.documentElement &&
-      candidate !== doc.body?.parentElement
-    ) {
-      const tag = candidate.tagName.toLowerCase();
-      if (tag === 'article' || tag === 'main' || tag === 'section' || tag === 'div' || tag === 'body') {
-        root = candidate;
-        const textLen = (candidate.textContent || '').length;
-        // 找到能覆盖 Readability 正文 80% 的最外层容器即可停止
-        if (textLen >= coverageThreshold) {
-          break;
-        }
-      }
-      candidate = candidate.parentElement;
-    }
-
-    // 排除 consent SDK 容器，避免误把 cookie 弹窗当正文
-    if (root && isConsentSdkContainer(root)) return null;
-
-    return root;
+    logger.debug(
+      `[ContentDetector] Readability mapping: <${result.root.tagName}> .${(result.root.className || '').split(/\s+/)[0]} ` +
+        `anchors=${result.matchedAnchors}/${result.totalAnchors} mappingConf=${result.mappingConfidence.toFixed(2)} ` +
+        `contentCov=${result.contentCoverage.toFixed(2)}`,
+    );
+    return result;
   } catch (e) {
     logger.warn('[ContentDetector] Readability fallback failed:', e);
     return null;
@@ -534,30 +520,42 @@ function tryReadabilityRoot(doc: Document): Element | null {
 // entry
 // =============================================================================
 
-export function detectArticleRoot(doc: Document): Element | null {
+export function detectArticleRoot(doc: Document): ContentRoot | null {
   // 主条件：@mozilla/readability 定位正文根。
   // Readability 比手写评分更鲁棒，能稳定聚合多 section / 缺少语义标签 /
   // 被噪声容器干扰的站点正文。因此把它作为判断主条件，评分算法仅作兜底。
-  const readabilityRoot = tryReadabilityRoot(doc);
-  if (readabilityRoot) {
-    // tryReadabilityRoot 已校验：正文长度 >= 200、签名在原始 DOM 命中、
-    // 且返回根不是 consent SDK 容器（collectCandidates 的祖先展开可能引入
-    // 外层包装，这里再防御一次）。
-    // 但 Readability 有时只能定位到 body/html（覆盖率阈值让它跳过真正的文章
-    // 容器，如 OneTrust cookie 弹窗页的真实文章是 body 直接子节点），此时
-    // 交给评分算法取更精确的容器；若评分也找不到，仍会落到 body 兜底。
+  const readability = tryReadabilityRoot(doc);
+  if (readability) {
+    const { root: readabilityRoot, mappingConfidence, contentCoverage, anchorCoverage } = readability;
+    // tryReadabilityRoot（mapReadabilityToRoot）已校验：正文长度 >= 200、
+    // 多锚点在原始 DOM 命中、内容覆盖率达标、且返回根不是 consent SDK 容器。
+    // 但 Readability 有时只能定位到 body/html（如 OneTrust cookie 弹窗页的
+    // 真实文章是 body 直接子节点），此时交给评分算法取更精确的容器；
+    // 若评分也找不到，仍会落到 body 兜底。
     if (
       !isConsentSdkContainer(readabilityRoot) &&
       readabilityRoot !== doc.body &&
       readabilityRoot !== doc.documentElement
     ) {
       // 直接采用 Readability 结果，打保底分数确保跨过阈值。
+      // confidence 来自映射自身的多锚点命中率（mappingConfidence），
+      // 而非硬编码 0.85 —— 映射越可靠，正文越可信。
       const s = scoreElement(readabilityRoot);
       const bestScore = Math.max(s, SCORE_THRESHOLD + 1);
       logger.debug(
-        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${(readabilityRoot.textContent || '').length})`,
+        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${(readabilityRoot.textContent || '').length}, mappingConf: ${mappingConfidence.toFixed(2)}, contentCov: ${contentCoverage.toFixed(2)})`,
       );
-      return readabilityRoot;
+      return {
+        element: readabilityRoot,
+        source: 'readability',
+        confidence: mappingConfidence,
+        evidence: {
+          textLength: (readabilityRoot.textContent || '').length,
+          readabilityCoverage: contentCoverage,
+          anchorCoverage,
+          semanticScore: s,
+        },
+      };
     }
     logger.debug(
       `[ContentDetector] Readability root is a consent/cookie SDK container, falling back to scoring`,
@@ -598,5 +596,15 @@ export function detectArticleRoot(doc: Document): Element | null {
   logger.debug(
     `[ContentDetector] Scoring fallback root: <${best!.tagName}> .${(best!.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)})`,
   );
-  return best;
+  // confidence: 将 bestScore 在 [SCORE_THRESHOLD, 2*SCORE_THRESHOLD] 映射到 [0.6, 0.9]，封顶 0.95。
+  const confidence = Math.min(0.95, 0.6 + (bestScore - SCORE_THRESHOLD) / SCORE_THRESHOLD * 0.3);
+  return {
+    element: best!,
+    source: 'scoring',
+    confidence,
+    evidence: {
+      textLength: (best!.textContent || '').length,
+      semanticScore: bestScore,
+    },
+  };
 }

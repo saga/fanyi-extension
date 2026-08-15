@@ -137,6 +137,34 @@ export function shouldSkipByClass(el: Element): boolean {
 }
 
 /**
+ * 节点分类（ADR-001 P0）：显式区分「节点自身是噪声」与「节点子树该被剪掉」
+ * 两个语义，避免把结构性内容容器（article / main）当噪声整棵剪枝。
+ *
+ * - nodeNoise: 节点自身命中噪声模式（class / 站点规则）。
+ * - structuralContainer: 节点是否为结构性内容容器（article / main）。
+ *   这类容器即使自身 class 命中噪声 token，也不应被整棵剪枝——
+ *   例如 404media.co 的 <article class="... has-sidebar">，命中 "sidebar"
+ *   但它是正文根，必须下钻提取内部段落。
+ * - subtreePrune: 是否应剪掉整棵子树（nodeNoise 且非结构容器）。
+ */
+export interface NodeClassification {
+  nodeNoise: boolean;
+  structuralContainer: boolean;
+  subtreePrune: boolean;
+}
+
+export function classifyNode(el: Element): NodeClassification {
+  const nodeNoise = shouldSkipByClass(el) || shouldSkipBySiteRules(el);
+  const tag = el.tagName.toLowerCase();
+  const structuralContainer = tag === 'article' || tag === 'main';
+  return {
+    nodeNoise,
+    structuralContainer,
+    subtreePrune: nodeNoise && !structuralContainer,
+  };
+}
+
+/**
  * 是否为元数据容器 (作者 / 日期 / 分类 / byline)。
  * 用**整词分割**匹配,不是子串——避免误伤 "metadata-block" / "authorship"。
  * 命中后整棵子树拒绝,避免误翻人名 / 日期格式 / 分类标签。

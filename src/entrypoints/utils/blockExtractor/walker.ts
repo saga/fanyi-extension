@@ -34,6 +34,7 @@ import {
   isParagraphLikeElement,
   isPopupByStyle,
   isValidText,
+  classifyNode,
   shouldSkipByClass,
   shouldSkipBySiteRules,
 } from './rules';
@@ -206,12 +207,15 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_REJECT;
   }
   // 噪声类 (广告 / cookie / 侧边栏 / 推荐 等): 整棵子树拒绝。
-  // 但 article / main 例外 —— 仅跳过自身、继续下钻，避免 404media.co 的
-  // <article class="... has-sidebar"> 因 "sidebar" 模式被整棵误杀正文。
+  // 用 classifyNode() 显式区分「节点自身是噪声」与「节点子树该被剪掉」两个语义
+  // （ADR-001 P0）：结构性内容容器 (article / main) 即使自身 class 命中噪声
+  // token（如 404media.co 的 <article class="... has-sidebar"> 命中 "sidebar"），
+  // 也不应被整棵剪枝，仅跳过自身、继续下钻提取内部正文。
   // （div/section 即使含内容 token 也不豁免，否则 ad-content / sponsored-content
   // 等噪声 div 会被下钻提取。article/main 是语义内容根，可安全豁免。）
-  if (shouldSkipByClass(el) || shouldSkipBySiteRules(el)) {
-    if (tag === 'article' || tag === 'main') {
+  const nodeCls = classifyNode(el);
+  if (nodeCls.nodeNoise) {
+    if (nodeCls.structuralContainer) {
       counters.skipped++;
       return NodeFilter.FILTER_SKIP;
     }

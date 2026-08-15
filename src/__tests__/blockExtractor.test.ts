@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { extractBlocks, findBlockNode, buildNodeMap, collapseSpacedText } from '../entrypoints/utils/blockExtractor';
-import { shouldSkipByClass, isLowPriorityElement, isOverlayElement } from '../entrypoints/utils/blockExtractor/rules';
+import { shouldSkipByClass, isLowPriorityElement, isOverlayElement, classifyNode } from '../entrypoints/utils/blockExtractor/rules';
 
 // Mock matchSiteRule for shouldSkipBySiteRules tests
 vi.mock('../rules', () => ({
@@ -963,6 +963,44 @@ describe('extractBlocks - Paragraph with Inline Elements', () => {
     
     expect(pBlocks).toHaveLength(1);
     expect(pBlocks[0].text).toBe('Important: This is emphasized text with a link inside.');
+  });
+});
+
+// =============================================================================
+// classifyNode（ADR-001 P0）：显式区分「节点自身是噪声」与「节点子树该被剪掉」
+// =============================================================================
+describe('classifyNode', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('treats article with has-sidebar as structural container (not subtree-pruned)', () => {
+    // 404media.co 案例：<article class="... has-sidebar"> 命中 "sidebar" 噪声 token，
+    // 但它是结构性内容容器，不应被整棵剪枝——子树应继续下钻提取正文。
+    document.body.innerHTML = '<article class="post tag-ai has-sidebar"><div class="post__content"><p>Body text.</p></div></article>';
+    const article = document.querySelector('article')!;
+    const cls = classifyNode(article);
+    expect(cls.nodeNoise).toBe(true);          // 自身命中 noise token
+    expect(cls.structuralContainer).toBe(true); // 是结构性内容容器
+    expect(cls.subtreePrune).toBe(false);       // 因此不剪子树
+  });
+
+  it('prunes non-container noise node (ad-content div)', () => {
+    document.body.innerHTML = '<div class="ad-content"><p>Ad copy.</p></div>';
+    const ad = document.querySelector('.ad-content')!;
+    const cls = classifyNode(ad);
+    expect(cls.nodeNoise).toBe(true);
+    expect(cls.structuralContainer).toBe(false); // div 不是结构性容器
+    expect(cls.subtreePrune).toBe(true);         // 整棵剪枝
+  });
+
+  it('does not flag a plain content container as noise', () => {
+    document.body.innerHTML = '<article class="post-content"><p>Body.</p></article>';
+    const a = document.querySelector('article')!;
+    const cls = classifyNode(a);
+    expect(cls.nodeNoise).toBe(false);
+    expect(cls.structuralContainer).toBe(true);
+    expect(cls.subtreePrune).toBe(false);
   });
 });
 
