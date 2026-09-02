@@ -1,0 +1,517 @@
+- generic [active] [ref=e1]:
+  - link [aria-hidden] [ref=e2] [cursor=pointer]:
+    - /url: "#"
+    - text: ___
+  - banner [ref=e4]:
+    - generic [ref=e6]:
+      - link [ref=e9] [cursor=pointer]:
+        - /url: /
+        - img "DZone" [ref=e11]
+      - generic [ref=e12]:
+        - text: 
+        - generic [ref=e13]:
+          - generic [ref=e14]: Over 2 million developers have joined DZone.
+          - generic [ref=e15]:
+            - link "Log In" [ref=e16] [cursor=pointer]:
+              - /url: /users/login.html
+            - text: /
+            - link "Join" [ref=e17] [cursor=pointer]:
+              - /url: /static/registration.html
+          - link "User" [ref=e18] [cursor=pointer]:
+            - /url: /users/login.html
+        - button "Search" [ref=e23] [cursor=pointer]
+    - generic:
+      - generic:
+        - link "Refcards" [ref=e27] [cursor=pointer]:
+          - /url: /refcardz
+        - link "Trend Reports" [ref=e28] [cursor=pointer]:
+          - /url: /trendreports
+        - link "Events" [ref=e30] [cursor=pointer]:
+          - /url: /events
+    - navigation [ref=e31]:
+      - text:  
+      - link "Culture and Methodologies" [ref=e33] [cursor=pointer]:
+        - /url: /culture-and-methodologies
+      - link "Data Engineering" [ref=e36] [cursor=pointer]:
+        - /url: /data-engineering
+      - link "Software Design and Architecture" [ref=e39] [cursor=pointer]:
+        - /url: /software-design-and-architecture
+      - link "Coding" [ref=e42] [cursor=pointer]:
+        - /url: /coding
+      - link "Testing, Deployment, and Maintenance" [ref=e45] [cursor=pointer]:
+        - /url: /testing-deployment-and-maintenance
+      - link "Partner Zones" [ref=e48] [cursor=pointer]:
+        - /url: javascript:void(0)
+  - generic [ref=e49]:
+    - generic [ref=e50]:
+      - text:  
+      - generic [ref=e52]:
+        - paragraph [ref=e54]:
+          - strong [ref=e55]: Can you trust every artifact you deploy?
+          - text: Join us to learn how to build continuous trust into your CI/CD pipeline without slowing delivery.
+        - link [ref=e56] [cursor=pointer]:
+          - /url: https://web.cvent.com/event/website/008a487d-c230-4d25-8218-608b49d596a7/landingPage?utm_source=Announcements&utm_medium=DzoneWeb&utm_campaign=Harness
+          - button "Register now" [ref=e57]
+    - generic [ref=e58]:
+      - generic [ref=e62]:
+        - iframe [ref=e67]:
+          - generic [ref=f16e1]:
+            - generic:
+              - generic [ref=f16e2] [cursor=pointer]
+              - button [ref=f16e7] [cursor=pointer]
+        - generic [ref=e68]:
+          - generic [ref=e69]:
+            - generic [ref=e70]:
+              - iframe [ref=e74]:
+                - generic [ref=f18e1]:
+                  - generic:
+                    - generic [ref=f18e2] [cursor=pointer]
+                    - button [ref=f18e7] [cursor=pointer]
+              - complementary [ref=e76]:
+                - heading "Trending" [level=2] [ref=e77]
+                - list [ref=e78]:
+                  - listitem [ref=e79]:
+                    - link "Securing AI Retrieval Pipelines and Adding Identity-Aware Access Controls to RAG Systems" [ref=e80] [cursor=pointer]:
+                      - /url: /articles/ai-retrieval-identity-access
+                  - listitem [ref=e81]:
+                    - 'link "Building a Config-Driven SOAP/REST Integration Layer: One Service, Many Protocols" [ref=e82] [cursor=pointer]':
+                      - /url: /articles/config-driven-soap-rest-integration
+                  - listitem [ref=e83]:
+                    - link "AGENTS.md Makes Your Java Codebase AI-Agent Ready" [ref=e84] [cursor=pointer]:
+                      - /url: /articles/agents-md-java
+                  - listitem [ref=e85]:
+                    - link "Open Source as a Leadership Lab for Software Engineers" [ref=e86] [cursor=pointer]:
+                      - /url: /articles/open-source-leadership-engineering
+            - article [ref=e87]:
+              - generic [ref=e88]:
+                - generic [ref=e89]:
+                  - list [ref=e90]:
+                    - listitem [ref=e91]:
+                      - link "DZone" [ref=e92] [cursor=pointer]:
+                        - /url: https://dzone.com
+                    - listitem [ref=e93]:
+                      - text: /
+                      - link "Data Engineering" [ref=e94] [cursor=pointer]:
+                        - /url: https://dzone.com/data-engineering
+                    - listitem [ref=e95]:
+                      - text: /
+                      - link "AI/ML" [ref=e96] [cursor=pointer]:
+                        - /url: https://dzone.com/ai-ml
+                    - listitem [ref=e97]: "/ Enterprise Architecture in the AI Era: Tools, Capabilities, and the Road to Autonomy"
+                  - generic [ref=e98]:
+                    - 'heading "Enterprise Architecture in the AI Era: Tools, Capabilities, and the Road to Autonomy" [level=1] [ref=e100]'
+                    - paragraph [ref=e102]: EA tools centralize business and IT data to improve alignment, governance, decision-making, and portfolio management while enabling AI-driven automation.
+                    - generic [ref=e103]:
+                      - text: By
+                      - generic [ref=e104]:
+                        - img "Dr Gopala Krishna Behara user avatar" [ref=e105]
+                        - link "Dr Gopala Krishna Behara" [ref=e108] [cursor=pointer]:
+                          - /url: /authors/gopalkrishnabehra
+                        - generic [ref=e109]:
+                          - img "DZone Core" [ref=e110]
+                          - text: CORE
+                        - text: ·
+                      - text: Sep. 01, 26 · Analysis
+                - generic [ref=e111]:
+                  - generic [ref=e112]:
+                    - generic [ref=e113]: 
+                    - generic [ref=e114]: Likes (2)
+                  - generic [ref=e116]:
+                    - generic [ref=e117]: 
+                    - text: Comment
+                  - generic [ref=e118]:  Save
+                  - link " Tweet" [ref=e121] [cursor=pointer]:
+                    - /url: ""
+                    - generic [ref=e122]: 
+                    - text: Tweet
+                  - link " Share" [ref=e125] [cursor=pointer]:
+                    - /url: https://www.linkedin.com/sharing/share-offsite/?url=https://dzone.com/articles/enterprise-architecture-in-ai
+                    - generic [ref=e126]: 
+                    - text: Share
+                  - generic [ref=e129]:
+                    - generic [ref=e130]: 
+                    - text: 1.6K Views
+                - generic [ref=e131]:
+                  - paragraph [ref=e132]: Join the DZone community and get the full member experience.
+                  - link "Join For Free" [ref=e133] [cursor=pointer]:
+                    - /url: /static/registration.html
+                - iframe [ref=e139]:
+                  - generic [ref=f20e1]:
+                    - generic:
+                      - generic [ref=f20e2] [cursor=pointer]
+                      - button [ref=f20e7] [cursor=pointer]
+                - generic [ref=e141]:
+                  - paragraph [ref=e142]: An enterprise architecture (EA) tool is a software platform that enterprises use to capture, connect, and continuously maintain a structured picture of the enterprise covering strategies, business capabilities, processes, applications, data, technologies, and the relationships between all these elements.
+                  - paragraph [ref=e143]: An EA tool acts as a Central Enterprise Repository (a “single source of truth”) that architects and other stakeholders use to model both the current state of the enterprise and the desired future state.
+                  - paragraph [ref=e144]: At its core, an EA tool is built on the following three foundational layers
+                  - list [ref=e145]:
+                    - listitem [ref=e146]:
+                      - generic [ref=e147]:
+                        - strong [ref=e148]: Metamodel
+                        - text: ": the taxonomy and rules that define what kinds of elements (applications, capabilities, goals, processes, risks, etc.) can exist and how they relate to one another."
+                    - listitem [ref=e149]:
+                      - generic [ref=e150]:
+                        - strong [ref=e151]: Modeling and repository environment
+                        - text: ": where those elements are created, stored, versioned, and analyzed."
+                    - listitem [ref=e152]:
+                      - generic [ref=e153]:
+                        - strong [ref=e154]: Collaboration layer
+                        - text: ": that connects a wide range of business and IT stakeholders so that EA insight isn’t locked inside the architecture team."
+                  - paragraph [ref=e155]: EA tools are used across many architecture and IT disciplines covering business, information, security, application, and infrastructure architecture. They typically integrate with adjacent systems such as CMDBs, financial planning tools, project and portfolio management (PPM) systems, and process mining tools to pull in the data that keeps the model accurate and useful.
+                  - heading "Limitations of Traditional EA Tools and Their Usage" [level=2] [ref=e156]
+                  - paragraph [ref=e157]: Enterprises still struggle to communicate the quantifiable business value of EA tools to business stakeholders. The most prominent challenges faced by these business users and non-IT stakeholders are,
+                  - list [ref=e158]:
+                    - listitem [ref=e159]: Managing data quality
+                    - listitem [ref=e160]: Manual data management
+                    - listitem [ref=e161]: Complexity of the tool’s usage
+                    - listitem [ref=e162]: Lack of automation of EA work
+                    - listitem [ref=e163]: No out-of-the-box AI capabilities in EA tools
+                  - paragraph [ref=e164]: "Despite steady progress, users of EA tools and heads of EA continue to encounter a consistent set of challenges:"
+                  - list [ref=e165]:
+                    - listitem [ref=e166]:
+                      - strong [ref=e167]: AI-enabled EA tool
+                      - text: ": The majority of EA tools are not fully automated to generate end-to-end target architecture. Current EA Tools are not mature enough to handle sophisticated tasks such as a comprehensive roadmap."
+                    - listitem [ref=e168]:
+                      - strong [ref=e169]: Data quality
+                      - text: ": Current EA tools struggle with data issues, including poor data quality, data accuracy, and real-time data. This is because the architects, application owners, and EA tool administrators manually follow up with stakeholders for accurate and up-to-date data entry."
+                    - listitem [ref=e170]:
+                      - strong [ref=e171]: Resistance to adoption
+                      - text: ": In most cases, EA tool use by owners across enterprises is centered on IT. The stakeholders outside IT are not clear on the value proposition of EA tools. This makes the enterprise-wide adoption of EA tools difficult and slows the demonstration of quantifiable business value to senior leadership."
+                    - listitem [ref=e172]:
+                      - strong [ref=e173]: Siloed data sources
+                      - text: ": In most cases, the data lives in disconnected source systems across the enterprise. This results in inconsistent data and a lack of integrated pictures across the entire enterprise."
+                    - listitem [ref=e174]:
+                      - strong [ref=e175]: Usage of multiple tools
+                      - text: ": Many enterprises use multiple tools for capturing the artifacts covering all the architecture domains, leading to the implementation of complex governance frameworks to standardize the processes and keep data consistent across tools."
+                    - listitem [ref=e176]:
+                      - strong [ref=e177]: Embedding of AI governance
+                      - text: ": Most enterprises are still in the process of establishing AI Governance across the enterprise. Implementing data privacy, ethical usage, risk management, and regulatory compliance are the big challenges."
+                    - listitem [ref=e178]:
+                      - strong [ref=e179]: Skills gap
+                      - text: ": Getting real value from increasingly AI-augmented EA tools requires continuous upskilling, both within the EA team and across the enterprise, which not all enterprises have invested in."
+                  - heading "Importance of EA Tools in Digital Era" [level=2] [ref=e181]
+                  - paragraph [ref=e182]:
+                    - text: The fundamental purpose of an
+                    - link "enterprise architecture" [ref=e183] [cursor=pointer]:
+                      - /url: https://dzone.com/articles/popular-enterprise-architecture-frameworks
+                    - text: (EA) tool is to turn a complex, ever-changing enterprise into something that can be modeled, reasoned about, and deliberately steered as business and technology conditions evolve.
+                  - paragraph [ref=e184]: To achieve this, an EA tool establishes a common language and structured repository that links business strategy directly to technology decisions, enables leaders to analyze trends and risks to plan realistic future scenarios, and supports the complete arc of strategic execution, from defining initial goals to governing solution design and tracking benefits.
+                  - paragraph [ref=e185]: Ultimately, by illuminating costs and risks across the enterprise landscape, it optimizes technology investments, reduces technical debt, and strengthens operational resilience to ensure continuous, alignment-driven transformation.
+                  - paragraph [ref=e186]: Enterprise architecture tools in the digital era are required to,
+                  - list [ref=e187]:
+                    - listitem [ref=e188]: Establish business and IT collaboration to achieve enterprise strategic objectives and measurable business outcomes in terms of reduced downtime or faster project delivery
+                    - listitem [ref=e189]: Business capability modeling
+                    - listitem [ref=e190]: Integrate with enterprise data sources and repositories to automate data ingestion
+                    - listitem [ref=e191]: Minimize manual involvement and automate the enterprise architecture processes
+                    - listitem [ref=e192]: Evaluate assets, returns, and risks in the IT landscape
+                    - listitem [ref=e193]:
+                      - link "Application portfolio rationalization" [ref=e194] [cursor=pointer]:
+                        - /url: https://dzone.com/articles/application-portfolio-rationalization-risk-assessm
+                      - text: ": estimate interdependencies between portfolios for applications, technologies, projects, services, and APIs"
+                    - listitem [ref=e195]: Support business innovation, a new market segment or the back office, and determine how fast systems need to change
+                    - listitem [ref=e196]: Roadmap planning, executive reporting, and dashboards
+                  - heading "Core Capabilities of EA Tools" [level=2] [ref=e198]
+                  - paragraph [ref=e199]: In general, EA tools enable enterprises to map their business architecture, business capabilities, business processes, application architecture, data architecture, integration architecture, security, and infrastructure by centralizing data.
+                  - paragraph [ref=e200]: The most common capabilities of Next Generation EA Tool are,
+                  - list [ref=e201]:
+                    - listitem [ref=e202]:
+                      - strong [ref=e203]: EA repository
+                      - text: ": It acts as the single source of truth. It supports business, information, technology, and solution viewpoints and versioning of all these objects and their relationships that support business direction, vision, strategy, etc."
+                    - listitem [ref=e204]:
+                      - strong [ref=e205]: EA modeling
+                      - text: ": Support the viewpoints and relationships across strategies and goals of business, information, solutions, and technology. Modeling of As-Is and Target state, Impact Analysis and Roadmaps"
+                    - listitem [ref=e206]:
+                      - strong [ref=e207]: Decision analysis
+                      - text: ": Capabilities such as gap analysis, traceability, impact analysis, scenario planning, system thinking, and opportunities across portfolios of capabilities, investments, applications, and technologies."
+                    - listitem [ref=e208]:
+                      - strong [ref=e209]: Multiple views
+                      - text: ": Support multiple views for different types of audience/users such as Executives, Architects/Designers, Business Planners, and Suppliers, etc. Support customization and extensions of meta-model, diagrams, menus, matrices, and reports"
+                    - listitem [ref=e210]:
+                      - strong [ref=e211]: Collaboration and sharing
+                      - text: ": Provides good collaboration-oriented features, which include simultaneous model editing, a shared remote repository, version management including model comparison and merge, easy publishing, and review capabilities"
+                    - listitem [ref=e212]:
+                      - strong [ref=e213]: Compatibility
+                      - text: ": Support for multiple frameworks and standards, and should enable integration of these models into a single repository that enables interoperability in a tool chain and data migration between tools"
+                    - listitem [ref=e214]:
+                      - strong [ref=e215]: Administration
+                      - text: ": Enable security, user management, and other tasks. Ease of administration of various day-to-day operations."
+                    - listitem [ref=e216]:
+                      - strong [ref=e217]: Configurability
+                      - text: ": Support for configuration of the tool to reflect the uniqueness of the enterprise. It helps in administering security, role-based access, and persona-specific user experiences across the tool."
+                    - listitem [ref=e218]:
+                      - strong [ref=e219]: Integration
+                      - text: ": Usage of Open APIs for integration with other enterprise tools such as CMDB, PPM, BPM, JIRA, etc such that it can serve as an Enterprise Data Hub."
+                    - listitem [ref=e220]:
+                      - strong [ref=e221]: Frameworks and standards
+                      - text: ": Supports standard EA frameworks (e.g., TOGAF, Zachman Framework) and industry-standard notations/conventions for business and IT architecture/design modeling"
+                    - listitem [ref=e222]:
+                      - strong [ref=e223]: Presentation
+                      - text: ": Provides the capabilities that are visual or interactive to meet the demands of a myriad of stakeholders. To present the content to various types of users, including web, thick clients, and reports."
+                    - listitem [ref=e224]:
+                      - strong [ref=e225]: Publication
+                      - text: ": Distributes repository content broadly across the enterprise and captures feedback, comments, and scoring from consumers of that content."
+                  - heading "AI-Enabled Capabilities of Next-Generation EA Tools" [level=2] [ref=e227]
+                  - paragraph [ref=e228]:
+                    - text: AI capabilities in EA tools help business stakeholders make informed strategic and operational decisions. They also support
+                    - link "EA governance" [ref=e229] [cursor=pointer]:
+                      - /url: https://dzone.com/articles/enterprise-architecture-governance-a-holistic-view
+                    - text: and streamline content creation across architecture layers and integrations. The next-generation AI capabilities that are being embedded in EA tools/platforms are,
+                  - list [ref=e230]:
+                    - listitem [ref=e231]:
+                      - strong [ref=e232]: EA Copilot
+                      - text: ": It acts as an intelligent architecture assistant that enables architects and stakeholders to interact with enterprise architecture repositories using natural language. It provides contextual architecture recommendations, answers architecture-related questions, and performs impact analysis through conversational interfaces. By leveraging enterprise knowledge, standards, and architecture artifacts, it helps the architects make faster, more informed design and governance decisions."
+                    - listitem [ref=e233]:
+                      - strong [ref=e234]: Innovation and sustainability
+                      - text: ": Used by innovation teams and business stakeholders to track ideas from inception to commercialization and connect them to business outcomes."
+                    - listitem [ref=e235]:
+                      - strong [ref=e236]: AI portfolio rationalization
+                      - text: ": It uses machine learning to analyze application portfolios, identify redundancies, and assess business and technical value. It generates data-driven TIME (Tolerate, Invest, Migrate, Eliminate) recommendations, uncovers consolidation opportunities, and prioritizes modernization initiatives. The capability helps enterprises optimize technology investments, reduce operational costs, and simplify complex application landscapes."
+                    - listitem [ref=e237]:
+                      - strong [ref=e238]: Automated architecture documentation
+                      - text: ": It leverages Generative AI to create and maintain architecture artifacts such as HLDs, LLDs, ADRs, and TOGAF deliverables. It can generate architecture diagrams and documentation directly from requirements, models, or existing system information. This significantly reduces manual effort, improves consistency, and accelerates architecture delivery while ensuring documentation remains current and reusable."
+                    - listitem [ref=e239]:
+                      - strong [ref=e240]: EA governance
+                      - text: ": It is used by architecture review boards, risk/compliance teams, and delivery teams to apply control-based, outcome-based, agility-based, and autonomous governance styles as appropriate to context. AI-powered review bots continuously assess architecture artifacts, identify risks, detect architectural drift, and recommend corrective actions."
+                    - listitem [ref=e241]:
+                      - strong [ref=e242]: EA linkages
+                      - text: ": It creates a connected, searchable view of enterprise architecture data by linking applications, technologies, business capabilities, processes, and infrastructure. AI-driven semantic search and relationship discovery enable architects to quickly identify dependencies, impacts, and hidden connections across the enterprise. This provides deeper architectural intelligence and supports faster decision-making for transformation initiatives."
+                    - listitem [ref=e243]:
+                      - strong [ref=e244]: Technology radar AI
+                      - text: ": It continuously monitors technology trends, vendor ecosystems, and innovation signals to provide strategic technology insights. It assists architects with build-versus-buy decisions, evaluates emerging technologies, and analyzes product lifecycle risks and opportunities. By combining market intelligence with enterprise context, it helps organizations make informed technology investment and modernization decisions."
+                  - heading "Users of EA Tools" [level=2] [ref=e246]
+                  - paragraph [ref=e247]: The audience for EA information now extends well beyond the EA team. EA tools are designed for EA specialists who create and maintain models, as well as a broader group of non-EA stakeholders who primarily consume architecture content. Most EA tools offer self-service access, enabling non-technical users to engage with relevant information without learning the full tool.
+                  - paragraph [ref=e248]: The various types of users of the EA tool are,
+                  - list [ref=e249]:
+                    - listitem [ref=e250]: CIOs, business leaders and executives, IT strategists
+                    - listitem [ref=e251]: Enterprise and business architects
+                    - listitem [ref=e252]: Solution and data architects
+                    - listitem [ref=e253]: PMO and project managers
+                    - listitem [ref=e254]: Architecture review boards
+                    - listitem [ref=e255]: Agile and DevOps delivery teams
+                    - listitem [ref=e256]: Risk, security and compliance teams
+                    - listitem [ref=e257]: Business users and external partners
+                  - paragraph [ref=e258]:
+                    - img "Users, purpose of usage, and typical outputs" [ref=e262]
+                  - emphasis [ref=e264]: Users, purpose of usage, and typical outputs
+                  - paragraph
+                  - paragraph [ref=e265]
+                  - table [ref=e267]:
+                    - rowgroup [ref=e268]:
+                      - row [ref=e269]:
+                        - cell [ref=e270]:
+                          - paragraph [ref=e271]:
+                            - strong [ref=e272]: User / Personas
+                        - cell [ref=e273]:
+                          - paragraph [ref=e274]:
+                            - strong [ref=e275]: Why They Use the Tool
+                        - cell [ref=e276]:
+                          - paragraph [ref=e277]:
+                            - strong [ref=e278]: Typical Outputs Generated
+                    - rowgroup [ref=e279]:
+                      - row [ref=e280]:
+                        - cell [ref=e281]:
+                          - paragraph [ref=e282]: Enterprise & Business Architects
+                        - cell [ref=e283]:
+                          - paragraph [ref=e284]: Model the enterprise's current and future state; connect strategy, capabilities, processes, and technology. Advise leadership on trends and transformation options
+                        - cell [ref=e285]:
+                          - paragraph [ref=e286]: Business capability maps, value streams, operating-model diagrams, trend/disruption analyses, strategic recommendations
+                      - row [ref=e287]:
+                        - cell [ref=e288]:
+                          - paragraph [ref=e289]: Solution & Data Architects
+                        - cell [ref=e290]:
+                          - paragraph [ref=e291]: Translate approved concepts into detailed, standard-aligned designs. Identify information flows and processing needs
+                        - cell [ref=e292]:
+                          - paragraph [ref=e293]: Context diagrams, C4/UML models, solution architecture documents, data flow diagrams, decision logs
+                      - row [ref=e294]:
+                        - cell [ref=e295]:
+                          - paragraph [ref=e296]: Business Leaders & Executives
+                        - cell [ref=e297]:
+                          - paragraph [ref=e298]: Monitor progress toward strategic objectives. Make investment and prioritization decisions
+                        - cell [ref=e299]:
+                          - paragraph [ref=e300]: Executive dashboards, scorecards, heat maps, portfolio health summaries, cost-benefit views
+                      - row [ref=e301]:
+                        - cell [ref=e302]:
+                          - paragraph [ref=e303]: PMO & Project Managers
+                        - cell [ref=e304]:
+                          - paragraph [ref=e305]: Manage dependencies across initiatives, mitigate delivery risk. Track transformation progress
+                        - cell [ref=e306]:
+                          - paragraph [ref=e307]: Roadmaps, dependency maps, risk registers, status/progress reports
+                      - row [ref=e308]:
+                        - cell [ref=e309]:
+                          - paragraph [ref=e310]: Architecture Review Boards
+                        - cell [ref=e311]:
+                          - paragraph [ref=e312]: Approve or reject solution proposals. Enforce standards and principles, oversee architecture health
+                        - cell [ref=e313]:
+                          - paragraph [ref=e314]: Review decisions, compliance/audit findings, standards catalogs, governance dashboards
+                      - row [ref=e315]:
+                        - cell [ref=e316]:
+                          - paragraph [ref=e317]: Agile & DevOps Delivery Teams
+                        - cell [ref=e318]:
+                          - paragraph [ref=e319]: Consume approved designs to plan and execute delivery. Assess infrastructure and cloud implications
+                        - cell [ref=e320]:
+                          - paragraph [ref=e321]: Backlogs, epics, story points, release plans, cloud resource/deployment views
+                      - row [ref=e322]:
+                        - cell [ref=e323]:
+                          - paragraph [ref=e324]: Risk, Security & Compliance Teams
+                        - cell [ref=e325]:
+                          - paragraph [ref=e326]: Assess exposure, track regulatory alignment (e.g., GDPR, DORA, SOX), manage audit cycles
+                        - cell [ref=e327]:
+                          - paragraph [ref=e328]: Risk catalogs, compliance dashboards, audit reports, control-exception logs
+                      - row [ref=e329]:
+                        - cell [ref=e330]:
+                          - paragraph [ref=e331]: Business Users & External Partners
+                        - cell [ref=e332]:
+                          - paragraph [ref=e333]: Provide input without needing architecture expertise. Respond to surveys, confirm application usage, submit ideas, access relevant data securely
+                        - cell [ref=e334]:
+                          - paragraph [ref=e335]: Survey responses, application-fitness ratings, submitted ideas/comments, shared partner reports
+                  - paragraph [ref=e336]
+                  - heading "Benefits of Usage of EA Tools" [level=2] [ref=e338]
+                  - paragraph [ref=e339]: The following are the high-level benefits of the usage of Enterprise Architecture tools,
+                  - list [ref=e340]:
+                    - listitem [ref=e341]:
+                      - strong [ref=e342]: Single source of truth
+                      - text: ": It reduces reliance on scattered spreadsheets and tribal knowledge for understanding applications, capabilities, and dependencies."
+                    - listitem [ref=e343]:
+                      - strong [ref=e344]: Faster informed decisions
+                      - text: ": Stakeholders can see the cost, risk, and business impact of a change before committing to it."
+                    - listitem [ref=e345]:
+                      - strong [ref=e346]: Business and IT alignment
+                      - text: ": Shared models and dashboards give both IT and business stakeholders a common frame of reference."
+                    - listitem [ref=e347]:
+                      - strong [ref=e348]: Improved portfolio management
+                      - text: ": Helps in portfolio and application rationalization analysis that results in identifying aging or redundant applications and technologies"
+                    - listitem [ref=e349]:
+                      - strong [ref=e350]: Establishing governance
+                      - text: ": Automated workflows, standards catalogs, and review board support make governance more consistent without becoming a bottleneck"
+                    - listitem [ref=e351]:
+                      - strong [ref=e352]: Transformation roadmap
+                      - text: ": Helps in defining enterprise-wide roadmaps that connect strategy, investment, and delivery so that transformation programs stay on track."
+                    - listitem [ref=e353]:
+                      - generic [ref=e354]:
+                        - strong [ref=e355]: Architecture insight
+                        - text: ": Role-based views, surveys, and self-service dashboards allow business stakeholders to consume and contribute to EA content without needing deep technical expertise."
+                    - listitem [ref=e356]:
+                      - strong [ref=e357]: AI-driven productivity gains
+                      - text: ": Automated data ingestion, diagram generation, and natural-language assistants reduce manual effort."
+                    - listitem [ref=e358]:
+                      - strong [ref=e359]: Support for innovation and sustainability
+                      - text: ": Built-in idea management and tracking connect emerging trends and sustainability goals directly to the enterprise roadmap."
+                  - heading "Summary" [level=2] [ref=e361]
+                  - paragraph [ref=e362]: Enterprise Architecture is moving towards Agentic EA where AI agents autonomously assist architects with,
+                  - list [ref=e363]:
+                    - listitem [ref=e364]: Autonomous solution design
+                    - listitem [ref=e365]: Architecture review automation
+                    - listitem [ref=e366]: Governance enforcement
+                    - listitem [ref=e367]: Self-updating architecture repositories
+                    - listitem [ref=e368]: Multi-agent collaboration
+                    - listitem [ref=e369]: Continuous architecture compliance monitoring
+                  - paragraph [ref=e370]: AI-enabled EA tools are evolving from architecture repositories into intelligent architecture copilots that can automatically discover applications, generate architecture artifacts, rationalize portfolios, enforce governance, assess technical debt, and provide real-time strategic recommendations.
+                  - paragraph [ref=e371]: It helps to identify redundant applications across the enterprise and retire them. This helps in improving cost savings. The tool also helps in integrating the EA across the enterprise.
+                  - heading "Acknowledgements" [level=2] [ref=e373]
+                  - paragraph [ref=e374]: The authors would like to thank Tricon Solutions LLC for giving the required time and support in many ways in bringing up this article.
+                  - heading "Disclaimer" [level=2] [ref=e375]
+                  - paragraph [ref=e376]: The views expressed in this article/presentation are those of the authors, and Tricon Solutions LLC does not subscribe to the substance, veracity, or truthfulness of the said opinion.
+                - generic [ref=e379]:
+                  - generic [ref=e380]: AI
+                  - generic [ref=e381]: Enterprise architecture
+                  - generic [ref=e382]: Tool
+                - paragraph [ref=e384]: Opinions expressed by DZone contributors are their own.
+          - complementary [ref=e386]:
+            - heading "Related" [level=2] [ref=e387]
+            - list [ref=e388]:
+              - listitem [ref=e389]:
+                - 'link "Agents and Tools in Agentic AI: A Simple Explanation" [ref=e390] [cursor=pointer]':
+                  - /url: /articles/agents-tools-agentic-ai
+              - listitem [ref=e391]:
+                - 'link "From Microservices to Agent Services: The Next Architectural Shift" [ref=e392] [cursor=pointer]':
+                  - /url: /articles/ai-agent-architectural-shift
+              - listitem [ref=e393]:
+                - link "Building an AI Visibility Checker With Cloudflare Workers (Without a Backend)" [ref=e394] [cursor=pointer]:
+                  - /url: /articles/ai-visibility-checker
+              - listitem [ref=e395]:
+                - link "How Agentic AI Is Turning Traditional Automation Into a Tool Layer?" [ref=e396] [cursor=pointer]:
+                  - /url: /articles/agentic-ai-tool-layer
+        - heading "Partner Resources" [level=2] [ref=e401]
+      - generic [ref=e406]:
+        - generic "close" [ref=e407] [cursor=pointer]: ×
+        - iframe [ref=e411]:
+          - generic [ref=f22e1]:
+            - generic:
+              - generic [ref=f22e2] [cursor=pointer]
+              - button [ref=f22e7] [cursor=pointer]
+  - generic: 
+  - text: ✕
+  - generic [ref=e419]:
+    - generic [ref=e420]:
+      - generic [ref=e421]:
+        - generic [ref=e422]:
+          - paragraph [ref=e423]: ABOUT US
+          - list [ref=e424]:
+            - listitem [ref=e425]:
+              - link "About DZone" [ref=e426] [cursor=pointer]:
+                - /url: /pages/about
+            - listitem [ref=e427]:
+              - link "Support and feedback" [ref=e428] [cursor=pointer]:
+                - /url: mailto:support@dzone.com
+            - listitem [ref=e429]:
+              - link "Community research" [ref=e430] [cursor=pointer]:
+                - /url: /pages/dzone-community-research
+        - generic [ref=e431]:
+          - paragraph [ref=e432]: ADVERTISE
+          - list [ref=e433]:
+            - listitem [ref=e434]:
+              - link "Advertise with DZone" [ref=e435] [cursor=pointer]:
+                - /url: https://advertise.dzone.com
+      - generic [ref=e436]:
+        - generic [ref=e437]:
+          - paragraph [ref=e438]: CONTRIBUTE ON DZONE
+          - list [ref=e439]:
+            - listitem [ref=e440]:
+              - link "Article Submission Guidelines" [ref=e441] [cursor=pointer]:
+                - /url: /articles/dzones-article-submission-guidelines
+            - listitem [ref=e442]:
+              - link "Become a Contributor" [ref=e443] [cursor=pointer]:
+                - /url: /pages/contribute
+            - listitem [ref=e444]:
+              - link "Core Program" [ref=e445] [cursor=pointer]:
+                - /url: /pages/core
+            - listitem [ref=e446]:
+              - link "Visit the Writers' Zone" [ref=e447] [cursor=pointer]:
+                - /url: /writers-zone
+          - paragraph [ref=e448]: LEGAL
+          - list [ref=e449]:
+            - listitem [ref=e450]:
+              - link "Terms of Service" [ref=e451] [cursor=pointer]:
+                - /url: https://technologyadvice.com/terms-conditions/
+            - listitem [ref=e452]:
+              - link "Privacy Policy" [ref=e453] [cursor=pointer]:
+                - /url: https://technologyadvice.com/privacy-policy/
+        - generic [ref=e454]:
+          - paragraph [ref=e455]: CONTACT US
+          - list [ref=e456]:
+            - listitem [ref=e457]: 3343 Perimeter Hill Drive
+            - listitem [ref=e458]: Suite 215
+            - listitem [ref=e459]: Nashville, TN 37211
+            - listitem [ref=e460]:
+              - link "support@dzone.com" [ref=e461] [cursor=pointer]:
+                - /url: mailto:support@dzone.com
+    - generic [ref=e462]:
+      - paragraph [ref=e463]: "Let's be friends:"
+      - list [ref=e465] [cursor=pointer]:
+        - listitem [ref=e466]:
+          - link [ref=e467]:
+            - /url: /pages/feeds
+            - img "Follow our RSS feeds" [ref=e468]
+        - listitem [ref=e470]:
+          - link [ref=e471]:
+            - /url: https://twitter.com/DZoneInc
+            - img "Follow us on X" [ref=e472]
+        - listitem [ref=e474]:
+          - link [ref=e475]:
+            - /url: https://www.facebook.com/DZoneInc
+            - img "Follow us on Facebook" [ref=e476]
+        - listitem [ref=e478]:
+          - link [ref=e479]:
+            - /url: https://www.linkedin.com/company/dzone/
+            - img "Follow us on LinkedIn" [ref=e480]
+  - text: ✕  

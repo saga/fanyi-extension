@@ -77,7 +77,7 @@ export function createTranslationController(
     async start() {
       if (isTranslating) return;
       if (isTranslatedState || isPageTranslated()) {
-        showStatus('页面已翻译', 'success');
+        showStatus('页面已翻译（如需重新翻译请先恢复原文）', 'success');
         setTimeout(hideStatus, 4000);
         return;
       }
@@ -279,6 +279,17 @@ async function handleFullTranslation(
     logger.debug(
       `[ContentScript] Server translation end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
     );
+
+    // 守卫：0 块实际翻译时不标记"已翻译"，避免后续尝试被 isPageTranslated() 短路。
+    // 典型触发场景：LLM 对技术内容返回 identity 翻译（译文=原文），
+    // applyServerTranslatedHtml 内部跳过所有块（translatedText === block.text），
+    // 但若仍设置 fanyiTranslated=true，用户再点翻译只会看到"页面已翻译"然后退出。
+    if (translatedIds.size === 0) {
+      showStatus('翻译未生效（译文与原文相同），请重试', 'error');
+      setTimeout(hideStatus, 6000);
+      return { translated: false, observer: null };
+    }
+
     const statusMsg =
       missingIds.length > 0
         ? `翻译完成（${missingIds.length} 段未返回）`
@@ -317,6 +328,13 @@ async function handleFullTranslation(
   logger.debug(
     `[ContentScript] Session end: ${nodeMap.size} blocks total, ${translatedIds.size} translated, ${missingIds.length} missing`,
   );
+
+  // 守卫：与服务端路径一致，0 块实际翻译时不标记"已翻译"。
+  if (translatedIds.size === 0) {
+    showStatus('翻译未生效（译文与原文相同），请重试', 'error');
+    setTimeout(hideStatus, 6000);
+    return { translated: false, observer: null };
+  }
 
   const statusMsg =
     missingIds.length > 0
