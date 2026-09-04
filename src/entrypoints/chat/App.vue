@@ -6,10 +6,14 @@
         <div class="src-title">{{ pageContext?.title || '网页对话' }}</div>
         <div class="src-url" v-if="pageContext">{{ shortUrl(pageContext.url) }}</div>
       </div>
+      <button class="close-btn" :disabled="status === 'loading'" @click="closeSidebar" title="关闭侧栏">×</button>
       <button class="reload-btn" :disabled="status === 'loading'" @click="loadContext">
         {{ status === 'loading' ? '加载中…' : '重新加载' }}
       </button>
     </header>
+
+    <!-- KV Cache 命中率指示（多轮时 system 前缀命中缓存，输入 token 大幅下降） -->
+    <div v-if="usageText" class="usage-hint">{{ usageText }}</div>
 
     <!-- 提示条 -->
     <div v-if="status === 'error'" class="banner error">
@@ -44,11 +48,18 @@
 
     <!-- 输入区 -->
     <footer class="composer">
+      <button
+        class="json-toggle"
+        :class="{ active: jsonMode }"
+        :disabled="streaming"
+        :title="jsonMode ? '关闭结构化 JSON 输出' : '开启结构化 JSON 输出'"
+        @click="jsonMode = !jsonMode"
+      >JSON</button>
       <textarea
         v-model="input"
         class="input"
         rows="1"
-        :placeholder="status === 'ready' ? '输入你的问题…' : '请先加载页面内容'"
+        :placeholder="status === 'ready' ? (jsonMode ? '要求以 JSON 形式回答…' : '输入你的问题…') : '请先加载页面内容'"
         :disabled="status !== 'ready'"
         @keydown.enter.exact.prevent="send"
       ></textarea>
@@ -60,9 +71,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import browser from 'webextension-polyfill';
 import type { PageContext, GetPageContextResponse } from '@/types/messages';
+import type { ChatUsage } from '@/entrypoints/service/chat';
 
 interface ChatTurn {
   role: 'user' | 'assistant';
@@ -76,8 +88,19 @@ const messages = ref<ChatTurn[]>([]);
 const input = ref('');
 const streaming = ref(false);
 const messagesEl = ref<HTMLElement | null>(null);
+const jsonMode = ref(false);
+const lastUsage = ref<ChatUsage | null>(null);
+const currentPort = ref<browser.Runtime.Port | null>(null);
 
 const canSend = computed(() => input.value.trim().length > 0 && !!pageContext.value && !streaming.value);
+
+/** KV Cache 命中率摘要：多轮对话时 system 前缀命中缓存，命中率越高越省 token。 */
+const usageText = computed(() => {
+  const u = lastUsage.value;
+  if (!u || u.promptTokens === 0) return '';
+  const hitRate = Math.round((u.cacheHitTokens / u.promptTokens) * 100);
+  return `KV 缓存命中 ${hitRate}% · 输入 ${u.promptTokens} / 命中 ${u.cacheHitTokens}`;
+});
 
 function shortUrl(url: string): string {
   try {
@@ -131,6 +154,29 @@ function usePrompt(text: string) {
   ta?.focus();
 }
 
+/**
+ * 通知承载本页的 content script 移除聊天侧栏。
+ * 在独立 tab 打开 chat.html 时（无 sourceTabId）则是 no-op。
+ */
+async function closeSidebar() {
+  // 先断开对话端口，background 会 abort 在途请求（不再浪费配额）
+  currentPort.value?.disconnect();
+  currentPort.value = null;
+  const sid = getSourceTabId();
+  if (sid == null) return;
+  try {
+    await browser.tabs.sendMessage(sid, { action: 'closeChatSidebar' });
+  } catch {
+    /* 页面可能已导航/关闭，吞掉错误即可 */
+  }
+}
+
+/** 断开对话端口（关闭/卸载时调用），让 background 中断在途流式请求。 */
+function disconnectPort() {
+  currentPort.value?.disconnect();
+  currentPort.value = null;
+}
+
 async function send() {
   const question = input.value.trim();
   if (!question || !pageContext.value || streaming.value) return;
@@ -146,30 +192,42 @@ async function send() {
   const assistantTurn: ChatTurn = { role: 'assistant', content: '' };
   messages.value.push(assistantTurn);
   input.value = '';
+  lastUsage.value = null;
   streaming.value = true;
   scrollToBottom();
 
   const port = browser.runtime.connect({ name: 'chat' });
+  currentPort.value = port;
   port.onMessage.addListener((msg: unknown) => {
-    const m = msg as { type?: string; text?: string; message?: string };
+    const m = msg as {
+      type?: string;
+      text?: string;
+      message?: string;
+      usage?: ChatUsage;
+    };
     if (m.type === 'partial' && typeof m.text === 'string') {
       assistantTurn.content = m.text;
       scrollToBottom();
+    } else if (m.type === 'usage' && m.usage) {
+      // 实时更新缓存命中率（多轮时随 system 前缀命中而升高）
+      lastUsage.value = m.usage;
     } else if (m.type === 'done') {
+      if (m.usage) lastUsage.value = m.usage;
       streaming.value = false;
-      port.disconnect();
+      disconnectPort();
       scrollToBottom();
     } else if (m.type === 'error') {
       assistantTurn.content = '⚠️ ' + (m.message || '对话出错');
       streaming.value = false;
-      port.disconnect();
+      disconnectPort();
       scrollToBottom();
     }
   });
-  port.postMessage({ type: 'chat', context: pageContext.value, history });
+  port.postMessage({ type: 'chat', context: pageContext.value, history, jsonMode: jsonMode.value });
 }
 
 onMounted(loadContext);
+onUnmounted(disconnectPort);
 </script>
 
 <style scoped>
@@ -240,6 +298,42 @@ onMounted(loadContext);
   cursor: default;
 }
 
+.close-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  border: 1px solid #d9d9d9;
+  border-radius: 50%;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.close-btn:hover {
+  background: #f5f5f5;
+  color: #1a1a1a;
+}
+.close-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 嵌入侧栏 iframe 时视口只有 ~380px，挤掉 URL 行避免头栏换行 */
+@media (max-width: 480px) {
+  .src-url {
+    display: none;
+  }
+  .src-title {
+    max-width: 50vw;
+  }
+}
+
 .banner {
   padding: 8px 12px;
   font-size: 12px;
@@ -256,6 +350,17 @@ onMounted(loadContext);
 .banner.error {
   background: #fef0f0;
   color: #f56c6c;
+}
+
+/* KV Cache 命中率提示条 */
+.usage-hint {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #8a8a8a;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .banner-hint {
@@ -342,6 +447,31 @@ onMounted(loadContext);
   background: #fff;
   border-top: 1px solid #ececec;
   flex-shrink: 0;
+}
+
+.json-toggle {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 42px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #d9d9d9;
+  border-radius: 12px;
+  background: #fff;
+  color: #888;
+  cursor: pointer;
+}
+
+.json-toggle.active {
+  border-color: #409eff;
+  background: #409eff;
+  color: #fff;
+}
+
+.json-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .input {

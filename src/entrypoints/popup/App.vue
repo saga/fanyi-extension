@@ -164,8 +164,17 @@ async function triggerTranslate() {
 
 async function openChat() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  const url = browser.runtime.getURL('chat.html') + (tab?.id ? `?sourceTabId=${tab.id}` : '');
-  browser.tabs.create({ url }).catch(() => {});
+  if (!tab?.id) {
+    window.close();
+    return;
+  }
+  // 优先注入侧栏；非 http(s) 页 / 未授权时回退到新开 chat.html tab
+  const chatUrl = browser.runtime.getURL('chat.html') + `?sourceTabId=${tab.id}`;
+  browser.tabs
+    .sendMessage(tab.id, { action: 'openChatSidebar', sourceTabId: tab.id })
+    .catch(() => {
+      browser.tabs.create({ url: chatUrl }).catch(() => {});
+    });
   window.close();
 }
 

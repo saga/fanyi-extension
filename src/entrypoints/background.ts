@@ -27,7 +27,7 @@ import type {
   GetPageContextResponse,
   PageContext,
 } from '../types/messages';
-import { chatStream, buildChatSystem, type ChatMessage } from './service/chat';
+import { chatStream, buildChatSystem, type ChatMessage, type ChatUsage } from './service/chat';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -167,9 +167,15 @@ export default defineBackground({
             browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
             break;
           case 'chat-page': {
-            // 用当前页作为上下文打开对话 tab（带 sourceTabId）
-            const url = browser.runtime.getURL('chat.html') + `?sourceTabId=${tab.id}`;
-            browser.tabs.create({ url }).catch(() => {});
+            // 优先在当前页注入聊天侧栏（页面正文在左、聊天在右）。
+            // 非 http(s) / content script 未加载时，sendMessage 会 reject，
+            // 回退到原来的"新开 chat.html tab"流程（已知会报 connection 错误）。
+            const chatUrl = browser.runtime.getURL('chat.html') + `?sourceTabId=${tab.id}`;
+            browser.tabs
+              .sendMessage(tab.id, { action: 'openChatSidebar', sourceTabId: tab.id })
+              .catch(() => {
+                browser.tabs.create({ url: chatUrl }).catch(() => {});
+              });
             break;
           }
             }
@@ -580,8 +586,12 @@ export default defineBackground({
     browser.runtime.onConnect.addListener((port) => {
       if (port.name !== 'chat') return;
 
+      // 用户关闭侧栏 / 导航时端口断开 -> 中断在途请求，避免浪费带宽与配额
+      const controller = new AbortController();
+      port.onDisconnect.addListener(() => controller.abort());
+
       port.onMessage.addListener(async (msg: unknown) => {
-        const m = msg as { type?: string; context?: PageContext; history?: ChatMessage[] };
+        const m = msg as { type?: string; context?: PageContext; history?: ChatMessage[]; jsonMode?: boolean };
         if (m.type !== 'chat') return;
 
         const config = await getConfig();
@@ -591,15 +601,26 @@ export default defineBackground({
         }
 
         try {
-          const system = buildChatSystem(m.context ?? null);
+          const system = buildChatSystem(m.context ?? null, m.jsonMode);
           const llmMessages: ChatMessage[] = [{ role: 'system', content: system }, ...(m.history ?? [])];
           let full = '';
-          for await (const partial of chatStream(config.deepseekApiKey, llmMessages)) {
+          let usage: ChatUsage | null = null;
+          for await (const partial of chatStream(config.deepseekApiKey, llmMessages, {
+            jsonMode: m.jsonMode,
+            signal: controller.signal,
+            onUsage: (u) => {
+              usage = u;
+              // 实时回传，供 UI 即时展示缓存命中率（无需等整段生成完）
+              port.postMessage({ type: 'usage', usage: u });
+            },
+          })) {
             full = partial;
             port.postMessage({ type: 'partial', text: full });
           }
-          port.postMessage({ type: 'done', text: full });
+          port.postMessage({ type: 'done', text: full, usage });
         } catch (error) {
+          // 端口已断开（用户主动关闭）导致的 abort 属正常流程，静默处理
+          if (controller.signal.aborted) return;
           logger.error('[Background] chat stream error:', error);
           port.postMessage({
             type: 'error',
