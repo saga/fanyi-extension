@@ -99,6 +99,16 @@ export interface GetPageContextMessage {
   sourceTabId?: number;
 }
 
+/**
+ * 消息中枢：popup / side panel 把"要发给 content script 的消息"统一交给
+ * background 转发，集中控制失败处理（无 content script 时的友好错误）。
+ */
+export interface RelayToContentMessage {
+  action: 'relayToContent';
+  tabId: number;
+  message: ContentMessage;
+}
+
 /** 发往 background 的所有消息类型。 */
 export type BackgroundMessage =
   | TranslateChunkMessage
@@ -106,7 +116,8 @@ export type BackgroundMessage =
   | ValidateApiKeyMessage
   | ClearCacheMessage
   | CheckConfigMessage
-  | GetPageContextMessage;
+  | GetPageContextMessage
+  | RelayToContentMessage;
 
 // ============================================================
 // Content-script-bound messages (background → content script)
@@ -249,6 +260,22 @@ export type GetPageContextResponse =
   | GetPageContextSuccessResponse
   | GetPageContextErrorResponse;
 
+// --- relayToContent ---
+
+export interface RelayToContentSuccessResponse {
+  success: true;
+  response: unknown;
+}
+
+export interface RelayToContentErrorResponse {
+  success: false;
+  error: string;
+}
+
+export type RelayToContentResponse =
+  | RelayToContentSuccessResponse
+  | RelayToContentErrorResponse;
+
 /**
  * 所有 background 响应的合集，作为运行时收包的兜底类型。
  * 业务代码应当按 action 窄化到具体的 Response 类型。
@@ -259,7 +286,8 @@ export type BackgroundResponse =
   | ValidateApiKeyResponse
   | ClearCacheResponse
   | CheckConfigResponse
-  | GetPageContextResponse;
+  | GetPageContextResponse
+  | RelayToContentResponse;
 
 // ============================================================
 // Listener 签名（替换 onMessage.addListener 的 `any` 入参）

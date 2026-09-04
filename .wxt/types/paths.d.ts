@@ -8,6 +8,7 @@ declare module "wxt/browser" {
     | "/background.js"
     | "/content-scripts/content.js"
     | "/content-scripts/youtube-injector.js"
+    | "/offscreen.html"
     | "/popup.html"
     | "/sidepanel.html"
   type HtmlPublicPath = Extract<PublicPath, `${string}.html`>

@@ -7,6 +7,7 @@ import {
   processTranslationResult,
   clearAllCache,
 } from './utils/translateApi';
+import { translationCache } from './utils/cacheManager';
 import { globalQueue } from './utils/translationQueue';
 import { generateTranslationCacheKey } from './utils/cacheKey';
 import { translateSingleflight } from './utils/singleflight';
@@ -25,10 +26,13 @@ import type {
   CheckConfigResponse,
   GetPageContextMessage,
   GetPageContextResponse,
+  RelayToContentMessage,
+  RelayToContentResponse,
   PageContext,
 } from '../types/messages';
 import { chatStream, buildChatSystem, type ChatMessage, type ChatUsage } from './service/chat';
 import { openSidePanel } from './utils/sidePanel';
+import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -155,7 +159,29 @@ export default defineBackground({
       }
 
       registerCommands();
+
+      // 定时清理过期翻译缓存（alarms API 无需额外权限）。
+      // 12h 一次：把长期不访问、已超 7 天 TTL 但仍残留在 storage 的条目清掉。
+      try {
+        if (browser.alarms) {
+          browser.alarms.create('translation-cache-cleanup', { periodInMinutes: 12 * 60 });
+        }
+      } catch {
+        /* ignore */
+      }
     });
+
+    // 定时任务：清理过期缓存
+    if (browser.alarms) {
+      browser.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === 'translation-cache-cleanup') {
+          translationCache
+            .pruneExpired()
+            .then((n) => logger.debug('[Background] pruned', n, 'expired translation cache entries'))
+            .catch(() => {});
+        }
+      });
+    }
 
     // Only register command listener if commands API is supported
     if (isCommandsSupported) {
@@ -233,6 +259,8 @@ export default defineBackground({
             await handleCheckConfig(sendResponse as (r: CheckConfigResponse) => void);
           } else if (message.action === 'getPageContext') {
             await handleGetPageContext(message, sendResponse as (r: GetPageContextResponse) => void);
+          } else if (message.action === 'relayToContent') {
+            await handleRelayToContent(message, sendResponse as (r: RelayToContentResponse) => void);
           } else {
             // Unknown action, don't keep port open
             sendResponse({ success: false, error: 'Unknown action' });
@@ -563,42 +591,94 @@ export default defineBackground({
           return;
         }
 
-        // 让该页的 content script 提取正文作为上下文。
-        const ctx = (await browser.tabs.sendMessage(tabId, {
-          action: 'extractChatContext',
-        })) as PageContext | null;
+        // 1) 主路径：让该页的 content script 提取正文作为上下文。
+        let ctx: PageContext | null = null;
+        try {
+          ctx = (await browser.tabs.sendMessage(tabId, {
+            action: 'extractChatContext',
+          })) as PageContext | null;
+        } catch {
+          // 连接失败（无 content script）：走下方 offscreen 兜底
+          ctx = null;
+        }
 
+        // 2) 兜底路径：content script 取不到（无脚本 / 返回空）时，
+        //    用 offscreen 文档的 DOMParser 解析页面 HTML 抽正文。
         if (!ctx || !ctx.text) {
-          sendResponse({ success: false, error: '该页面没有可提取的正文内容' });
+          const offscreenCtx = await getPageContextViaOffscreen(tabId);
+          if (offscreenCtx?.text) {
+            sendResponse({ success: true, context: offscreenCtx });
+            return;
+          }
+        } else {
+          sendResponse({ success: true, context: ctx });
           return;
         }
-        sendResponse({ success: true, context: ctx });
+
+        // 3) 都失败：按页面类型给友好提示（chrome:// 等仍走手动粘贴）。
+        let hint = '无法提取该页面的正文内容，请手动复制正文后粘贴到对话框';
+        try {
+          const t = await browser.tabs.get(tabId);
+          if (t?.url?.startsWith('file://')) {
+            hint = '无法读取本机文件：请在扩展管理页（chrome://extensions）开启"允许访问文件网址"后重试';
+          } else if (t?.url?.startsWith('chrome://') || t?.url?.startsWith('about:')) {
+            hint = '该页面（浏览器内部页）无法读取，请手动复制正文后粘贴到对话框';
+          }
+        } catch {
+          /* tab 可能已关闭 */
+        }
+        sendResponse({ success: false, error: hint });
       } catch (error) {
         const msg = error instanceof Error ? error.message : '提取页面内容失败';
+        logger.error('[Background] getPageContext error:', error);
+        sendResponse({ success: false, error: msg });
+      }
+    }
+
+    /**
+     * 兜底：用 offscreen 文档解析页面取正文。
+     * 流程：scripting.executeScript 拿 HTML → 发 offscreen 用 DOMParser 抽正文。
+     * 失败（无 offscreen API / 页面不可注入）返回 null，让 UI 走手动粘贴。
+     */
+    async function getPageContextViaOffscreen(tabId: number): Promise<PageContext | null> {
+      try {
+        const html = await getPageHtmlViaScripting(tabId);
+        if (!html) return null;
+        const text = (await parseHtmlViaOffscreen(html))
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 16000);
+        if (!text) return null;
+        const t = await browser.tabs.get(tabId).catch(() => null);
+        return { title: t?.title ?? '', url: t?.url ?? '', text };
+      } catch (err) {
+        logger.debug('[Background] offscreen 兜底取正文失败:', err instanceof Error ? err.message : err);
+        return null;
+      }
+    }
+
+    // ============================================================
+    // 消息中枢：把发给 content script 的消息统一由 background 转发，
+    // 失败（无 content script / 页面已导航）时返回统一错误，方便 UI 处理。
+    // ============================================================
+    async function handleRelayToContent(
+      message: RelayToContentMessage,
+      sendResponse: (response: RelayToContentResponse) => void
+    ) {
+      try {
+        const response = await browser.tabs.sendMessage(message.tabId, message.message);
+        sendResponse({ success: true, response: response ?? null });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'relay failed';
         const isConnectionLost =
           msg.includes('Could not establish connection') ||
           msg.includes('Receiving end does not exist');
         if (isConnectionLost) {
-          // 预期情况：目标页无 content script（非 http(s) 页 / 尚未注入）。
-          // 用户已在 UI 看到友好提示，无需以 error 级别刷屏。
-          logger.debug('[Background] getPageContext: 目标页无 content script（非普通网页或未注入）:', msg);
-          // 本机文件需在扩展管理页开启"允许访问文件网址"后 content script 才会注入
-          let hint = '无法连接到该页面，请确认是普通网页且扩展已授权';
-          if (tabId != null) {
-            try {
-              const t = await browser.tabs.get(tabId);
-              if (t?.url?.startsWith('file://')) {
-                hint = '无法读取本机文件：请在扩展管理页（chrome://extensions）开启"允许访问文件网址"后重试';
-              }
-            } catch {
-              /* tab 可能已关闭 */
-            }
-          }
-          sendResponse({ success: false, error: hint });
+          logger.debug('[Background] relayToContent: 目标页无 content script:', msg);
         } else {
-          logger.error('[Background] getPageContext error:', error);
-          sendResponse({ success: false, error: msg });
+          logger.error('[Background] relayToContent error:', error);
         }
+        sendResponse({ success: false, error: msg });
       }
     }
 

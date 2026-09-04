@@ -158,6 +158,7 @@ async function loadContext() {
     if (resp.success) {
       pageContext.value = resp.context;
       status.value = 'ready';
+      void saveHistory();
     } else {
       // 自动读取失败（Chrome 安全拦截 / 无 content script / 非普通网页）→ 启用手动输入兜底
       errorMsg.value = resp.error;
@@ -183,6 +184,59 @@ function applyManualContext() {
   manualMode.value = false;
   manualText.value = '';
   status.value = 'ready';
+  void saveHistory();
+}
+
+const HISTORY_PREFIX = 'chatHistory:';
+
+/**
+ * 把当前对话（页上下文 + 多轮消息 + KV 命中）存到 storage.session，
+ * 让 side panel 重开同一 tab 时恢复，并在 popup / side panel 间共享。
+ * 用 session（浏览器重启即清），避免 tabId 复用读到别的页的历史。
+ */
+async function saveHistory() {
+  const sid = getSourceTabId();
+  if (sid == null) return;
+  const store = (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
+  try {
+    await store.set(HISTORY_PREFIX + sid, {
+      pageContext: pageContext.value,
+      messages: messages.value.map((m) => ({ role: m.role, content: m.content })),
+      usage: lastUsage.value,
+      savedAt: Date.now(),
+    });
+  } catch {
+    /* storage 不可用时忽略 */
+  }
+}
+
+/** 恢复历史。返回是否成功恢复（有消息则视为恢复成功）。 */
+async function loadHistory(): Promise<boolean> {
+  const sid = getSourceTabId();
+  if (sid == null) return false;
+  const store = (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
+  try {
+    const data = await store.get(HISTORY_PREFIX + sid);
+    if (data && Array.isArray(data.messages) && data.messages.length > 0) {
+      pageContext.value = (data.pageContext as PageContext) ?? null;
+      messages.value = data.messages as ChatTurn[];
+      lastUsage.value = (data.usage as ChatUsage) ?? null;
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** 初始化：优先恢复历史，否则实时取页正文。 */
+async function initChat() {
+  const restored = await loadHistory();
+  if (restored && pageContext.value) {
+    status.value = 'ready';
+  } else {
+    await loadContext();
+  }
 }
 
 function usePrompt(text: string) {
@@ -203,6 +257,7 @@ function clearChat() {
   messages.value = [];
   input.value = '';
   lastUsage.value = null;
+  void saveHistory();
 }
 
 /** 断开对话端口（关闭/卸载时调用），让 background 中断在途流式请求。 */
@@ -258,6 +313,7 @@ async function send() {
       if (m.usage) lastUsage.value = m.usage;
       streaming.value = false;
       disconnectPort();
+      void saveHistory();
       scrollToBottom();
     } else if (m.type === 'error') {
       assistantTurn.content = '⚠️ ' + (m.message || '对话出错');
@@ -269,7 +325,7 @@ async function send() {
   port.postMessage({ type: 'chat', context: pageContext.value, history, jsonMode: jsonMode.value });
 }
 
-onMounted(loadContext);
+onMounted(initChat);
 onUnmounted(disconnectPort);
 </script>
 

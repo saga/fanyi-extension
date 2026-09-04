@@ -81,6 +81,31 @@ export class CacheManager {
     await storage.setItem(this.storageKey, {});
   }
 
+  /**
+   * 主动清理已过期但还残留在 storage 里的条目（get 只在命中时才顺手删，
+   * 长期不访问的过期项会一直占着空间）。返回清理掉的条数。供 background
+   * 的 alarms 定时任务调用。
+   */
+  async pruneExpired(): Promise<number> {
+    this.memoryCache.clear();
+    try {
+      const entries = await storage.getItem<Record<string, CacheEntry<any>>>(this.storageKey);
+      if (!entries) return 0;
+      const now = Date.now();
+      let removed = 0;
+      for (const [key, entry] of Object.entries(entries)) {
+        if (now - entry.timestamp > entry.ttl) {
+          delete entries[key];
+          removed++;
+        }
+      }
+      if (removed > 0) await storage.setItem(this.storageKey, entries);
+      return removed;
+    } catch {
+      return 0;
+    }
+  }
+
   async getStats(): Promise<{ memorySize: number; storageSize: number }> {
     let storageSize = 0;
     try {

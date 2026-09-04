@@ -49,7 +49,8 @@ export default defineConfig({
         'debugger',         
         'tabs',
         'activeTab',
-        'scripting'];
+        'scripting',
+        'offscreen'];
       manifest.host_permissions = [
         'https://api.deepseek.com/*',
         'https://s.sunxiunan.com/*',

@@ -158,7 +158,9 @@ async function checkApiKey() {
 async function triggerTranslate() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
-    browser.tabs.sendMessage(tab.id, { action: 'translatePage' }).catch(() => {});
+    // 经 background 消息中枢转发到 content script（失败由 background 统一处理）
+    browser.runtime.sendMessage({ action: 'relayToContent', tabId: tab.id, message: { action: 'translatePage' } })
+      .catch(() => {});
     window.close();
   }
 }
@@ -178,7 +180,8 @@ async function openChat() {
 async function restoreOriginal() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
-    browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' }).catch(() => {});
+    browser.runtime.sendMessage({ action: 'relayToContent', tabId: tab.id, message: { action: 'restoreOriginal' } })
+      .catch(() => {});
   }
 }
 
