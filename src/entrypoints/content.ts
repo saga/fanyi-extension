@@ -15,6 +15,7 @@
  */
 import browser from 'webextension-polyfill';
 import { getConfig } from './utils/config';
+import { prepareDocument } from './utils/contentHelper';
 import { getStyles } from './content/styles';
 import {
   createTranslationController,
@@ -144,6 +145,10 @@ export default defineContentScript({
         case 'translationStreamUpdate':
           // 预留：流式翻译当前未启用，保留接口以便后续接入
           return undefined;
+        case 'extractChatContext':
+          // 返回当前页面的可翻译正文，作为对话上下文。
+          // 返回 Promise 让 background 的 sendMessage 收到响应。
+          return handleExtractChatContext();
       }
     }) as browser.Runtime.OnMessageListener);
 
@@ -183,6 +188,33 @@ export default defineContentScript({
       if (translation) return translation;
       translation = createTranslationController(isMobile, state);
       return translation;
+    }
+
+    /**
+     * 提取当前页面正文作为对话上下文。
+     * 复用翻译管线的正文检测（prepareDocument），失败则退化为 body.innerText。
+     * 文本截断到上限，避免单条对话消息过长。
+     */
+    const MAX_CHAT_CONTEXT_CHARS = 16000;
+    async function handleExtractChatContext(): Promise<{
+      title: string;
+      url: string;
+      text: string;
+    }> {
+      let text = '';
+      try {
+        const { fullText } = prepareDocument(document);
+        text = fullText || '';
+      } catch {
+        // 翻译管线检测失败（如 0 块）：退化为整页可见文本
+        text = document.body?.innerText || '';
+      }
+      text = text.replace(/\s+/g, ' ').trim().slice(0, MAX_CHAT_CONTEXT_CHARS);
+      return {
+        title: document.title || '',
+        url: window.location.href,
+        text,
+      };
     }
   },
 });

@@ -93,13 +93,20 @@ export interface CheckConfigMessage {
   action: 'checkConfig';
 }
 
+export interface GetPageContextMessage {
+  action: 'getPageContext';
+  /** 可选：显式指定要读取的标签页（从 popup / 右键菜单跳转到对话 tab 时带上） */
+  sourceTabId?: number;
+}
+
 /** 发往 background 的所有消息类型。 */
 export type BackgroundMessage =
   | TranslateChunkMessage
   | TranslateChunkStreamMessage
   | ValidateApiKeyMessage
   | ClearCacheMessage
-  | CheckConfigMessage;
+  | CheckConfigMessage
+  | GetPageContextMessage;
 
 // ============================================================
 // Content-script-bound messages (background → content script)
@@ -122,12 +129,17 @@ export interface TranslationStreamUpdateMessage {
   partial: string;
 }
 
+export interface ExtractChatContextMessage {
+  action: 'extractChatContext';
+}
+
 /** 发往 content script 的所有消息类型。 */
 export type ContentMessage =
   | TranslatePageMessage
   | RestoreOriginalMessage
   | ToggleTranslationMessage
-  | TranslationStreamUpdateMessage;
+  | TranslationStreamUpdateMessage
+  | ExtractChatContextMessage;
 
 // ============================================================
 // Responses
@@ -214,6 +226,29 @@ export type CheckConfigResponse =
   | CheckConfigSuccessResponse
   | CheckConfigErrorResponse;
 
+// --- getPageContext ---
+
+/** 从当前页面提取出的、喂给对话模型的上下文。 */
+export interface PageContext {
+  title: string;
+  url: string;
+  text: string;
+}
+
+export interface GetPageContextSuccessResponse {
+  success: true;
+  context: PageContext;
+}
+
+export interface GetPageContextErrorResponse {
+  success: false;
+  error: string;
+}
+
+export type GetPageContextResponse =
+  | GetPageContextSuccessResponse
+  | GetPageContextErrorResponse;
+
 /**
  * 所有 background 响应的合集，作为运行时收包的兜底类型。
  * 业务代码应当按 action 窄化到具体的 Response 类型。
@@ -223,7 +258,8 @@ export type BackgroundResponse =
   | TranslateChunkStreamResponse
   | ValidateApiKeyResponse
   | ClearCacheResponse
-  | CheckConfigResponse;
+  | CheckConfigResponse
+  | GetPageContextResponse;
 
 // ============================================================
 // Listener 签名（替换 onMessage.addListener 的 `any` 入参）

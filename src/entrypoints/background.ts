@@ -23,7 +23,11 @@ import type {
   ValidateApiKeyResponse,
   ClearCacheResponse,
   CheckConfigResponse,
+  GetPageContextMessage,
+  GetPageContextResponse,
+  PageContext,
 } from '../types/messages';
+import { chatStream, buildChatSystem, type ChatMessage } from './service/chat';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -36,6 +40,72 @@ export default defineBackground({
     // Check which APIs are supported
     const isContextMenuSupported = !!browser.contextMenus;
     const isCommandsSupported = !!browser.commands;
+
+    // ============================================================
+    // 对话 tab：跟踪"当前内容标签页"（Firefox Mobile 安全）
+    // ============================================================
+    // Firefox Android 不支持 windows API（currentWindow 静默失效），
+    // 且对话 tab 自身也是标签页。我们用 onActivated / onUpdated 记录
+    // "最后一个非对话页的激活标签"，作为对话上下文的来源。
+    const CHAT_PAGE = 'chat.html';
+
+    function isChatUrl(url?: string): boolean {
+      return !!url && url.includes(CHAT_PAGE);
+    }
+
+    let lastContentTabId: number | null = null;
+
+    browser.tabs.onActivated.addListener(({ tabId }) => {
+      browser.tabs.get(tabId).then((t) => {
+        if (t && !isChatUrl(t.url)) lastContentTabId = tabId;
+      }).catch(() => {});
+    });
+
+    browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (changeInfo.status === 'complete' && tab.id != null && !isChatUrl(tab.url)) {
+        lastContentTabId = tabId;
+      }
+    });
+
+    /**
+     * 解析"对话上下文来自哪个标签页"。
+     * 优先级：显式 sourceTabId > 最近记录的内容标签页 > 回退查询。
+     * 桌面用 currentWindow；Android 该选项无效，靠 lastContentTabId。
+     */
+    async function getActiveContentTabId(sourceTabId?: number): Promise<number | null> {
+      if (typeof sourceTabId === 'number') {
+        try {
+          const t = await browser.tabs.get(sourceTabId);
+          if (t && !isChatUrl(t.url)) return sourceTabId;
+        } catch {
+          /* tab 可能已关闭 */
+        }
+      }
+      if (lastContentTabId != null) {
+        try {
+          const t = await browser.tabs.get(lastContentTabId);
+          if (t && !isChatUrl(t.url)) return lastContentTabId;
+        } catch {
+          /* tab 可能已关闭 */
+        }
+      }
+      // 回退：active tab（桌面可用；Android 上 currentWindow 无效但 active 仍可靠）
+      try {
+        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+        const t = tabs.find((x) => x.id != null && !isChatUrl(x.url)) ?? tabs[0];
+        if (t?.id != null) return t.id;
+      } catch {
+        /* ignore */
+      }
+      try {
+        const tabs = await browser.tabs.query({ active: true });
+        const t = tabs.find((x) => x.id != null && !isChatUrl(x.url)) ?? tabs[0];
+        if (t?.id != null) return t.id;
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
 
     // Service instances are lightweight; create per request.
     function getService(apiKey: string, style?: PromptStyle): DeepSeekTranslationService {
@@ -64,6 +134,12 @@ export default defineBackground({
             title: '切换译文显示',
             contexts: ['page'],
           });
+
+          browser.contextMenus.create({
+            id: 'chat-page',
+            title: '用本页内容对话',
+            contexts: ['page'],
+          });
         } catch (error) {
           logger.warn('Context menu creation failed:', error);
         }
@@ -87,9 +163,15 @@ export default defineBackground({
               case 'restore-original':
                 browser.tabs.sendMessage(tab.id, { action: 'restoreOriginal' }).catch(() => {});
                 break;
-              case 'toggle-translation':
-                browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
-                break;
+          case 'toggle-translation':
+            browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
+            break;
+          case 'chat-page': {
+            // 用当前页作为上下文打开对话 tab（带 sourceTabId）
+            const url = browser.runtime.getURL('chat.html') + `?sourceTabId=${tab.id}`;
+            browser.tabs.create({ url }).catch(() => {});
+            break;
+          }
             }
           } catch (error) {
             logger.warn('Command handling failed:', error);
@@ -136,6 +218,8 @@ export default defineBackground({
             await handleClearCache(sendResponse as (r: ClearCacheResponse) => void);
           } else if (message.action === 'checkConfig') {
             await handleCheckConfig(sendResponse as (r: CheckConfigResponse) => void);
+          } else if (message.action === 'getPageContext') {
+            await handleGetPageContext(message, sendResponse as (r: GetPageContextResponse) => void);
           } else {
             // Unknown action, don't keep port open
             sendResponse({ success: false, error: 'Unknown action' });
@@ -453,6 +537,77 @@ export default defineBackground({
         sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
+
+    async function handleGetPageContext(
+      message: GetPageContextMessage,
+      sendResponse: (response: GetPageContextResponse) => void
+    ) {
+      try {
+        const tabId = await getActiveContentTabId(message.sourceTabId);
+        if (tabId == null) {
+          sendResponse({ success: false, error: '找不到可读取内容的标签页' });
+          return;
+        }
+
+        // 让该页的 content script 提取正文作为上下文。
+        const ctx = (await browser.tabs.sendMessage(tabId, {
+          action: 'extractChatContext',
+        })) as PageContext | null;
+
+        if (!ctx || !ctx.text) {
+          sendResponse({ success: false, error: '该页面没有可提取的正文内容' });
+          return;
+        }
+        sendResponse({ success: true, context: ctx });
+      } catch (error) {
+        logger.error('[Background] getPageContext error:', error);
+        const msg = error instanceof Error ? error.message : '提取页面内容失败';
+        // 常见：content script 未注入（非 http(s) 页 / 权限不足）
+        sendResponse({
+          success: false,
+          error: msg.includes('Could not establish connection')
+            ? '无法连接到该页面，请确认是普通网页且扩展已授权'
+            : msg,
+        });
+      }
+    }
+
+    // ============================================================
+    // 对话流式通道：tab 页通过 runtime.connect({name:'chat'}) 建立长连接，
+    // 发送 {type:'chat', context, history}，background 流式回传 partial。
+    // 端口方式比一次性 sendMessage 更适合长文本流式输出，且 Android 同样支持。
+    // ============================================================
+    browser.runtime.onConnect.addListener((port) => {
+      if (port.name !== 'chat') return;
+
+      port.onMessage.addListener(async (msg: unknown) => {
+        const m = msg as { type?: string; context?: PageContext; history?: ChatMessage[] };
+        if (m.type !== 'chat') return;
+
+        const config = await getConfig();
+        if (!config.deepseekApiKey) {
+          port.postMessage({ type: 'error', message: '未配置 DeepSeek API Key，请在插件设置中填写' });
+          return;
+        }
+
+        try {
+          const system = buildChatSystem(m.context ?? null);
+          const llmMessages: ChatMessage[] = [{ role: 'system', content: system }, ...(m.history ?? [])];
+          let full = '';
+          for await (const partial of chatStream(config.deepseekApiKey, llmMessages)) {
+            full = partial;
+            port.postMessage({ type: 'partial', text: full });
+          }
+          port.postMessage({ type: 'done', text: full });
+        } catch (error) {
+          logger.error('[Background] chat stream error:', error);
+          port.postMessage({
+            type: 'error',
+            message: error instanceof Error ? error.message : '对话失败',
+          });
+        }
+      });
+    });
 
     async function registerCommands() {
       if (!isCommandsSupported) return;

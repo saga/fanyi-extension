@@ -78,6 +78,7 @@
 
       <div class="actions">
         <button @click="triggerTranslate" class="primary">翻译</button>
+        <button @click="openChat">对话</button>
         <button @click="restoreOriginal">恢复</button>
         <button @click="clearCache">清除缓存</button>
       </div>
@@ -159,6 +160,13 @@ async function triggerTranslate() {
     browser.tabs.sendMessage(tab.id, { action: 'translatePage' }).catch(() => {});
     window.close();
   }
+}
+
+async function openChat() {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  const url = browser.runtime.getURL('chat.html') + (tab?.id ? `?sourceTabId=${tab.id}` : '');
+  browser.tabs.create({ url }).catch(() => {});
+  window.close();
 }
 
 async function restoreOriginal() {

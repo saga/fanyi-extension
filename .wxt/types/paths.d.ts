@@ -6,6 +6,7 @@ declare module "wxt/browser" {
     | ""
     | "/"
     | "/background.js"
+    | "/chat.html"
     | "/content-scripts/content.js"
     | "/content-scripts/youtube-injector.js"
     | "/popup.html"
