@@ -50,7 +50,9 @@ const isMobile = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(navigator.userAgen
 // ============================================================
 
 export default defineContentScript({
-  matches: ['*://*/*'],
+  // *://*/* 覆盖 http/https；file:///* 让本地 HTML 也能翻译/对话
+  // （需用户在 chrome://extensions 开启"允许访问文件网址"）。
+  matches: ['*://*/*', 'file:///*'],
   main() {
     logger.debug('[ContentScript] Initializing on:', window.location.href, 'isMobile:', isMobile);
 

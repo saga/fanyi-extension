@@ -25,6 +25,21 @@
       已加载页面正文（约 {{ pageContext.text.length }} 字）作为对话上下文。
     </div>
 
+    <!--
+      手动输入上下文：自动读取失败时（Chrome 安全拦截、无 content script、非 http(s) 页等）
+      仍能让用户粘贴正文继续对话，实现"任何页面都能聊"。
+    -->
+    <div v-if="manualMode" class="manual-context">
+      <div class="manual-label">无法自动读取本页（可能被 Chrome 屏蔽 / 扩展未授权）。粘贴正文继续对话：</div>
+      <textarea
+        v-model="manualText"
+        class="manual-input"
+        rows="6"
+        placeholder="粘贴文章正文或要点…（也可粘贴 URL 文本作为参考）"
+      ></textarea>
+      <button class="manual-btn" :disabled="!manualText.trim()" @click="applyManualContext">用此内容对话</button>
+    </div>
+
     <!-- 消息列表 -->
     <main class="messages" ref="messagesEl">
       <div v-if="messages.length === 0" class="empty">
@@ -91,6 +106,9 @@ const messagesEl = ref<HTMLElement | null>(null);
 const jsonMode = ref(false);
 const lastUsage = ref<ChatUsage | null>(null);
 const currentPort = ref<browser.Runtime.Port | null>(null);
+// 手动输入上下文模式：自动读取失败时启用，让用户粘贴正文继续对话
+const manualMode = ref(false);
+const manualText = ref('');
 
 const canSend = computed(() => input.value.trim().length > 0 && !!pageContext.value && !streaming.value);
 
@@ -130,6 +148,8 @@ async function loadContext() {
   status.value = 'loading';
   errorMsg.value = '';
   pageContext.value = null;
+  manualMode.value = false;
+  manualText.value = '';
   try {
     const resp = (await browser.runtime.sendMessage({
       action: 'getPageContext',
@@ -139,13 +159,30 @@ async function loadContext() {
       pageContext.value = resp.context;
       status.value = 'ready';
     } else {
+      // 自动读取失败（Chrome 安全拦截 / 无 content script / 非普通网页）→ 启用手动输入兜底
       errorMsg.value = resp.error;
       status.value = 'error';
+      manualMode.value = true;
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : '加载失败';
     status.value = 'error';
+    manualMode.value = true;
   }
+}
+
+/** 将用户手动粘贴的内容作为对话上下文，绕过任何"无法读取原页"的情形。 */
+function applyManualContext() {
+  const text = manualText.value.trim();
+  if (!text) return;
+  pageContext.value = {
+    title: '手动输入的内容',
+    url: '',
+    text,
+  };
+  manualMode.value = false;
+  manualText.value = '';
+  status.value = 'ready';
 }
 
 function usePrompt(text: string) {
@@ -367,6 +404,56 @@ onUnmounted(disconnectPort);
   margin-top: 4px;
   color: #c4564f;
   line-height: 1.4;
+}
+
+/* 手动输入上下文：自动读取失败时的兜底，保证"任何页面都能聊" */
+.manual-context {
+  padding: 10px 12px;
+  background: #fffbe6;
+  border-bottom: 1px solid #ffe58f;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.manual-label {
+  font-size: 12px;
+  color: #ad6800;
+  line-height: 1.5;
+}
+.manual-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 96px;
+  max-height: 240px;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  outline: none;
+  font-family: inherit;
+  background: #fff;
+  box-sizing: border-box;
+}
+.manual-input:focus {
+  border-color: #409eff;
+}
+.manual-btn {
+  align-self: flex-end;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  background: #409eff;
+  color: #fff;
+  cursor: pointer;
+  min-height: 36px;
+}
+.manual-btn:disabled {
+  background: #a0cfff;
+  cursor: default;
 }
 
 .messages {

@@ -53,6 +53,13 @@ export default defineBackground({
       return !!url && url.includes(CHAT_PAGE);
     }
 
+    // 只有可注入 content script 的页面才作为对话来源：http(s) 与本地 file://
+    // （file:// 需用户在 chrome://extensions 开启"允许访问文件网址"）。
+    // chrome://、about:、PDF 查看器、扩展自身页面等都无法接收消息。
+    function isWebUrl(url?: string): boolean {
+      return !!url && /^(https?|file):\/\//i.test(url);
+    }
+
     let lastContentTabId: number | null = null;
 
     browser.tabs.onActivated.addListener(({ tabId }) => {
@@ -76,7 +83,8 @@ export default defineBackground({
       if (typeof sourceTabId === 'number') {
         try {
           const t = await browser.tabs.get(sourceTabId);
-          if (t && !isChatUrl(t.url)) return sourceTabId;
+          // 只接受可注入 content script 的普通网页；chat 页 / 非 http(s) 页回退
+          if (t && isWebUrl(t.url)) return sourceTabId;
         } catch {
           /* tab 可能已关闭 */
         }
@@ -84,7 +92,7 @@ export default defineBackground({
       if (lastContentTabId != null) {
         try {
           const t = await browser.tabs.get(lastContentTabId);
-          if (t && !isChatUrl(t.url)) return lastContentTabId;
+          if (t && isWebUrl(t.url)) return lastContentTabId;
         } catch {
           /* tab 可能已关闭 */
         }
@@ -92,7 +100,7 @@ export default defineBackground({
       // 回退：active tab（桌面可用；Android 上 currentWindow 无效但 active 仍可靠）
       try {
         const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-        const t = tabs.find((x) => x.id != null && !isChatUrl(x.url)) ?? tabs[0];
+        const t = tabs.find((x) => x.id != null && isWebUrl(x.url));
         if (t?.id != null) return t.id;
       } catch {
         /* ignore */
@@ -548,8 +556,9 @@ export default defineBackground({
       message: GetPageContextMessage,
       sendResponse: (response: GetPageContextResponse) => void
     ) {
+      let tabId: number | null = null;
       try {
-        const tabId = await getActiveContentTabId(message.sourceTabId);
+        tabId = await getActiveContentTabId(message.sourceTabId);
         if (tabId == null) {
           sendResponse({ success: false, error: '找不到可读取内容的标签页' });
           return;
@@ -566,15 +575,31 @@ export default defineBackground({
         }
         sendResponse({ success: true, context: ctx });
       } catch (error) {
-        logger.error('[Background] getPageContext error:', error);
         const msg = error instanceof Error ? error.message : '提取页面内容失败';
-        // 常见：content script 未注入（非 http(s) 页 / 权限不足）
-        sendResponse({
-          success: false,
-          error: msg.includes('Could not establish connection')
-            ? '无法连接到该页面，请确认是普通网页且扩展已授权'
-            : msg,
-        });
+        const isConnectionLost =
+          msg.includes('Could not establish connection') ||
+          msg.includes('Receiving end does not exist');
+        if (isConnectionLost) {
+          // 预期情况：目标页无 content script（非 http(s) 页 / 尚未注入）。
+          // 用户已在 UI 看到友好提示，无需以 error 级别刷屏。
+          logger.debug('[Background] getPageContext: 目标页无 content script（非普通网页或未注入）:', msg);
+          // 本机文件需在扩展管理页开启"允许访问文件网址"后 content script 才会注入
+          let hint = '无法连接到该页面，请确认是普通网页且扩展已授权';
+          if (tabId != null) {
+            try {
+              const t = await browser.tabs.get(tabId);
+              if (t?.url?.startsWith('file://')) {
+                hint = '无法读取本机文件：请在扩展管理页（chrome://extensions）开启"允许访问文件网址"后重试';
+              }
+            } catch {
+              /* tab 可能已关闭 */
+            }
+          }
+          sendResponse({ success: false, error: hint });
+        } else {
+          logger.error('[Background] getPageContext error:', error);
+          sendResponse({ success: false, error: msg });
+        }
       }
     }
 
