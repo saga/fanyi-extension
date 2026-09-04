@@ -89,6 +89,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
+import { openSidePanel } from '@/entrypoints/utils/sidePanel';
 
 const config = ref<Config>({
   sourceLang: 'auto',
@@ -168,13 +169,9 @@ async function openChat() {
     window.close();
     return;
   }
-  // 优先注入侧栏；非 http(s) 页 / 未授权时回退到新开 chat.html tab
-  const chatUrl = browser.runtime.getURL('chat.html') + `?sourceTabId=${tab.id}`;
-  browser.tabs
-    .sendMessage(tab.id, { action: 'openChatSidebar', sourceTabId: tab.id })
-    .catch(() => {
-      browser.tabs.create({ url: chatUrl }).catch(() => {});
-    });
+  // 打开浏览器级对话侧栏（Chrome sidePanel / Firefox sidebarAction）。
+  // 面板自身向 background 取该页正文，不再用 iframe 注入网页 DOM。
+  await openSidePanel(tab.id);
   window.close();
 }
 

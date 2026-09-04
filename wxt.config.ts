@@ -45,7 +45,8 @@ export default defineConfig({
       };
     } else {
       // Chrome & other Chromium browsers
-      manifest.permissions = ['storage', 'contextMenus',         
+      manifest.permissions = ['storage', 'contextMenus',
+        'debugger',         
         'tabs',
         'activeTab',
         'scripting'];

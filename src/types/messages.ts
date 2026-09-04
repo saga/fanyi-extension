@@ -133,29 +133,13 @@ export interface ExtractChatContextMessage {
   action: 'extractChatContext';
 }
 
-/**
- * 让 content script 在当前页注入聊天侧边栏（shadow DOM + iframe），
- * 而不是新开一个 tab。sourceTabId 用作 chat.html 的上下文来源标签页。
- */
-export interface OpenChatSidebarMessage {
-  action: 'openChatSidebar';
-  sourceTabId: number;
-}
-
-/** chat.html 的关闭按钮通过此消息让 content script 移除侧边栏。 */
-export interface CloseChatSidebarMessage {
-  action: 'closeChatSidebar';
-}
-
 /** 发往 content script 的所有消息类型。 */
 export type ContentMessage =
   | TranslatePageMessage
   | RestoreOriginalMessage
   | ToggleTranslationMessage
   | TranslationStreamUpdateMessage
-  | ExtractChatContextMessage
-  | OpenChatSidebarMessage
-  | CloseChatSidebarMessage;
+  | ExtractChatContextMessage;
 
 // ============================================================
 // Responses

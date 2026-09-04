@@ -28,6 +28,7 @@ import type {
   PageContext,
 } from '../types/messages';
 import { chatStream, buildChatSystem, type ChatMessage, type ChatUsage } from './service/chat';
+import { openSidePanel } from './utils/sidePanel';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -47,7 +48,7 @@ export default defineBackground({
     // Firefox Android 不支持 windows API（currentWindow 静默失效），
     // 且对话 tab 自身也是标签页。我们用 onActivated / onUpdated 记录
     // "最后一个非对话页的激活标签"，作为对话上下文的来源。
-    const CHAT_PAGE = 'chat.html';
+    const CHAT_PAGE = 'sidepanel.html';
 
     function isChatUrl(url?: string): boolean {
       return !!url && url.includes(CHAT_PAGE);
@@ -175,15 +176,9 @@ export default defineBackground({
             browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
             break;
           case 'chat-page': {
-            // 优先在当前页注入聊天侧栏（页面正文在左、聊天在右）。
-            // 非 http(s) / content script 未加载时，sendMessage 会 reject，
-            // 回退到原来的"新开 chat.html tab"流程（已知会报 connection 错误）。
-            const chatUrl = browser.runtime.getURL('chat.html') + `?sourceTabId=${tab.id}`;
-            browser.tabs
-              .sendMessage(tab.id, { action: 'openChatSidebar', sourceTabId: tab.id })
-              .catch(() => {
-                browser.tabs.create({ url: chatUrl }).catch(() => {});
-              });
+            // 打开浏览器级对话侧栏（Chrome sidePanel / Firefox sidebarAction）。
+            // 面板自身向 background 取该页正文，不再用 iframe 注入网页 DOM。
+            void openSidePanel(tab.id);
             break;
           }
             }
@@ -210,6 +205,10 @@ export default defineBackground({
               break;
             case 'toggle-translation':
               browser.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }).catch(() => {});
+              break;
+            case 'chat-page':
+              // 右键菜单"用本页内容对话"：打开浏览器级侧栏对话这一页
+              void openSidePanel(tab.id);
               break;
           }
         });

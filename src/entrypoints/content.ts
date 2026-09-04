@@ -30,7 +30,6 @@ import {
   extractVideoId,
 } from './content/youtube';
 import { setupTouchEvents } from './content/touchGesture';
-import { openChatSidebar, closeChatSidebar } from './content/chatSidebar';
 import type { ContentMessage } from '../types/messages';
 
 import { logger } from '../utils/logger';
@@ -127,8 +126,6 @@ export default defineContentScript({
       translation?.restore(true);
       stopYouTubeCaptionTranslation();
       translatedVideoId = null;
-      // SPA 切文章后旧页的侧栏没意义了，顺手关掉
-      closeChatSidebar();
       logger.debug('[ContentScript] SPA navigation detected, translation state reset:', window.location.href);
     }
 
@@ -152,15 +149,9 @@ export default defineContentScript({
           return undefined;
         case 'extractChatContext':
           // 返回当前页面的可翻译正文，作为对话上下文。
+          // 侧栏（side panel）通过该消息向 background 取页面正文。
           // 返回 Promise 让 background 的 sendMessage 收到响应。
           return handleExtractChatContext();
-        case 'openChatSidebar':
-          // 在当前页内注入聊天侧边栏（shadow DOM + iframe）。
-          openChatSidebar(message.sourceTabId);
-          return undefined;
-        case 'closeChatSidebar':
-          closeChatSidebar();
-          return undefined;
       }
     }) as browser.Runtime.OnMessageListener);
 

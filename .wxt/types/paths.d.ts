@@ -6,10 +6,10 @@ declare module "wxt/browser" {
     | ""
     | "/"
     | "/background.js"
-    | "/chat.html"
     | "/content-scripts/content.js"
     | "/content-scripts/youtube-injector.js"
     | "/popup.html"
+    | "/sidepanel.html"
   type HtmlPublicPath = Extract<PublicPath, `${string}.html`>
   export interface WxtRuntime {
     getURL(path: PublicPath): string;

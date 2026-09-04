@@ -6,7 +6,7 @@
         <div class="src-title">{{ pageContext?.title || '网页对话' }}</div>
         <div class="src-url" v-if="pageContext">{{ shortUrl(pageContext.url) }}</div>
       </div>
-      <button class="close-btn" :disabled="status === 'loading'" @click="closeSidebar" title="关闭侧栏">×</button>
+      <button class="close-btn" :disabled="status === 'loading'" @click="clearChat" title="清空对话">×</button>
       <button class="reload-btn" :disabled="status === 'loading'" @click="loadContext">
         {{ status === 'loading' ? '加载中…' : '重新加载' }}
       </button>
@@ -192,26 +192,32 @@ function usePrompt(text: string) {
 }
 
 /**
- * 通知承载本页的 content script 移除聊天侧栏。
- * 在独立 tab 打开 chat.html 时（无 sourceTabId）则是 no-op。
+ * 清空当前对话（断开在途流式请求 + 重置消息）。
+ * Chrome 侧栏没有"编程关闭" API（由浏览器原生 × 关闭），
+ * 所以这里的 × 按钮语义为"清空对话、重新开始"，保持面板常驻、可立即再聊。
+ * Firefox 侧栏用 browser.sidebarAction.close() 关闭（见 sidePanel 工具）。
  */
-async function closeSidebar() {
+function clearChat() {
   // 先断开对话端口，background 会 abort 在途请求（不再浪费配额）
-  currentPort.value?.disconnect();
-  currentPort.value = null;
-  const sid = getSourceTabId();
-  if (sid == null) return;
-  try {
-    await browser.tabs.sendMessage(sid, { action: 'closeChatSidebar' });
-  } catch {
-    /* 页面可能已导航/关闭，吞掉错误即可 */
-  }
+  disconnectPort();
+  messages.value = [];
+  input.value = '';
+  lastUsage.value = null;
 }
 
 /** 断开对话端口（关闭/卸载时调用），让 background 中断在途流式请求。 */
 function disconnectPort() {
-  currentPort.value?.disconnect();
+  const port = currentPort.value;
+  if (!port) return;
   currentPort.value = null;
+  try {
+    // 面板卸载 / 对方断开时 Chrome 已自动断开端口，再次 disconnect 会抛
+    // "Illegal invocation: Function must be called on an object of type Port"，
+    // 这里吞掉即可（断开已是目标状态，幂等）。
+    port.disconnect();
+  } catch {
+    /* 端口已被 Chrome 自动断开，忽略 */
+  }
 }
 
 async function send() {
