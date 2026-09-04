@@ -69,7 +69,30 @@ export async function openSidePanel(sourceTabId: number): Promise<void> {
     } catch {
       /* ignore */
     }
+    return;
   }
+
+  // Firefox Android 等不支持侧栏的环境：退化为"新标签页打开聊天页"。
+  // sidebar_action / sidePanel 在 Firefox for Android 上均不可用，
+  // 否则上层点击"对话"会静默无反应（本函数什么都不做）。
+  // sidepanel.html 本身是普通网页（读 window.location.search 的 sourceTabId），
+  // 作为标签页打开即可正常使用，移动端反而是全屏更好读。
+  try {
+    await browser.tabs.create({
+      url: browser.runtime.getURL(`sidepanel.html?sourceTabId=${sourceTabId}`),
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 当前环境是否支持侧栏（Chrome sidePanel / Firefox 桌面 sidebarAction）。
+ * Firefox Android 返回 false —— 此时对话以标签页形式打开，× 应关掉该标签。
+ */
+export function isSidebarSupported(): boolean {
+  const b = browser as typeof browser & BrowserWithSidePanel & BrowserWithSidebarAction;
+  return !!(b.sidePanel?.open || b.sidebarAction?.open);
 }
 
 /** 关闭侧栏。Chrome 无编程关闭 API（由浏览器原生 × 关闭），此处主要供 Firefox。 */

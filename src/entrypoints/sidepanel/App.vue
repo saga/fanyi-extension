@@ -88,6 +88,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import browser from 'webextension-polyfill';
+import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse } from '@/types/messages';
 import type { ChatUsage } from '@/entrypoints/service/chat';
 
@@ -199,11 +200,15 @@ async function saveHistory() {
   if (sid == null) return;
   const store = (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
   try {
-    await store.set(HISTORY_PREFIX + sid, {
-      pageContext: pageContext.value,
-      messages: messages.value.map((m) => ({ role: m.role, content: m.content })),
-      usage: lastUsage.value,
-      savedAt: Date.now(),
+    // webextension-polyfill 的 StorageArea.set 只接受单个 items 对象（1 参），
+    // 不能用 set(key, value) 两参形式（会静默抛错、历史写不进去）。
+    await store.set({
+      [HISTORY_PREFIX + sid]: {
+        pageContext: pageContext.value,
+        messages: messages.value.map((m) => ({ role: m.role, content: m.content })),
+        usage: lastUsage.value,
+        savedAt: Date.now(),
+      },
     });
   } catch {
     /* storage 不可用时忽略 */
@@ -216,7 +221,8 @@ async function loadHistory(): Promise<boolean> {
   if (sid == null) return false;
   const store = (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
   try {
-    const data = await store.get(HISTORY_PREFIX + sid);
+    const result = (await store.get(HISTORY_PREFIX + sid)) as Record<string, any> | undefined;
+    const data = result?.[HISTORY_PREFIX + sid];
     if (data && Array.isArray(data.messages) && data.messages.length > 0) {
       pageContext.value = (data.pageContext as PageContext) ?? null;
       messages.value = data.messages as ChatTurn[];
@@ -247,17 +253,31 @@ function usePrompt(text: string) {
 
 /**
  * 清空当前对话（断开在途流式请求 + 重置消息）。
- * Chrome 侧栏没有"编程关闭" API（由浏览器原生 × 关闭），
- * 所以这里的 × 按钮语义为"清空对话、重新开始"，保持面板常驻、可立即再聊。
- * Firefox 侧栏用 browser.sidebarAction.close() 关闭（见 sidePanel 工具）。
+ * - 桌面侧栏（Chrome sidePanel / Firefox sidebarAction）：浏览器原生 × 关闭面板，
+ *   这里的 × 语义为"清空对话、重新开始"，保持面板常驻、可立即再聊。
+ * - 移动端（Firefox Android，无侧栏）：对话以标签页打开，× 直接关掉该标签页，
+ *   否则会留一个空白标签。Chrome 侧栏下 tabs.getCurrent() 返回 undefined，不会误关。
  */
-function clearChat() {
+async function clearChat() {
   // 先断开对话端口，background 会 abort 在途请求（不再浪费配额）
   disconnectPort();
   messages.value = [];
   input.value = '';
   lastUsage.value = null;
   void saveHistory();
+
+  // 不支持侧栏的环境（Firefox Android 等）：聊天是独立标签页，× 关掉它
+  if (!isSidebarSupported()) {
+    try {
+      const tab = await browser.tabs.getCurrent();
+      if (tab?.id != null) {
+        await browser.tabs.remove(tab.id);
+        return;
+      }
+    } catch {
+      /* 关闭失败（如权限/竞态）则保持页面，用户可手动关标签或点"重新加载" */
+    }
+  }
 }
 
 /** 断开对话端口（关闭/卸载时调用），让 background 中断在途流式请求。 */
