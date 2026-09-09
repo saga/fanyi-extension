@@ -290,7 +290,19 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
-        const cacheKey = providedCacheKey || generateTranslationCacheKey(jsonContent, sourceLang, targetLang, config.provider, config.promptStyle);
+        // 缓存 key 纳入 glossary + sitePrompt：改术语表/站点规则后不再命中旧脏缓存（分析报告 P0）。
+        // glossary/sitePrompt 为空时 key 与改动前一致，旧缓存不无谓失效。
+        const cacheKey =
+          providedCacheKey ||
+          generateTranslationCacheKey(
+            jsonContent,
+            sourceLang,
+            targetLang,
+            config.provider,
+            config.promptStyle,
+            glossary,
+            sitePrompt,
+          );
 
         const cached = await getCachedTranslation(cacheKey);
         const hasValidCache = cached && cached.size > 0;

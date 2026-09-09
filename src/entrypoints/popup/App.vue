@@ -50,37 +50,51 @@
         <span>通过远程服务翻译当前页面</span>
       </label>
 
-      <div v-if="config.useServerTranslation" class="server-group">
-        <div class="input-item">
-          <label>服务端翻译地址</label>
-          <input
-            type="text"
-            v-model="config.serverUrl"
-            placeholder="https://s.sunxiunan.com/fanyi/page"
-            @input="onServerUrlChange"
-          />
-          <span class="hint-text">把当前页面发送到远程翻译</span>
-        </div>
+      <div v-if="config.useServerTranslation" class="server-section">
+        <button
+          type="button"
+          class="server-toggle"
+          :aria-expanded="serverExpanded"
+          @click="serverExpanded = !serverExpanded"
+        >
+          <span>服务端翻译设置</span>
+          <span class="chevron" :class="{ open: serverExpanded }">▸</span>
+        </button>
+        <div v-if="serverExpanded" class="server-group">
+          <div class="input-item">
+            <label>服务端翻译地址</label>
+            <input
+              type="text"
+              v-model="config.serverUrl"
+              placeholder="https://s.sunxiunan.com/fanyi/page"
+              @input="onServerUrlChange"
+            />
+            <span class="hint-text">把当前页面发送到远程翻译</span>
+          </div>
 
-        <div class="select-item">
-          <label>服务端翻译 Provider</label>
-          <select v-model="config.provider" @change="saveConfig">
-            <option value="deepseek">DeepSeek</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="nvidia">NVIDIA</option>
-            <option value="cloudflare">Cloudflare</option>
-            <option value="gemini">Gemini</option>
-            <option value="opencode">OpenCode</option>
-          </select>
-          <span class="hint-text">选择服务端翻译使用的 LLM Provider</span>
+          <div class="select-item">
+            <label>服务端翻译 Provider</label>
+            <select v-model="config.provider" @change="saveConfig">
+              <option value="deepseek">DeepSeek</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="nvidia">NVIDIA</option>
+              <option value="cloudflare">Cloudflare</option>
+              <option value="gemini">Gemini</option>
+              <option value="opencode">OpenCode</option>
+            </select>
+            <span class="hint-text">选择服务端翻译使用的 LLM Provider</span>
+          </div>
         </div>
       </div>
 
       <div class="actions">
         <button @click="triggerTranslate" class="primary">翻译</button>
         <button @click="openChat">对话</button>
-        <button @click="restoreOriginal">恢复</button>
-        <button @click="clearCache">清除缓存</button>
+      </div>
+      <div class="actions-minor">
+        <button @click="openDocument" title="翻译本地文档（txt/md/html/srt/vtt/json/pdf/docx/epub）">文档</button>
+        <button @click="restoreOriginal" title="恢复原网页">恢复</button>
+        <button @click="clearCache" title="清空所有翻译缓存">清除缓存</button>
       </div>
     </div>
   </div>
@@ -108,6 +122,8 @@ const config = ref<Config>({
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
+/** 服务端翻译设置面板折叠状态（默认收起，保持 popup 紧凑）。 */
+const serverExpanded = ref(false);
 let checkTimer: number | null = null;
 let serverUrlTimer: number | null = null;
 
@@ -174,6 +190,16 @@ async function openChat() {
   // 打开浏览器级对话侧栏（Chrome sidePanel / Firefox sidebarAction）。
   // 面板自身向 background 取该页正文，不再用 iframe 注入网页 DOM。
   await openSidePanel(tab.id);
+  window.close();
+}
+
+/**
+ * 打开文档翻译页。
+ * 独立标签页而不是侧栏：文档是长内容沉浸式阅读，侧栏 400px 太窄；
+ * 而且 Firefox Android 根本没有侧栏 API，标签页在两端行为一致。
+ */
+async function openDocument() {
+  await browser.tabs.create({ url: browser.runtime.getURL('document.html') });
   window.close();
 }
 
@@ -249,6 +275,45 @@ h2 {
   border: 1px solid #e4e7ed;
   border-radius: 6px;
   background: #fafafa;
+  margin-top: 4px;
+}
+
+/* 服务端翻译设置折叠触发器：默认收起，点开才显示 server-group */
+.server-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.server-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  background: #fafafa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #666;
+  margin-top: 2px;
+  text-align: left;
+}
+
+.server-toggle:hover {
+  border-color: #409eff;
+  color: #409eff;
+}
+
+.chevron {
+  display: inline-block;
+  font-size: 12px;
+  transition: transform 0.2s;
+  transform: rotate(0deg);
+}
+
+.chevron.open {
+  transform: rotate(90deg);
 }
 
 .lang-row {
@@ -303,17 +368,17 @@ h2 {
 .actions {
   display: flex;
   gap: 8px;
-  justify-content: flex-end;
   margin-top: 8px;
 }
 
 .actions button {
-  padding: 6px 12px;
+  flex: 1;
+  padding: 8px 12px;
   border: 1px solid #ddd;
   border-radius: 4px;
   background: white;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .actions button.primary {
@@ -341,6 +406,30 @@ h2 {
 .actions button.error {
   border-color: #f56c6c;
   color: #f56c6c;
+}
+
+/* 次要操作：文档 / 恢复 / 清除缓存 — 矮小、低视觉权重，排在主操作下方 */
+.actions-minor {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.actions-minor button {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #888;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.actions-minor button:hover {
+  border-color: #e4e7ed;
+  color: #409eff;
+  background: #f5f7fa;
 }
 
 .status-text {
