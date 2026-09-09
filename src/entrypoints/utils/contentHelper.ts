@@ -4,6 +4,75 @@ import { detectArticleRoot, type ContentRoot } from './contentDetector';
 import { matchSiteRule } from '../../rules';
 
 import { logger } from '../../utils/logger';
+
+// =============================================================================
+// 后处理噪声过滤：基于文本特征移除 UI / 媒体播放器 / 工具栏块
+// =============================================================================
+// 覆盖 class-less 站点（archive.md 等）的内联样式噪声无法被 classifyNode 拦截的问题。
+// 保守策略：只移除明确匹配 UI/媒体控制模式的块，不误伤正文。
+
+const NOISE_TEXT_PATTERNS: RegExp[] = [
+  // 音频/视频播放器控件
+  /^Listen$/i,
+  /^\d+ minutes?$/,
+  /^\d{1,2}:\d{2}$/,  // "00:00", "58:00"
+  /^Loaded:?\s*\d+%?$/i,
+  /^Progress:?\s*\d+%?$/i,
+  /^(Current |Remaining )Time$/i,
+  /^-\d{1,2}:\d{2}$/,  // "-0:00"
+  /^Unmute$/i,
+  /^Volume:?\s*\d+%?$/i,
+  // 视频嵌入
+  /^Video From /i,
+  /^The live event has ended/i,
+  // 卡通/图片工具
+  /^Cartoon by\s+/i,
+  /^Copy link to (cartoon|image)/i,
+  /^Link copied$/i,
+  /^Open cartoon gallery/i,
+  /^Shop$/i,
+  // 页面工具按钮
+  /^Save this story$/i,
+  // 摄影署名（非正文）
+  /^Photographs by .+ for The New Yorker$/i,
+  // 纯空白块（仅含空格/换行）
+  /^[\s\n\r\t]*$/,
+];
+
+/** 单个块是否命中噪声模式。 */
+function isNoiseBlock(block: TextBlock): boolean {
+  const text = block.text.trim();
+  if (text.length === 0) return true;
+  for (const pattern of NOISE_TEXT_PATTERNS) {
+    if (pattern.test(text)) return true;
+  }
+  return false;
+}
+
+/**
+ * 从提取结果中移除基于文本特征的噪声块。
+ * 返回 [filteredBlocks, removedCount]。
+ */
+function filterNoiseBlocks(blocks: TextBlock[]): TextBlock[][] {
+  const kept: TextBlock[] = [];
+  const removed: TextBlock[] = [];
+
+  for (const block of blocks) {
+    if (isNoiseBlock(block)) {
+      removed.push(block);
+    } else {
+      kept.push(block);
+    }
+  }
+
+  if (removed.length > 0) {
+    logger.debug(
+      `[ContentHelper] Noise filter: removed ${removed.length}/${blocks.length + removed.length} blocks`,
+    );
+  }
+
+  return [kept, removed];
+}
 // 优先级：先 class 后标签，先更具体的子容器再更通用的包裹元素。
 // 像 bankingdive.com 把 <article> 用作整页 wrapper、正文放在
 // .article-body 的站点，会直接定位到 .article-body。HBR 这种把整篇
@@ -688,6 +757,10 @@ export function prepareDocument(root: Document | Element): {
   }
 
   let blocks = extractBlocks(effectiveRoot);
+
+  // 后处理噪声过滤：移除 UI 控件 / 媒体播放器 / 工具栏块。
+  // 覆盖 class-less 站点（archive.md 等）内联样式噪声无法被 walker class 规则拦截的问题。
+  [blocks] = filterNoiseBlocks(blocks);
 
   // 防御性回退: 当 detectArticleRoot 误判 (e.g. 选了一个高密度但被 walker 整棵
   // 剪枝的容器, 如 cookie banner) 导致 0 块时, 从整个 body 重试。
