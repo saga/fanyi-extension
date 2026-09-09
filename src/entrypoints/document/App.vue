@@ -221,20 +221,21 @@ async function loadFile(file: File) {
 async function startTranslate() {
   if (!doc.value) return;
   // 与网页翻译一致：从正文抽取用户术语表，专有名词（API / Kubernetes / GPT-5 …）不被翻错
-  const fullText = doc.value.segments.map((s) => s.text).join('\n');
-  const glossary = extractGlossaryLocal(fullText);
   await run(doc.value.segments, {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
-    glossary,
+    glossary: glossary.value,
   });
 }
 
 async function retry() {
   if (!doc.value) return;
+  // 必须传同一份 glossary，否则重试批次的 cacheKey 不含 |g... hash，
+  // 会与初次翻译的 cacheKey 失配，命中不到缓存并白白调一次 LLM（P0）。
   await retryFailed(doc.value.segments, {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
+    glossary: glossary.value,
   });
 }
 
@@ -262,6 +263,7 @@ function resetAll() {
   doc.value = null;
   parseError.value = '';
   rawText = '';
+  glossary.value = undefined;
   progress.value = { done: 0, total: 0 };
 }
 </script>
