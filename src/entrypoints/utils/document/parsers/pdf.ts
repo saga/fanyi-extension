@@ -76,7 +76,9 @@ export async function parsePdfDocument(
   const segments: DocumentSegment[] = [];
   let index = 0;
 
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const doc = await loadingTask.promise;
+  try {
   const total = Math.min(doc.numPages, maxPages);
   if (doc.numPages > maxPages) {
     warnings.push(`文档共 ${doc.numPages} 页，本次只解析前 ${maxPages} 页`);
@@ -140,8 +142,6 @@ export async function parsePdfDocument(
     options.onProgress?.(pageNo, total);
   }
 
-  await doc.destroy();
-
   if (!segments.length) {
     warnings.push('未提取到文字，该 PDF 可能是扫描件（图片型），需要 OCR 才能翻译');
   } else if (blankPages.length) {
@@ -161,4 +161,10 @@ export async function parsePdfDocument(
       warnings,
     },
   };
+  } finally {
+    // 关键修复：destroy() 是 PDFDocumentLoadingTask 的方法，不是 PDFDocumentProxy 的。
+    // 旧代码 `await doc.destroy()` 在 pdfjs-dist v6 下会抛 "doc.destroy is not a function"。
+    // loadingTask 即 getDocument() 的返回值（doc 是 .promise 解析出的 proxy，只有 cleanup()）。
+    await loadingTask.destroy();
+  }
 }
