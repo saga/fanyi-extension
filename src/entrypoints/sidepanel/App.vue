@@ -451,6 +451,25 @@ onUnmounted(disconnectPort);
   .src-title {
     max-width: 50vw;
   }
+
+  /* 移动端输入区：压缩两侧固定控件的占位，让"输入框 + 发送"尽量保持同一行；
+     发送按钮独占一行时靠 wrap 兜底，不会溢出视口。 */
+  .json-toggle {
+    min-width: 38px;
+    min-height: 40px;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+  .send-btn {
+    min-width: 48px;
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+  .input {
+    padding: 9px 10px;
+    font-size: 15px;
+  }
 }
 
 .banner {
@@ -611,6 +630,9 @@ onUnmounted(disconnectPort);
 .composer {
   display: flex;
   align-items: flex-end;
+  /* 允许换行：窄屏（Firefox Android 聊天以标签页打开）下 JSON / 输入框 / 发送
+     三个控件挤在一行会超出视口，导致发送按钮跑到屏幕外。wrap 保证控件不越界。 */
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
   background: #fff;
@@ -645,6 +667,10 @@ onUnmounted(disconnectPort);
 
 .input {
   flex: 1;
+  /* min-width:0 是关键：flex 项默认 min-width:auto = min-content，而 textarea
+     的 min-content 约为 cols 默认值（20 字符）。移动端窄屏下这个下限 + 两侧固定
+     按钮会超过视口宽度，把发送按钮挤出屏幕。归零后输入框可收缩，按钮回到屏内。 */
+  min-width: 0;
   resize: none;
   max-height: 120px;
   padding: 10px 12px;
