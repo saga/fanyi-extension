@@ -21,6 +21,7 @@
 import type browser from 'webextension-polyfill';
 import type { Config } from '../entrypoints/utils/config';
 import type { Glossary } from '../entrypoints/service/_service';
+import type { PromptStyle } from '../entrypoints/service/deepseek';
 
 // ============================================================
 // 公共子类型
@@ -67,6 +68,12 @@ export interface TranslateChunkMessage {
   cacheKey?: string;
   pageUrl?: string;
   glossary?: Glossary;
+  /**
+   * 已解析的文风（页级语言检测后的结果）。
+   * 缺省时 background 回退到 config.promptStyle —— 兼容旧调用方与
+   * 无页面上下文的调用点（如按 key 校验）。见 content/translation.ts。
+   */
+  promptStyle?: PromptStyle;
 }
 
 export interface TranslateChunkStreamMessage {
@@ -78,6 +85,8 @@ export interface TranslateChunkStreamMessage {
   glossary?: Glossary;
   /** background 把流式 partial 发回哪个 tab；缺省时用 sender.tab.id */
   tabId?: number;
+  /** 已解析的文风；缺省时回退 config.promptStyle */
+  promptStyle?: PromptStyle;
 }
 
 export interface ValidateApiKeyMessage {

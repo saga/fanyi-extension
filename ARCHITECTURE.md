@@ -480,7 +480,6 @@ extractBlocks(rootNode)
 | 字段 | 说明 |
 |------|------|
 | `hostPattern` | 主机匹配模式 (支持 `*.` 通配) |
-| `skipTerms` | 不翻译的术语 |
 | `skipSelectors` | 跳过的 CSS 选择器 |
 | `skipTextPatterns` | 跳过的文本正则 |
 | `promptInstructions` | 站点特定 prompt 指令 |

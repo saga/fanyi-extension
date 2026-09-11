@@ -111,7 +111,7 @@ src/rules/
 **Prompt 构建流程：**
 
 1. **基础系统提示** - 固定的翻译规则和输出格式要求
-2. **站点规则注入** - 根据当前页面 URL 匹配对应规则，将 `skipTerms` 和 `promptInstructions` 追加到 system prompt
+2. **站点规则注入** - 根据当前页面 URL 匹配对应规则，将 `documentTerms` 和 `promptInstructions` 追加到 system prompt
 3. **术语表注入** - 前置调用 LLM 抽取专有名词及其译法，注入到 prompt 保证全文一致
 4. **用户消息** - 待翻译的文本块 JSON
 

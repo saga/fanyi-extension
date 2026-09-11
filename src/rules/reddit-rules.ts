@@ -2,7 +2,7 @@ import type { SiteRule } from './types';
 
 export const redditRule: SiteRule = {
   hostPattern: 'reddit.com',
-  skipTerms: [
+  documentTerms: [
     'Home',
     'Hot',
     'New',

@@ -10,6 +10,7 @@ import {
 import { applyBlockTranslation } from '../utils/translationDisplay';
 import type { TranslationState } from './translationTypes';
 import type { TranslateChunkResponse } from '../../types/messages';
+import type { PromptStyle } from '../service/deepseek';
 
 import { logger } from '../../utils/logger';
 // ============================================================
@@ -45,6 +46,11 @@ export interface ChunkCallContext {
   sourceLang: string;
   targetLang: string;
   glossary: Glossary;
+  /**
+   * 页级语言检测后解析出的文风。随消息传给 background，避免 background
+   * 只能读 config.promptStyle（那样会把日语页面的 default 又打回通用直译）。
+   */
+  promptStyle?: PromptStyle;
   onFailure: () => void;
   onApply: (chunkMap: Map<string, string>) => void;
   translatedIds: Set<string>;
@@ -69,6 +75,7 @@ export async function translateChunksViaBackground(
   onProgress?: (current: number, total: number) => void,
   isMobile: boolean = false,
   state?: TranslationState,
+  promptStyle?: PromptStyle,
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
   logger.debug('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
 
@@ -104,6 +111,7 @@ export async function translateChunksViaBackground(
           sourceLang,
           targetLang,
           glossary,
+          promptStyle,
           onFailure: () => { hasFailure = true; },
           onApply: (chunkMap) =>
             applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, state)),
@@ -171,6 +179,7 @@ async function translateChunkPayload(
       targetLang: ctx.targetLang,
       pageUrl: window.location.href,
       glossary: ctx.glossary,
+      promptStyle: ctx.promptStyle,
     }) as TranslateChunkResponse;
 
     if (!response.success) {

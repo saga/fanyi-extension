@@ -72,7 +72,7 @@ export function buildRetryChunk(
     (sum, b) => sum + Math.ceil(b.text.length / 4),
     0,
   );
-  // 提到局部变量，与 vocal-saga/lib/translate/chunkRetry.ts 保持一致（便于阅读 + 便于以后插入 perf log）
+  // 提取为局部变量（两端结构保持一致，便于阅读 + 便于以后插入 perf log）
   const jsonContent = JSON.stringify(retryBlocks.map((b) => ({ id: b.id, text: b.text })));
   return {
     id: `${parentChunk.id}_retry`,

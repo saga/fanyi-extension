@@ -198,7 +198,7 @@ function extractProductNames(text: string): string[] {
   return [...results];
 }
 
-function extractNamedEntities(doc: ReturnType<typeof nlp>): string[] {
+function extractNamedEntities(doc: any): string[] {
   const entities = new Set<string>();
   const fullText = doc.text();
 
@@ -612,7 +612,7 @@ export function extractGlossaryLocal(
     }
   }
 
-  const doc = nlp(safeText);
+  const doc = nlp(safeText) as any;
 
   // TAGGING INTERVENTION
   // 1. Force-tag high-frequency pure verbs so they don't enter #Noun+ chains

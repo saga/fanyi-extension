@@ -290,6 +290,12 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
+        // 文风：优先使用 content script 页级语言检测后的结果（message.promptStyle）。
+        // 缺省回退 config.promptStyle —— 兼容旧调用方，以及无页面上下文的调用点。
+        // 必须与 cacheKey 用同一个值：否则 ja-source-natural 的译文会被写进 default 的
+        // 缓存条目，后续同页面翻译命中脏缓存、文风来回跳。
+        const promptStyle = message.promptStyle ?? config.promptStyle;
+
         // 缓存 key 纳入 glossary + sitePrompt：改术语表/站点规则后不再命中旧脏缓存（分析报告 P0）。
         // glossary/sitePrompt 为空时 key 与改动前一致，旧缓存不无谓失效。
         const cacheKey =
@@ -299,7 +305,7 @@ export default defineBackground({
             sourceLang,
             targetLang,
             config.provider,
-            config.promptStyle,
+            promptStyle,
             glossary,
             sitePrompt,
           );
@@ -312,7 +318,7 @@ export default defineBackground({
           return;
         }
 
-        const service = getService(config.deepseekApiKey, config.promptStyle);
+        const service = getService(config.deepseekApiKey, promptStyle);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
         // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
@@ -457,7 +463,10 @@ export default defineBackground({
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
 
-        const service = getService(config.deepseekApiKey, config.promptStyle);
+        // 文风：同 handleTranslateChunk，优先用页级检测结果，缺省回退配置。
+        const promptStyle = message.promptStyle ?? config.promptStyle;
+
+        const service = getService(config.deepseekApiKey, promptStyle);
 
         const stream = service.translateStream(
           jsonContent,

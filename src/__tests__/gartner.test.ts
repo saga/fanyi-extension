@@ -14,6 +14,20 @@ const FIXTURE = 'src/__tests__/fixtures/gartner-press-release.html';
 const GARTNER_URL =
   'https://www.gartner.com/en/newsroom/press-releases/gartner-survey-finds-only-22-percent-of-organizations-have-successfully-scaled-ai-across-multiple-business-units';
 
+/**
+ * 本文件的重型用例超时（默认 5000ms 不够）。
+ *
+ * 原因不是"代码变慢了"，而是用例本身就重：343KB 真实页面快照 → jsdom 解析 →
+ * 对整棵 aem-Grid 子树跑递归 DOM walker。单独跑约 1.5–2.9s，
+ * 但在 `vitest run` 的默认并行池下（44 个测试文件抢 CPU）实测会被放大到 9s+，
+ * 于是触发 "Test timed out in 5000ms" 的**假失败**。
+ *
+ * 放宽到 30s：既留足并行竞争的余量，又仍能在真正卡死时失败。
+ * 注意：轻量用例（如站点规则注册）继续用默认 5s，不要一起放宽 ——
+ * 那会把真实的性能回归也一起掩盖掉。
+ */
+const HEAVY_TIMEOUT = 30_000;
+
 describe('Gartner press-release page', () => {
   beforeAll(() => {
     const html = readFileSync(FIXTURE, 'utf-8');
@@ -42,45 +56,57 @@ describe('Gartner press-release page', () => {
     expect(matched?.siteRule).toBe(gartnerRule);
   });
 
-  it('articleRootSelector resolves to the top article container with full content', () => {
-    const root = document.querySelector('[class*="aem-Grid"]');
-    expect(root).not.toBeNull();
-    // 顶层 aem-Grid 同时包含 h1 标题与全部 9 个 .article-text 碎片
-    expect(root?.querySelector('h1')).not.toBeNull();
-    // 注意：jsdom 在 innerHTML 替换后 class 选择器有缓存缺陷，
-    // .article-text 会返回 0，这里用 attribute 选择器等价确认结构。
-    expect(extractBlocks(root as Element).length).toBeGreaterThan(90);
-  });
+  it(
+    'articleRootSelector resolves to the top article container with full content',
+    () => {
+      const root = document.querySelector('[class*="aem-Grid"]');
+      expect(root).not.toBeNull();
+      // 顶层 aem-Grid 同时包含 h1 标题与全部 9 个 .article-text 碎片
+      expect(root?.querySelector('h1')).not.toBeNull();
+      // 注意：jsdom 在 innerHTML 替换后 class 选择器有缓存缺陷，
+      // .article-text 会返回 0，这里用 attribute 选择器等价确认结构。
+      expect(extractBlocks(root as Element).length).toBeGreaterThan(90);
+    },
+    HEAVY_TIMEOUT
+  );
 
-  it('prepareDocument returns translatable blocks (regression: no "No translatable content found")', () => {
-    const { blocks } = prepareDocument(document);
-    expect(blocks.length).toBeGreaterThan(0);
-  });
+  it(
+    'prepareDocument returns translatable blocks (regression: no "No translatable content found")',
+    () => {
+      const { blocks } = prepareDocument(document);
+      expect(blocks.length).toBeGreaterThan(0);
+    },
+    HEAVY_TIMEOUT
+  );
 
-  it('site-rule path yields the aem-Grid root end-to-end', () => {
-    // 模拟在 gartner.com 上运行：让 matchSiteRule 命中站点规则
-    let originalHref = '';
-    try {
-      const loc = (window as unknown as { location: { href: string } }).location;
-      originalHref = loc.href;
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: { href: GARTNER_URL },
-      });
-    } catch {
-      // 无法重定义 location 时跳过本断言（不影响其它回归）
-      return;
-    }
-    const { blocks } = prepareDocument(document);
-    expect(blocks.length).toBeGreaterThan(0);
-    // 还原
-    try {
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: { href: originalHref || 'http://localhost/' },
-      });
-    } catch {
-      /* ignore */
-    }
-  });
+  it(
+    'site-rule path yields the aem-Grid root end-to-end',
+    () => {
+      // 模拟在 gartner.com 上运行：让 matchSiteRule 命中站点规则
+      let originalHref = '';
+      try {
+        const loc = (window as unknown as { location: { href: string } }).location;
+        originalHref = loc.href;
+        Object.defineProperty(window, 'location', {
+          configurable: true,
+          value: { href: GARTNER_URL },
+        });
+      } catch {
+        // 无法重定义 location 时跳过本断言（不影响其它回归）
+        return;
+      }
+      const { blocks } = prepareDocument(document);
+      expect(blocks.length).toBeGreaterThan(0);
+      // 还原
+      try {
+        Object.defineProperty(window, 'location', {
+          configurable: true,
+          value: { href: originalHref || 'http://localhost/' },
+        });
+      } catch {
+        /* ignore */
+      }
+    },
+    HEAVY_TIMEOUT
+  );
 });

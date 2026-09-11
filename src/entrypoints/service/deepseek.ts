@@ -1,21 +1,20 @@
 import type { TranslationService, Glossary } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
-import { buildJinyongSystemContent } from './jinyong-prompt';
-import { buildAchengSystemContent } from './acheng-prompt';
-import { buildWangxiaoboSystemContent } from './wangxiaobo-prompt';
+import { buildStyledSystemContent, type PromptStyle } from './prompt-style';
 
 import { logger } from '../../utils/logger';
+
+// 文风类型与调度集中在 service/prompt-style.ts；此处再导出，
+// 让既有 `from '../service/deepseek'` 的引用保持可用。
+export type { PromptStyle };
 const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 const USER_ID = 'fanyi-extension';
 const TRANSLATION_TEMPERATURE = 0.1;
 
-/** 翻译文风选项：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话 */
-export type PromptStyle = 'default' | 'jinyong' | 'acheng' | 'wangxiaobo';
-
 /**
- * Estimate max output tokens for translation.
+ * 估算 max output tokens for translation.
  *
  * 真实边界（已查 https://api-docs.deepseek.com/quick_start/pricing）：
  * - deepseek-v4-flash MAX OUTPUT = 384K（硬上限非常高）
@@ -54,10 +53,13 @@ function buildHeaders(apiKey: string): Record<string, string> {
 }
 
 /**
- * 根据 style 选择对应的 system prompt 构建函数。
- * - default: 通用直译风格（保留 sitePrompt 追加逻辑）
- * - jinyong / acheng / wangxiaobo: 对应文学风格 prompt，
- *   sitePrompt 在调用后追加到末尾。
+ * 按文风构建 system prompt（扩展端入口）。
+ *
+ * 文风调度本身在 `service/prompt-style.ts`（两端共用的同步对），
+ * 本函数只多做一件事：把站点规则追加到末尾。
+ *
+ * 注意 `sitePrompt` 在签名中位于 `glossary` 之前 —— 这是扩展端的历史签名，
+ * vocal-saga 端没有站点规则，签名不同。调用方不要按位置猜参数。
  */
 export function buildSystemContent(
   sourceLang: string,
@@ -66,97 +68,8 @@ export function buildSystemContent(
   glossary?: Glossary,
   style?: PromptStyle
 ): string {
-  switch (style) {
-    case 'jinyong': {
-      // 武侠风格：先构建风格 prompt，再追加站点规则
-      let content = buildJinyongSystemContent(sourceLang, targetLang, glossary);
-      if (sitePrompt) {
-        content += '\n\nSite-specific rules:\n' + sitePrompt;
-      }
-      return content;
-    }
-    case 'acheng': {
-      // 阿城白描风格：先构建风格 prompt，再追加站点规则
-      let content = buildAchengSystemContent(sourceLang, targetLang, glossary);
-      if (sitePrompt) {
-        content += '\n\nSite-specific rules:\n' + sitePrompt;
-      }
-      return content;
-    }
-    case 'wangxiaobo': {
-      // 王小波大白话风格：先构建风格 prompt，再追加站点规则
-      let content = buildWangxiaoboSystemContent(sourceLang, targetLang, glossary);
-      if (sitePrompt) {
-        content += '\n\nSite-specific rules:\n' + sitePrompt;
-      }
-      return content;
-    }
-    default:
-      // 通用直译风格
-      return buildDefaultSystemContent(sourceLang, targetLang, sitePrompt, glossary);
-  }
-}
-
-/**
- * 默认 system prompt：通用直译风格。
- */
-function buildDefaultSystemContent(
-  sourceLang: string,
-  targetLang: string,
-  sitePrompt?: string,
-  glossary?: Glossary
-): string {
-  const targetLangName = !targetLang ? 'Simplified Chinese' : targetLang === 'zh' ? 'Simplified Chinese' : targetLang;
-  const sourceLangName = !sourceLang ? 'English' : sourceLang === 'en' ? 'English' : sourceLang;
-
-  // Prompt 设计目标：低成本、高吞吐、非人工交互。每个词都要有价值。
-  // 1. 明确源语言 → 不让模型猜，减少一次隐式语言检测。
-  // 2. 不写 "must NOT equal input" → 品牌名/代号确实就是要保留原文，
-  //    写了反而跟 "Keep URLs, brand names unchanged" 冲突，让模型困惑。
-  // 3. "Longest match first" 太模糊删掉。
-  // 4. user message 精简到 "JSON:" + blocksJson → 更短 token。
-  let systemContent = `Translate ${sourceLangName} to ${targetLangName}.
-
-1. Return {"translations":[{"id":"x","translated_text":"y"}]}. One entry per input block, same ids.
-2. For translatable text, provide a translation. Never return empty string or placeholder.
-3. Keep URLs, code, and version numbers unchanged. Translate everything else into natural Chinese.
-4. Treat every block as independent — do not skip, summarize, merge, or reorder any block.
-
-Translation style:
-
-- Write as if originally written in natural Simplified Chinese.
-- Freely restructure sentences to follow natural Chinese expression while preserving every fact.
-- Translate generic "you" and "we" naturally according to context instead of mechanically.
-- Omit repeated subjects when natural in Chinese.
-- Preserve the original meaning exactly.
-- Prefer fluent Chinese over mirroring the source wording.
-`;
-
-  const docTerms = glossary?.document_terms;
-  if (docTerms && docTerms.length > 0) {
-    // 排序固定 → token 序列稳定 → DeepSeek KV cache 公共前缀命中。
-    // 没有 glossary → 不写这段，免得空 Examples 占 token。
-    const sorted = [...docTerms].sort();
-    systemContent += `
-
-Preserve only proper nouns and named entities. Examples:
-- company names
-- organization names
-- product names
-- service names
-- trademarks
-
-This page mentions:
-${sorted.join('\n')}
-
-Translate all remaining text naturally into Chinese.`;
-  }
-
-  if (sitePrompt) {
-    systemContent += `\n\nSite-specific rules:\n${sitePrompt}`;
-  }
-
-  return systemContent;
+  const content = buildStyledSystemContent(sourceLang, targetLang, glossary, style);
+  return sitePrompt ? content + '\n\nSite-specific rules:\n' + sitePrompt : content;
 }
 
 function buildTranslationBody(
@@ -264,11 +177,7 @@ async function callApi(
 }
 
 function hasGlossaryEntries(glossary?: Glossary): boolean {
-  return !!glossary && (
-    (glossary.hard_terms?.length ?? 0) > 0 ||
-    (glossary.soft_terms?.length ?? 0) > 0 ||
-    (glossary.document_terms?.length ?? 0) > 0
-  );
+  return (glossary?.document_terms?.length ?? 0) > 0;
 }
 
 export class DeepSeekTranslationService implements TranslationService {

@@ -38,8 +38,8 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined);
     const body = await captureRequestBody();
     const system = body.messages[0].content as string;
-    expect(system).toMatch(/Translate.*to/);
-    expect(system).toMatch(/One entry per input block/);
+    expect(system).toContain('目标语言：简体中文');
+    expect(system).toMatch(/每个输入块对应一个输出/);
     expect(system).toMatch(/translated_text/);
   });
 
@@ -52,8 +52,9 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     const system = body.messages[0].content as string;
     // 不再写 "NOT equal input" — 品牌名/代号就是要保留原文，写了反而
     // 跟 "Keep URLs, code, version numbers, and protected terms unchanged" 冲突，让模型困惑。
-    // 取而代之用 "For translatable text, provide a translation." 暗示不要 no-op。
-    expect(system).toMatch(/For translatable text/i);
+    // 取而代之用「不返回空字符串」+「不得添加、删除、总结」暗示不要 no-op。
+    expect(system).toContain('不返回空字符串');
+    expect(system).toContain('不得添加、删除、总结、臆测、解释或重新编造原文没有的信息');
   });
 
   it('user message prefix is stable (no variable N) but mentions "json" for json_object', async () => {
@@ -80,9 +81,10 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     // 硬约束：response_format: json_object 要求 user message 出现 "json"
     // 这个字，否则 HTTP 400 invalid_request_error。
     expect(user.toLowerCase()).toContain('json');
-    // system message 里仍然有目标语言说明
+    // system message 里仍然有语言对说明（prompt 已全量中文化）
     const system = body.messages[0].content as string;
-    expect(system).toContain('Translate English to Simplified Chinese');
+    expect(system).toContain('输入语言：英语');
+    expect(system).toContain('目标语言：简体中文');
   });
 
   it('still passes when a block is silently returned unchanged (warns)', async () => {

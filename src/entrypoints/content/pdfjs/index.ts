@@ -32,6 +32,8 @@
 import browser from 'webextension-polyfill';
 import { buildChunks, type Chunk } from '../../utils/chunkBuilder';
 import type { TextBlock } from '../../utils/blockExtractor';
+import { detectLanguage, shouldUseJapaneseSource } from '../../utils/languageDetector';
+import type { PromptStyle } from '../../service/deepseek';
 import type { TranslationState } from '../translationTypes';
 import type {
   TranslateChunkMessage,
@@ -410,6 +412,7 @@ async function translateParagraphs(
   targetLang: string,
   pageUrl: string,
   onProgress?: (current: number, total: number) => void,
+  promptStyle?: PromptStyle,
 ): Promise<Map<string, string>> {
   const results = new Map<string, string>();
   if (chunks.length === 0) return results;
@@ -418,7 +421,7 @@ async function translateParagraphs(
   for (let i = 0; i < chunks.length; i += TRANSLATE_CONCURRENCY) {
     const batch = chunks.slice(i, i + TRANSLATE_CONCURRENCY);
     const batchResults = await Promise.all(
-      batch.map((chunk) => translateOneChunk(chunk, sourceLang, targetLang, pageUrl)),
+      batch.map((chunk) => translateOneChunk(chunk, sourceLang, targetLang, pageUrl, promptStyle)),
     );
     for (const resultMap of batchResults) {
       for (const [id, text] of resultMap) {
@@ -437,6 +440,7 @@ async function translateOneChunk(
   sourceLang: string,
   targetLang: string,
   pageUrl: string,
+  promptStyle?: PromptStyle,
 ): Promise<Map<string, string>> {
   const message: TranslateChunkMessage = {
     action: 'translateChunk',
@@ -444,6 +448,7 @@ async function translateOneChunk(
     sourceLang,
     targetLang,
     pageUrl,
+    promptStyle,
   };
   try {
     const response = (await browser.runtime.sendMessage(message)) as TranslateChunkResponse;
@@ -607,12 +612,35 @@ export async function translatePdfJsViewer(
     `[PdfJs] ${lines.length} lines → ${paragraphs.length} paragraphs (${translatable.length} translatable, ${skippedCount} skipped) → ${chunks.length} chunks`,
   );
 
+  // ── 文档级语言检测（整份 PDF 只做一次）──
+  // 与网页翻译同一策略：日语原文 → 非日语目标语言时把 default 自动升级为
+  // ja-source-natural（保留原文的克制、论述顺序与限定语气）。
+  // 检测基于全部段落而不是单 chunk：单 chunk 可能过短而触发短文本保护，
+  // 会导致同一 PDF 内各 chunk 文风不一致。
+  // PDF 没有 html lang，故不传辅助信号（假名证据已足够）。
+  const detected = detectLanguage(blocks.map((b) => b.text).join('\n'));
+  const effectiveStyle: PromptStyle = shouldUseJapaneseSource(
+    config.promptStyle,
+    detected.language,
+    config.targetLang,
+  )
+    ? 'ja-source-natural'
+    : config.promptStyle;
+  if (effectiveStyle !== config.promptStyle) {
+    logger.debug(
+      `[PdfJs] Source detected as ${detected.language} ` +
+        `(kanaRatio=${detected.kanaRatio.toFixed(3)}, confidence=${detected.confidence.toFixed(2)}) ` +
+        `→ promptStyle ${config.promptStyle} auto-upgraded to ${effectiveStyle}`,
+    );
+  }
+
   const translations = await translateParagraphs(
     chunks,
     config.sourceLang,
     config.targetLang,
     window.location.href,
     (current, total) => onStatus(`PDF 翻译进度: ${current}/${total}`, 'loading'),
+    effectiveStyle,
   );
 
   // 渲染覆盖层

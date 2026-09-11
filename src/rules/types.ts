@@ -6,11 +6,6 @@ export interface SiteRule {
   hostPattern: string;
 
   /**
-   * Terms that should NOT be translated, kept as-is
-   */
-  skipTerms?: string[];
-
-  /**
    * CSS selectors whose content should be skipped entirely
    */
   skipSelectors?: string[];

@@ -12,6 +12,7 @@ import { showStatus, hideStatus } from './statusOverlay';
 import { translateChunksViaBackground } from './chunkTranslation';
 import type { TranslationState } from './translationTypes';
 import type { TranslateChunkResponse } from '../../types/messages';
+import type { PromptStyle } from '../service/deepseek';
 
 import { logger } from '../../utils/logger';
 // ============================================================
@@ -24,6 +25,7 @@ export async function retryGlobalMissing(
   translatedIds: Set<string>,
   config: { sourceLang: string; targetLang: string },
   isMobile: boolean,
+  promptStyle?: PromptStyle,
 ): Promise<void> {
   const stillMissingIds: string[] = [];
   for (const [id] of nodeMap) {
@@ -49,6 +51,8 @@ export async function retryGlobalMissing(
     {},
     undefined,
     isMobile,
+    undefined,
+    promptStyle,
   );
 
   let recoveredCount = 0;
@@ -165,6 +169,7 @@ export function toggleTranslation(): void {
 
 export function setupDynamicContentObserver(
   state: TranslationState,
+  promptStyle?: PromptStyle,
 ): DOMObserverManager {
   const observer = new DOMObserverManager(
     async (newBlocks: TextBlock[]) => {
@@ -178,6 +183,9 @@ export function setupDynamicContentObserver(
             sourceLang: config.sourceLang,
             targetLang: config.targetLang,
             pageUrl: window.location.href,
+            // 沿用整页翻译时解析出的文风：动态新增的单个 block 通常过短，
+            // 单独做语言检测会触发短文本保护而退回 default，导致同页文风不一致。
+            promptStyle,
           }) as TranslateChunkResponse;
           if (response.success && response.result.length > 0) {
             const node = findNodeByText(block.text);

@@ -3,6 +3,8 @@ import browser from 'webextension-polyfill';
 import type { TranslateChunkResponse } from '@/types/messages';
 import type { TranslationEntry } from '@/types/messages';
 import type { Glossary } from '@/entrypoints/service/_service';
+import type { PromptStyle } from '@/entrypoints/service/deepseek';
+import { detectLanguage, shouldUseJapaneseSource } from '@/entrypoints/utils/languageDetector';
 import { buildSegmentBatches, type BatchBudget } from '@/entrypoints/utils/document/batcher';
 import type { DocumentSegment } from '@/entrypoints/utils/document/types';
 
@@ -26,6 +28,31 @@ export interface TranslateOptions {
   retries?: number;
   /** 用户术语表（与网页翻译行为一致，避免文档里同名专有名词被翻错）。 */
   glossary?: Glossary;
+  /**
+   * 已解析的文风。调用方通常不传 —— 由 `run`/`retryFailed` 基于全部 segment
+   * 做一次文档级语言检测后填入（见 resolveDocumentStyle）。
+   */
+  promptStyle?: PromptStyle;
+}
+
+/**
+ * 解析本次文档翻译应使用的文风。
+ *
+ * 与网页翻译、PDF 翻译同一策略：日语原文 → 非日语目标语言时，把 default
+ * 自动升级为 ja-source-natural（保留原文的克制、论述顺序与限定语气）。
+ * 用户手工选择的文风永远优先 —— 策略集中在 shouldUseJapaneseSource。
+ *
+ * 检测基于**全部** segment 而不是单批：单批文本可能过短，会触发
+ * languageDetector 的短文本保护而判不出语言，导致同一文档内各批文风不一致。
+ */
+function resolveDocumentStyle(
+  segments: DocumentSegment[],
+  options: TranslateOptions,
+): PromptStyle | undefined {
+  const detected = detectLanguage(segments.map((s) => s.text).join('\n'));
+  return shouldUseJapaneseSource(options.promptStyle, detected.language, options.targetLang)
+    ? 'ja-source-natural'
+    : options.promptStyle;
 }
 
 export interface DocumentTranslateState {
@@ -84,6 +111,7 @@ export function useDocumentTranslation() {
       targetLang: options.targetLang,
       pageUrl: 'fanyi://document',
       glossary: options.glossary,
+      promptStyle: options.promptStyle,
     })) as TranslateChunkResponse;
 
     if (!response?.success) {
@@ -103,6 +131,12 @@ export function useDocumentTranslation() {
     state.value.total = batches.length;
     state.value.running = true;
 
+    // 文档级语言检测（整篇只做一次），结果贯穿本批全部批次与重试。
+    const effectiveOptions: TranslateOptions = {
+      ...options,
+      promptStyle: resolveDocumentStyle(segments, options),
+    };
+
     const concurrency = Math.max(1, options.concurrency ?? 3);
     const retries = options.retries ?? 1;
     let cursor = 0;
@@ -114,7 +148,7 @@ export function useDocumentTranslation() {
         let ok = false;
         for (let attempt = 0; attempt <= retries && !stopped; attempt++) {
           try {
-            ok = await translateBatch(batch, options);
+            ok = await translateBatch(batch, effectiveOptions);
             if (ok) break;
           } catch (err) {
             if (attempt === retries) {
@@ -155,12 +189,19 @@ export function useDocumentTranslation() {
     state.value.running = true;
     stopped = false;
 
+    // 与 run 同一份解析结果：重试批次必须沿用同一文风，否则缓存 key 不同、
+    // 且同一文档会出现文风割裂。
+    const effectiveOptions: TranslateOptions = {
+      ...options,
+      promptStyle: resolveDocumentStyle(segments, options),
+    };
+
     for (const index of failed) {
       if (stopped) break;
       const batch = batches[index];
       if (!batch) continue;
       try {
-        const ok = await translateBatch(batch, options);
+        const ok = await translateBatch(batch, effectiveOptions);
         if (ok) state.value.done++;
         else state.value.failedBatches.push(index);
       } catch (err) {

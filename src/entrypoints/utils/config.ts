@@ -16,7 +16,12 @@ export interface Config {
   deepseekApiKey: string;
   /** 服务端翻译使用的 LLM Provider（仅对"通过远程服务器翻译"生效，本地翻译固定 DeepSeek） */
   provider: Provider;
-  /** 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话 */
+  /**
+   * 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描,
+   * wangxiaobo=王小波大白话, ja-source-natural=日语原文汉译（源语言感知，仅日译中）。
+   * 选 default 时，若页级检测判定源语言为日语且目标语言非日语，
+   * 会自动升级为 ja-source-natural（见 utils/languageDetector）。
+   */
   promptStyle: PromptStyle;
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
