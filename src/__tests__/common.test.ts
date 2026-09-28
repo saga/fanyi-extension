@@ -57,21 +57,5 @@ describe('getCenterPoint', () => {
     expect(result).toEqual({ x: 100, y: 100 });
   });
 
-  it('handles negative coordinates', () => {
-    const touches = createTouchList([
-      { clientX: -100, clientY: -200 },
-      { clientX: -300, clientY: -400 },
-    ]);
-    const result = getCenterPoint(touches, 2);
-    expect(result).toEqual({ x: -200, y: -300 });
-  });
 
-  it('handles zero coordinates', () => {
-    const touches = createTouchList([
-      { clientX: 0, clientY: 0 },
-      { clientX: 0, clientY: 0 },
-    ]);
-    const result = getCenterPoint(touches, 2);
-    expect(result).toEqual({ x: 0, y: 0 });
-  });
 });

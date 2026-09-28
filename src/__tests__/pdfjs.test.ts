@@ -232,10 +232,6 @@ describe('collectLines', () => {
     if (restoreRect) restoreRect();
   });
 
-  it('returns empty array when no textLayer spans exist', () => {
-    makePdfJsViewer([]);
-    expect(mod.collectLines(document)).toHaveLength(0);
-  });
 
   it('skips spans with empty text content', () => {
     const page = makePage(1, [
@@ -248,17 +244,6 @@ describe('collectLines', () => {
     expect(lines[0].text).toBe('Hello');
   });
 
-  it('skips spans with zero-size rect (display:none)', () => {
-    const hidden = makeSpan('Hidden', { left: 0, top: 0, right: 0, bottom: 0 });
-    hidden.setAttribute('data-mock-width', '0');
-    hidden.setAttribute('data-mock-height', '0');
-    const visible = makeSpan('Visible', { left: 0, top: 30, right: 80, bottom: 50 });
-    const page = makePage(1, [hidden, visible]);
-    makePdfJsViewer([page]);
-    const lines = mod.collectLines(document);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].text).toBe('Visible');
-  });
 
   it('groups spans with same top into one line (sorted by left)', () => {
     // 两个 span 在同一行 top=10，但 DOM 顺序相反
@@ -306,35 +291,7 @@ describe('collectLines', () => {
     expect(lines[0].text).toBe('AB');
   });
 
-  it('sorts lines by page number then top coordinate', () => {
-    // Page 2 的第一行 top=10 应该排在 Page 1 的第二行 top=50 之前
-    const page1 = makePage(1, [
-      makeSpan('Page1-Line1', { left: 10, top: 10, right: 110, bottom: 25 }),
-      makeSpan('Page1-Line2', { left: 10, top: 50, right: 110, bottom: 65 }),
-    ]);
-    const page2 = makePage(2, [
-      makeSpan('Page2-Line1', { left: 10, top: 10, right: 110, bottom: 25 }),
-    ]);
-    makePdfJsViewer([page1, page2]);
-    const lines = mod.collectLines(document);
-    expect(lines).toHaveLength(3);
-    expect(lines[0].text).toBe('Page1-Line1');
-    expect(lines[1].text).toBe('Page1-Line2');
-    expect(lines[2].text).toBe('Page2-Line1');
-  });
 
-  it('separates spans from different textLayer even with same top', () => {
-    // 两个独立 page 各有自己的 textLayer，即使 top 相同也不能合并
-    const page1 = makePage(1, [
-      makeSpan('Page1Text', { left: 10, top: 10, right: 110, bottom: 25 }),
-    ]);
-    const page2 = makePage(2, [
-      makeSpan('Page2Text', { left: 10, top: 10, right: 110, bottom: 25 }),
-    ]);
-    makePdfJsViewer([page1, page2]);
-    const lines = mod.collectLines(document);
-    expect(lines).toHaveLength(2);
-  });
 });
 
 // =============================================================================

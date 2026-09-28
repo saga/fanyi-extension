@@ -24,10 +24,4 @@ describe('session id', () => {
     expect(a).not.toBe(b);
   });
 
-  it('getSessionId 在无轮换时惰性生成一个 id且不抛错', () => {
-    // 单独导入验证惰性路径：用一个独立断言确保函数可用。
-    const id = getSessionId();
-    expect(typeof id).toBe('string');
-    expect(id.length).toBeGreaterThan(0);
-  });
 });

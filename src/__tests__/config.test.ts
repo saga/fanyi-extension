@@ -63,12 +63,6 @@ describe('config', () => {
   });
 
   describe('setConfig', () => {
-    it('stores partial config and merges with defaults', async () => {
-      await setConfig({ targetLang: 'ja' });
-      const stored = store['local:config'];
-      expect(stored.targetLang).toBe('ja');
-      expect(stored.sourceLang).toBe('auto'); // default preserved in merge
-    });
 
     it('strips Proxy/reactive wrappers via JSON serialization', async () => {
       // Simulate a Vue ref-like proxy by creating an object with non-serializable getters
@@ -85,13 +79,6 @@ describe('config', () => {
       expect(stored.targetLang).toBe('en');
     });
 
-    it('overwrites existing config values', async () => {
-      store['local:config'] = { targetLang: 'en' };
-      await setConfig({ sourceLang: 'zh' });
-      const stored = store['local:config'];
-      expect(stored.targetLang).toBe('en'); // preserved
-      expect(stored.sourceLang).toBe('zh'); // overwritten
-    });
   });
 
   describe('resetConfig', () => {

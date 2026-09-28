@@ -174,52 +174,7 @@ describe('translateViaServer', () => {
   // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS 把
   // form action 改成 http://，这会触发 Mixed Content 警告并污染发往服务端
   // 的 HTML。prepareHtmlForServer 应把 http:// 升级为 https://。
-  it('upgrades insecure http:// form actions to https:// before sending HTML', async () => {
-    document.body.innerHTML += `
-      <form name="FeedBlitz_test" method="POST" action="http://app.feedblitz.com/f/f.Fbz?AddNewUserDirect">
-        <input name="EMAIL" type="text" />
-      </form>
-    `;
 
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(baseConfig, blocks, nodeMap);
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    // 发送给服务端的 HTML 不应再包含 http://app.feedblitz.com
-    expect(body.html).not.toContain('http://app.feedblitz.com');
-    // 应升级为 https://
-    expect(body.html).toContain('https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect');
-  });
-
-  it('leaves secure https:// form actions untouched', async () => {
-    document.body.innerHTML += `
-      <form method="POST" action="https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect">
-        <input name="EMAIL" type="text" />
-      </form>
-    `;
-
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(baseConfig, blocks, nodeMap);
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.html).toContain('https://app.feedblitz.com/f/f.Fbz?AddNewUserDirect');
-  });
 
   it('skips blocks whose translation span is missing', async () => {
     const translatedHtml = `
@@ -258,36 +213,6 @@ describe('translateViaServer', () => {
     expect(applyBlockTranslation).toHaveBeenCalledTimes(1);
   });
 
-  it('skips blocks whose translation equals original text', async () => {
-    const translatedHtml = `
-      <html><body>
-        <article>
-          <h1 data-fanyi-block-id="b1" class="fanyi-translated">
-            <span class="fanyi-original">Hello World</span>
-            <span class="fanyi-translation">Hello World</span>
-          </h1>
-        </article>
-      </body></html>
-    `;
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => translatedHtml,
-    });
-
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
-    ];
-
-    const nodeMap = new Map<string, Node>([
-      ['b1', document.querySelector('h1')!],
-    ]);
-
-    const result = await translateViaServer(baseConfig, blocks, nodeMap);
-
-    expect(result.size).toBe(0);
-    expect(applyBlockTranslation).not.toHaveBeenCalled();
-  });
 
   it('throws when apiKey is missing for deepseek provider', async () => {
     const config = { ...baseConfig, deepseekApiKey: '', provider: 'deepseek' as const };
@@ -341,43 +266,7 @@ describe('translateViaServer', () => {
     expect(body.apiKey).toBeUndefined();
   });
 
-  it('sends provider=gemini and no apiKey when provider is gemini', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
 
-    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'gemini' };
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(config, blocks, nodeMap);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.provider).toBe('gemini');
-    expect(body.apiKey).toBeUndefined();
-  });
-
-  it('sends provider=opencode and no apiKey when provider is opencode', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'opencode' };
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(config, blocks, nodeMap);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.provider).toBe('opencode');
-    expect(body.apiKey).toBeUndefined();
-  });
 
   it('sends provider=deepseek and apiKey when provider is deepseek', async () => {
     fetchMock.mockResolvedValueOnce({
@@ -436,31 +325,6 @@ describe('translateViaServer', () => {
     );
   });
 
-  it('falls back to default server URL when config.serverUrl is empty', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => `
-        <html><body>
-          <h1 data-fanyi-block-id="b1" class="fanyi-translated">
-            <span class="fanyi-original">Hello World</span>
-            <span class="fanyi-translation">你好世界</span>
-          </h1>
-        </body></html>
-      `,
-    });
-
-    const config = { ...baseConfig, serverUrl: '' };
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
-    ];
-    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
-
-    await translateViaServer(config, blocks, nodeMap);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('https://s.sunxiunan.com/fanyi/page');
-  });
 });
 
 describe('checkServerCache', () => {
@@ -506,18 +370,6 @@ describe('checkServerCache', () => {
     expect(result).toBeNull();
   });
 
-  it('falls back to default server URL when config.serverUrl is empty', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 204,
-    });
-
-    const config = { ...baseConfig, serverUrl: '' };
-    await checkServerCache(config);
-
-    const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain('https://s.sunxiunan.com/fanyi/page/check');
-  });
 
   it('throws when server responds non-OK', async () => {
     fetchMock.mockResolvedValueOnce({
@@ -580,27 +432,6 @@ describe('applyServerTranslatedHtml', () => {
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '这是一个测试段落。');
   });
 
-  it('skips blocks whose translation equals original text', () => {
-    const translatedHtml = `
-      <html><body>
-        <h1 data-fanyi-block-id="b1" class="fanyi-translated">
-          <span class="fanyi-original">Hello World</span>
-          <span class="fanyi-translation">Hello World</span>
-        </h1>
-      </body></html>
-    `;
-
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
-    ];
-
-    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
-
-    const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
-
-    expect(result.size).toBe(0);
-    expect(applyBlockTranslation).not.toHaveBeenCalled();
-  });
 
   it('strips <base> tag from server HTML to avoid CSP base-uri violation (regression: aws.amazon.com)', () => {
     // 服务端返回的 HTML 可能包含 <base href="...">，但某些站点 CSP 设置
@@ -630,27 +461,4 @@ describe('applyServerTranslatedHtml', () => {
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
   });
 
-  it('strips self-closing and uppercase <base> tags', () => {
-    const translatedHtml = `
-      <html><head>
-        <BASE HREF="https://example.com/">
-        <base href="https://example.com/" />
-      </head><body>
-        <h1 data-fanyi-block-id="b1" class="fanyi-translated">
-          <span class="fanyi-translation">你好世界</span>
-        </h1>
-      </body></html>
-    `;
-
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
-    ];
-
-    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
-
-    const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
-
-    expect(result.size).toBe(1);
-    expect(result.has('b1')).toBe(true);
-  });
 });

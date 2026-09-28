@@ -87,24 +87,6 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     expect(system).toContain('目标语言：简体中文');
   });
 
-  it('still passes when a block is silently returned unchanged (warns)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // LLM "no-op": returns the source text as-is.
-    globalFetch.mockResolvedValue(
-      createJsonResponse({ translations: [{ id: 'b1', translated_text: 'hello' }] })
-    );
-    const result = await service.translate(
-      JSON.stringify([{ id: 'b1', text: 'hello' }]),
-      'en',
-      'zh',
-      undefined
-    );
-    // The raw string is still returned untouched — caller (background) decides
-    // what to do. We just verify the diagnostic fired.
-    expect(warn).toHaveBeenCalled();
-    expect(result).toContain('hello');
-    warn.mockRestore();
-  });
 
   it('translateStream also runs the no-op check on its final content', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

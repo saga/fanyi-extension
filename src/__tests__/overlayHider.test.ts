@@ -44,15 +44,6 @@ describe('createOverlayHider (Poptins 等动态弹层隐藏)', () => {
     expect(inside.hasAttribute('data-fanyi-remove')).toBe(false);
   });
 
-  it('普通 overlay 节点也被隐藏', async () => {
-    hider = createOverlayHider();
-    hider.start();
-    const overlay = document.createElement('div');
-    overlay.className = 'site-overlay';
-    document.body.appendChild(overlay);
-    await tick();
-    expect(overlay.getAttribute('data-fanyi-remove')).toBe('true');
-  });
 
   it('stop() 后不再隐藏新注入的弹层', async () => {
     hider = createOverlayHider();

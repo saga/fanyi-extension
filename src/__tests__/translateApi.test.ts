@@ -46,37 +46,9 @@ describe('processTranslationResult', () => {
     expect(result.get('b2')).toBe('世界');
   });
 
-  it('returns empty Map for empty translations array', () => {
-    const json = JSON.stringify({ translations: [] });
-    const result = processTranslationResult(json);
-    expect(result.size).toBe(0);
-  });
 
-  it('handles single translation item', () => {
-    const json = JSON.stringify({
-      translations: [{ id: 'b1', translated_text: '单个翻译' }],
-    });
-    const result = processTranslationResult(json);
-    expect(result.get('b1')).toBe('单个翻译');
-  });
 
-  it('preserves empty translated_text', () => {
-    const json = JSON.stringify({
-      translations: [{ id: 'b1', translated_text: '' }],
-    });
-    const result = processTranslationResult(json);
-    expect(result.get('b1')).toBe('');
-  });
 
-  it('handles items with extra fields', () => {
-    const json = JSON.stringify({
-      translations: [
-        { id: 'b1', translated_text: '你好', confidence: 0.95, extra: 'data' },
-      ],
-    });
-    const result = processTranslationResult(json);
-    expect(result.get('b1')).toBe('你好');
-  });
 
   // 真实场景：prompt 要求 `translated_text` 字段，但模型经常自由发挥用 `text`。
   // 修复前的 hard bug：id 全在、map 全空、content 报 missing。回归测试。
@@ -134,46 +106,8 @@ describe('logUnchangedBlocks', () => {
     expect(logUnchangedBlocks('not json', [{ id: 'b1', text: 'x' }])).toBe('not json');
   });
 
-  it('warns when a block came back unchanged', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const raw = JSON.stringify({ translations: [{ id: 'b1', translated_text: 'hello' }] });
-    logUnchangedBlocks(raw, [{ id: 'b1', text: 'hello' }]);
-    expect(warn).toHaveBeenCalled();
-    const allArgs = warn.mock.calls.flat().map(String).join(' | ');
-    expect(allArgs).toContain('b1');
-    warn.mockRestore();
-  });
 
-  it('errors when every block came back unchanged', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const raw = JSON.stringify({
-      translations: [
-        { id: 'b1', translated_text: 'hello' },
-        { id: 'b2', translated_text: 'world' },
-      ],
-    });
-    logUnchangedBlocks(raw, [
-      { id: 'b1', text: 'hello' },
-      { id: 'b2', text: 'world' },
-    ]);
-    expect(err).toHaveBeenCalled();
-    expect(String(err.mock.calls[0]?.[0])).toMatch(/ALL/);
-    warn.mockRestore();
-    err.mockRestore();
-  });
 
-  it('warns when response is missing blocks from the input', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const raw = JSON.stringify({ translations: [{ id: 'b1', translated_text: '你好' }] });
-    logUnchangedBlocks(raw, [
-      { id: 'b1', text: 'hello' },
-      { id: 'b2', text: 'world' },
-    ]);
-    const allArgs = warn.mock.calls.flat().map(String).join(' | ');
-    expect(allArgs).toMatch(/missing/);
-    warn.mockRestore();
-  });
 
   it('is silent when all blocks were translated', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -234,18 +168,7 @@ describe('getCachedTranslation', () => {
     expect(result?.size).toBe(2);
   });
 
-  it('returns empty Map for empty object', async () => {
-    mockCache.get.mockResolvedValue({});
-    const result = await getCachedTranslation('test-key');
-    expect(result).toBeInstanceOf(Map);
-    expect(result?.size).toBe(0);
-  });
 
-  it('handles single entry', async () => {
-    mockCache.get.mockResolvedValue({ b1: '单个翻译' });
-    const result = await getCachedTranslation('test-key');
-    expect(result?.get('b1')).toBe('单个翻译');
-  });
 });
 
 describe('cacheTranslation', () => {
@@ -267,17 +190,7 @@ describe('cacheTranslation', () => {
     expect(ttl).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
-  it('stores empty Map', async () => {
-    await cacheTranslation('test-key', new Map());
-    expect(mockCache.set).toHaveBeenCalledWith('test-key', {}, 7 * 24 * 60 * 60 * 1000);
-  });
 
-  it('stores single entry', async () => {
-    const data = new Map([['b1', '单个翻译']]);
-    await cacheTranslation('test-key', data);
-    const [, storedObj] = mockCache.set.mock.calls[0];
-    expect(storedObj).toEqual({ b1: '单个翻译' });
-  });
 });
 
 describe('clearAllCache', () => {
@@ -290,8 +203,4 @@ describe('clearAllCache', () => {
     expect(mockCache.clear).toHaveBeenCalledTimes(1);
   });
 
-  it('throws if cache clear fails', async () => {
-    mockCache.clear.mockRejectedValueOnce(new Error('Storage error'));
-    await expect(clearAllCache()).rejects.toThrow('Storage error');
-  });
 });

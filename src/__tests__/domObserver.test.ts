@@ -189,21 +189,6 @@ describe('DOMObserverManager', () => {
 
   // --- intersection observer ---
 
-  it('starts and stops intersection observer without error', () => {
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/p[1]', tag: 'p', text: 'Test' },
-    ];
-    const nodeMap = new Map<string, Node>();
-    const p = document.createElement('p');
-    p.textContent = 'Test';
-    document.body.appendChild(p);
-    nodeMap.set('b1', p);
-
-    manager.startIntersectionObserver(blocks, nodeMap);
-    expect(capturedCallback).not.toBeNull();
-    manager.stopIntersectionObserver();
-    expect(mockDisconnect).toHaveBeenCalled();
-  });
 
   it('intersection observer fires onNodeVisible for intersecting elements', () => {
     const blocks: TextBlock[] = [

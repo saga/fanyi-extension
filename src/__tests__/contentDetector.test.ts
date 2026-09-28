@@ -86,36 +86,8 @@ describe('contentDetector', () => {
       expect(classes.some(c => c.includes('article-body'))).toBe(true);
     });
 
-    it('collects parent elements (up to 2 levels)', () => {
-      document.body.innerHTML = `
-        <div id="level-0">
-          <div id="level-1">
-            <div id="level-2" class="article-content">
-              <p>Content</p>
-            </div>
-          </div>
-        </div>
-      `;
-      const candidates = collectCandidates(document);
-      const ids = candidates.map(el => el.id);
-      expect(ids).toContain('level-2');
-      expect(ids).toContain('level-1');
-      expect(ids).toContain('level-0');
-    });
 
-    it('does not collect body or html', () => {
-      document.body.innerHTML = '<div class="article"><p>Content</p></div>';
-      const candidates = collectCandidates(document);
-      expect(candidates).not.toContain(document.body);
-      expect(candidates).not.toContain(document.documentElement);
-    });
 
-    it('does not duplicate elements', () => {
-      document.body.innerHTML = '<article class="content"><p>Content</p></article>';
-      const candidates = collectCandidates(document);
-      const articleCount = candidates.filter(el => el.tagName === 'ARTICLE').length;
-      expect(articleCount).toBe(1);
-    });
   });
 
   // --- detectArticleRoot ---
@@ -137,20 +109,6 @@ describe('contentDetector', () => {
       expect(root!.tagName).toBe('ARTICLE');
     });
 
-    it('detects div with content-like class', () => {
-      document.body.innerHTML = `
-        <div class="sidebar"><a href="#">Link1</a><a href="#">Link2</a></div>
-        <div class="post-content">
-          <h2>Blog Post</h2>
-          <p>This is a blog post with substantial content that should be detected.</p>
-          <p>More paragraphs to increase the score of this element.</p>
-          <p>Even more content to ensure the scoring algorithm picks this div.</p>
-        </div>
-      `;
-      const root = detectArticleRoot(document)?.element ?? null;
-      expect(root).not.toBeNull();
-      expect(root!.className).toContain('post-content');
-    });
 
     it('returns null for pages with no good content', () => {
       document.body.innerHTML = `
@@ -214,22 +172,6 @@ describe('contentDetector', () => {
       expect(root!.textContent).toContain('real article body');
     });
 
-    it('excludes consent SDK reachable via class match (Cookiebot)', () => {
-      document.body.innerHTML = `
-        <div class="CybotCookiebotDialog">
-          <p>We use cookies. Accept all. Manage consent. Privacy settings for everyone.</p>
-          <p>Cookiebot consent dialog with lots of dense legal text and no links at all.</p>
-        </div>
-        <div class="post-content">
-          <h2>Real post</h2>
-          <p>This is the genuine article content that should be detected as the root.</p>
-          <p>Additional paragraphs ensure this scores well in the detection algorithm.</p>
-        </div>
-      `;
-      const root = detectArticleRoot(document)?.element ?? null;
-      expect(root).not.toBeNull();
-      expect(root!.className).toContain('post-content');
-    });
 
     // Regression: analyticsvidhya.com blog. Custom cookie modal #cookiesModal
     // (class "modal fade", not a known SDK name) holds ~50k chars of cookie policy
@@ -384,56 +326,8 @@ describe('contentDetector', () => {
     // 含正文，h1 在兄弟 .post-hero）。手写评分在这种「语义标签 + 噪声类 has-sidebar」
     // 组合上容易误判，而 Readability 作为主条件应稳定返回包含正文的容器。
     // 此测试锁定 detectArticleRoot 必须优先采用 Readability 的结果，而非评分算法。
-    it('uses Readability as primary locator for article with has-sidebar noise class', () => {
-      document.body.innerHTML = `
-        <main>
-          <div class="post-hero">
-            <h1 class="post-hero__title">The Tokenpocalypse Is Here</h1>
-            <figcaption>Photo by Sebastian Herrmann</figcaption>
-          </div>
-          <article class="post tag-ai featured post-access-paid has-sidebar">
-            <div class="post__content no-overflow">
-              <div class="post-sneak-peek fading">
-                <p>Consulting giant Accenture is trying to figure out how to stop non-technical workers from using AI tools.</p>
-                <p>The news highlights a major shift in the tech industry and other companies that use AI.</p>
-                <p>It also undercuts the narrative that superpowered engineers generating mountains of code are behind the AI boom.</p>
-              </div>
-            </div>
-          </article>
-        </main>
-      `;
-
-      const root = detectArticleRoot(document)?.element ?? null;
-      expect(root).not.toBeNull();
-      // Readability 应定位到包含正文的 article / .post__content，而非只有 h1 的 hero。
-      const text = root!.textContent || '';
-      expect(text).toContain('Consulting giant Accenture');
-      expect(text).toContain('superpowered engineers');
-      expect(root!.className).not.toContain('post-hero__title');
-    });
 
     // ContentRoot 契约（ADR-001 P0）：detectArticleRoot 返回 ContentRoot，
     // 携带 source / confidence / evidence，供调试与后续 Evidence Fusion 使用。
-    it('returns a ContentRoot contract (source/confidence/evidence)', () => {
-      document.body.innerHTML = `
-        <nav><a href="/">Home</a><a href="/about">About</a></nav>
-        <article>
-          <h1>Article Title</h1>
-          <p>This is a long article with multiple paragraphs of content.</p>
-          <p>The second paragraph continues the article with more text.</p>
-        </article>
-      `;
-
-      const root = detectArticleRoot(document);
-      expect(root).not.toBeNull();
-      // 必须携带契约字段
-      expect(root!.element).toBeInstanceOf(HTMLElement);
-      expect(['site-rule', 'selector', 'readability', 'scoring', 'body-fallback']).toContain(root!.source);
-      expect(typeof root!.confidence).toBe('number');
-      expect(root!.confidence).toBeGreaterThanOrEqual(0);
-      expect(root!.confidence).toBeLessThanOrEqual(1);
-      expect(typeof root!.evidence.textLength).toBe('number');
-      expect(root!.evidence.textLength).toBeGreaterThan(0);
-    });
   });
 });

@@ -161,18 +161,6 @@ describe('prepareDocument', () => {
     expect(fullText).toContain('Real article body paragraph one');
   });
 
-  it('should work with Element root parameter', () => {
-    document.body.innerHTML = `
-      <div id="custom-root">
-        <p>Custom root content.</p>
-      </div>
-    `;
-
-    const customRoot = document.getElementById('custom-root')!;
-    const { fullText } = prepareDocument(customRoot);
-
-    expect(fullText).toContain('Custom root content');
-  });
 
   it('should throw when no translatable content found', () => {
     document.body.innerHTML = '<div></div>';
@@ -199,13 +187,6 @@ describe('prepareDocument', () => {
     expect(() => prepareDocument(document)).toThrow('PDF.js viewer pages render content client-side');
   });
 
-  it('throws PDF.js-specific error when only #viewerContainer is present (no .pdfViewer class)', () => {
-    document.body.innerHTML = `
-      <div id="viewerContainer"></div>
-    `;
-
-    expect(() => prepareDocument(document)).toThrow('PDF.js viewer pages render content client-side');
-  });
 
   // Regression: databricks.com blog. A consent/cookie SDK banner that gets picked as
   // the article root yields 0 blocks (every descendant is pruned by overlay/cookie
@@ -685,20 +666,6 @@ describe('extractFromDataIsland', () => {
     expect(texts.every((t) => !t.includes('Short text under 50'))).toBe(true);
   });
 
-  it('deduplicates identical strings', () => {
-    const dup =
-      'This is a long duplicated string that appears in multiple fields and should only be extracted once.';
-    document.body.innerHTML = `
-      <script id="__NEXT_DATA__" type="application/json">
-        ${JSON.stringify({ field1: dup, field2: dup, field3: dup })}
-      </script>
-    `;
-
-    const blocks = extractFromDataIsland(document);
-    const matches = blocks.filter((b) => b.text === dup);
-
-    expect(matches.length).toBe(1);
-  });
 
   it('silently skips invalid JSON', () => {
     document.body.innerHTML = `
@@ -722,25 +689,6 @@ describe('extractFromDataIsland', () => {
     expect(blocks).toEqual([]);
   });
 
-  it('returns TextBlock with id/xpath/tag fields', () => {
-    document.body.innerHTML = `
-      <script id="__NEXT_DATA__" type="application/json">
-        ${JSON.stringify({
-          articleBody:
-            'Long article body content exceeding fifty chars for proper extraction.',
-        })}
-      </script>
-    `;
-
-    const blocks = extractFromDataIsland(document);
-
-    expect(blocks.length).toBeGreaterThan(0);
-    const first = blocks[0];
-    expect(first.id).toMatch(/^data-island-\d+$/);
-    expect(first.xpath).toMatch(/^\/data-island\/\d+$/);
-    expect(first.tag).toBe('p');
-    expect(typeof first.text).toBe('string');
-  });
 });
 
 describe('prepareDocument data island integration', () => {

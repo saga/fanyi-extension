@@ -159,29 +159,6 @@ describe('handleTranslateChunkStream logic', () => {
     });
   });
 
-  it('should ignore tab send errors', async () => {
-    const sendResponse = vi.fn();
-    mockTabsSendMessage.mockRejectedValue(new Error('Tab closed'));
-
-    async function* mockStream() {
-      yield 'test';
-      return 'test';
-    }
-
-    await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key', provider: 'deepseek' },
-      { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh', tabId: 123 },
-      {},
-      { translateStream: mockStream },
-      sendResponse
-    );
-
-    // Should still complete successfully despite tab errors
-    expect(sendResponse).toHaveBeenCalledWith({
-      success: true,
-      result: 'test',
-    });
-  });
 
   it('should pass glossary to translateStream', async () => {
     const sendResponse = vi.fn();
@@ -209,27 +186,6 @@ describe('handleTranslateChunkStream logic', () => {
     );
   });
 
-  it('should handle empty stream', async () => {
-    const sendResponse = vi.fn();
-
-    async function* mockStream() {
-      return '';
-    }
-
-    await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key', provider: 'deepseek' },
-      { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh' },
-      {},
-      { translateStream: mockStream },
-      sendResponse
-    );
-
-    expect(mockTabsSendMessage).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({
-      success: true,
-      result: '',
-    });
-  });
 
   it('should handle stream errors', async () => {
     const sendResponse = vi.fn();

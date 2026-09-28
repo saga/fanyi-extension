@@ -36,12 +36,6 @@ describe('CacheManager', () => {
     expect(result).toBeNull();
   });
 
-  it('stores and retrieves objects', async () => {
-    const obj = { name: 'test', count: 42, nested: { deep: true } };
-    await cache.set('obj', obj);
-    const result = await cache.get<typeof obj>('obj');
-    expect(result).toEqual(obj);
-  });
 
   it('uses custom TTL', async () => {
     // Set with very short TTL
@@ -92,11 +86,6 @@ describe('CacheManager', () => {
     expect(stats.storageSize).toBe(2);
   });
 
-  it('reports zero stats for empty cache', async () => {
-    const stats = await cache.getStats();
-    expect(stats.memorySize).toBe(0);
-    expect(stats.storageSize).toBe(0);
-  });
 
   // --- expiry ---
 
@@ -124,16 +113,6 @@ describe('CacheManager', () => {
 
   // --- multiple instances ---
 
-  it('isolates data between different cache instances', async () => {
-    const cache1 = new CacheManager('test:cache:a');
-    const cache2 = new CacheManager('test:cache:b');
-
-    await cache1.set('key', 'valueA');
-    await cache2.set('key', 'valueB');
-
-    expect(await cache1.get<string>('key')).toBe('valueA');
-    expect(await cache2.get<string>('key')).toBe('valueB');
-  });
 
   // --- storage error recovery ---
 

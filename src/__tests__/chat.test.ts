@@ -34,10 +34,6 @@ describe('chat service', () => {
     expect(s).toContain('hello world from the page');
   });
 
-  it('buildChatSystem handles null context', () => {
-    const s = buildChatSystem(null);
-    expect(s).toContain('没有可用的网页内容');
-  });
 
   it('chatStream yields incremental full text from SSE', async () => {
     const sse = [

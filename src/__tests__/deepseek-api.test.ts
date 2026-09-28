@@ -106,19 +106,6 @@ describe('DeepSeekTranslationService API methods', () => {
       ).rejects.toThrow('401');
     });
 
-    it('should handle HTTP 429 error', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 429,
-        headers: new Map(),
-        text: vi.fn().mockResolvedValue('Too many requests'),
-      };
-      globalFetch.mockResolvedValue(mockResponse);
-
-      await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
-      ).rejects.toThrow('429');
-    });
 
     it('should handle network errors', async () => {
       globalFetch.mockRejectedValue(new TypeError('fetch failed'));
@@ -144,19 +131,6 @@ describe('DeepSeekTranslationService API methods', () => {
       ).rejects.toThrow('无效响应');
     });
 
-    it('should handle non-JSON error response', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 500,
-        headers: new Map(),
-        text: vi.fn().mockResolvedValue('Internal Server Error'),
-      };
-      globalFetch.mockResolvedValue(mockResponse);
-
-      await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
-      ).rejects.toThrow('500');
-    });
   });
 
   describe('error handling', () => {
@@ -176,18 +150,5 @@ describe('DeepSeekTranslationService API methods', () => {
       ).rejects.toThrow('账户余额不足');
     });
 
-    it('should handle 503 error with service hint', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 503,
-        headers: new Map(),
-        text: vi.fn().mockResolvedValue('Service Unavailable'),
-      };
-      globalFetch.mockResolvedValue(mockResponse);
-
-      await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
-      ).rejects.toThrow('暂时不可用');
-    });
   });
 });

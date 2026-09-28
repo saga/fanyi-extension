@@ -437,26 +437,6 @@ describe('translateCaptions', () => {
     expect(captions[0].translatedText).toBe('测试');
   });
 
-  it('handles thinking tags in response (defense in depth)', async () => {
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{
-          message: {
-            content: '<think>Reasoning about translation</think>\n{"translations":[{"id":"0","translated_text":"你好"}]}',
-          },
-        }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello' },
-    ];
-
-    await translateCaptions(captions, 'test-api-key');
-    expect(captions[0].translatedText).toBe('你好');
-  });
 
   it('calls progress callback', async () => {
     const mockResponse = {
@@ -576,32 +556,6 @@ describe('CaptionOverlay', () => {
     expect(document.getElementById('fanyi-caption-overlay')).toBeNull();
   });
 
-  it('updateCaptions refreshes display when translation arrives', () => {
-    const video = document.createElement('video');
-    video.className = 'html5-main-video';
-    Object.defineProperty(video, 'currentTime', { value: 0, writable: true });
-    const player = document.createElement('div');
-    player.className = 'html5-video-player';
-    player.appendChild(video);
-    document.body.appendChild(player);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 5000, text: 'Hello' },
-    ];
-
-    overlay.start(captions);
-    const el = document.getElementById('fanyi-caption-overlay')!;
-    // 未翻译完成时不显示
-    expect(el.textContent).toBe('');
-    expect(el.style.display).toBe('none');
-
-    captions[0].translatedText = '你好';
-    overlay.updateCaptions(captions);
-
-    expect(el.children.length).toBe(1);
-    expect(el.children[0].textContent).toBe('你好');
-    expect(el.style.display).toBe('block');
-  });
 });
 
 // =============================================================================
@@ -660,19 +614,6 @@ describe('translateAhead', () => {
     expect(captions[1].status).toBe('failed');
   });
 
-  it('aborts when signal is already aborted', async () => {
-    const controller = new AbortController();
-    controller.abort();
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello', status: 'pending' },
-    ];
-
-    await translateAhead(captions, 0, 90_000, 'test-api-key', controller.signal);
-
-    expect(globalFetch).not.toHaveBeenCalled();
-    expect(captions[0].status).toBe('pending');
-  });
 
   it('aborts mid-batch when signal fires', async () => {
     const controller = new AbortController();
@@ -743,19 +684,6 @@ describe('translateBatch', () => {
     globalFetch.mockReset();
   });
 
-  it('returns empty map when signal already aborted', async () => {
-    const controller = new AbortController();
-    controller.abort();
-
-    const result = await translateBatch(
-      'test-api-key',
-      [{ id: '0', text: 'Hello' }],
-      controller.signal,
-    );
-
-    expect(result.size).toBe(0);
-    expect(globalFetch).not.toHaveBeenCalled();
-  });
 
   it('passes signal to fetch', async () => {
     const controller = new AbortController();

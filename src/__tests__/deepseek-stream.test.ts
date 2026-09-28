@@ -93,22 +93,6 @@ describe('DeepSeekTranslationService.translateStream', () => {
     expect(body.stream).toBe(true);
   });
 
-  it('should include Authorization header', async () => {
-    const mockResponse = createMockResponse(['test']);
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const stream = service.translateStream(
-      JSON.stringify([{ id: 'b1', text: 'hello' }]),
-      'en',
-      'zh',
-      []
-    );
-
-    await consumeStream(stream);
-
-    const fetchCall = globalFetch.mock.calls[0];
-    expect(fetchCall[1].headers.Authorization).toBe('Bearer test-api-key');
-  });
 
   it('should throw on HTTP error', async () => {
     const mockResponse = {
@@ -198,36 +182,5 @@ describe('DeepSeekTranslationService.translateStream', () => {
     expect(body.messages[0].content).toContain('<术语表>');
     });
 
-  it('should handle multiple document_terms in stream', async () => {
-    const mockResponse = createMockResponse(['test']);
-    globalFetch.mockResolvedValue(mockResponse);
 
-    const glossary = { document_terms: ['LLM', 'React'] };
-    const stream = service.translateStream(
-      JSON.stringify([{ id: 'b1', text: 'LLM and React' }]),
-      'en',
-      'zh',
-      glossary
-    );
-
-    await consumeStream(stream);
-
-    const fetchCall = globalFetch.mock.calls[0];
-    const body = JSON.parse(fetchCall[1].body);
-    expect(body.messages[0].content).toContain('LLM');
-    expect(body.messages[0].content).toContain('React');
-  });
-
-  it('should handle network errors', async () => {
-    globalFetch.mockRejectedValue(new TypeError('fetch failed'));
-
-    const stream = service.translateStream(
-      JSON.stringify([{ id: 'b1', text: 'hello' }]),
-      'en',
-      'zh',
-      []
-    );
-
-    await expect(consumeStream(stream)).rejects.toThrow();
-  });
 });

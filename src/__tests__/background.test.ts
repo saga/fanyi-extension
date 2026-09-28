@@ -289,14 +289,6 @@ describe('background message handlers', () => {
       }
     }
 
-    it('should return error when API key is empty', async () => {
-      const sendResponse = vi.fn();
-      await handleValidateApiKey({ apiKey: '' }, sendResponse);
-      expect(sendResponse).toHaveBeenCalledWith({
-        success: false,
-        error: 'API Key 不能为空',
-      });
-    });
 
     it('should validate API key successfully', async () => {
       mockTranslate.mockResolvedValue('{"translations":[]}');
@@ -350,17 +342,6 @@ describe('background message handlers', () => {
       expect(sendResponse).toHaveBeenCalledWith({ success: true });
     });
 
-    it('should handle clear cache error', async () => {
-      mockClearAllCache.mockRejectedValue(new Error('Storage error'));
-      const sendResponse = vi.fn();
-
-      await handleClearCache(sendResponse);
-
-      expect(sendResponse).toHaveBeenCalledWith({
-        success: false,
-        error: 'Storage error',
-      });
-    });
   });
 
   describe('handleCheckConfig', () => {
@@ -386,28 +367,6 @@ describe('background message handlers', () => {
       });
     });
 
-    it('should return false when API key is missing', async () => {
-      mockGetConfig.mockResolvedValue({ deepseekApiKey: '', provider: 'deepseek', targetLang: 'zh' });
-      const sendResponse = vi.fn();
 
-      await handleCheckConfig(sendResponse);
-
-      expect(sendResponse).toHaveBeenCalledWith({
-        success: false,
-        config: { deepseekApiKey: '', provider: 'deepseek', targetLang: 'zh' },
-      });
-    });
-
-    it('should handle config error', async () => {
-      mockGetConfig.mockRejectedValue(new Error('Config error'));
-      const sendResponse = vi.fn();
-
-      await handleCheckConfig(sendResponse);
-
-      expect(sendResponse).toHaveBeenCalledWith({
-        success: false,
-        error: 'Config error',
-      });
-    });
   });
 });

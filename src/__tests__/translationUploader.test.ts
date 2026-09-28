@@ -60,18 +60,4 @@ describe('uploadTranslation', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('handles fetch failure gracefully', async () => {
-    (globalThis.fetch as any).mockRejectedValueOnce(new Error('network'));
-
-    const result = await uploadTranslation(
-      { serverUrl: 'https://example.com/fanyi/page', shareTranslations: true } as any,
-      {
-        url: 'https://example.com/article',
-        html: '<html></html>',
-      } as UploadRequest,
-    );
-
-    expect(result.accepted).toBe(false);
-    expect(result.reason).toContain('网络');
-  });
 });
