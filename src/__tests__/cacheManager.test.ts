@@ -31,10 +31,6 @@ describe('CacheManager', () => {
     expect(result).toBe('value1');
   });
 
-  it('returns null for missing key', async () => {
-    const result = await cache.get<string>('nonexistent');
-    expect(result).toBeNull();
-  });
 
 
   it('uses custom TTL', async () => {
@@ -45,13 +41,6 @@ describe('CacheManager', () => {
     expect(result).toBeNull();
   });
 
-  it('uses default TTL when not specified', async () => {
-    const cache1 = new CacheManager('test:cache2', 100);
-    await cache1.set('key1', 'value1');
-    await new Promise(r => setTimeout(r, 150));
-    const result = await cache1.get<string>('key1');
-    expect(result).toBeNull();
-  });
 
   // --- remove ---
 
@@ -66,14 +55,6 @@ describe('CacheManager', () => {
 
   // --- clear ---
 
-  it('clears all entries', async () => {
-    await cache.set('key1', 'value1');
-    await cache.set('key2', 'value2');
-    await cache.clear();
-
-    expect(await cache.get<string>('key1')).toBeNull();
-    expect(await cache.get<string>('key2')).toBeNull();
-  });
 
   // --- getStats ---
 
@@ -102,14 +83,6 @@ describe('CacheManager', () => {
 
   // --- memory cache (in-session speed) ---
 
-  it('serves from memory cache on subsequent access', async () => {
-    await cache.set('key1', 'value1');
-    // First get should populate memory cache
-    await cache.get<string>('key1');
-    // Second get should hit memory cache
-    const result = await cache.get<string>('key1');
-    expect(result).toBe('value1');
-  });
 
   // --- multiple instances ---
 

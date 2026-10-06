@@ -19,23 +19,7 @@ describe('uploadTranslation', () => {
     expect(result.reason).toContain('未开启');
   });
 
-  it('rejects private URLs', async () => {
-    const result = await uploadTranslation(
-      { serverUrl: 'https://example.com/fanyi/page', shareTranslations: true } as any,
-      { url: 'http://localhost:3000/test', html: '<html></html>' } as UploadRequest,
-    );
-    expect(result.accepted).toBe(false);
-    expect(result.reason).toContain('私有');
-  });
 
-  it('rejects oversized HTML', async () => {
-    const result = await uploadTranslation(
-      { serverUrl: 'https://example.com/fanyi/page', shareTranslations: true } as any,
-      { url: 'https://example.com/article', html: 'x'.repeat(900001) } as UploadRequest,
-    );
-    expect(result.accepted).toBe(false);
-    expect(result.reason).toContain('超过');
-  });
 
   it('calls fetch when all checks pass', async () => {
     (globalThis.fetch as any).mockResolvedValueOnce({

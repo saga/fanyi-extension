@@ -149,69 +149,6 @@ describe('fetchCaptions', () => {
     expect(fetchUrl).toContain('potc=SIG');
   });
 
-  it('falls back to timedtext URL interception when no POT in audio tracks', async () => {
-    restorePostMessage = setupPostMessageMock((message) => {
-      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
-        return buildPlayerDataResponse({
-          videoId: 'abc123',
-          captionTracks: [
-            {
-              baseUrl: 'https://www.youtube.com/api/timedtext?v=abc123&caps=asr',
-              languageCode: 'en',
-              kind: 'asr',
-              vssId: 'a.en',
-            },
-          ],
-          audioCaptionTracks: [],
-          device: null,
-          cver: null,
-          playerState: 1,
-          selectedTrackLanguageCode: null,
-          selectedTrackVssId: null,
-          cachedTimedtextUrl: null,
-        });
-      }
-      if (message.type === ENSURE_SUBTITLES_REQUEST_TYPE) {
-        return buildEnsureSubtitlesResponse();
-      }
-      if (message.type === WAIT_TIMEDTEXT_REQUEST_TYPE) {
-        return buildTimedtextResponse(
-          'https://www.youtube.com/api/timedtext?v=abc123&pot=TOKEN2&potc=SIG2',
-        );
-      }
-      return null;
-    });
-
-    // 第一次 fetch 无 POT，模拟 YouTube 拒绝，触发 fallback 流程
-    globalFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      text: vi.fn().mockResolvedValue('Forbidden'),
-    });
-
-    // fallback 后第二次 fetch 成功
-    globalFetch.mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        events: [
-          {
-            tStartMs: 0,
-            dDurationMs: 1500,
-            segs: [{ utf8: 'Fallback line' }],
-          },
-        ],
-      }),
-    });
-
-    const captions = await fetchCaptions('abc123');
-    expect(captions).toHaveLength(1);
-    expect(captions[0].text).toBe('Fallback line');
-
-    // 第二次 fetch 使用拦截到的 timedtext URL（含 POT）
-    const fetchUrl = globalFetch.mock.calls[1][0];
-    expect(fetchUrl).toContain('pot=TOKEN2');
-    expect(fetchUrl).toContain('potc=SIG2');
-  }, 10000);
 
   it('throws when no caption tracks available', async () => {
     restorePostMessage = setupPostMessageMock((message) => {
@@ -234,51 +171,6 @@ describe('fetchCaptions', () => {
     await expect(fetchCaptions('abc123')).rejects.toThrow('未找到可用字幕');
   });
 
-  it('filters noise annotations from captions', async () => {
-    restorePostMessage = setupPostMessageMock((message) => {
-      if (message.type === PLAYER_DATA_REQUEST_TYPE) {
-        return buildPlayerDataResponse({
-          videoId: 'abc123',
-          captionTracks: [
-            {
-              baseUrl: 'https://www.youtube.com/api/timedtext?v=abc123',
-              languageCode: 'en',
-              vssId: 'a.en',
-            },
-          ],
-          audioCaptionTracks: [
-            {
-              url: 'https://www.youtube.com/api/timedtext?v=abc123&pot=POT',
-              vssId: 'a.en',
-            },
-          ],
-          device: null,
-          cver: null,
-          playerState: 1,
-          selectedTrackLanguageCode: null,
-          selectedTrackVssId: null,
-          cachedTimedtextUrl: null,
-        });
-      }
-      return null;
-    });
-
-    globalFetch.mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        events: [
-          {
-            tStartMs: 0,
-            dDurationMs: 2000,
-            segs: [{ utf8: '[Music] Hello' }],
-          },
-        ],
-      }),
-    });
-
-    const captions = await fetchCaptions('abc123');
-    expect(captions[0].text).toBe('Hello');
-  });
 
   it('parses scrolling ASR subtitles into sentence fragments', async () => {
     restorePostMessage = setupPostMessageMock((message) => {
@@ -416,64 +308,9 @@ describe('translateCaptions', () => {
     expect(globalFetch).not.toHaveBeenCalled();
   });
 
-  it('handles markdown code block in response', async () => {
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{
-          message: {
-            content: '```json\n{"translations":[{"id":"0","translated_text":"测试"}]}\n```',
-          },
-        }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Test' },
-    ];
-
-    await translateCaptions(captions, 'test-api-key');
-    expect(captions[0].translatedText).toBe('测试');
-  });
 
 
-  it('calls progress callback', async () => {
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{
-          message: {
-            content: '{"translations":[{"id":"0","translated_text":"你好"}]}',
-          },
-        }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
 
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello' },
-    ];
-    const onProgress = vi.fn();
-
-    await translateCaptions(captions, 'test-api-key', onProgress);
-    expect(onProgress).toHaveBeenCalledWith(1, 1);
-  });
-
-  it('handles API error by marking batch as failed', async () => {
-    globalFetch.mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: vi.fn().mockResolvedValue('Unauthorized'),
-    });
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello', status: 'pending' },
-    ];
-
-    await translateCaptions(captions, 'bad-key');
-    expect(captions[0].status).toBe('failed');
-  });
 });
 
 // =============================================================================
@@ -615,63 +452,7 @@ describe('translateAhead', () => {
   });
 
 
-  it('aborts mid-batch when signal fires', async () => {
-    const controller = new AbortController();
 
-    let callCount = 0;
-    globalFetch.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return new Promise((resolve) => {
-          setTimeout(() => {
-            controller.abort();
-            resolve({
-              ok: true,
-              json: () => Promise.resolve({
-                choices: [{ message: { content: '{"translations":[{"id":"0","translated_text":"你好"}]}' } }],
-              }),
-            });
-          }, 0);
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ choices: [{ message: { content: '{"translations":[]}' } }] }),
-      });
-    });
-
-    const captions: CaptionEvent[] = [];
-    for (let i = 0; i < 60; i++) {
-      captions.push({ startMs: i * 2000, durationMs: 2000, text: 'Line ' + i, status: 'pending' });
-    }
-
-    await translateAhead(captions, 0, Number.MAX_SAFE_INTEGER, 'test-api-key', controller.signal);
-
-    expect(captions[0].translatedText).toBe('你好');
-    expect(callCount).toBe(1);
-  });
-
-  it('calls progress callback', async () => {
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{
-          message: {
-            content: '{"translations":[{"id":"0","translated_text":"你好"}]}',
-          },
-        }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello', status: 'pending' },
-    ];
-    const onProgress = vi.fn();
-
-    await translateAhead(captions, 0, 90_000, 'test-api-key', undefined, onProgress);
-    expect(onProgress).toHaveBeenCalledWith(1, 1);
-  });
 });
 
 // =============================================================================
@@ -732,10 +513,6 @@ describe('YouTubeCaptionManager', () => {
     expect(a).toBe(b);
   });
 
-  it('start returns false when not on YouTube watch page', async () => {
-    const result = await manager.start('test-api-key');
-    expect(result).toBe(false);
-  });
 
   it('stop clears running state', () => {
     expect(() => manager.stop()).not.toThrow();

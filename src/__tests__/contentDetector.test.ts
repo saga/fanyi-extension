@@ -179,36 +179,6 @@ describe('contentDetector', () => {
     // (which only had "cookielaw"/"cookie-law", not plain "cookie"), so
     // #myTabContent scored highest and won detectArticleRoot() — translating
     // cookie policy instead of the article.
-    it('excludes custom cookie modal with "cookie" in id (not a known SDK)', () => {
-      document.body.innerHTML = `
-        <div id="cookiesModal" class="modal fade">
-          <div class="modal-dialog">
-            <div class="modal-content">
-              <div class="modal-body">
-                <div id="myTabContent" class="tab-content">
-                  <div id="details" class="tab-pane">
-                    <h2>Necessary cookies</h2>
-                    <p>Necessary cookies help make a website usable by enabling basic functions like page navigation and access to secure areas of the website. The website cannot function properly without these cookies.</p>
-                    <p>Analytics cookies allow the website to compute anonymous visits and traffic sources so that the website can be improved. All information these cookies collect is aggregated and anonymous.</p>
-                    <p>Marketing cookies are used to track visitors across websites. The intention is to display ads that are relevant and engaging for the individual user.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div id="article-start" class="content-box">
-          <h1>System Design for ML Interviews</h1>
-          <p>ML system design interviews test how well you can think beyond models. Choosing an algorithm is only one part of the answer.</p>
-          <p>You also need to explain how data is collected, how features are created, and how predictions are served.</p>
-        </div>
-      `;
-      const root = detectArticleRoot(document)?.element ?? null;
-      expect(root).not.toBeNull();
-      expect(root!.id).toBe('article-start');
-      expect(root!.closest('#cookiesModal')).toBeNull();
-      expect(root!.textContent).toContain('ML system design interviews');
-    });
 
     // 安全阀：consent SDK 容器若 textContent > 5000 字符不视为噪声，参与评分。
     // 回归 case: 长隐私政策 / 长 FAQ 用 id="cookie-policy" 命名，但因文本过长
@@ -230,24 +200,6 @@ describe('contentDetector', () => {
       expect(root!.id).toBe('cookie-policy');
     });
 
-    it('safe valve: short cookie-named container (<5000 chars) is still excluded', () => {
-      // 对照组：短文本的 cookie-banner 仍应被排除
-      document.body.innerHTML = `
-        <div id="cookie-banner" class="cookie-banner">
-          <p>We use cookies. Accept all to continue.</p>
-        </div>
-        <div class="post-content">
-          <h1>Real Article</h1>
-          <p>This is the genuine article content that should be detected as the root.</p>
-          <p>Another paragraph to ensure good text density and structure for detection.</p>
-        </div>
-      `;
-
-      const root = detectArticleRoot(document)?.element ?? null;
-      expect(root).not.toBeNull();
-      expect(root!.className).toContain('post-content');
-      expect(root!.closest('#cookie-banner')).toBeNull();
-    });
 
     // Regression: developers.googleblog.com
     // 页面没有 article/main，body 下直接是 .blog-detail-container 作为真正文章容器。

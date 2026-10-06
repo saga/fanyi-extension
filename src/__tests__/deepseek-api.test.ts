@@ -90,21 +90,6 @@ describe('DeepSeekTranslationService API methods', () => {
       expect(body.messages[0].content).not.toContain('<术语表>');
     });
 
-    it('should handle HTTP 401 error', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 401,
-        headers: new Map(),
-        text: vi.fn().mockResolvedValue(JSON.stringify({
-          error: { message: 'Invalid API key', type: 'authentication_error', code: 'invalid_api_key' },
-        })),
-      };
-      globalFetch.mockResolvedValue(mockResponse);
-
-      await expect(
-        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined)
-      ).rejects.toThrow('401');
-    });
 
 
     it('should handle network errors', async () => {

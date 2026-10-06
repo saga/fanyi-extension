@@ -119,39 +119,130 @@ function buildClientInfo() {
 }
 
 /**
- * 查询服务端是否已有当前 URL 的翻译缓存。
- * @returns 命中的翻译后 HTML；未命中返回 null。
+ * 计算 blocks 的「结构指纹」——id + tag 序列。
+ *
+ * 为什么需要它：服务端缓存里的双语 HTML 靠 `data-fanyi-block-id` 回填，而这些
+ * id 只在**生成缓存时那次抽取**里才有意义。页面动态变化（插入/删除/重排块）会让
+ * 同一个 id 指向不同元素，缓存命中后译文就会贴到错误的块上（a16z.news 故障：
+ * 标题拿到正文段落的译文）。
+ *
+ * 只取 id+tag 而**不含文本**：文本变化（点赞数 142→184）不影响 id→元素的对应关系，
+ * 不应让整页缓存失效；而块集合的结构变化一定会改变这个序列。
+ *
+ * @returns 形如 `b1:h1|b2:p|...` 的字符串，直接作为 contentHash 发给服务端。
  */
-export async function checkServerCache(config: Config): Promise<string | null> {
+export function computeBlocksFingerprint(blocks: TextBlock[]): string {
+  return blocks.map((b) => `${b.id}:${b.tag}`).join('|');
+}
+
+/** 归一化文本用于映射校验：去掉零宽/不可见格式字符 + 折叠空白。 */
+function normalizeForMatch(text: string): string {
+  return text
+    .replace(/[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 校验服务端元素里的原文与当前 block 文本是否指向同一段内容。
+ *
+ * 方向是**单向包含**：服务端原文应当是客户端 block 文本的超集。因为客户端文本可能
+ * 剔除了站点装饰（HN 的 .titleline 去掉 .comhead）或合并了 letter-spacing
+ * （"S t a r t" → "Start"），所以客户端文本更短是正常的；反过来（服务端原文比
+ * 客户端文本还短）则说明两者不是同一段内容。
+ *
+ * 额外比较「去掉全部空白」的形态，兼容 collapseSpacedText 造成的差异。
+ */
+function isSameBlockText(serverOriginal: string, blockText: string): boolean {
+  const a = normalizeForMatch(serverOriginal);
+  const b = normalizeForMatch(blockText);
+  if (!a || !b) return false;
+  if (a === b || a.includes(b)) return true;
+  const a2 = a.replace(/\s+/g, '');
+  const b2 = b.replace(/\s+/g, '');
+  return a2 === b2 || a2.includes(b2);
+}
+
+/**
+ * 查询服务端是否已有当前 URL 的翻译缓存。
+ *
+ * `blocks` 用于计算 contentHash：服务端据此判断缓存里的 block id 映射是否仍与
+ * 当前页面一致。**参数是必填的**——不传指纹时服务端无法做陈旧校验，只能无条件返回
+ * 缓存，页面结构一变就会出现译文错位（a16z.news 故障就是这么来的）。
+ *
+ * @returns 命中的翻译后 HTML；未命中或缓存已过期（410）返回 null。
+ */
+export async function checkServerCache(
+  config: Config,
+  blocks: TextBlock[],
+): Promise<string | null> {
   const serverUrl = getDefaultServerUrl(config);
   const checkUrl = new URL(serverUrl);
   checkUrl.pathname = checkUrl.pathname.replace(/\/$/, '') + '/check';
   checkUrl.searchParams.set('url', window.location.href);
   checkUrl.searchParams.set('source', config.sourceLang || 'en');
   checkUrl.searchParams.set('target', config.targetLang || 'zh');
+  if (blocks.length > 0) {
+    checkUrl.searchParams.set('contentHash', computeBlocksFingerprint(blocks));
+  }
 
   const response = await fetch(checkUrl.toString(), {
     method: 'GET',
     headers: { 'X-Session-Id': getSessionId() },
   });
-  if (!response.ok) {
-    throw new Error(`服务端缓存检查失败: ${response.status} ${response.statusText}`);
-  }
   // 204 表示未缓存
   if (response.status === 204) {
     return null;
   }
+  // 410 表示缓存已过期（服务端比对 contentHash 不一致）→ 当成未命中，
+  // 让调用方走完整 pipeline 重新翻译。这不是错误，不要抛异常。
+  if (response.status === 410) {
+    logger.debug('[ServerTranslation] Server cache stale (410), will re-translate.');
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`服务端缓存检查失败: ${response.status} ${response.statusText}`);
+  }
   return response.text();
+}
+
+export interface ServerApplyResult {
+  /** 成功回填译文的 block id 集合 */
+  translatedIds: Set<string>;
+  /**
+   * 命中了 id、但服务端原文与当前 block 文本对不上的块数（这些块已被跳过，没有回填）。
+   *
+   * >0 说明这份 HTML 的 id→元素映射已经过期（缓存陈旧 / 页面结构变了）。
+   * 调用方只需要记录/上报：结构性变化本应由 checkServerCache 的 contentHash 指纹
+   * 提前拦掉（410 → 未命中），走到这里通常只是单个块原地改了文案（如点赞数），
+   * 所以**不**要为此触发整页重译。
+   */
+  mismatched: number;
+}
+
+/** 取服务端元素里的「原文」文本，用于校验 id→元素映射是否仍然成立。 */
+function getServerOriginalText(el: Element): string {
+  const orig = el.querySelector('.fanyi-original');
+  if (orig) return orig.textContent ?? '';
+  // 兜底：没有 .fanyi-original 时，用「去掉 .fanyi-translation 后的文本」
+  const clone = el.cloneNode(true) as Element;
+  clone.querySelectorAll('.fanyi-translation').forEach((n) => n.remove());
+  return clone.textContent ?? '';
 }
 
 /**
  * 解析服务端返回的双语对照 HTML，按 block id 回填到当前 DOM。
+ *
+ * ⚠️ 回填前**必须校验**服务端元素里的原文与当前 block 文本是否一致：
+ * `data-fanyi-block-id` 只在生成这份 HTML 的那次抽取里才有意义，页面结构一变
+ * （块被插入/删除/重排），同一个 id 就指向另一个元素，直接回填会把译文贴错。
+ * 校验不通过时跳过该块并计入 `mismatched`，由调用方决定是否重新翻译。
  */
 export function applyServerTranslatedHtml(
   translatedHtml: string,
   blocks: TextBlock[],
   nodeMap: Map<string, Node>,
-): Set<string> {
+): ServerApplyResult {
   const parser = new DOMParser();
   // 服务端返回的 HTML 可能包含 <base href="...">，用于相对路径解析。
   // 但某些站点 CSP 设置 base-uri 'none'，DOMParser 解析 <base> 时会触发违例。
@@ -162,6 +253,7 @@ export function applyServerTranslatedHtml(
   const translatedDoc = parser.parseFromString(sanitizedHtml, 'text/html');
 
   const translatedIds = new Set<string>();
+  let mismatched = 0;
   for (const block of blocks) {
     const el = translatedDoc.querySelector(`[data-fanyi-block-id="${block.id}"]`);
     if (!el) continue;
@@ -172,6 +264,20 @@ export function applyServerTranslatedHtml(
     const translatedText = translationSpan?.textContent?.trim();
     if (!translatedText || translatedText === block.text) continue;
 
+    // 映射校验：服务端这份 HTML 里该 id 对应的原文，必须就是当前这个块的内容。
+    if (!isSameBlockText(getServerOriginalText(el), block.text)) {
+      mismatched++;
+      logger.warn(
+        '[ServerTranslation] block id mapping stale for',
+        block.id,
+        '| block=',
+        block.text.substring(0, 60),
+        '| server original=',
+        getServerOriginalText(el).substring(0, 60),
+      );
+      continue;
+    }
+
     const node = nodeMap.get(block.id);
     if (node instanceof HTMLElement) {
       applyBlockTranslation(node, translatedText);
@@ -179,7 +285,7 @@ export function applyServerTranslatedHtml(
     }
   }
 
-  return translatedIds;
+  return { translatedIds, mismatched };
 }
 
 /**
@@ -194,7 +300,7 @@ export async function translateViaServer(
   config: Config,
   blocks: TextBlock[],
   nodeMap: Map<string, Node>,
-): Promise<Set<string>> {
+): Promise<ServerApplyResult> {
   const serverUrl = getDefaultServerUrl(config);
   const url = window.location.href;
   // 服务端翻译使用的 LLM 提供方，直接复用本地 provider 配置
@@ -225,6 +331,9 @@ export async function translateViaServer(
     provider,
     // 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话
     promptStyle: config.promptStyle,
+    // 本次抽取的结构指纹。服务端原样存进 content_hash，下次 check 时用它判断
+    // 缓存里的 block id 映射是否仍与当前页面一致（不一致就 410 重译，避免译文错位）。
+    contentHash: computeBlocksFingerprint(blocks),
     // 客户端浏览器/设备信息，供服务端错误日志标注（见 vocal-saga lib/clientInfo）
     client: buildClientInfo(),
     // 单次翻译会话标识，供服务端把 check→page→报错 整条链路关联到同一 sid

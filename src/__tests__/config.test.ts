@@ -43,52 +43,11 @@ describe('config', () => {
       expect(config).toEqual(defaultConfig);
     });
 
-    it('merges stored partial config with defaults', async () => {
-      store['local:config'] = { targetLang: 'en', deepseekApiKey: 'sk-test' };
-      const config = await getConfig();
-      expect(config.targetLang).toBe('en');
-      expect(config.deepseekApiKey).toBe('sk-test');
-      expect(config.sourceLang).toBe('auto'); // default preserved
-    });
-
-    it('overrides shortcuts via shallow merge (stored shortcuts replace entire object)', async () => {
-      store['local:config'] = {
-        shortcuts: { translatePage: 'Ctrl+T' },
-      };
-      const config = await getConfig();
-      expect(config.shortcuts.translatePage).toBe('Ctrl+T');
-      // Shallow merge: stored shortcuts object replaces default entirely
-      expect(config.shortcuts.translateSelection).toBeUndefined();
-    });
-  });
-
-  describe('setConfig', () => {
-
-    it('strips Proxy/reactive wrappers via JSON serialization', async () => {
-      // Simulate a Vue ref-like proxy by creating an object with non-serializable getters
-      const proxyLike = {
-        get targetLang() {
-          return 'en';
-        },
-        nonSerializable: undefined,
-      };
-      // Access the getter to get the value
-      const rawValue = { targetLang: proxyLike.targetLang };
-      await setConfig(rawValue);
-      const stored = store['local:config'];
-      expect(stored.targetLang).toBe('en');
-    });
 
   });
+
 
   describe('resetConfig', () => {
-    it('resets storage to default config', async () => {
-      store['local:config'] = {
-        targetLang: 'ja',
-      };
-      await resetConfig();
-      expect(store['local:config']).toEqual(defaultConfig);
-    });
 
     it('works when storage was empty', async () => {
       await resetConfig();

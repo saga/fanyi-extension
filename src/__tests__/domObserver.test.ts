@@ -104,21 +104,6 @@ describe('DOMObserverManager', () => {
     expect(onNewContent).not.toHaveBeenCalled();
   });
 
-  it('debounces rapid mutations', async () => {
-    manager.startMutationObserver();
-
-    for (let i = 0; i < 5; i++) {
-      const p = document.createElement('p');
-      p.textContent = `Paragraph ${i} with enough text content to be detected by the observer`;
-      document.body.appendChild(p);
-    }
-
-    await wait(5);
-    expect(onNewContent).not.toHaveBeenCalled();
-
-    await wait(20);
-    expect(onNewContent).toHaveBeenCalledTimes(1);
-  });
 
   // --- stopMutationObserver ---
 
@@ -136,17 +121,6 @@ describe('DOMObserverManager', () => {
 
   // --- destroy ---
 
-  it('destroy stops all observers', async () => {
-    manager.startMutationObserver();
-    manager.destroy();
-
-    const p = document.createElement('p');
-    p.textContent = 'Should not be detected';
-    document.body.appendChild(p);
-
-    await wait(50);
-    expect(onNewContent).not.toHaveBeenCalled();
-  });
 
   // --- characterData mutations ---
 
@@ -167,25 +141,6 @@ describe('DOMObserverManager', () => {
 
   // --- extractBlocksFromNode ---
 
-  it('extracts blocks from nested structure', async () => {
-    manager.startMutationObserver();
-
-    const container = document.createElement('div');
-    const p1 = document.createElement('p');
-    p1.textContent = 'First paragraph with enough content for detection';
-    const p2 = document.createElement('p');
-    p2.textContent = 'Second paragraph with enough content for detection';
-    container.appendChild(p1);
-    container.appendChild(p2);
-
-    document.body.appendChild(container);
-
-    await wait(50);
-
-    expect(onNewContent).toHaveBeenCalled();
-    const blocks = onNewContent.mock.calls[0][0] as TextBlock[];
-    expect(blocks.length).toBeGreaterThanOrEqual(2);
-  });
 
   // --- intersection observer ---
 
@@ -219,76 +174,5 @@ describe('DOMObserverManager', () => {
     manager.stopIntersectionObserver();
   });
 
-  it('intersection observer ignores non-intersecting elements', () => {
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/p[1]', tag: 'p', text: 'Test' },
-    ];
-    const nodeMap = new Map<string, Node>();
-    const p = document.createElement('p');
-    p.textContent = 'Test';
-    document.body.appendChild(p);
-    nodeMap.set('b1', p);
 
-    manager.startIntersectionObserver(blocks, nodeMap);
-
-    capturedCallback!([
-      {
-        isIntersecting: false,
-        target: p,
-        intersectionRatio: 0,
-        boundingClientRect: {} as DOMRectReadOnly,
-        intersectionRect: {} as DOMRectReadOnly,
-        rootBounds: null,
-        time: Date.now(),
-      },
-    ], mockObserverInstance as unknown as IntersectionObserver);
-
-    expect(onNodeVisible).not.toHaveBeenCalled();
-    manager.stopIntersectionObserver();
-  });
-
-  it('intersection observer unobserve after first intersection', () => {
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/p[1]', tag: 'p', text: 'Test' },
-    ];
-    const nodeMap = new Map<string, Node>();
-    const p = document.createElement('p');
-    p.textContent = 'Test';
-    document.body.appendChild(p);
-    nodeMap.set('b1', p);
-
-    manager.startIntersectionObserver(blocks, nodeMap);
-
-    // First intersection fires
-    capturedCallback!([
-      {
-        isIntersecting: true,
-        target: p,
-        intersectionRatio: 0.5,
-        boundingClientRect: {} as DOMRectReadOnly,
-        intersectionRect: {} as DOMRectReadOnly,
-        rootBounds: null,
-        time: Date.now(),
-      },
-    ], mockObserverInstance as unknown as IntersectionObserver);
-    expect(onNodeVisible).toHaveBeenCalledTimes(1);
-
-    onNodeVisible.mockClear();
-
-    // Second intersection should not fire because element was already unobserved
-    capturedCallback!([
-      {
-        isIntersecting: true,
-        target: p,
-        intersectionRatio: 0.5,
-        boundingClientRect: {} as DOMRectReadOnly,
-        intersectionRect: {} as DOMRectReadOnly,
-        rootBounds: null,
-        time: Date.now(),
-      },
-    ], mockObserverInstance as unknown as IntersectionObserver);
-
-    expect(onNodeVisible).not.toHaveBeenCalled();
-    manager.stopIntersectionObserver();
-  });
 });

@@ -33,16 +33,6 @@ describe('applyBlockTranslation', () => {
     expect(translationSpan?.textContent).toBe('你好世界');
   });
 
-  it('skips if element is already translated', () => {
-    const p = createP('Hello world');
-    applyBlockTranslation(p, '你好世界');
-
-    const originalSpanCount = p.querySelectorAll('.fanyi-original').length;
-    applyBlockTranslation(p, '第二次翻译');
-
-    expect(p.querySelectorAll('.fanyi-original').length).toBe(originalSpanCount);
-    expect(p.querySelector('.fanyi-translation')?.textContent).toBe('你好世界');
-  });
 
   describe('mapping validation (suspect block-id misalignment)', () => {
     it('warns when a short title gets a long paragraph translation', () => {

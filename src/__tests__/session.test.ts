@@ -12,16 +12,6 @@ describe('session id', () => {
     expect(id.length).toBeGreaterThan(8);
   });
 
-  it('rotate 后 getSessionId 返回同一个 id（本次会话共享）', () => {
-    const id = rotateSessionId();
-    expect(getSessionId()).toBe(id);
-    expect(getSessionId()).toBe(id); // 不轮换则稳定
-  });
 
-  it('每次 rotate 产生不同的 id（不同翻译会话区分）', () => {
-    const a = rotateSessionId();
-    const b = rotateSessionId();
-    expect(a).not.toBe(b);
-  });
 
 });

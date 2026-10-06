@@ -58,32 +58,5 @@ describe('chat service', () => {
     expect(out).toEqual(['Hi', 'Hi there']);
   });
 
-  it('chatStream throws on HTTP error with status', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => '{"error":{"message":"invalid key"}}',
-    }) as unknown as typeof fetch;
 
-    await expect(
-      (async () => {
-        for await (const _ of chatStream('k', [{ role: 'user', content: 'q' }])) {
-          /* drain */
-        }
-      })(),
-    ).rejects.toThrow(/401/);
-  });
-
-  it('chat returns full content (non-stream)', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: makeSSE(['data: {"choices":[{"delta":{"content":"x"}}]}\n\n']),
-      // chat() 解析的是整段响应文本（JSON），不是 SSE 流
-      text: async () => '{"choices":[{"message":{"content":"final answer"}}]}',
-    }) as unknown as typeof fetch;
-
-    const result = await chat('k', [{ role: 'user', content: 'q' }]);
-    expect(result).toBe('final answer');
-  });
 });

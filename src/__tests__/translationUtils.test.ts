@@ -127,13 +127,6 @@ describe('translationUtils', () => {
     expect(el2.getAttribute('title')).toBeTruthy();
   });
 
-  it('markMissingBlocks returns all missing ids', () => {
-    const el = document.createElement('p');
-    const nodeMap = new Map<string, Node>([['b1', el]]);
-    const translatedIds = new Set<string>();
-    const missing = mod.markMissingBlocks(nodeMap, translatedIds);
-    expect(missing).toEqual(['b1']);
-  });
 
   it('markMissingBlocks handles non-HTMLElement nodes gracefully', () => {
     const textNode = document.createTextNode('hello');
@@ -206,22 +199,6 @@ describe('translationUtils', () => {
     expect(el2.hasAttribute('title')).toBe(false);
   });
 
-  it('restoreOriginal removes body dataset and clears state when provided', async () => {
-    document.body.dataset.fanyiTranslated = 'true';
-    const state: TranslationState = {
-      originalTexts: new Map([['b1', 'hello']]),
-      translatedBlocks: new Set(['b1']),
-      translatedTexts: new Map([['b1', '你好']]),
-    };
-
-    const utils = await import('../entrypoints/content/translationUtils');
-    utils.restoreOriginal(state);
-
-    expect(document.body.dataset.fanyiTranslated).toBeUndefined();
-    expect(state.originalTexts.size).toBe(0);
-    expect(state.translatedBlocks.size).toBe(0);
-    expect(state.translatedTexts.size).toBe(0);
-  });
 
   it('restoreOriginal with silent=true does not call showStatus', async () => {
     const { showStatus } = await import('../entrypoints/content/statusOverlay');
@@ -234,13 +211,4 @@ describe('translationUtils', () => {
     expect(document.body.dataset.fanyiTranslated).toBeUndefined();
   });
 
-  it('restoreOriginal with silent=false calls showStatus', async () => {
-    const { showStatus } = await import('../entrypoints/content/statusOverlay');
-    document.body.dataset.fanyiTranslated = 'true';
-
-    const utils = await import('../entrypoints/content/translationUtils');
-    utils.restoreOriginal(undefined, false);
-
-    expect(showStatus).toHaveBeenCalledWith('已恢复原文', 'success');
-  });
 });

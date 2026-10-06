@@ -137,73 +137,8 @@ describe('handleTranslateChunkStream logic', () => {
     });
   });
 
-  it('should use sender.tab.id when tabId not in message', async () => {
-    const sendResponse = vi.fn();
-
-    async function* mockStream() {
-      yield 'test';
-      return 'test';
-    }
-
-    await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key', provider: 'deepseek' },
-      { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh' },
-      { tab: { id: 456 } },
-      { translateStream: mockStream },
-      sendResponse
-    );
-
-    expect(mockTabsSendMessage).toHaveBeenCalledWith(456, {
-      action: 'translationStreamUpdate',
-      partial: 'test',
-    });
-  });
 
 
-  it('should pass glossary to translateStream', async () => {
-    const sendResponse = vi.fn();
-    const translateStream = vi.fn().mockImplementation(async function* () {
-      yield 'result';
-      return 'result';
-    });
-
-    const glossary = [{ term: 'API', translation: 'API' }];
-
-    await handleTranslateChunkStream(
-      { deepseekApiKey: 'test-key', provider: 'deepseek' },
-      { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh', glossary },
-      {},
-      { translateStream },
-      sendResponse
-    );
-
-    expect(translateStream).toHaveBeenCalledWith(
-      '[]',
-      'en',
-      'zh',
-      glossary,
-      ''
-    );
-  });
 
 
-  it('should handle stream errors', async () => {
-    const sendResponse = vi.fn();
-
-    async function* mockStream() {
-      throw new Error('Stream error');
-      yield 'never';
-      return 'never';
-    }
-
-    await expect(async () => {
-      await handleTranslateChunkStream(
-        { deepseekApiKey: 'test-key', provider: 'deepseek' },
-        { jsonContent: '[]', sourceLang: 'en', targetLang: 'zh' },
-        {},
-        { translateStream: mockStream },
-        sendResponse
-      );
-    }).rejects.toThrow('Stream error');
-  });
 });

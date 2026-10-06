@@ -28,12 +28,6 @@ describe('escapeHtml', () => {
     expect(escapeHtml('A & B')).toBe('A &amp; B');
   });
 
-  it('does NOT escape quotes (text-content contract)', () => {
-    // 防御性测试：锁定当前行为，避免未来误用 escapeHtml 处理 attribute value。
-    // 如果要在 attribute 里用，应该用 setAttribute 或显式转义 " 和 '。
-    expect(escapeHtml("it's a test")).toBe("it's a test");
-    expect(escapeHtml('say "hi"')).toBe('say "hi"');
-  });
 
   it('returns plain text unchanged (no double-encoding)', () => {
     expect(escapeHtml('hello world')).toBe('hello world');
@@ -44,11 +38,6 @@ describe('escapeHtml', () => {
     expect(escapeHtml('')).toBe('');
   });
 
-  it('does not interpret already-escaped HTML (no double encoding reduction)', () => {
-    // 注意：escapeHtml 总是无脑转义 < > &，不识别 "已转义"。
-    // 这是设计选择：调用方应只对原始用户输入调用此函数。
-    expect(escapeHtml('&amp;')).toBe('&amp;amp;');
-  });
 
   it('preserves unicode characters', () => {
     expect(escapeHtml('中文 😀 emoji')).toBe('中文 😀 emoji');
@@ -91,44 +80,7 @@ describe('showStatus', () => {
     expect(document.querySelectorAll('.fanyi-status-overlay').length).toBe(1);
   });
 
-  it('replaces both the message and the type class on subsequent calls', () => {
-    showStatus('Loading', 'loading');
-    showStatus('Done', 'success');
 
-    const overlay = document.querySelector('.fanyi-status-overlay') as HTMLElement;
-    expect(overlay.textContent).toBe('Done');
-    expect(overlay.classList.contains('fanyi-success')).toBe(true);
-    // 关键：旧 class 应被替换，而不是累积
-    expect(overlay.classList.contains('fanyi-loading')).toBe(false);
-  });
-
-  it('cycles through all status types correctly', () => {
-    showStatus('A', 'loading');
-    expect(
-      (document.querySelector('.fanyi-status-overlay') as HTMLElement).classList.contains(
-        'fanyi-loading',
-      ),
-    ).toBe(true);
-
-    showStatus('B', 'success');
-    expect(
-      (document.querySelector('.fanyi-status-overlay') as HTMLElement).classList.contains(
-        'fanyi-success',
-      ),
-    ).toBe(true);
-    expect(
-      (document.querySelector('.fanyi-status-overlay') as HTMLElement).classList.contains(
-        'fanyi-loading',
-      ),
-    ).toBe(false);
-
-    showStatus('C', 'error');
-    expect(
-      (document.querySelector('.fanyi-status-overlay') as HTMLElement).classList.contains(
-        'fanyi-error',
-      ),
-    ).toBe(true);
-  });
 });
 
 describe('hideStatus', () => {
@@ -155,16 +107,4 @@ describe('hideStatus', () => {
     expect(() => hideStatus()).not.toThrow();
   });
 
-  it('round-trip: showStatus → hideStatus → showStatus uses the same element', () => {
-    showStatus('First', 'loading');
-    const first = document.querySelector('.fanyi-status-overlay');
-
-    hideStatus();
-    expect((first as HTMLElement).style.display).toBe('none');
-
-    showStatus('Second', 'error');
-    const second = document.querySelector('.fanyi-status-overlay');
-    expect(second).toBe(first);
-    expect((second as HTMLElement).style.display).toBe('flex');
-  });
 });

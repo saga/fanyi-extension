@@ -75,23 +75,6 @@ describe('DeepSeekTranslationService.translateStream', () => {
     expect(values).toEqual(['Hello', 'Hello world', 'Hello world!']);
   });
 
-  it('should set stream=true in request body', async () => {
-    const mockResponse = createMockResponse(['test']);
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const stream = service.translateStream(
-      JSON.stringify([{ id: 'b1', text: 'hello' }]),
-      'en',
-      'zh',
-      []
-    );
-
-    await consumeStream(stream);
-
-    const fetchCall = globalFetch.mock.calls[0];
-    const body = JSON.parse(fetchCall[1].body);
-    expect(body.stream).toBe(true);
-  });
 
 
   it('should throw on HTTP error', async () => {

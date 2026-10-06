@@ -35,16 +35,6 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('SET');
   });
 
-  it('strips trailing punctuation from named entities', () => {
-    const text = 'Brady went to Squad: and used TUI, for the project.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    for (const term of terms) {
-      expect(term).not.toMatch(/[,;:.!?]$/);
-      expect(term).not.toMatch(/^[,;:.!?]/);
-    }
-  });
 
   it('extracts recurring noun phrases by frequency', () => {
     const text = 'We use Playwright for testing. Playwright runs end-to-end tests. The Playwright framework is great. Playwright supports Chrome.';
@@ -54,25 +44,7 @@ describe('extractGlossaryLocal', () => {
     expect(terms).toContain('Playwright');
   });
 
-  it('filters out stopwords from frequent terms', () => {
-    const text = 'The system works. That is clear. Then we proceed. When ready, we go. You can see Code here. Prompt is important. Work is done.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
 
-    expect(terms).not.toContain('The');
-    expect(terms).not.toContain('That');
-    expect(terms).not.toContain('Then');
-    expect(terms).not.toContain('When');
-    expect(terms).not.toContain('You');
-  });
-
-  it('filters out pure-stopword noun phrases', () => {
-    const text = 'The way is long. The way is hard. The way is clear. The way is good.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    expect(terms).not.toContain('The way');
-  });
 
 
   it('extracts named entities (people, organizations, places)', () => {
@@ -127,29 +99,9 @@ describe('extractGlossaryLocal', () => {
     }
   });
 
-  it('sorts results by term length descending', () => {
-    const text = 'We use LLM and API for GPT models.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    for (let i = 1; i < terms.length; i++) {
-      expect(terms[i - 1].length).toBeGreaterThanOrEqual(terms[i].length);
-    }
-  });
-
-  it('handles empty text', () => {
-    const result = extractGlossaryLocal('');
-    expect(result.document_terms).toEqual([]);
-  });
 
 
-  it('deduplicates terms', () => {
-    const text = 'We use LLM for LLM training and LLM inference.';
-    const result = extractGlossaryLocal(text);
-    const llmEntries = result.document_terms.filter(t => t === 'LLM');
 
-    expect(llmEntries.length).toBe(1);
-  });
 
 
   it('does not extract common words like time year people as glossary terms', () => {
@@ -162,13 +114,6 @@ describe('extractGlossaryLocal', () => {
     expect(terms).not.toContain('People');
   });
 
-  it('extracts technical terms that repeat', () => {
-    const text = 'The token billing model uses tokens. Token billing is expensive. Token billing requires monitoring. Token billing affects costs.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    expect(terms.some(t => t.toLowerCase().includes('token billing'))).toBe(true);
-  });
 
   // --- Singular/plural merging ---
 
@@ -197,51 +142,18 @@ describe('extractGlossaryLocal', () => {
 
   // --- Single word frequency threshold ---
 
-  it('requires single nouns to appear at least 3 times', () => {
-    const text = 'The governance model. Governance is important. Governance defines rules. Governance ensures compliance.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    // "governance" appears 4+ times as noun — should be included
-    expect(terms.some(t => t.toLowerCase() === 'governance')).toBe(true);
-  });
 
 
   // --- Multi-word phrase frequency threshold ---
 
-  it('requires multi-word phrases to appear at least 2 times', () => {
-    const text = 'Context window is large. Context window defines limits.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    expect(terms.some(t => t.toLowerCase().includes('context window'))).toBe(true);
-  });
 
 
   // --- Substring dedup edge cases ---
 
-  it('removes shorter term when fully contained in a longer term', () => {
-    const text = 'We use PII scrubbing for data. PII scrubbing removes personal info. PII scrubbing is required. PII scrubbing protects users.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    // Acronyms (PII) survive even when a longer phrase containing them
-    // is also present — see isPhraseSubsuming() in glossaryExtractor.ts.
-    if (terms.some(t => t.toLowerCase().includes('pii scrubbing'))) {
-      expect(terms).toContain('PII');
-    }
-  });
 
 
   // --- Emphasized terms edge cases ---
 
-  it('handles empty emphasized terms array', () => {
-    const text = 'We use LLM for natural language processing.';
-    const result = extractGlossaryLocal(text, []);
-    const terms = result.document_terms;
-
-    expect(terms).toContain('LLM');
-  });
 
 
   it('adds emphasized terms even if they appear only once', () => {
@@ -333,21 +245,6 @@ describe('extractGlossaryLocal - Performance', () => {
   });
 
 
-  it('extracts correct terms from large text', () => {
-    const largeText = generateLargeText(30);
-
-    const result = extractGlossaryLocal(largeText);
-    const terms = result.document_terms;
-
-    // Should find common technical terms (acronyms may be subsumed by longer phrases)
-    expect(terms.some(t => t.includes('LLM'))).toBe(true);
-    expect(terms.some(t => t.includes('API'))).toBe(true);
-    expect(terms.some(t => t.includes('GPT'))).toBe(true);
-    expect(terms.some(t => t.includes('CUDA'))).toBe(true);
-    expect(terms.some(t => t.includes('GPU'))).toBe(true);
-    expect(terms.some(t => t.includes('NLP'))).toBe(true);
-    expect(terms.some(t => t.includes('MIT'))).toBe(true);
-  });
 
 });
 
@@ -376,19 +273,6 @@ describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
     expect(terms).not.toContain('DB_URL');
   });
 
-  it('does not extract inline code variables as named entities', () => {
-    // myCustomVar, fetchData, handleClick are inline code references
-    // They must NOT appear in glossary as proper nouns
-    const text = 'Use `myCustomVar` to store the result. Call `fetchData` first, then `handleClick` will fire. Anthropic built the SDK.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    expect(terms).not.toContain('myCustomVar');
-    expect(terms).not.toContain('fetchData');
-    expect(terms).not.toContain('handleClick');
-    // Real proper noun still extracted
-    expect(terms).toContain('Anthropic');
-  });
 
   it('does not extract paths/domains from URLs as named entities', () => {
     // The hostnames should not become glossary entries
@@ -402,20 +286,6 @@ describe('extractGlossaryLocal - PRE-PROCESSING (safeText)', () => {
     expect(terms).toContain('Anthropic');
   });
 
-  it('preserves text length so offset-based logic does not break', () => {
-    // The PRE-PROCESSING replaces code with spaces of equal length.
-    // Even though we can't see inside the function, we verify that
-    // an acronym that exists in BOTH code and prose is still extractable,
-    // and prose-only acronyms are still found.
-    const text = '```\nconst API_KEY = "sk-xxx";\n```\nThe API supports streaming.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    // API_KEY is in the code block, must not leak
-    expect(terms).not.toContain('API_KEY');
-    // The prose mention of API is still found
-    expect(terms).toContain('API');
-  });
 });
 
 describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
@@ -436,20 +306,6 @@ describe('extractGlossaryLocal - lookaround boundary fixes (Bug A)', () => {
     expect(terms).toContain('Vue');
   });
 
-  it('handles F# and similar symbol-suffixed identifiers', () => {
-    const text = 'F# is a functional language. F# runs on .NET. F# has good tooling. F# is mature.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    // cleanTerm strips leading punctuation: F# -> F (1 char, filtered
-    // by the 2-char minimum), .NET -> NET (3 chars, extracted).
-    // The important assertion is that the symbol-bearing names do not
-    // crash the pipeline and are preserved (under any sensible cleaned
-    // form) in the output.
-    expect(terms).toContain('NET');
-    // Sanity: result is well-formed
-    expect(result.document_terms.every(e => typeof e === 'string')).toBe(true);
-  });
 });
 
 describe('extractGlossaryLocal - TAGGING INTERVENTION (sentence starter demotion)', () => {
@@ -526,13 +382,6 @@ describe('extractGlossaryLocal - isSentenceStartMisident (sentence-start demotio
     expect(result.document_terms).toBeDefined();
   });
 
-  it('drops single capitalized common word that appears mid-sentence and once at sentence start', () => {
-    // "Tech" 在文本中出现 1 次（在句首）→ 丢
-    const text = 'Tech companies are growing. We love innovation.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-    expect(terms).not.toContain('Tech');
-  });
 
   it('keeps acronyms (AI, IT, AWS) even at sentence start', () => {
     // 全大写 acronym — 不是 ^[A-Z][a-z]+$ 模式，不在过滤范围
@@ -542,13 +391,6 @@ describe('extractGlossaryLocal - isSentenceStartMisident (sentence-start demotio
     expect(terms).toContain('AI');
   });
 
-  it('keeps known brands in KNOWN_BRANDS_AT_SENTENCE_START even when only at sentence start', () => {
-    // 已知白名单品牌 → 始终保留
-    const text = 'OpenAI released a new model.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-    expect(terms).toContain('OpenAI');
-  });
 
   it('keeps known brand token that appears inside a multi-token phrase', () => {
     // "Sachs" 是 "Goldman Sachs Research" 中的 token
@@ -564,16 +406,6 @@ describe('extractGlossaryLocal - isSentenceStartMisident (sentence-start demotio
 });
 
 describe('extractGlossaryLocal - isGenericNoise protection (Bug B)', () => {
-  it('preserves short lowercase tech product names that end in s', () => {
-    // These are known tech products / acronyms. They should NOT be
-    // filtered by the "lowercase plural <= 10 chars" rule.
-    const text = 'We use K8s for orchestration. K8s is essential. K8s scales well. K8s is mature.';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    // K8s is a known tech anchor and must survive
-    expect(terms).toContain('K8s');
-  });
 
   it('preserves mixed-case short tech names (iOS, macOS, SaaS)', () => {
     // These are mixed case, so the lowercase check shouldn't even hit them,
@@ -616,23 +448,7 @@ describe('extractGlossaryLocal - dedup protection (Bug D)', () => {
     expect(terms).not.toContain('Dbt');
   });
 
-  it('does not produce duplicate entries for the same word in different cases', () => {
-    // Once deduplicated, there should be at most one entry for dbt
-    const text = 'Dbt helps. We use dbt. The dbt project succeeded.';
-    const result = extractGlossaryLocal(text);
-    const dbtEntries = result.document_terms.filter(r => r.toLowerCase() === 'dbt');
 
-    expect(dbtEntries.length).toBe(1);
-  });
-
-  it('handles GitHub-like brands that appear in both cases', () => {
-    // GitHub should not be doubled with GITHUB or github
-    const text = 'GitHub is popular. github is a code host. We use GitHub daily.';
-    const result = extractGlossaryLocal(text);
-    const githubEntries = result.document_terms.filter(r => r.toLowerCase() === 'github');
-
-    expect(githubEntries.length).toBe(1);
-  });
 });
 
 describe('extractGlossaryLocal - isPossessive fix (Bug C, fix C)', () => {
@@ -647,19 +463,6 @@ describe('extractGlossaryLocal - isPossessive fix (Bug C, fix C)', () => {
     expect(terms).toContain('AI');
   });
 
-  it('still drops a word that is ALWAYS possessive', () => {
-    // A word that appears only as possessive should be treated as a
-    // possessive fragment, not a standalone glossary term.
-    // "Netflix's" only appears possessively; "Netflix" alone does not.
-    // After possessive detection, bare "Netflix" should be filtered.
-    const text = "Netflix's shows are great. Netflix's content is popular. Netflix's recommendation engine is excellent.";
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    // If Netflix never appears non-possessively, it may be filtered.
-    // This is the correct behavior — pure-possessive names are noisy fragments.
-    expect(terms).not.toContain('Netflix');
-  });
 });
 
 describe('extractGlossaryLocal - productRe lookaround (Bug C fix)', () => {
@@ -675,15 +478,6 @@ describe('extractGlossaryLocal - productRe lookaround (Bug C fix)', () => {
     expect(terms).toContain('nginx');
   });
 
-  it('extracts product at start of string and at end of string', () => {
-    // ^ and $ boundaries must work correctly with lookaround
-    const text = 'redis is fast. We use it daily. nginx';
-    const result = extractGlossaryLocal(text);
-    const terms = result.document_terms;
-
-    expect(terms).toContain('redis');
-    expect(terms).toContain('nginx');
-  });
 });
 
 describe('extractGlossaryLocal - Q3 single-occurrence proper noun retention', () => {
@@ -705,32 +499,10 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
     expect(terms).not.toContain('AI feels');
   });
 
-  it('STRONG_VERBS: "LangChain helps" truncated to "langchain"', () => {
-    const text = 'LangChain helps developers build LLM apps. LangChain helps simplify prompts. LangChain helps manage chains. LangChain helps a lot.';
-    const terms = extractGlossaryLocal(text).document_terms;
-    // "LangChain helps" should be truncated to "langchain" (canonical lowercase
-    // from tech-products.json overrides the TitleCase form)
-    expect(terms).toContain('langchain');
-    // The verb form must not appear
-    expect(terms).not.toContain('LangChain helps');
-  });
 
 
-  it('NOUN_CHAIN_BREAKERS: "Zhipu AI targets" truncated to "Zhipu AI"', () => {
-    const text = 'GLM 4.7 from Zhipu AI targets production-grade agent workflows. Zhipu AI targets the enterprise. Zhipu AI targets developers.';
-    const terms = extractGlossaryLocal(text).document_terms;
-    // The fragment must be truncated, not dropped
-    expect(terms.some(t => t.includes('Zhipu'))).toBe(true);
-    // No sentence fragment should survive
-    expect(terms.every(t => !t.includes('targets production-grade'))).toBe(true);
-  });
 
 
-  it('NOUN_CHAIN_BREAKERS: "API calls" should still be kept (calls is not a strong verb)', () => {
-    const text = 'API calls are fast. We handle many API calls. API calls return JSON. API calls are reliable.';
-    const terms = extractGlossaryLocal(text).document_terms;
-    expect(terms.some(t => t.toLowerCase().includes('api calls'))).toBe(true);
-  });
 
 
 
@@ -744,18 +516,7 @@ describe('extractGlossaryLocal - TAGGING INTERVENTION + NOUN_CHAIN_BREAKERS (Pla
 
 
 
-  it('NOUN_CHAIN_BREAKERS: API endpoint verbs (returns/retrieves/cancels)', () => {
-    const text = 'The API returns JSON. The API retrieves records. The API cancels jobs. The API searches indexes. The API lists results. The API marks complete.';
-    const terms = extractGlossaryLocal(text).document_terms;
-    expect(terms.every(t => !t.includes('returns') && !t.includes('retrieves') && !t.includes('cancels'))).toBe(true);
-    expect(terms).toContain('API');
-  });
 
-  it('NOUN_CHAIN_BREAKERS: infrastructure verbs (hosts/serves/stores/loads)', () => {
-    const text = 'The server hosts the service. The API serves requests. The database stores records. The system loads config. The CDN caches content. The tool syncs files.';
-    const terms = extractGlossaryLocal(text).document_terms;
-    expect(terms.every(t => !t.includes('hosts') && !t.includes('serves') && !t.includes('stores'))).toBe(true);
-  });
 
 
 

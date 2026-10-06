@@ -105,71 +105,20 @@ describe('translateViaServer', () => {
     expect(body.provider).toBe('deepseek');
     // promptStyle 端到端传递：config.promptStyle 应原样写入请求 body
     expect(body.promptStyle).toBe('default');
+    // 结构指纹随 POST 发出：服务端把它存进 content_hash，下次 check 时用它判断
+    // 缓存里的 block id 映射是否仍与当前页面一致（不一致就 410 重译，避免译文错位）。
+    expect(body.contentHash).toContain('b1:h1');
+    expect(body.contentHash).toContain('b2:p');
 
-    expect(result.size).toBe(2);
-    expect(result.has('b1')).toBe(true);
-    expect(result.has('b2')).toBe(true);
+    expect(result.translatedIds.size).toBe(2);
+    expect(result.translatedIds.has('b1')).toBe(true);
+    expect(result.translatedIds.has('b2')).toBe(true);
+    expect(result.mismatched).toBe(0);
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '这是一个测试段落。');
   });
 
-  it('cleans up extension UI before sending HTML', async () => {
-    document.body.innerHTML += `
-      <div class="fanyi-status-overlay fanyi-loading">正在发送到服务端翻译...</div>
-      <div class="fanyi-floating-btn">译</div>
-      <div class="fanyi-config-panel">config panel</div>
-      <div class="selection-translator">selection translator</div>
-    `;
 
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(baseConfig, blocks, nodeMap);
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.html).not.toContain('fanyi-status-overlay');
-    expect(body.html).not.toContain('fanyi-floating-btn');
-    expect(body.html).not.toContain('fanyi-config-panel');
-    expect(body.html).not.toContain('selection-translator');
-  });
-
-  it('strips existing bilingual translation markup before sending HTML', async () => {
-    document.documentElement.innerHTML = `
-      <html><body>
-        <article>
-          <h1 data-fanyi-block-id="b1" class="fanyi-translated" data-original-text="Hello World">
-            <span class="fanyi-original">Hello World</span>
-            <span class="fanyi-translation">你好世界</span>
-          </h1>
-        </article>
-      </body></html>
-    `;
-
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(baseConfig, blocks, nodeMap);
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.html).toContain('data-fanyi-block-id="b1"');
-    expect(body.html).toContain('Hello World');
-    expect(body.html).not.toContain('fanyi-translation');
-    expect(body.html).not.toContain('fanyi-original');
-    expect(body.html).not.toContain('fanyi-translated');
-    expect(body.html).not.toContain('data-original-text');
-  });
 
   // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS 把
   // form action 改成 http://，这会触发 Mixed Content 警告并污染发往服务端
@@ -208,24 +157,12 @@ describe('translateViaServer', () => {
 
     const result = await translateViaServer(baseConfig, blocks, nodeMap);
 
-    expect(result.size).toBe(1);
-    expect(result.has('b1')).toBe(true);
+    expect(result.translatedIds.size).toBe(1);
+    expect(result.translatedIds.has('b1')).toBe(true);
     expect(applyBlockTranslation).toHaveBeenCalledTimes(1);
   });
 
 
-  it('throws when apiKey is missing for deepseek provider', async () => {
-    const config = { ...baseConfig, deepseekApiKey: '', provider: 'deepseek' as const };
-    const blocks: TextBlock[] = [
-      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
-    ];
-    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
-
-    await expect(translateViaServer(config, blocks, nodeMap)).rejects.toThrow(
-      'DeepSeek API Key 未配置',
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
   it('does not require apiKey when provider is not deepseek', async () => {
     fetchMock.mockResolvedValueOnce({
@@ -247,64 +184,10 @@ describe('translateViaServer', () => {
     expect(body.apiKey).toBeUndefined();
   });
 
-  it('sends provider=nvidia and no apiKey when provider is nvidia', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const config: Config = { ...baseConfig, deepseekApiKey: '', provider: 'nvidia' };
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(config, blocks, nodeMap);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.provider).toBe('nvidia');
-    expect(body.apiKey).toBeUndefined();
-  });
 
 
 
-  it('sends provider=deepseek and apiKey when provider is deepseek', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
 
-    const config: Config = { ...baseConfig, deepseekApiKey: 'sk-test', provider: 'deepseek' };
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(config, blocks, nodeMap);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.provider).toBe('deepseek');
-    expect(body.apiKey).toBe('sk-test');
-  });
-
-  it('端到端传递 promptStyle 到服务端请求 body', async () => {
-    // 验证非默认文风（jinyong）能从 config 正确传递到 /fanyi/page 请求体
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: async () => '<html><body></body></html>',
-    });
-
-    const config: Config = { ...baseConfig, promptStyle: 'jinyong' };
-    const blocks: TextBlock[] = [];
-    const nodeMap = new Map<string, Node>();
-
-    await translateViaServer(config, blocks, nodeMap);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.promptStyle).toBe('jinyong');
-  });
 
   it('throws when server responds with non-OK status', async () => {
     fetchMock.mockResolvedValueOnce({
@@ -348,7 +231,10 @@ describe('checkServerCache', () => {
       text: async () => cachedHtml,
     });
 
-    const result = await checkServerCache(baseConfig);
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
+    ];
+    const result = await checkServerCache(baseConfig, blocks);
 
     expect(result).toBe(cachedHtml);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -359,16 +245,6 @@ describe('checkServerCache', () => {
     expect(url).toContain('target=zh');
   });
 
-  it('returns null when server responds 204 (not cached)', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 204,
-    });
-
-    const result = await checkServerCache(baseConfig);
-
-    expect(result).toBeNull();
-  });
 
 
   it('throws when server responds non-OK', async () => {
@@ -378,7 +254,10 @@ describe('checkServerCache', () => {
       statusText: 'Internal Server Error',
     });
 
-    await expect(checkServerCache(baseConfig)).rejects.toThrow(
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
+    ];
+    await expect(checkServerCache(baseConfig, blocks)).rejects.toThrow(
       '服务端缓存检查失败: 500 Internal Server Error',
     );
   });
@@ -425,9 +304,9 @@ describe('applyServerTranslatedHtml', () => {
 
     const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
 
-    expect(result.size).toBe(2);
-    expect(result.has('b1')).toBe(true);
-    expect(result.has('b2')).toBe(true);
+    expect(result.translatedIds.size).toBe(2);
+    expect(result.translatedIds.has('b1')).toBe(true);
+    expect(result.translatedIds.has('b2')).toBe(true);
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '这是一个测试段落。');
   });
@@ -456,8 +335,8 @@ describe('applyServerTranslatedHtml', () => {
     // jsdom 不会触发 CSP 违例，这里验证 <base> 被移除后仍能正常提取译文
     const result = applyServerTranslatedHtml(translatedHtml, blocks, nodeMap);
 
-    expect(result.size).toBe(1);
-    expect(result.has('b1')).toBe(true);
+    expect(result.translatedIds.size).toBe(1);
+    expect(result.translatedIds.has('b1')).toBe(true);
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
   });
 

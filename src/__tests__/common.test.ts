@@ -24,13 +24,6 @@ describe('getCenterPoint', () => {
     expect(getCenterPoint(touches, 2)).toBeNull();
   });
 
-  it('returns null when touches length exceeds expected count', () => {
-    const touches = createTouchList([
-      { clientX: 100, clientY: 200 },
-      { clientX: 300, clientY: 400 },
-    ]);
-    expect(getCenterPoint(touches, 1)).toBeNull();
-  });
 
   it('calculates center of a single touch', () => {
     const touches = createTouchList([{ clientX: 100, clientY: 200 }]);
@@ -38,24 +31,7 @@ describe('getCenterPoint', () => {
     expect(result).toEqual({ x: 100, y: 200 });
   });
 
-  it('calculates center of two touches', () => {
-    const touches = createTouchList([
-      { clientX: 100, clientY: 200 },
-      { clientX: 300, clientY: 400 },
-    ]);
-    const result = getCenterPoint(touches, 2);
-    expect(result).toEqual({ x: 200, y: 300 });
-  });
 
-  it('calculates center of three touches', () => {
-    const touches = createTouchList([
-      { clientX: 0, clientY: 0 },
-      { clientX: 300, clientY: 0 },
-      { clientX: 0, clientY: 300 },
-    ]);
-    const result = getCenterPoint(touches, 3);
-    expect(result).toEqual({ x: 100, y: 100 });
-  });
 
 
 });

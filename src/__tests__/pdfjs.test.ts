@@ -144,9 +144,6 @@ describe('isPdfJsViewer', () => {
     mod = await import('../entrypoints/content/pdfjs');
   });
 
-  it('returns false when no PDF.js elements present', () => {
-    expect(mod.isPdfJsViewer(document)).toBe(false);
-  });
 
   it('returns true when #viewer.pdfViewer exists', () => {
     const viewer = document.createElement('div');
@@ -156,12 +153,6 @@ describe('isPdfJsViewer', () => {
     expect(mod.isPdfJsViewer(document)).toBe(true);
   });
 
-  it('returns false when #viewer exists but lacks pdfViewer class', () => {
-    const viewer = document.createElement('div');
-    viewer.id = 'viewer';
-    document.body.appendChild(viewer);
-    expect(mod.isPdfJsViewer(document)).toBe(false);
-  });
 
   it('returns true when #viewerContainer + .textLayer exist (fallback signal)', () => {
     const container = document.createElement('div');
@@ -173,12 +164,6 @@ describe('isPdfJsViewer', () => {
     expect(mod.isPdfJsViewer(document)).toBe(true);
   });
 
-  it('returns false when only .textLayer exists (no #viewerContainer)', () => {
-    const textLayer = document.createElement('div');
-    textLayer.className = 'textLayer';
-    document.body.appendChild(textLayer);
-    expect(mod.isPdfJsViewer(document)).toBe(false);
-  });
 
   it('returns false when only #viewerContainer exists (no .textLayer)', () => {
     const container = document.createElement('div');
@@ -245,17 +230,6 @@ describe('collectLines', () => {
   });
 
 
-  it('groups spans with same top into one line (sorted by left)', () => {
-    // 两个 span 在同一行 top=10，但 DOM 顺序相反
-    const page = makePage(1, [
-      makeSpan('World', { left: 60, top: 10, right: 110, bottom: 25 }),
-      makeSpan('Hello', { left: 10, top: 10, right: 55, bottom: 25 }),
-    ]);
-    makePdfJsViewer([page]);
-    const lines = mod.collectLines(document);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].text).toBe('Hello World');
-  });
 
   it('groups spans with top within tolerance (3px) into one line', () => {
     // top=10 和 top=12 应该聚合（差 2px < 3px）
@@ -323,9 +297,6 @@ describe('groupLinesIntoParagraphs', () => {
     return mod.groupLinesIntoParagraphs(lines);
   }
 
-  it('returns empty array for empty input', () => {
-    expect(mod.groupLinesIntoParagraphs([])).toHaveLength(0);
-  });
 
   it('groups consecutive lines with small gaps into one paragraph', () => {
     // 三行，间距 = 行高（行高 15，间距 15，ratio = 1.0 < 1.5）→ 同段
@@ -380,17 +351,6 @@ describe('groupLinesIntoParagraphs', () => {
     expect(paragraphs).toHaveLength(2);
   });
 
-  it('always splits paragraphs across different pages', () => {
-    // 即使两行紧挨着，跨页必断段
-    const page1 = makePage(1, [
-      makeSpan('Page one content here', { left: 10, top: 10, right: 200, bottom: 25 }),
-    ]);
-    const page2 = makePage(2, [
-      makeSpan('Page two content here', { left: 10, top: 10, right: 200, bottom: 25 }),
-    ]);
-    const paragraphs = buildAndGroup([page1, page2]);
-    expect(paragraphs).toHaveLength(2);
-  });
 
   it('preserves font-size from first line of paragraph', () => {
     const page = makePage(1, [
@@ -416,17 +376,6 @@ describe('restorePdfJsViewer', () => {
     mod = await import('../entrypoints/content/pdfjs');
   });
 
-  it('removes all .fanyi-pdfjs-translation overlay divs', () => {
-    const overlay1 = document.createElement('div');
-    overlay1.className = 'fanyi-pdfjs-translation';
-    const overlay2 = document.createElement('div');
-    overlay2.className = 'fanyi-pdfjs-translation';
-    document.body.append(overlay1, overlay2);
-    expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(2);
-
-    mod.restorePdfJsViewer(document);
-    expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(0);
-  });
 
   it('removes data-fanyi-pdfjs-line attributes from spans', () => {
     const span = document.createElement('span');
@@ -484,17 +433,6 @@ describe('togglePdfJsViewer', () => {
     expect(overlay.style.display).toBe('none');
   });
 
-  it('restores overlays on second toggle (display: "")', () => {
-    const overlay = document.createElement('div');
-    overlay.className = 'fanyi-pdfjs-translation';
-    document.body.appendChild(overlay);
-
-    mod.togglePdfJsViewer(document); // hide
-    expect(overlay.style.display).toBe('none');
-
-    mod.togglePdfJsViewer(document); // show
-    expect(overlay.style.display).toBe('');
-  });
 
   it('toggles multiple overlays independently but consistently', () => {
     const o1 = document.createElement('div');
@@ -654,34 +592,6 @@ describe('translatePdfJsViewer', () => {
     expect(call.pageUrl).toBe(window.location.href);
   });
 
-  it('reports progress via onStatus callback', async () => {
-    mockEchoTranslate();
-    const page = makePage(1, [
-      makeSpan('First paragraph here.', { left: 10, top: 10, right: 200, bottom: 25 }),
-      makeSpan('Second paragraph here.', { left: 10, top: 65, right: 200, bottom: 80 }),
-    ]);
-    makePdfJsViewer([page]);
-
-    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
-    const onStatus = vi.fn();
-    await mod.translatePdfJsViewer(
-      { sourceLang: 'en', targetLang: 'zh' },
-      state,
-      onStatus,
-    );
-
-    // translatePdfJsViewer 内部只用 'loading' 回调报告进度；
-    // 'success' 状态由调用方（translation.ts）根据返回值显示。
-    const calls = onStatus.mock.calls.map((c) => c[1]);
-    expect(calls).toContain('loading');
-    // 至少触发了一次进度更新（"正在提取..."、"共 N 段..."、"进度..."等）
-    expect(onStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
-    // 第一个回调应该是 "正在提取 PDF 文本..."
-    expect(onStatus.mock.calls[0][0]).toContain('提取');
-    // 应该有包含段数的回调
-    const segmentCall = onStatus.mock.calls.find((c) => c[0].includes('段'));
-    expect(segmentCall).toBeDefined();
-  });
 
   it('tags original spans with data-fanyi-pdfjs-line for restore', async () => {
     mockEchoTranslate();

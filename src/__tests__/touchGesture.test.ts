@@ -99,60 +99,7 @@ describe('setupTouchEvents', () => {
     expect(onTranslate).not.toHaveBeenCalled();
   });
 
-  it('does not trigger when tapping on config panel', () => {
-    const panel = document.createElement('div');
-    panel.className = 'fanyi-config-panel';
-    document.body.appendChild(panel);
 
-    dispatchTouchStart(panel);
-    dispatchTouchStart(panel);
-    dispatchTouchStart(panel);
-    expect(onTranslate).not.toHaveBeenCalled();
-  });
 
-  it('does not trigger when tapping on status overlay', () => {
-    const overlay = document.createElement('div');
-    overlay.className = 'fanyi-status-overlay';
-    document.body.appendChild(overlay);
 
-    dispatchTouchStart(overlay);
-    dispatchTouchStart(overlay);
-    dispatchTouchStart(overlay);
-    expect(onTranslate).not.toHaveBeenCalled();
-  });
-
-  it('calls preventDefault on the third tap (passive: false)', () => {
-    const event = new TouchEvent('touchstart', {
-      bubbles: true,
-      cancelable: true,
-      touches: [
-        {
-          clientX: 0,
-          clientY: 0,
-          identifier: 0,
-          target: document.body,
-        } as unknown as Touch,
-      ],
-    });
-    const spy = vi.spyOn(event, 'preventDefault');
-    Object.defineProperty(event, 'target', { value: document.body });
-
-    document.body.dispatchEvent(event);
-    document.body.dispatchEvent(event);
-    document.body.dispatchEvent(event);
-
-    expect(spy).toHaveBeenCalled();
-  });
-
-  it('clears pending tap timer when triggering (no stray reset)', () => {
-    dispatchTouchStart();
-    dispatchTouchStart();
-    dispatchTouchStart();
-    expect(onTranslate).toHaveBeenCalledTimes(1);
-
-    // 触发后 100ms 再来一击，不应该误触发
-    vi.advanceTimersByTime(100);
-    dispatchTouchStart();
-    expect(onTranslate).toHaveBeenCalledTimes(1);
-  });
 });

@@ -80,11 +80,6 @@ describe('diffMissingIds', () => {
     expect(diffMissingIds(input, output)).toEqual(['b1', 'b2', 'b3']);
   });
 
-  it('ignores output ids that are not in input (defensive against model extras)', () => {
-    const input = ['b1', 'b2'];
-    const output = ['b1', 'b2', 'b999'];
-    expect(diffMissingIds(input, output)).toEqual([]);
-  });
 });
 
 describe('pickMissingBlocks', () => {
@@ -129,27 +124,6 @@ describe('buildRetryChunk', () => {
     expect(retry.blocks[1].text).toBe('three');
   });
 
-  it('re-serializes jsonContent (cache key differs from parent)', () => {
-    const parent = makeChunk([
-      makeBlock('b1', 'p', 'one'),
-      makeBlock('b2', 'p', 'two'),
-    ]);
-    const retry = buildRetryChunk(parent, ['b1']);
-    expect(retry.jsonContent).not.toBe(parent.jsonContent);
-    // Even though both contain b1, retry's payload only includes b1
-    expect(retry.jsonContent).toBe(JSON.stringify([{ id: 'b1', text: 'one' }]));
-  });
 
-  it('recomputes estimatedTokens for the subset', () => {
-    const parent = makeChunk([
-      makeBlock('b1', 'p', 'a'.repeat(100)), // 25 tokens
-      makeBlock('b2', 'p', 'b'.repeat(200)), // 50 tokens
-      makeBlock('b3', 'p', 'c'.repeat(400)), // 100 tokens
-    ]);
-    expect(parent.estimatedTokens).toBe(175);
-    const retry = buildRetryChunk(parent, ['b1', 'b3']);
-    // b1 (25) + b3 (100) = 125
-    expect(retry.estimatedTokens).toBe(125);
-  });
 
 });

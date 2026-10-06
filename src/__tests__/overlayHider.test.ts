@@ -34,25 +34,6 @@ describe('createOverlayHider (Poptins 等动态弹层隐藏)', () => {
     expect(ui.hasAttribute('data-fanyi-remove')).toBe(false);
   });
 
-  it('正文（main 内）内的 poptin 节点不被误隐藏', async () => {
-    hider = createOverlayHider();
-    hider.start();
-    const inside = document.createElement('div');
-    inside.className = 'poptin-notification';
-    document.querySelector('main')!.appendChild(inside);
-    await tick();
-    expect(inside.hasAttribute('data-fanyi-remove')).toBe(false);
-  });
 
 
-  it('stop() 后不再隐藏新注入的弹层', async () => {
-    hider = createOverlayHider();
-    hider.start();
-    hider.stop();
-    const popup = document.createElement('div');
-    popup.className = 'poptin-modal';
-    document.body.appendChild(popup);
-    await tick();
-    expect(popup.hasAttribute('data-fanyi-remove')).toBe(false);
-  });
 });

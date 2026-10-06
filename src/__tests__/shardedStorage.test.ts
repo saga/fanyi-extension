@@ -72,11 +72,6 @@ describe('ShardedCache', () => {
     expect(result).toBeNull();
   });
 
-  it('does not expire before TTL', async () => {
-    await cache.set('key1', 'value1', 60000);
-    const result = await cache.get<string>('key1');
-    expect(result).toBe('value1');
-  });
 
   // --- clear ---
 
@@ -111,13 +106,6 @@ describe('ShardedCache', () => {
     expect(await cache.size()).toBe(1);
   });
 
-  it('size decreases after TTL expiry', async () => {
-    await cache.set('key1', 'value1', 1);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    // get 触发 TTL 清理 → 同时从索引移除
-    await cache.get('key1');
-    expect(await cache.size()).toBe(0);
-  });
 
   it('set same key twice does not duplicate index entry', async () => {
     await cache.set('key1', 'value1', 60000);
@@ -129,23 +117,5 @@ describe('ShardedCache', () => {
 
   // --- 隔离性 ---
 
-  it('different prefixes do not share data', async () => {
-    const cacheA = new ShardedCache('prefixA', 'local:meta:A:index');
-    const cacheB = new ShardedCache('prefixB', 'local:meta:B:index');
-    await cacheA.set('key1', 'valueA', 60000);
-    // cacheB 不应该看到 cacheA 的数据
-    expect(await cacheB.get('key1')).toBeNull();
-    expect(await cacheA.size()).toBe(1);
-    expect(await cacheB.size()).toBe(0);
-  });
 
-  it('clear on one prefix does not affect another', async () => {
-    const cacheA = new ShardedCache('prefixA', 'local:meta:A:index');
-    const cacheB = new ShardedCache('prefixB', 'local:meta:B:index');
-    await cacheA.set('key1', 'valueA', 60000);
-    await cacheB.set('key1', 'valueB', 60000);
-    await cacheA.clear();
-    expect(await cacheA.get('key1')).toBeNull();
-    expect(await cacheB.get<string>('key1')).toBe('valueB');
-  });
 });

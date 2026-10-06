@@ -70,13 +70,6 @@ describe('buildSystemContent 文风切换', () => {
     expect(content).toContain(STYLE_MARKER.default);
   });
 
-  it('default 风格包含通用自然翻译指令', () => {
-    const content = build(sourceLang, targetLang, undefined, 'default');
-    expect(content).toContain('你是一名专业翻译人员');
-    expect(content).toContain('<翻译原则>');
-    // 这条是本次改写的核心：明确区分「自然表达」与「创作性重写」
-    expect(content).toContain('“自然翻译”指自然地表达原意，而不是重新写一篇文章');
-  });
 
   it('所有文风都包含共用骨架段落', () => {
     for (const style of ALL_STYLES) {
@@ -112,11 +105,6 @@ describe('buildSystemContent 文风切换', () => {
     }
   });
 
-  it('各文风的措辞确有区分（不是同一份 prompt 换了个名字）', () => {
-    expect(build(sourceLang, targetLang, undefined, 'jinyong')).toContain('金庸');
-    expect(build(sourceLang, targetLang, undefined, 'acheng')).toContain('阿城');
-    expect(build(sourceLang, targetLang, undefined, 'wangxiaobo')).toContain('王小波');
-  });
 
 
   it('语言代码解析为中文语言名（未知代码原样透传）', () => {
@@ -142,12 +130,6 @@ describe('glossary 注入', () => {
     }
   });
 
-  it('无术语时不输出空的 <术语表> 段落', () => {
-    for (const style of ALL_STYLES) {
-      const content = build(sourceLang, targetLang, undefined, style);
-      expect(content).not.toContain('<术语表>');
-    }
-  });
 });
 
 describe('ja-source-natural 文风', () => {

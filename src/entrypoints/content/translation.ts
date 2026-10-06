@@ -7,7 +7,12 @@ import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { matchSiteRule } from '../../rules';
 import { showStatus, hideStatus } from './statusOverlay';
 import { translateChunksViaBackground } from './chunkTranslation';
-import { translateViaServer, checkServerCache, applyServerTranslatedHtml } from './serverTranslation';
+import {
+  translateViaServer,
+  checkServerCache,
+  applyServerTranslatedHtml,
+  type ServerApplyResult,
+} from './serverTranslation';
 import { rotateSessionId } from '../utils/session';
 import type { PromptStyle } from '../service/deepseek';
 import {
@@ -224,14 +229,20 @@ async function handleFullTranslation(
   const skipGlossary = siteRule?.skipGlossary === true;
   const useServer = config.useServerTranslation && !forceDirect;
 
-  // 服务端翻译模式下，先查询服务端缓存，命中即可跳过 prepareHtmlForServer 等重计算。
+  // 必须先 prepareDocument 拿到 blocks：服务端缓存检查要带上本次抽取的结构指纹
+  // （block id+tag 序列）。服务端用它判断缓存里的 id→元素映射是否仍与当前页面一致，
+  // 不一致就返回 410 让本次走完整翻译 —— 否则页面结构一变，缓存里按旧 id 回填的
+  // 译文会贴到错误的块上（a16z.news 故障：小节标题拿到正文段落的译文）。
+  const { blocks, chunks, fullText } = prepareDocument(document);
+
+  // 服务端翻译模式下，查询服务端缓存，命中即可跳过 prepareHtmlForServer 等重计算。
   let cachedHtml: string | null = null;
   if (useServer) {
     // 轮换新的翻译会话 id，让本次翻译的 check 与 page 两次请求共享同一 sid。
     rotateSessionId();
     showStatus('正在检查服务端缓存...', 'loading');
     try {
-      cachedHtml = await checkServerCache(config);
+      cachedHtml = await checkServerCache(config, blocks);
       if (cachedHtml) {
         logger.debug('[ContentScript] Server cache hit, skip heavy HTML preparation.');
       }
@@ -240,8 +251,6 @@ async function handleFullTranslation(
       // 缓存检查失败不阻塞，继续走正常翻译流程
     }
   }
-
-  const { blocks, chunks, fullText } = prepareDocument(document);
 
   // 启动动态弹层猎手：持续隐藏翻译开始后（如 Poptins 的
   // initiatePullPoptinsRequest 动态注入）才出现的全屏营销弹窗 / 通知层，
@@ -265,16 +274,26 @@ async function handleFullTranslation(
 
   // 使用服务端翻译
   if (useServer) {
-    let translatedIds: Set<string>;
+    let applyResult: ServerApplyResult;
     if (cachedHtml) {
       showStatus('正在应用服务端缓存...', 'loading');
-      translatedIds = applyServerTranslatedHtml(cachedHtml, blocks, nodeMap);
+      applyResult = applyServerTranslatedHtml(cachedHtml, blocks, nodeMap);
+      // 缓存里的 id→元素映射已过期（页面结构变了）：这些块被跳过，而不是把别的段落
+      // 的译文贴上去。这里**不**自动整页重译 —— 单个块原地改文案（「142 Likes」→
+      // 「184 Likes」）也会命中这条分支，自动重译会让每次访问都白跑一次 LLM。
+      // 结构性变化由 checkServerCache 的结构指纹提前拦掉（410 → 当作未命中）。
+      if (applyResult.mismatched > 0) {
+        logger.warn(
+          `[ContentScript] Server cache has ${applyResult.mismatched} stale block mapping(s), skipped.`,
+        );
+      }
     } else {
       showStatus('正在发送到服务端翻译...', 'loading');
       // 服务端翻译失败直接抛错（由 start() 的 catch 展示给用户），不再降级到本地翻译，
       // 避免静默切换翻译通道导致用户困惑、且本地翻译同样会失败却更慢。
-      translatedIds = await translateViaServer(config, blocks, nodeMap);
+      applyResult = await translateViaServer(config, blocks, nodeMap);
     }
+    const translatedIds = applyResult.translatedIds;
 
     const missingIds = markMissingBlocks(nodeMap, translatedIds);
     cleanupTempAttrs();

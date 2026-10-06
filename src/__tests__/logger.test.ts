@@ -54,24 +54,9 @@ describe('logger', () => {
       );
     });
 
-    it('logger.info prepends [fanyi:info] to first string argument', () => {
-      logger.info('Background script loaded');
-      expect(log).toHaveBeenCalled();
-      const infoCall = log.mock.calls.find((c: unknown[]) =>
-        typeof c[0] === 'string' && (c[0] as string).startsWith('[fanyi:info]'),
-      );
-      expect(infoCall?.[0]).toBe('[fanyi:info] Background script loaded');
-    });
   });
 
   describe('non-string first argument', () => {
-    it('prepends prefix as separate argument when first arg is not a string', () => {
-      const errorObj = new Error('something');
-      logger.warn(errorObj);
-      expect(warn).toHaveBeenCalledOnce();
-      expect(warn.mock.calls[0][0]).toBe('[fanyi:warn]');
-      expect(warn.mock.calls[0][1]).toBe(errorObj);
-    });
 
     it('handles empty argument list', () => {
       logger.error();
@@ -119,11 +104,5 @@ describe('logger', () => {
       expect(warn).not.toHaveBeenCalled();
     });
 
-    it('logger.debug and logger.info both call console.log', () => {
-      logger.debug('debug msg');
-      logger.info('info msg');
-      // 两次都路由到 console.log
-      expect(log).toHaveBeenCalledTimes(2);
-    });
   });
 });

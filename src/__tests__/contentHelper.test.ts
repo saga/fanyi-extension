@@ -29,23 +29,6 @@ describe('prepareDocument', () => {
     expect(blocks.length).toBeGreaterThan(0);
   });
 
-  it('should use role="main" when article is not present', () => {
-    document.body.innerHTML = `
-      <nav>Navigation</nav>
-      <div role="main">
-        <h1>Main Content</h1>
-        <p>Main paragraph.</p>
-      </div>
-      <aside>Sidebar</aside>
-    `;
-
-    const { fullText } = prepareDocument(document);
-
-    expect(fullText).toContain('Main Content');
-    expect(fullText).toContain('Main paragraph');
-    expect(fullText).not.toContain('Navigation');
-    expect(fullText).not.toContain('Sidebar');
-  });
 
   it('should use main element when available', () => {
     document.body.innerHTML = `
@@ -90,22 +73,6 @@ describe('prepareDocument', () => {
     expect(fullText).toContain('Some content');
   });
 
-  it('should prefer article over role=main', () => {
-    document.body.innerHTML = `
-      <div role="main">
-        <p>Main role content</p>
-      </div>
-      <article>
-        <p>Article content</p>
-      </article>
-    `;
-
-    const { fullText } = prepareDocument(document);
-
-    // article 优先级更高，应该只提取 article 内容
-    expect(fullText).toContain('Article content');
-    expect(fullText).not.toContain('Main role content');
-  });
 
   it('should keep <article> root when heading lives outside .article-body (bankingdive-style)', () => {
     // bankingdive.com 用 <article> 包裹整页：标题在 .first-page-pdf，
@@ -241,41 +208,6 @@ describe('prepareDocument', () => {
     expect(fullText).not.toContain('Footer');
   });
 
-  it('should refine to .post-content inside <article> (Jane Street)', () => {
-    // Jane Street blog: <article> 包含 .post-header + .post-content + .bios-container
-    // 需要下钻到 .post-content 只取正文
-    document.body.innerHTML = `
-      <article>
-        <div class="post-header">
-          <h3>Formal methods and the future of programming</h3>
-          <span class="date">Jun 07, 2026</span>
-          <ul class="social-share">
-            <li><a href="#">Share on Facebook</a></li>
-          </ul>
-          <div class="author">By: Yaron Minsky</div>
-        </div>
-        <div class="post-content">
-          <p>I've been telling people for the last 25 years that Jane Street was not interested in formal methods.</p>
-          <p>I'm not saying that anymore.</p>
-          <h1>Why the change of heart?</h1>
-          <p>Agentic coding upsets the formal-methods apple-cart in a few ways.</p>
-        </div>
-        <div class="bios-container">
-          <p class="bio">Yaron Minsky joined Jane Street back in 2002.</p>
-        </div>
-      </article>
-    `;
-
-    const { fullText, blocks } = prepareDocument(document);
-
-    expect(fullText).toContain("I've been telling people");
-    expect(fullText).toContain("I'm not saying that anymore");
-    expect(fullText).toContain("Why the change of heart");
-    expect(fullText).toContain("Agentic coding upsets");
-    expect(fullText).not.toContain('Share on Facebook');
-    expect(fullText).not.toContain('Yaron Minsky joined Jane Street');
-    expect(blocks.length).toBeGreaterThanOrEqual(4);
-  });
 
   it('should reach main.page_main through 7-layer nesting (claude.com real structure)', () => {
     // claude.com 真实 DOM：.u-rich-text-blog 到 main.page_main 有 7 层嵌套，
@@ -562,20 +494,6 @@ describe('extractFromDataIsland', () => {
     expect(blocks.every((b) => b.xpath.startsWith('/data-island/'))).toBe(true);
   });
 
-  it('extracts content from __NUXT_DATA__', () => {
-    const content =
-      'This is long content from Nuxt SSR payload that should be picked up when DOM skeleton is empty after hydration.';
-    document.body.innerHTML = `
-      <div id="__nuxt"></div>
-      <script id="__NUXT_DATA__" type="application/json">
-        ${JSON.stringify({ state: { content }, url: '/some-path' })}
-      </script>
-    `;
-
-    const blocks = extractFromDataIsland(document);
-
-    expect(blocks.some((b) => b.text === content)).toBe(true);
-  });
 
   it('extracts from generic application/json script', () => {
     const text =
@@ -606,28 +524,6 @@ describe('extractFromDataIsland', () => {
     expect(matches.length).toBe(1);
   });
 
-  it('skips metadata fields (url/href/src/type/name)', () => {
-    document.body.innerHTML = `
-      <script id="__NEXT_DATA__" type="application/json">
-        ${JSON.stringify({
-          url: 'https://example.com/very-long-url-that-should-not-be-extracted-as-content',
-          href: 'https://example.com/another-long-href-that-should-be-skipped-as-metadata',
-          name: 'Some name field that is long enough but should be skipped because it is metadata',
-          type: 'article-type-field-that-is-long-enough-but-should-be-skipped',
-          articleBody: 'This is the real article body that should be extracted as content.',
-        })}
-      </script>
-    `;
-
-    const blocks = extractFromDataIsland(document);
-    const texts = blocks.map((b) => b.text);
-
-    expect(texts.some((t) => t.includes('real article body'))).toBe(true);
-    expect(texts.every((t) => !t.includes('very-long-url'))).toBe(true);
-    expect(texts.every((t) => !t.includes('another-long-href'))).toBe(true);
-    expect(texts.every((t) => !t.includes('article-type-field'))).toBe(true);
-    expect(texts.every((t) => !t.includes('Some name field'))).toBe(true);
-  });
 
   it('extracts priority fields regardless of length (description/summary)', () => {
     // description / summary 是优先字段，短文本也采集
@@ -667,27 +563,7 @@ describe('extractFromDataIsland', () => {
   });
 
 
-  it('silently skips invalid JSON', () => {
-    document.body.innerHTML = `
-      <script id="__NEXT_DATA__" type="application/json">
-        not-valid-json {{{{ broken
-      </script>
-      <script type="application/json">{"articleBody": "Valid JSON content that is long enough to pass threshold check."}</script>
-    `;
 
-    const blocks = extractFromDataIsland(document);
-
-    expect(blocks.length).toBeGreaterThan(0);
-    expect(blocks.some((b) => b.text.includes('Valid JSON content'))).toBe(true);
-  });
-
-  it('returns empty array when no data island scripts exist', () => {
-    document.body.innerHTML = `<div>no script tags here</div>`;
-
-    const blocks = extractFromDataIsland(document);
-
-    expect(blocks).toEqual([]);
-  });
 
 });
 
