@@ -4,6 +4,7 @@ import type { Config } from '../utils/config';
 
 import { logger } from '../../utils/logger';
 import { getSessionId } from '../utils/session';
+import { inlineStylesheetsInClone } from './inlineStylesheets';
 
 /**
  * 服务端翻译失败时抛出的错误。
@@ -20,9 +21,10 @@ export class ServerTranslationError extends Error {
   }
 }
 
-// 大多数平台（Cloudflare Workers / Netlify Functions）请求体限制约 1MB。
-// 保守阈值：超过 900KB 时只发送 body，避免被网关截断导致服务端收到空 body 报 400。
-const MAX_FULL_HTML_CHARS = 900_000;
+// 请求体上限的约束来自平台：CF Workers 宽松，Netlify Functions 约 6MB。
+// 内联 CSS 后整页可达数 MB（大型营销站的主 CSS 普遍 >1MB），阈值放宽到 4MB；
+// 超限时仍退回只发 body（丢 head = 丢样式），但那只对超大页面发生。
+const MAX_FULL_HTML_CHARS = 4_000_000;
 
 /** 扩展端注入到 DOM 的 UI 选择器，发送 HTML 前需要移除。 */
 const EXTENSION_UI_SELECTORS = [
@@ -38,8 +40,10 @@ const EXTENSION_UI_SELECTORS = [
  * 2. 清理已有的双语译文结构（.fanyi-original / .fanyi-translation）。
  * 3. 清理扩展端 UI（状态提示、浮动按钮、配置面板等）。
  * 4. 保留 data-fanyi-block-id，让服务端能直接定位 block。
+ * 5. 在浏览器上下文内联外联样式表（服务端 cssInliner 抓不到防爬站点的 CSS，
+ *    见 inlineStylesheets.ts 头注释），让缓存页自包含。
  */
-function prepareHtmlForServer(): string {
+async function prepareHtmlForServer(): Promise<string> {
   const clone = document.documentElement.cloneNode(true) as HTMLElement;
 
   // 清理 clone 上的翻译标记，恢复成"已标记 block id 但未翻译"的状态。
@@ -79,6 +83,10 @@ function prepareHtmlForServer(): string {
       form.setAttribute('action', action.replace(/^http:\/\//i, 'https://'));
     }
   }
+
+  // 样式内联在序列化之前：成功内联的表会显著增大 HTML，必须让下面的
+  // 体积回退逻辑基于内联后的真实尺寸做判断。
+  await inlineStylesheetsInClone(clone);
 
   const fullHtml = clone.outerHTML;
   const bodyHtml = clone.querySelector('body')?.outerHTML ?? fullHtml;
@@ -315,7 +323,7 @@ export async function translateViaServer(
     throw new Error('DeepSeek API Key 未配置，服务端翻译（DeepSeek）需要 API Key');
   }
 
-  const html = prepareHtmlForServer();
+  const html = await prepareHtmlForServer();
   logger.debug(
     `[ServerTranslation] url=${url} provider=${provider} sentHtml=${html.length} bytes ` +
       `(bodyFallback=${html.startsWith('<body')})`,
