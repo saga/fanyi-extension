@@ -40,15 +40,18 @@ function median(values: number[], fallback: number): number {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return fallback;
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[middle] as number
-    : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+  const current = sorted[middle] ?? fallback;
+  if (sorted.length % 2) return current;
+  const previous = sorted[middle - 1] ?? current;
+  return (previous + current) / 2;
 }
 
 function toAtom(item: PdfTextItem): Atom | null {
   const text = item.str.replace(/\u0000/g, '').replace(/[\t\u00a0 ]+/g, ' ').trim();
-  const x = item.transform[4];
-  const y = item.transform[5];
+  // PDF.js transform 类型本身是 number[]，索引访问在 strict/noUncheckedIndexedAccess 下可为 undefined。
+  // 无有效坐标的 text item 直接丢弃，不让 undefined 进入后续几何计算。
+  const x = item.transform[4] ?? Number.NaN;
+  const y = item.transform[5] ?? Number.NaN;
   const height = item.height || Math.abs(item.transform[3] || 0) || 10;
   if (!text || !Number.isFinite(x) || !Number.isFinite(y)) return null;
   // PDF.js 的 width 通常可靠；测试夹具/异常 PDF 缺失 width 时以平均字宽估算。
@@ -325,7 +328,10 @@ export async function parsePdfDocument(
       const page = await doc.getPage(pageNo);
       try {
         const content = await page.getTextContent();
-        const items = content.items.filter(isTextItem).filter((item) => item.str.trim());
+        // PDF.js 的 items 是 TextItem | TextMarkedContent；先以 unknown 收窄，避免第二个 filter 丢失类型谓词。
+        const items = (content.items as unknown[]).filter(
+          (item): item is PdfTextItem => isTextItem(item) && item.str.trim().length > 0,
+        );
         let width = 0;
         let height = 0;
         if (typeof (page as unknown as { getViewport?: unknown }).getViewport === 'function') {
