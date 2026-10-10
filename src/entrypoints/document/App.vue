@@ -218,25 +218,38 @@ async function loadFile(file: File) {
   }
 }
 
-async function startTranslate() {
-  if (!doc.value) return;
-  // 与网页翻译一致：从正文抽取用户术语表，专有名词（API / Kubernetes / GPT-5 …）不被翻错
-  await run(doc.value.segments, {
+/** 所有翻译入口共用同一份设置，重试时保持 provider、术语表和服务端模式不变。 */
+async function buildTranslationOptions() {
+  if (!doc.value) throw new Error('尚未打开文档');
+  const config = await getConfig();
+  return {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
     glossary: glossary.value,
-  });
+    promptStyle: config.promptStyle,
+    // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
+    useServerTranslation: config.useServerTranslation,
+    serverUrl: config.serverUrl,
+    provider: config.provider,
+    apiKey: config.deepseekApiKey,
+    documentFileName: doc.value.title + '.' + doc.value.format,
+    documentTitle: doc.value.title,
+    documentFormat: doc.value.format,
+    documentWarnings: doc.value.meta.warnings,
+  };
+}
+
+async function startTranslate() {
+  if (!doc.value) return;
+  const options = await buildTranslationOptions();
+  await run(doc.value.segments, options);
 }
 
 async function retry() {
   if (!doc.value) return;
-  // 必须传同一份 glossary，否则重试批次的 cacheKey 不含 |g... hash，
-  // 会与初次翻译的 cacheKey 失配，命中不到缓存并白白调一次 LLM（P0）。
-  await retryFailed(doc.value.segments, {
-    sourceLang: sourceLang.value,
-    targetLang: targetLang.value,
-    glossary: glossary.value,
-  });
+  // 重试复用同一份 provider / 文风 / glossary，并且服务端模式只重传缺失片段。
+  const options = await buildTranslationOptions();
+  await retryFailed(doc.value.segments, options);
 }
 
 function doExport(format: ExportFormat) {

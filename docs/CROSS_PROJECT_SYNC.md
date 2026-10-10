@@ -364,3 +364,12 @@
 > - `B1`:架构改进
 > - `C1`:协议升级
 > - `S1-S9`:应同步的设计点
+
+
+## PDF 文档翻译与 vocal-saga 服务端接口
+
+- PDF 由扩展端 PDF.js 处理。解析阶段根据文本框几何补齐词间空格、合并跨行段落、修复常见英文行尾断词，并在证据充分时按双栏顺序重排；重复页眉/页脚会被过滤，低文本页会产生可见 warning。
+- 每个翻译片段保留稳定 ID、`kind` / `level`、源页 `page` 和只读章节语境 `contextPath`。这些字段帮助排序、问题定位和术语/指代理解；坐标不进入最终文档输出。
+- `useServerTranslation` 开启时，文档先在浏览器解析，再向同域 `/api/translate/document/segments` 提交结构化片段；不上传 PDF 二进制。服务端路由支持当前 provider / model / DeepSeek API key，并返回 `complete`、`missingSegmentIds` 与 `failedBatches`。
+- 服务端部分成功后，扩展保留已完成译文，“重试失败批次”只重新提交本地批次中仍缺失的片段。停止或更换任务后，旧请求迟到响应会被 generation 标记丢弃。
+- 扫描 PDF 目前会在解析警告中标出无文字层/低文本页面，但尚未接入实际 OCR 引擎；不要把这些页面报告为已经成功识别。

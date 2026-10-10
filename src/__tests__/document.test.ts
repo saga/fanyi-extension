@@ -5,6 +5,7 @@ import { parseSrt, parseVtt, parseSubtitleDocument } from '../entrypoints/utils/
 import { parseHtmlDocument, decodeEntities } from '../entrypoints/utils/document/parsers/html';
 import { parseJsonDocument, collectJsonLeaves } from '../entrypoints/utils/document/parsers/json';
 import { buildSegmentBatches } from '../entrypoints/utils/document/batcher';
+import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
 
@@ -199,6 +200,29 @@ describe('exportDocument', () => {
   });
 
 
+  it('Markdown/HTML 导出保留 PDF 编号列表，且不把 marker 重复拼入正文', () => {
+    const listDoc = {
+      format: 'pdf' as const,
+      title: 'List',
+      segments: [
+        { id: 'l1', index: 0, text: 'First translated entry', kind: 'list-item' as const, marker: '1.' },
+        { id: 'l2', index: 1, text: 'Second translated entry', kind: 'list-item' as const, marker: '2.' },
+      ],
+      meta: { charCount: 42, segmentCount: 2, warnings: [] },
+    };
+
+    const markdown = exportDocument(listDoc, {}, 'md', { mode: 'translation' });
+    expect(markdown).toContain('1. First translated entry');
+    expect(markdown).toContain('2. Second translated entry');
+    expect(markdown).not.toContain('- 1. First');
+
+    const html = exportDocument(listDoc, {}, 'html', { mode: 'translation' });
+    expect(html).toContain('<ol><li>');
+    expect(html).toContain('First translated entry');
+    expect(html).toContain('Second translated entry');
+    expect(html).toContain('</li>');
+  });
+
   it('HTML 导出做转义，防注入', () => {
     const evil = parseTextDocument('<img src=x onerror=alert(1)>', 'txt');
     const out = exportDocument(evil, {}, 'html');
@@ -225,5 +249,31 @@ describe('exportDocument', () => {
       jsonRoot: raw,
     });
     expect(JSON.parse(out)).toEqual({ a: '你好', b: '世界' });
+  });
+});
+
+
+describe('文档翻译响应完整性校验', () => {
+  it('忽略陌生 ID、空译文、格式错误和重复结果', () => {
+    const normalized = normalizeDocumentBatchResult([
+      ['s0', '译文一'],
+      ['foreign-id', '不能计入成功'],
+      ['s1', '   '],
+      ['s0', '重复译文'],
+      ['s2'],
+      null,
+    ], ['s0', 's1', 's2']);
+
+    expect(Array.from(normalized.entries())).toEqual([['s0', '译文一']]);
+    expect(getMissingDocumentBatchIds(['s0', 's1', 's2'], normalized)).toEqual(['s1', 's2']);
+  });
+
+  it('接受完整且属于当前批次的译文', () => {
+    const normalized = normalizeDocumentBatchResult([
+      ['s0', '第一段译文'],
+      ['s1', '第二段译文'],
+    ], ['s0', 's1']);
+
+    expect(getMissingDocumentBatchIds(['s0', 's1'], normalized)).toEqual([]);
   });
 });

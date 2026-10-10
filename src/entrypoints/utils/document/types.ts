@@ -44,6 +44,12 @@ export interface DocumentSegment {
   path?: string;
   /** 标题层级 1-6，仅 heading。 */
   level?: number;
+  /** PDF 列表的原始编号/项目符号；翻译正文不包含该标记。 */
+  marker?: string;
+  /** PDF 源页，仅用于诊断与追踪，不参与最终文档排版。 */
+  page?: number;
+  /** 当前章节路径，用于翻译模型理解跨批次片段的语境。 */
+  contextPath?: string;
   /** 字幕起止时间码（SRT/VTT），导出双语字幕时用。 */
   start?: string;
   end?: string;

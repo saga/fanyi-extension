@@ -14,6 +14,7 @@ const sampleItems = [
   { str: 'Second line of text', transform: [1, 0, 0, 12, 72, 690], height: 12 },
   { str: 'Third paragraph here', transform: [1, 0, 0, 12, 72, 660], height: 12 },
 ];
+const baselineSampleItems = sampleItems.map((item) => ({ ...item, transform: [...item.transform] }));
 
 const cfg = { getPageThrows: false };
 
@@ -40,6 +41,7 @@ describe('parsePdfDocument', () => {
   beforeEach(() => {
     destroySpy.mockClear();
     cfg.getPageThrows = false;
+    sampleItems.splice(0, sampleItems.length, ...baselineSampleItems);
   });
 
   it('v6 API 回归：destroy() 调用在 loadingTask 上，而非 proxy（不抛 doc.destroy is not a function）', async () => {
@@ -57,6 +59,48 @@ describe('parsePdfDocument', () => {
     expect(all).toContain('Hello World');
     expect(all).toContain('Second line');
     expect(all).toContain('Third paragraph');
+  });
+
+  it('同段跨行文本以空格拼接，并修复英文行尾断词', async () => {
+    const multiLineItems = [
+      { str: 'The document contains a reli-', transform: [1, 0, 0, 12, 72, 720], height: 12, width: 160 },
+      { str: 'able translation pipeline.', transform: [1, 0, 0, 12, 72, 705], height: 12, width: 140 },
+      { str: 'Chinese text remains natural.', transform: [1, 0, 0, 12, 72, 690], height: 12, width: 150 },
+    ];
+    sampleItems.splice(0, sampleItems.length, ...multiLineItems);
+    const result = await parsePdfDocument(new ArrayBuffer(8), { fileName: 'article.pdf' });
+    const text = result.segments.map((segment) => segment.text).join(' ');
+    expect(text).toContain('reliable translation pipeline.');
+    expect(text).not.toContain('reli- able');
+    expect(text).toContain('pipeline. Chinese');
+  });
+
+  it('为 PDF 片段附上源页和章节上下文，方便追踪与一致翻译', async () => {
+    sampleItems.splice(0, sampleItems.length,
+      { str: '1 Introduction', transform: [1, 0, 0, 20, 72, 720], height: 20, width: 140 },
+      { str: 'This section explains the design and its implications for the rest of the document.', transform: [1, 0, 0, 12, 72, 700], height: 12, width: 320 },
+      { str: 'The following paragraph gives more details about the approach and evaluation.', transform: [1, 0, 0, 12, 72, 685], height: 12, width: 300 },
+    );
+    const result = await parsePdfDocument(new ArrayBuffer(8), { fileName: 'article.pdf' });
+    expect(result.segments[0]?.kind).toBe('heading');
+    expect(result.segments[0]?.page).toBe(1);
+    expect(result.segments[1]?.contextPath).toContain('Introduction');
+  });
+  it('将编号列表的标记独立保存，并将无标记续行合并进同一列表项', async () => {
+    sampleItems.splice(0, sampleItems.length,
+      { str: '1. First list item continues', transform: [1, 0, 0, 12, 72, 720], height: 12, width: 190 },
+      { str: 'on the following visual line', transform: [1, 0, 0, 12, 72, 705], height: 12, width: 180 },
+      { str: '2. The second item contains enough text to remain a distinct entry.', transform: [1, 0, 0, 12, 72, 690], height: 12, width: 300 },
+    );
+    const result = await parsePdfDocument(new ArrayBuffer(8), { fileName: 'list.pdf' });
+
+    expect(result.segments).toHaveLength(2);
+    expect(result.segments[0]?.kind).toBe('list-item');
+    expect(result.segments[0]?.marker).toBe('1.');
+    expect(result.segments[0]?.text).toContain('First list item continues on the following visual line');
+    expect(result.segments[0]?.text).not.toMatch(/^1\./);
+    expect(result.segments[1]?.marker).toBe('2.');
+    expect(result.segments[1]?.text).not.toMatch(/^2\./);
   });
 
   it('解析抛错时 loadingTask 仍被销毁（finally，避免 worker 泄漏）', async () => {

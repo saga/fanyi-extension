@@ -1,12 +1,12 @@
 import { ref } from 'vue';
 import browser from 'webextension-polyfill';
 import type { TranslateChunkResponse } from '@/types/messages';
-import type { TranslationEntry } from '@/types/messages';
 import type { Glossary } from '@/entrypoints/service/_service';
 import type { PromptStyle } from '@/entrypoints/service/deepseek';
 import { detectLanguage, shouldUseJapaneseSource } from '@/entrypoints/utils/languageDetector';
 import { buildSegmentBatches, type BatchBudget } from '@/entrypoints/utils/document/batcher';
 import type { DocumentSegment } from '@/entrypoints/utils/document/types';
+import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '@/entrypoints/utils/document/translationResult';
 
 /**
  * 文档翻译执行器。
@@ -33,6 +33,16 @@ export interface TranslateOptions {
    * 做一次文档级语言检测后填入（见 resolveDocumentStyle）。
    */
   promptStyle?: PromptStyle;
+  /** 跟随扩展全局设置：将已重建的文档片段交给 vocal-saga 服务端翻译。 */
+  useServerTranslation?: boolean;
+  serverUrl?: string;
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  documentFileName?: string;
+  documentTitle?: string;
+  documentFormat?: string;
+  documentWarnings?: string[];
 }
 
 /**
@@ -55,6 +65,130 @@ function resolveDocumentStyle(
     : options.promptStyle;
 }
 
+interface ServerDocumentTranslationResponse {
+  translations?: Record<string, unknown>;
+  failedBatches?: unknown;
+  errors?: unknown;
+  complete?: unknown;
+  missingSegmentIds?: unknown;
+}
+
+/**
+ * 将各部署模式的现有 serverUrl 规范化为结构化文档端点。
+ * 默认设置是 /fanyi/page；文档接口与之同域，但路径独立，服务端不会接收 PDF 二进制。
+ */
+function resolveServerDocumentEndpoint(serverUrl?: string): string {
+  const base = serverUrl?.trim() || 'https://s.sunxiunan.com/fanyi/page';
+  const url = new URL(base);
+  if (!url.pathname.endsWith('/api/translate/document/segments')) {
+    url.pathname = '/api/translate/document/segments';
+    url.search = '';
+    url.hash = '';
+  }
+  return url.toString();
+}
+
+/**
+ * 上传已在浏览器端提取好的结构化片段。
+ * 响应只接纳当前请求中存在的 ID；服务端返回部分结果时保留有效译文，
+ * 再由调用方根据实际缺失片段重试，避免把 HTTP 200 当成完整成功。
+ */
+async function translateSegmentsViaServer(
+  segments: DocumentSegment[],
+  options: TranslateOptions,
+  runId: number,
+  isCurrentRun: (runId: number) => boolean,
+): Promise<ServerDocumentTranslationResponse | null> {
+  if (!segments.length) return { translations: {}, failedBatches: [], errors: [], complete: true };
+
+  const format = options.documentFormat || 'txt';
+  const fileName = options.documentFileName ||
+    ((options.documentTitle || 'document') + '.' + format);
+  const endpoint = resolveServerDocumentEndpoint(options.serverUrl);
+  const provider = options.provider || 'deepseek';
+  const payload = {
+    fileName,
+    title: options.documentTitle,
+    format,
+    warnings: options.documentWarnings ?? [],
+    source: options.sourceLang,
+    target: options.targetLang,
+    glossary: options.glossary,
+    promptStyle: options.promptStyle,
+    provider,
+    model: options.model,
+    ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
+    segments: segments.map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+      kind: segment.kind,
+      level: segment.level,
+      marker: segment.marker,
+      page: segment.page,
+      contextPath: segment.contextPath,
+      path: segment.path,
+      start: segment.start,
+      end: segment.end,
+    })),
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  let data: ServerDocumentTranslationResponse & { error?: string };
+  try {
+    data = await response.json() as ServerDocumentTranslationResponse & { error?: string };
+  } catch {
+    throw new Error('服务端文档翻译返回了无法解析的响应');
+  }
+  if (!isCurrentRun(runId)) return null;
+  if (!response.ok) {
+    throw new Error(data.error || ('服务端文档翻译失败：HTTP ' + response.status));
+  }
+
+  const expectedIds = new Set(segments.map((segment) => segment.id));
+  const normalized: Record<string, string> = {};
+  if (data.translations && typeof data.translations === 'object') {
+    for (const [id, value] of Object.entries(data.translations)) {
+      if (expectedIds.has(id) && typeof value === 'string' && value.trim()) {
+        normalized[id] = value;
+      }
+    }
+  }
+  return { ...data, translations: normalized };
+}
+
+/** 把服务端结果合并进当前运行状态，并按客户端原有批次重新计算完整度。 */
+function applyServerDocumentResult(
+  segments: DocumentSegment[],
+  result: ServerDocumentTranslationResponse,
+  batches: DocumentSegment[][],
+  state: { value: DocumentTranslateState },
+): void {
+  const expectedIds = new Set(segments.map((segment) => segment.id));
+  for (const [id, value] of Object.entries(result.translations ?? {})) {
+    if (expectedIds.has(id) && typeof value === 'string' && value.trim()) {
+      state.value.translations.set(id, value);
+    }
+  }
+  state.value.done = batches.filter((batch) =>
+    batch.every((segment) => !!state.value.translations.get(segment.id)?.trim()),
+  ).length;
+  state.value.failedBatches = batches
+    .map((batch, index) => ({ batch, index }))
+    .filter(({batch}) => batch.some((segment) => !state.value.translations.get(segment.id)?.trim()))
+    .map(({index}) => index);
+  const serverErrors = Array.isArray(result.errors)
+    ? result.errors.filter((error): error is string => typeof error === 'string')
+    : [];
+  const missingCount = segments.filter((segment) => !state.value.translations.get(segment.id)?.trim()).length;
+  state.value.error = missingCount
+    ? serverErrors.join('；') || ('仍有 ' + missingCount + ' 个片段未翻译完成')
+    : '';
+}
+
 export interface DocumentTranslateState {
   /** segmentId → 译文 */
   translations: Map<string, string>;
@@ -75,12 +209,12 @@ export function useDocumentTranslation() {
     error: '',
   });
 
-  let stopped = false;
-  let active = 0;
+  // 每次运行有独立 generation；停止或启动新任务时递增，丢弃旧请求的迟到结果。
+  let generation = 0;
+  const isCurrentRun = (runId: number) => generation === runId;
 
   function reset() {
-    stopped = false;
-    active = 0;
+    generation++;
     state.value = {
       translations: new Map(),
       total: 0,
@@ -92,13 +226,15 @@ export function useDocumentTranslation() {
   }
 
   function stop() {
-    stopped = true;
+    // runtime.sendMessage 不一定可取消；使当前运行失效，丢弃之后返回的旧结果。
+    generation++;
     state.value.running = false;
   }
 
   async function translateBatch(
     batch: DocumentSegment[],
     options: TranslateOptions,
+    runId: number,
   ): Promise<boolean> {
     const jsonContent = JSON.stringify(
       batch.map((s) => ({ id: s.id, text: s.text })),
@@ -114,19 +250,28 @@ export function useDocumentTranslation() {
       promptStyle: options.promptStyle,
     })) as TranslateChunkResponse;
 
-    if (!response?.success) {
-      throw new Error(response?.error || '翻译失败');
-    }
-    if (stopped) return false;
+    // 当前任务可能已停止或被新文档替换。旧响应不得再修改共享状态。
+    if (!isCurrentRun(runId)) return false;
+    if (!response?.success) throw new Error(response?.error || '翻译失败');
 
-    for (const [id, text] of response.result as TranslationEntry[]) {
-      if (text) state.value.translations.set(id, text);
+    const expectedIds = batch.map((segment) => segment.id);
+    const normalized = normalizeDocumentBatchResult(response.result, expectedIds);
+    // 保留有效部分，但漏掉任何预期 ID 都必须走重试/失败路径，不能把 HTTP 成功当作完整成功。
+    for (const [id, text] of normalized) state.value.translations.set(id, text);
+    // 对重试响应允许只返回剩余 ID；用当前批次累计已提交的结果做对账，避免误报仍缺失。
+    const missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
+    if (missingIds.length) {
+      throw new Error(
+        '翻译结果不完整，缺少 ' + missingIds.length + '/' + expectedIds.length +
+        ' 个片段（' + missingIds.slice(0, 5).join(', ') + (missingIds.length > 5 ? '…' : '') + '）',
+      );
     }
-    return true;
+    return isCurrentRun(runId);
   }
 
   async function run(segments: DocumentSegment[], options: TranslateOptions) {
     reset();
+    const runId = generation;
     const batches = buildSegmentBatches(segments, options.budget);
     state.value.total = batches.length;
     state.value.running = true;
@@ -137,42 +282,59 @@ export function useDocumentTranslation() {
       promptStyle: resolveDocumentStyle(segments, options),
     };
 
+    if (effectiveOptions.useServerTranslation) {
+      try {
+        const response = await translateSegmentsViaServer(segments, effectiveOptions, runId, isCurrentRun);
+        if (response && isCurrentRun(runId)) {
+          applyServerDocumentResult(segments, response, batches, state);
+        }
+      } catch (error) {
+        if (isCurrentRun(runId)) {
+          state.value.failedBatches = batches.map((_, index) => index);
+          state.value.error = error instanceof Error ? error.message : String(error);
+        }
+      } finally {
+        if (isCurrentRun(runId)) state.value.running = false;
+      }
+      return state.value;
+    }
+
     const concurrency = Math.max(1, options.concurrency ?? 3);
     const retries = options.retries ?? 1;
     let cursor = 0;
 
     const worker = async () => {
-      while (cursor < batches.length && !stopped) {
+      while (cursor < batches.length && isCurrentRun(runId)) {
         const index = cursor++;
         const batch = batches[index] as DocumentSegment[];
         let ok = false;
-        for (let attempt = 0; attempt <= retries && !stopped; attempt++) {
+        for (let attempt = 0; attempt <= retries && isCurrentRun(runId); attempt++) {
           try {
-            ok = await translateBatch(batch, effectiveOptions);
+            ok = await translateBatch(batch, effectiveOptions, runId);
             if (ok) break;
           } catch (err) {
+            if (!isCurrentRun(runId)) return;
             if (attempt === retries) {
               state.value.failedBatches.push(index);
               state.value.error = (err as Error).message;
             } else {
-              // 简单退避：避免连续 429
+              // 简单退避：避免连续 429；停止或切换文档后不会进入下一轮。
               await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
             }
           }
         }
-        if (ok || stopped) state.value.done++;
+        if (!isCurrentRun(runId)) return;
+        if (ok) state.value.done++;
       }
-      active--;
     };
 
     await Promise.all(
       Array.from({ length: Math.min(concurrency, batches.length) }, () => {
-        active++;
         return worker();
       }),
     );
 
-    state.value.running = false;
+    if (isCurrentRun(runId)) state.value.running = false;
     return state.value;
   }
 
@@ -184,10 +346,10 @@ export function useDocumentTranslation() {
     const failed = [...state.value.failedBatches];
     if (!failed.length) return;
     const batches = buildSegmentBatches(segments, options.budget);
+    const runId = ++generation;
     state.value.failedBatches = [];
     state.value.error = '';
     state.value.running = true;
-    stopped = false;
 
     // 与 run 同一份解析结果：重试批次必须沿用同一文风，否则缓存 key 不同、
     // 且同一文档会出现文风割裂。
@@ -196,20 +358,38 @@ export function useDocumentTranslation() {
       promptStyle: resolveDocumentStyle(segments, options),
     };
 
+    if (effectiveOptions.useServerTranslation) {
+      const missing = failed.flatMap((index) => batches[index] ?? [])
+        .filter((segment) => !state.value.translations.get(segment.id)?.trim());
+      try {
+        const response = await translateSegmentsViaServer(missing, effectiveOptions, runId, isCurrentRun);
+        if (response && isCurrentRun(runId)) applyServerDocumentResult(segments, response, batches, state);
+      } catch (error) {
+        if (isCurrentRun(runId)) {
+          state.value.error = error instanceof Error ? error.message : String(error);
+        }
+      } finally {
+        if (isCurrentRun(runId)) state.value.running = false;
+      }
+      return state.value;
+    }
+
     for (const index of failed) {
-      if (stopped) break;
+      if (!isCurrentRun(runId)) break;
       const batch = batches[index];
       if (!batch) continue;
       try {
-        const ok = await translateBatch(batch, effectiveOptions);
+        const ok = await translateBatch(batch, effectiveOptions, runId);
+        if (!isCurrentRun(runId)) break;
         if (ok) state.value.done++;
         else state.value.failedBatches.push(index);
       } catch (err) {
+        if (!isCurrentRun(runId)) break;
         state.value.failedBatches.push(index);
         state.value.error = (err as Error).message;
       }
     }
-    state.value.running = false;
+    if (isCurrentRun(runId)) state.value.running = false;
   }
 
   return { state, run, retryFailed, stop, reset };

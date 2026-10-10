@@ -73,15 +73,22 @@ export function buildSystemContent(
 }
 
 function buildTranslationBody(
-  blocks: Array<{ id: string; text: string }>,
+  blocks: Array<{ id: string; text: string; contextPath?: string; kind?: string; level?: number }>,
   sourceLang: string,
   targetLang: string,
   sitePrompt?: string,
   glossary?: Glossary,
   style?: PromptStyle
 ) {
+  const hasDocumentContext = blocks.some((block) => !!block.contextPath?.trim() || !!block.kind);
   const blocksJson = JSON.stringify(
-    blocks.map((b) => ({ id: b.id, text: b.text })),
+    blocks.map((b) => ({
+      id: b.id,
+      text: b.text,
+      ...(b.contextPath?.trim() ? { contextPath: b.contextPath.trim() } : {}),
+      ...(b.kind ? { kind: b.kind } : {}),
+      ...(Number.isInteger(b.level) ? { level: b.level } : {}),
+    })),
     null,
     2
   );
@@ -99,7 +106,9 @@ function buildTranslationBody(
       },
       {
         role: 'user' as const,
-        content: `JSON:\n\n${blocksJson}`,
+        content: hasDocumentContext
+          ? `下面的 JSON 包含待翻译片段。只翻译每个对象的 text 字段。contextPath 是只读章节语境；kind 和 level 是只读文档结构元数据，用于区分标题、正文和列表。不要翻译这些元数据或将它们混入译文，保持原有 id 与翻译响应协议不变。\n\nJSON:\n\n${blocksJson}`
+          : `JSON:\n\n${blocksJson}`,
       },
     ],
     response_format: { type: 'json_object' },
