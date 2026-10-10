@@ -1,12 +1,12 @@
 import { ref } from 'vue';
 import browser from 'webextension-polyfill';
-import type { TranslateChunkResponse } from '@/types/messages';
-import type { Glossary } from '@/entrypoints/service/_service';
-import type { PromptStyle } from '@/entrypoints/service/deepseek';
-import { detectLanguage, shouldUseJapaneseSource } from '@/entrypoints/utils/languageDetector';
-import { buildSegmentBatches, type BatchBudget } from '@/entrypoints/utils/document/batcher';
-import type { DocumentSegment } from '@/entrypoints/utils/document/types';
-import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '@/entrypoints/utils/document/translationResult';
+import type { TranslateChunkResponse } from '../../types/messages';
+import type { Glossary } from '../service/_service';
+import type { PromptStyle } from '../service/deepseek';
+import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
+import { buildSegmentBatches, type BatchBudget } from '../utils/document/batcher';
+import type { DocumentSegment } from '../utils/document/types';
+import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../utils/document/translationResult';
 
 /**
  * 文档翻译执行器。

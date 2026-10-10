@@ -933,8 +933,8 @@ describe('extractBlocks - repeated visible text coverage', () => {
     const shared = 'In the third edition of this study, the authors found that people are adopting generative AI for an ever-widening range of uses.';
     setupHTML(`
       <article>
-        <div class="summary-callout"><p>${shared}</p></div>
-        <div class="social-share-preview"><p>${shared}</p></div>
+        <div class="abstract-box"><p>${shared}</p></div>
+        <div class="content-preview"><p>${shared}</p></div>
         <div class="article-body"><p>${shared}</p></div>
         <p>This paragraph is unique to the article body.</p>
       </article>

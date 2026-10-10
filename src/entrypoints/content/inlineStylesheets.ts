@@ -238,7 +238,7 @@ async function fetchCssBundle(
       return { css: '', complete: false };
     }
     if (utf8ByteLength(sourceCss) > state.maxBytesPerSheet) {
-      state.onError(absoluteUrl, 'stylesheet exceeds per-file byte limit (' + state.maxBytesPerSheet + ')');
+      state.onError(absoluteUrl, 'stylesheet is too large: exceeds per-file byte limit (' + state.maxBytesPerSheet + ')');
       return { css: '', complete: false };
     }
 
@@ -258,7 +258,7 @@ async function fetchCssBundle(
     if (utf8ByteLength(result.css) > state.maxBytesPerSheet) {
       state.onError(
         absoluteUrl,
-        'expanded stylesheet exceeds per-file byte limit (' + state.maxBytesPerSheet + ')',
+        'expanded stylesheet is too large: exceeds per-file byte limit (' + state.maxBytesPerSheet + ')',
       );
       return { css: '', complete: false };
     }
