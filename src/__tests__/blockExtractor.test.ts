@@ -924,12 +924,12 @@ describe('extractBlocks - Reference/citation patterns', () => {
 
 });
 
-describe('extractBlocks - Duplicate text dedup (HBR summary callout)', () => {
+describe('extractBlocks - repeated visible text coverage', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('should collapse identical paragraphs to a single block', () => {
+  it('keeps each visible occurrence as an independent translatable block', () => {
     const shared = 'In the third edition of this study, the authors found that people are adopting generative AI for an ever-widening range of uses.';
     setupHTML(`
       <article>
@@ -941,8 +941,10 @@ describe('extractBlocks - Duplicate text dedup (HBR summary callout)', () => {
     `);
 
     const blocks = extractBlocks(document);
-    const occurrences = blocks.filter(b => b.text === shared).length;
-    expect(occurrences).toBe(1);
+    const matching = blocks.filter((b) => b.text === shared);
+    expect(matching).toHaveLength(3);
+    expect(new Set(matching.map((b) => b.id)).size).toBe(3);
+    expect(document.querySelectorAll('[data-fanyi-block-id]')).toHaveLength(4);
     // The unique paragraph is still extracted.
     expect(blocks.some(b => b.text.includes('unique to the article body'))).toBe(true);
   });
@@ -1703,14 +1705,13 @@ describe('blockExtractor - isElementHidden performance (regression: layout thras
 
 });
 
-describe('blockExtractor - seenTexts dedup (HBR summary callout regression)', () => {
-  // 同一段摘要出现在多个 callout (HBR summary box, social share preview,
-  // article body) 时, 只送翻译一次, 节省 API 调用, 避免堆叠相同译文。
+describe('blockExtractor - repeated text must remain translatable', () => {
+  // 同一段文字可能在摘要框、正文和预览中分别可见；每个 DOM 节点都需有独立 ID。
   beforeEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('dedups identical paragraphs across multiple sections', () => {
+  it('assigns different block IDs to identical paragraphs across sections', () => {
     const duplicateText =
       'Companies that prioritize employee well-being consistently outperform their peers in long-term value creation across diverse market conditions.';
 
@@ -1728,7 +1729,9 @@ describe('blockExtractor - seenTexts dedup (HBR summary callout regression)', ()
 
     const blocks = extractBlocks(document);
     const matching = blocks.filter((b) => b.text === duplicateText);
-    expect(matching).toHaveLength(1);
+    expect(matching).toHaveLength(3);
+    expect(new Set(matching.map((b) => b.id)).size).toBe(3);
+    expect(document.querySelectorAll('[data-fanyi-block-id]')).toHaveLength(3);
   });
 
 });

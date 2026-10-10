@@ -172,6 +172,62 @@ describe('inlineStylesheetsInClone', () => {
     root.remove();
   });
 
+  it('递归内联常规 @import，并按原 stylesheet 路径改写字体与背景图 URL', async () => {
+    const root = makeRoot('<link rel="stylesheet" href="/styles/main.css"><p>x</p>');
+    const fetchFn = vi.fn(async (url: RequestInfo | URL) => {
+      const value = String(url);
+      if (value === 'https://www.example.com/styles/main.css') {
+        return {
+          ok: true,
+          status: 200,
+          url: value,
+          text: async () => '@import "./theme.css" screen; .hero{background-image:url("../images/hero.png")}',
+        };
+      }
+      if (value === 'https://www.example.com/styles/theme.css') {
+        return {
+          ok: true,
+          status: 200,
+          url: value,
+          text: async () => '@font-face{src:url("../fonts/site.woff2")}',
+        };
+      }
+      throw new Error('unexpected CSS URL: ' + value);
+    });
+
+    const result = await inlineStylesheetsInClone(root, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      baseUri: BASE,
+      onError: vi.fn(),
+    });
+    const css = root.querySelector('style')?.textContent ?? '';
+    expect(result.complete).toBe(true);
+    expect(result.inlined).toBe(1);
+    expect(css).not.toContain('@import');
+    expect(css).toContain('https://www.example.com/images/hero.png');
+    expect(css).toContain('https://www.example.com/fonts/site.woff2');
+    expect(root.getAttribute('data-fanyi-css-snapshot')).toBe('v2-complete');
+    root.remove();
+  });
+
+  it('stylesheet 超过 maxSheets 时明确标记 partial，而不是静默视为完整', async () => {
+    const root = makeRoot(
+      '<link rel="stylesheet" href="/1.css"><link rel="stylesheet" href="/2.css"><link rel="stylesheet" href="/3.css">',
+    );
+    const fetchFn = vi.fn().mockResolvedValue(cssResponse('a{}'));
+    const result = await inlineStylesheetsInClone(root, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      baseUri: BASE,
+      maxSheets: 2,
+      onError: vi.fn(),
+    });
+    expect(result.inlined).toBe(2);
+    expect(result.complete).toBe(false);
+    expect(root.querySelectorAll('link[rel=stylesheet]')).toHaveLength(1);
+    expect(root.getAttribute('data-fanyi-css-snapshot')).toBe('v2-partial');
+    root.remove();
+  });
+
   it('没有样式表时直接返回，不发起任何请求', async () => {
     const root = makeRoot('<p>plain</p>');
     const fetchFn = vi.fn();

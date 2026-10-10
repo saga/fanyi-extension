@@ -63,7 +63,8 @@ export function collapseSpacedText(text: string): string {
 export function extractBlocks(rootNode: Node): TextBlock[] {
   const blocks: TextBlock[] = [];
   const blockIdRef = { value: 0 };
-  // 跨段落去重: 同一文本多次出现只取第一个 (HBR summary callout 模式)。
+  // 记录主 DOM 树中的文本，只有跨入 Shadow DOM 时用于抑制 light-DOM 镜像内容。
+  // 主 DOM 中相同文本的不同可见位置仍需独立 block ID，不能因为文本相同而漏译。
   const seenTexts = new Set<string>();
 
   const isDocumentLike =
@@ -81,8 +82,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
   collectBlocks(startNode, blocks, blockIdRef, seenTexts);
 
   // 后处理：合并 CSS letter-spacing 渲染的分散单词。
-  // 在 collectBlocks 之后做，因为 walker 内部用原始文本做 seenTexts 去重，
-  // collapse 后的文本与原文不同，不应影响去重逻辑。
+  // 在 collectBlocks 之后做，避免 collapse 后的归一化文本影响 Shadow DOM 镜像去重。
   for (const block of blocks) {
     block.text = collapseSpacedText(block.text);
   }

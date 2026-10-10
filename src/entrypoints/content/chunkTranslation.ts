@@ -37,6 +37,44 @@ function categorizeError(msg: string): string {
   return 'other';
 }
 
+/**
+ * 校验模型返回的块结果，只允许本次请求中的 ID 和非空译文进入成功集合。
+ * 单独暴露为纯函数，方便回归测试“陌生 ID/空译文不能被计为成功”。
+ */
+export function normalizeChunkTranslationEntries(
+  entries: unknown,
+  expectedIds: readonly string[],
+): Map<string, string> {
+  const expected = new Set(expectedIds);
+  const normalized = new Map<string, string>();
+  if (!Array.isArray(entries)) {
+    logger.warn('[ContentScript] Translation response result is not an array.');
+    return normalized;
+  }
+
+  for (const entry of entries) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      logger.warn('[ContentScript] Skipping malformed entry:', entry);
+      continue;
+    }
+    const [id, text] = entry as unknown[];
+    if (typeof id !== 'string' || !expected.has(id)) {
+      logger.warn('[ContentScript] Ignoring unexpected block ID:', id);
+      continue;
+    }
+    if (typeof text !== 'string' || !text.trim()) {
+      logger.warn('[ContentScript] Skipping block ' + id + ': translation is empty or not a string.');
+      continue;
+    }
+    if (normalized.has(id)) {
+      logger.warn('[ContentScript] Ignoring duplicate response entry for block:', id);
+      continue;
+    }
+    normalized.set(id, text);
+  }
+  return normalized;
+}
+
 // ============================================================
 // Chunk dispatch — warmup-then-parallel
 // ============================================================
@@ -199,21 +237,10 @@ async function translateChunkPayload(
       return chunkMap;
     }
 
-    const outputIds: string[] = [];
-    for (const entry of response.result) {
-      if (!Array.isArray(entry) || entry.length !== 2) {
-        logger.warn('[ContentScript]   Skipping malformed entry:', entry);
-        continue;
-      }
-      const [id, text] = entry;
-      if (typeof text !== 'string') {
-        logger.warn(
-          `[ContentScript]   Skipping block ${id}: translated_text is not a string (${typeof text})`,
-        );
-        continue;
-      }
+    const normalizedEntries = normalizeChunkTranslationEntries(response.result, inputIds);
+    const outputIds = Array.from(normalizedEntries.keys());
+    for (const [id, text] of normalizedEntries) {
       chunkMap.set(id, text);
-      outputIds.push(id);
       ctx.translatedIds.add(id);
     }
 
@@ -255,8 +282,11 @@ async function translateChunkPayload(
         `[ContentScript] ${label} missing ${chunkMissing.length} block(s), retrying as ${retryChunk.id}`,
       );
       const retryMap = await translateChunkPayload(retryChunk, true, ctx);
+      // 递归重试会先把成功的 ID 加入 ctx.translatedIds，因此不能再以该 Set
+      // 判断是否“刚刚恢复”；应直接与本轮原本缺失的 ID 集合对账。
+      const missingIdSet = new Set(chunkMissing);
       for (const id of retryMap.keys()) {
-        if (!ctx.translatedIds.has(id)) {
+        if (missingIdSet.has(id) && !recoveredIds.includes(id)) {
           ctx.translatedIds.add(id);
           recoveredIds.push(id);
         }
@@ -271,6 +301,9 @@ async function translateChunkPayload(
         ctx.onChunkComplete('fully-ok', 0, 0);
       } else {
         const stillMissing = Math.max(0, outerMissingCount - recoveredIds.length);
+        // 只有所有缺失 ID 都被重试恢复时，批次才算成功；模型返回 HTTP 200 但漏块
+        // 不能让 allSucceeded 继续保持 true。
+        if (stillMissing > 0) ctx.onFailure();
         ctx.onChunkComplete('needed-retry', recoveredIds.length, stillMissing);
       }
     }

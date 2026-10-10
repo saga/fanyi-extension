@@ -125,6 +125,37 @@ describe('translateViaServer', () => {
   // 的 HTML。prepareHtmlForServer 应把 http:// 升级为 https://。
 
 
+  it('removes oversized scripts before sending HTML while preserving the stylesheet head', async () => {
+    const translatedHtml = '<html><body><p data-fanyi-block-id="b1">' +
+      '<span class="fanyi-original">Hello World</span>' +
+      '<span class="fanyi-translation">你好世界</span></p></body></html>';
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => translatedHtml,
+    });
+
+    document.head.innerHTML = '<style id="source-css">body{color:red}</style>';
+    document.body.innerHTML = '<article><p data-fanyi-block-id="b1">Hello World</p></article>';
+    const oversizedScript = document.createElement('script');
+    oversizedScript.type = 'application/json';
+    oversizedScript.id = 'oversized-test-script';
+    oversizedScript.textContent = 'oversized-payload-'.repeat(240_000);
+    document.body.appendChild(oversizedScript);
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/p', tag: 'p', text: 'Hello World' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('p')!]]);
+    const result = await translateViaServer(baseConfig, blocks, nodeMap);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).toContain('<style id="source-css">body{color:red}</style>');
+    expect(body.html).toContain('data-fanyi-block-id="b1"');
+    expect(body.html).not.toContain('oversized-test-script');
+    expect(document.querySelector('#oversized-test-script')).not.toBeNull();
+    expect(result.translatedIds.has('b1')).toBe(true);
+  });
   it('skips blocks whose translation span is missing', async () => {
     const translatedHtml = `
       <html><body>

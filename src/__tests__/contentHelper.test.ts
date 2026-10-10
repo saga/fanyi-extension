@@ -59,6 +59,50 @@ describe('prepareDocument', () => {
     expect(fullText).toContain('Content here');
   });
 
+  it('tries another root when the highest-priority selector points at an editor, not article content', () => {
+    const editorText = 'EDITOR_ONLY_TEXT '.repeat(70);
+    const articleParagraph = 'The actual article describes the design and explains the implementation trade-offs. '.repeat(6);
+    document.body.innerHTML = `
+      <main>
+        <section class="article-body" contenteditable="true">
+          <h1>Editor workspace</h1>
+          <p>${editorText}</p>
+        </section>
+        <article class="post-content">
+          <h1>Real article headline</h1>
+          <p>${articleParagraph}</p>
+          <p>A second real paragraph contains additional details for the reader.</p>
+        </article>
+      </main>
+    `;
+
+    const { blocks, fullText } = prepareDocument(document);
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(fullText).toContain('Real article headline');
+    expect(fullText).toContain('actual article describes the design');
+    expect(fullText).not.toContain('EDITOR_ONLY_TEXT');
+  });
+  it('tries another root when the first selector contains mostly filtered boilerplate', () => {
+    const sidebarNoise = 'This sidebar paragraph is unrelated boilerplate that should not be translated. '.repeat(30);
+    const actualArticle = 'The actual article describes a reliable architecture for processing documents, handling incomplete responses, and preserving the order and meaning of each paragraph. '.repeat(4);
+    document.body.innerHTML = `
+      <main>
+        <section class="article-body">
+          <div class="sidebar"><p>${sidebarNoise}</p></div>
+          <p>Short intro.</p>
+        </section>
+        <article class="post-content">
+          <h1>Actual article headline</h1>
+          <p>${actualArticle}</p>
+        </article>
+      </main>
+    `;
+
+    const { fullText } = prepareDocument(document);
+    expect(fullText).toContain('Actual article headline');
+    expect(fullText).toContain('reliable architecture for processing documents');
+    expect(fullText).not.toContain('unrelated boilerplate');
+  });
   it('should fallback to body when no article container found', () => {
     document.body.innerHTML = `
       <div>

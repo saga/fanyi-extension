@@ -357,8 +357,8 @@ extractBlocks(rootNode)
       │   ├── DIRECT_SET (p/h1-h6/li/blockquote/...): 若无子 DIRECT_SET → 返回
       │   ├── INLINE_SET (a/span/em/...): 在 article 内且无块级父 → 返回
       │   └── 其他容器: 只有内联子节点且有直接文本 → 返回
-      ├── seenTexts 去重 (同文本只取第一个)
-      └── collectFromShadowHosts() → 遍历 open shadow roots
+      ├── 可见重复文本分别分配 block ID（保证每个位置都能回填译文）
+      └── collectFromShadowHosts() → 遍历 open shadow roots，仅抑制 light-DOM 镜像文本
 ```
 
 **谓词函数** (`rules.ts`):
@@ -739,7 +739,7 @@ handleFullTranslation()
 | 5s rAF fallback | hidden tab 时 rAF 不触发，用 setTimeout 兜底 |
 | scoreCache WeakMap | contentHelper 评分缓存，同一元素不重复计算 |
 | collapseSpacedText | 后处理合并 CSS letter-spacing 渲染的分散单词 |
-| seenTexts 去重 | 同一文本多次出现只翻译一次 |
+| 重复文本映射 | 可见重复文本各自拥有 block ID；只抑制 Shadow DOM 对 light-DOM 的重复镜像 |
 
 ## 11. 诊断体系
 

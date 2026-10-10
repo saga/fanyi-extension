@@ -21,10 +21,8 @@ export class ServerTranslationError extends Error {
   }
 }
 
-// 请求体上限的约束来自平台：CF Workers 宽松，Netlify Functions 约 6MB。
-// 内联 CSS 后整页可达数 MB（大型营销站的主 CSS 普遍 >1MB），阈值放宽到 4MB；
-// 超限时仍退回只发 body（丢 head = 丢样式），但那只对超大页面发生。
-const MAX_FULL_HTML_CHARS = 4_000_000;
+// 服务端单次请求使用 4MB 的保守预算，按 UTF-8 字节计算而不是 JS 字符数。
+const MAX_FULL_HTML_BYTES = 4_000_000;
 
 /** 扩展端注入到 DOM 的 UI 选择器，发送 HTML 前需要移除。 */
 const EXTENSION_UI_SELECTORS = [
@@ -89,8 +87,35 @@ async function prepareHtmlForServer(): Promise<string> {
   await inlineStylesheetsInClone(clone);
 
   const fullHtml = clone.outerHTML;
-  const bodyHtml = clone.querySelector('body')?.outerHTML ?? fullHtml;
-  return fullHtml.length > MAX_FULL_HTML_CHARS ? bodyHtml : fullHtml;
+  if (utf8ByteLength(fullHtml) <= MAX_FULL_HTML_BYTES) return fullHtml;
+
+  // 体积超限时先删除展示缓存不需要的脚本与预加载提示。
+  // 旧做法直接只发 <body>，会把刚刚内联的 CSS 全丢掉，缓存页因此退化成裸 HTML。
+  // 服务端翻译依赖已经生成的 data-fanyi-block-id，不依赖页面脚本重新渲染正文。
+  logger.warn(
+    '[ServerTranslation] HTML exceeds request budget (' +
+      utf8ByteLength(fullHtml) + ' bytes); removing scripts and preload hints before retrying.',
+  );
+  clone.querySelectorAll('script').forEach((node) => node.remove());
+  clone.querySelectorAll(
+    'link[rel~="preload"], link[rel~="prefetch"], link[rel~="modulepreload"]',
+  ).forEach((node) => node.remove());
+
+  const reducedHtml = clone.outerHTML;
+  if (utf8ByteLength(reducedHtml) <= MAX_FULL_HTML_BYTES) return reducedHtml;
+
+  // 超大型正文仍然超过平台限制时，明确报错比丢掉 head/style 后继续翻译更可靠。
+  // 用户可以改用本地翻译，或先关闭页面内的超大嵌入内容再重试。
+  throw new Error(
+    '页面 HTML 仍超过服务端单次请求大小限制（' +
+      utf8ByteLength(reducedHtml) +
+      ' bytes）。为避免丢失 CSS 和正文映射，已停止发送不完整页面；请改用本地翻译或简化页面后重试。',
+  );
+}
+
+/** 返回 HTML 的 UTF-8 字节数，用于判断最终 JSON 请求体的页面内容预算。 */
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function getDefaultServerUrl(config: Config): string {
@@ -325,8 +350,8 @@ export async function translateViaServer(
 
   const html = await prepareHtmlForServer();
   logger.debug(
-    `[ServerTranslation] url=${url} provider=${provider} sentHtml=${html.length} bytes ` +
-      `(bodyFallback=${html.startsWith('<body')})`,
+    `[ServerTranslation] url=${url} provider=${provider} sentHtmlBytes=${utf8ByteLength(html)} ` +
+      `(snapshot=${html.includes('data-fanyi-css-snapshot') ? 'marked' : 'not-marked'})`,
   );
 
   const body: Record<string, any> = {

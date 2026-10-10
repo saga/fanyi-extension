@@ -415,7 +415,8 @@ export function collectBlocks(
   startNode: Node,
   blocks: TextBlock[],
   blockIdRef: { value: number },
-  seenTexts: Set<string>
+  seenTexts: Set<string>,
+  skipPreviouslySeen = false,
 ): WalkerCounters {
   const counters = { rejected: 0, skipped: 0, accepted: 0 };
   // Per-walker: 被 REJECT 的元素入表 + soft score hint 缓存。
@@ -444,13 +445,14 @@ export function collectBlocks(
     const text = getBlockText(translateNode, site.excludeFromText);
     if (!text) continue;
 
-    // 去重: 同样的段落出现在多个 callout (e.g. HBR summary box + body) 只取一个。
-    // 节省 API 调用 + 避免堆叠相同译文。
-    if (seenTexts.has(text)) {
+    // 正文树里的相同文本可能在摘要框、正文和分享预览中分别可见；
+    // 每个可见 DOM 节点都必须分配独立 ID，否则后面的节点会一直保留原文。
+    // 只在 Shadow DOM 边界去重：避免主树已有的 light-DOM 文本又从组件 shadowRoot 重复出现。
+    if (skipPreviouslySeen && seenTexts.has(text)) {
       counters.skipped++;
       continue;
     }
-    seenTexts.add(text);
+    if (!skipPreviouslySeen) seenTexts.add(text);
 
     const id = `b${++blockIdRef.value}`;
     if (translateNode instanceof HTMLElement) {
@@ -495,7 +497,7 @@ function collectFromShadowHosts(
     if (!(currentNode instanceof Element)) continue;
     const shadow = currentNode.shadowRoot;
     if (shadow && shadow.mode === 'open') {
-      collectBlocks(shadow, blocks, blockIdRef, seenTexts);
+      collectBlocks(shadow, blocks, blockIdRef, seenTexts, true);
     }
   }
 }

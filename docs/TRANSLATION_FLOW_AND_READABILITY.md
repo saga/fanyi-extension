@@ -44,12 +44,12 @@
 
 ## 2. 正文根判定（`findArticleRoot`）的四层架构
 
-`contentHelper.ts:314` 的 `findArticleRoot(doc)` 按优先级从四个层级选根，**命中即返回**：
+`findArticleRoot(doc)` 按四层优先级生成正文根候选，但**命中选择器后不会立即返回**：候选会先在 DOM 副本上运行实际 `extractBlocks`，检查有效块数、正文覆盖率、候选相对整页的大小，以及是否位于隐藏/编辑器区域；只有预检通过才采用。
 
 | 层级 | 机制 | 适用场景 | 失败则 |
 |------|------|----------|--------|
-| **Layer 0** | 站点规则 `articleRootSelector`（`rules.ts`） | 通用选择器搞不定的特定站点（如 hero 与正文分属兄弟 section） | 落到 Layer 1 |
-| **Layer 1** | `ARTICLE_SELECTORS` 显式清单逐条匹配（取文本最长者），再 `refineArticleRoot` → `expandWrappers` → `chooseBestRoot` 评分 | 已知高价值站点（WordPress / Ghost / Hugo / 404media 的 `.post__content` 等） | 落到 Layer 2 |
+| **Layer 0** | 站点规则 `articleRootSelector`（`rules.ts`） | 通用选择器搞不定的特定站点（如 hero 与正文分属兄弟 section） | 预检未通过则尝试 Layer 1 |
+| **Layer 1** | `ARTICLE_SELECTORS` 显式清单逐条生成候选（取该选择器下文本最长者），再 `refineArticleRoot` → `expandWrappers` → `chooseBestRoot` 评分和抽取预检 | 已知高价值站点（WordPress / Ghost / Hugo / 404media 的 `.post__content` 等） | 候选预检未通过时继续下一个选择器，再落到 Layer 2 |
 | **Layer 2** | `detectArticleRoot`：**Readability 主条件 + 手写评分兜底**（本文重点） | 未知站点、碎片正文、缺语义标签 | 落到 Layer 3 |
 | **Layer 3** | `doc.body`（整页兜底） | 前述全部失败 | —（仍可能被 walker 噪声规则过滤） |
 
@@ -63,7 +63,7 @@
 main / .main-content / .content-body
 ```
 
-命中后还要经过三步加工：
+候选命中后还要经过三步加工，并通过统一抽取预检：
 1. `refineArticleRoot`（`:60`）：若候选是具体正文容器、而其 `<article>` 祖先里有不在容器内的 h1/h2，则**上扩到 `<article>`**（避免标题漏翻，参见 mitsloan 修复）。
 2. `expandWrappers`（`:125`）：穿透纯包装层（父文本与子相同），但遇到 `nav/menu/sidebar/footer/header/comment/widget` 立即停止。
 3. `chooseBestRoot`（`:276`）：对 candidate 到含 h1 祖先逐层评分（`scoreArticleContainer`），选最高分——解决「hero 与正文是兄弟 section，应一起选」的问题。

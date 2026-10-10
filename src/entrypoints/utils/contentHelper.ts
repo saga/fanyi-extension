@@ -380,59 +380,258 @@ function chooseBestRoot(candidate: Element): Element {
   return best;
 }
 
-function findArticleRoot(doc: Document): ContentRoot {
-  // Layer 0: 站点特定 articleRootSelector（最高优先级）
-  // 当通用选择器无法正确定位正文根时（如 claude.com 的 hero 和正文
-  // 分属兄弟 section），用站点规则的 articleRootSelector 直接指定。
-  const siteRule = matchSiteRule(window.location.href)?.siteRule;
-  if (siteRule?.articleRootSelector) {
-    const el = doc.querySelector(siteRule.articleRootSelector);
-    if (el && hasMeaningfulContent(el)) {
-      logger.debug(
-        `[ContentHelper] Site rule articleRootSelector: ${siteRule.articleRootSelector} → <${el.tagName}> .${(el.className || '').slice(0, 40)}`,
-      );
-      return { element: el, source: 'site-rule', confidence: 0.95, evidence: { textLength: (el.textContent || '').length } };
-    }
-    logger.warn(
-      `[ContentHelper] Site rule articleRootSelector "${siteRule.articleRootSelector}" matched no meaningful element, falling back to Layer 1`,
-    );
+/**
+ * 对根候选执行轻量的真实抽取预检。
+ *
+ * 选择器/Readability 只提出“可能的正文根”，不能证明 walker 真能从中抽取正文。
+ * 这里在候选 DOM 的副本上运行同一个 extractBlocks 与噪声过滤，再决定是否采用；
+ * 因而无需针对每个新网站增加选择器规则。
+ */
+interface RootExtractionAssessment {
+  usable: boolean;
+  reason: string;
+  rootTextLength: number;
+  extractedTextLength: number;
+  coverage: number;
+  qualityScore: number;
+}
+
+function containsOpenShadowRoot(root: Element): boolean {
+  if ((root as HTMLElement).shadowRoot) return true;
+  for (const el of Array.from(root.querySelectorAll('*'))) {
+    if ((el as HTMLElement).shadowRoot) return true;
+  }
+  return false;
+}
+
+function assessArticleRoot(doc: Document, root: Element): RootExtractionAssessment {
+  const rootTextLength = (root.textContent || '').trim().length;
+  const pageTextLength = (doc.body?.textContent || '').trim().length;
+  const blockedAncestor = !!root.closest(
+    '[hidden], [aria-hidden="true"], [contenteditable]:not([contenteditable="false"])',
+  );
+
+  // cloneNode 不复制 shadowRoot。若候选内有开放 Shadow DOM，不能用不完整的 clone
+  // 错误地否定候选；保留已有选择，由正式 walker 跨 Shadow DOM 抽取。
+  if (containsOpenShadowRoot(root)) {
+    return {
+      usable: !blockedAncestor,
+      reason: blockedAncestor ? 'candidate is hidden or editable' : 'open shadow root; preflight deferred',
+      rootTextLength,
+      extractedTextLength: rootTextLength,
+      coverage: 1,
+      qualityScore: rootTextLength,
+    };
   }
 
-  // Layer 1: 选择器快速匹配（处理已知站点）
-  // 对每个选择器：先取内容最多的匹配项（避免空占位符/短摘要），
-  // 再 refine，再 expandWrappers（穿透纯包装层），最后 chooseBestRoot
-  //（对 candidate/parent/grandParent 评分，选最高分）。
+  try {
+    const probe = root.cloneNode(true) as Element;
+    const extracted = extractBlocks(probe);
+    const [usableBlocks] = filterNoiseBlocks(extracted);
+    const extractedTextLength = usableBlocks.reduce((sum, block) => sum + block.text.length, 0);
+    const coverage = rootTextLength > 0 ? extractedTextLength / rootTextLength : 0;
+
+    // 两类“有命中但不代表正文成功”的情形：
+    // 1. 容器文本很多，但 walker 实际留下的正文很少；
+    // 2. 候选只包含整页文本中很小的一点（例如菜单/卡片），而页面其余部分明显更丰富。
+    const sparseExtraction =
+      rootTextLength >= 800 && (extractedTextLength < 120 || coverage < 0.1);
+    const suspiciouslySmallCandidate =
+      pageTextLength >= 1800 &&
+      rootTextLength < pageTextLength * 0.025 &&
+      extractedTextLength < 180;
+    const usable = !blockedAncestor &&
+      usableBlocks.length > 0 &&
+      !sparseExtraction &&
+      !suspiciouslySmallCandidate;
+    const reason = blockedAncestor
+      ? 'candidate is hidden or editable'
+      : usableBlocks.length === 0
+        ? 'walker extracted zero blocks'
+        : sparseExtraction
+          ? 'extracted text is sparse relative to candidate'
+          : suspiciouslySmallCandidate
+            ? 'candidate is too small relative to page content'
+            : 'preflight passed';
+
+    // 兼顾正文覆盖率与实际提取量：防止一个高覆盖率的短菜单击败较完整的正文。
+    const qualityScore = extractedTextLength * (0.65 + Math.min(coverage, 1) * 0.35);
+    return {
+      usable,
+      reason,
+      rootTextLength,
+      extractedTextLength,
+      coverage,
+      qualityScore,
+    };
+  } catch (error) {
+    // 预检本身失败不应直接让整页翻译失败。记录原因并把决定权交给正式抽取兜底。
+    logger.warn('[ContentHelper] Root preflight failed; retaining candidate:', error);
+    return {
+      usable: !blockedAncestor && rootTextLength > 0,
+      reason: 'preflight threw; best effort',
+      rootTextLength,
+      extractedTextLength: 0,
+      coverage: 0,
+      qualityScore: 0,
+    };
+  }
+}
+
+function findArticleRoot(doc: Document): ContentRoot {
+  const seen = new Set<Element>();
+  let bestEffort: { candidate: ContentRoot; assessment: RootExtractionAssessment } | null = null;
+
+  const addCandidate = (
+    element: Element | null | undefined,
+    source: ContentRoot['source'],
+    confidence: number,
+  ): ContentRoot | null => {
+    if (!element || seen.has(element) || !hasMeaningfulContent(element)) return null;
+    seen.add(element);
+    return {
+      element,
+      source,
+      confidence,
+      evidence: { textLength: (element.textContent || '').trim().length },
+    };
+  };
+
+  const evaluateCandidate = (candidate: ContentRoot): ContentRoot | null => {
+    const assessment = assessArticleRoot(doc, candidate.element);
+    logger.debug(
+      '[ContentHelper] Root preflight: source=' + candidate.source +
+      ', tag=' + candidate.element.tagName +
+      ', chars=' + assessment.rootTextLength +
+      ', extracted=' + assessment.extractedTextLength +
+      ', coverage=' + assessment.coverage.toFixed(3) +
+      ', usable=' + assessment.usable +
+      ', reason=' + assessment.reason,
+    );
+
+    if (assessment.usable) {
+      return {
+        ...candidate,
+        evidence: {
+          ...candidate.evidence,
+          textLength: assessment.rootTextLength,
+        },
+      };
+    }
+
+    // 保留仍有价值的部分正文；隐藏/编辑器根绝不进入 best-effort。
+    if (
+      !candidate.element.closest(
+        '[hidden], [aria-hidden="true"], [contenteditable]:not([contenteditable="false"])',
+      ) &&
+      assessment.extractedTextLength > 0 &&
+      (!bestEffort || assessment.qualityScore > bestEffort.assessment.qualityScore)
+    ) {
+      bestEffort = { candidate, assessment };
+    }
+    return null;
+  };
+
+  // 只有当前层级的候选未通过预检，才尝试下一层。
+  // 尤其不要在显式选择器已经命中有效正文时，无条件执行 Readability 克隆整页。
+  const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
+  const siteRule = pageUrl ? matchSiteRule(pageUrl)?.siteRule : undefined;
+  if (siteRule?.articleRootSelector) {
+    try {
+      const el = doc.querySelector(siteRule.articleRootSelector);
+      const candidate = addCandidate(el, 'site-rule', 0.95);
+      if (candidate) {
+        const selected = evaluateCandidate(candidate);
+        if (selected) return selected;
+      } else {
+        logger.warn(
+          '[ContentHelper] Site rule articleRootSelector "' + siteRule.articleRootSelector +
+          '" matched no meaningful element',
+        );
+      }
+    } catch (error) {
+      logger.warn('[ContentHelper] Invalid site rule articleRootSelector:', error);
+    }
+  }
+
+  // Layer 1：严格按 selector 的优先顺序逐个提案与验证；有效命中后立即停止扫描。
   for (const selector of ARTICLE_SELECTORS) {
-    const els = Array.from(doc.querySelectorAll(selector));
+    let els: Element[];
+    try {
+      els = Array.from(doc.querySelectorAll(selector));
+    } catch (error) {
+      logger.warn('[ContentHelper] Invalid article selector "' + selector + '":', error);
+      continue;
+    }
     let bestInSelector: Element | null = null;
     let bestLen = 0;
     for (const el of els) {
       const len = (el.textContent || '').trim().length;
-      if (len > 0 && len > bestLen) {
+      if (len > bestLen) {
         bestLen = len;
         bestInSelector = el;
       }
     }
-    if (bestInSelector) {
-      const refined = refineArticleRoot(bestInSelector);
-      const expanded = expandWrappers(refined);
-      const best = chooseBestRoot(expanded);
-      if (best !== expanded) {
-        logger.debug(
-          `[ContentHelper] Chose <${best.tagName}> .${(best.className || '').slice(0, 40)} over <${expanded.tagName}> .${(expanded.className || '').slice(0, 40)} by scoring`,
+    if (!bestInSelector) continue;
+
+    const refined = refineArticleRoot(bestInSelector);
+    const expanded = expandWrappers(refined);
+    const best = chooseBestRoot(expanded);
+    const candidate = addCandidate(best, 'selector', 0.9);
+    if (!candidate) continue;
+
+    const selected = evaluateCandidate(candidate);
+    if (selected) return selected;
+  }
+
+  // Layer 2：只有站点规则和显式选择器全部不合格，才执行较重的 Readability / 语义评分。
+  if (pageUrl) {
+    try {
+      const detected = detectArticleRoot(doc);
+      if (detected && hasMeaningfulContent(detected.element)) {
+        const candidate = addCandidate(
+          detected.element,
+          detected.source,
+          detected.confidence,
         );
+        if (candidate) {
+          const selected = evaluateCandidate(candidate);
+          if (selected) return selected;
+        }
       }
-      return { element: best, source: 'selector', confidence: 0.9, evidence: { textLength: (best.textContent || '').length } };
+    } catch (error) {
+      logger.warn('[ContentHelper] Readability/scoring root detection failed:', error);
     }
   }
 
-  // Layer 2: 智能评分 / Readability（处理未知站点）
-  const detected = detectArticleRoot(doc);
-  if (detected && hasMeaningfulContent(detected.element)) return detected;
-
-  // Layer 3: 兜底
+  // Layer 3：body 只有在上述所有候选都失败后才会运行真实抽取预检。
   const body = doc.body || doc.documentElement;
-  return { element: body, source: 'body-fallback', confidence: 0.4, evidence: { textLength: (body.textContent || '').length } };
+  const bodyCandidate: ContentRoot = {
+    element: body,
+    source: 'body-fallback',
+    confidence: 0.4,
+    evidence: { textLength: (body.textContent || '').trim().length },
+  };
+  const selectedBody = evaluateCandidate(bodyCandidate);
+  if (selectedBody) return selectedBody;
+
+  if (bestEffort) {
+    logger.warn(
+      '[ContentHelper] No root candidate passed extraction quality checks; using best-effort root ' +
+      bestEffort.candidate.element.tagName + ' from ' + bestEffort.candidate.source,
+    );
+    return {
+      ...bestEffort.candidate,
+      confidence: Math.min(bestEffort.candidate.confidence, 0.55),
+      evidence: {
+        ...bestEffort.candidate.evidence,
+        textLength: bestEffort.assessment.rootTextLength,
+      },
+    };
+  }
+
+  logger.warn('[ContentHelper] All root candidates failed preflight; falling back to body.');
+  return bodyCandidate;
 }
 
 /**
