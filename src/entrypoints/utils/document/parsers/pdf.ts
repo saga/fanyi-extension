@@ -386,14 +386,17 @@ export async function parsePdfDocument(
         bufferedLines = [];
         if (!text) return;
 
-        for (const piece of splitLongText(text, max)) {
+        const pieces = splitLongText(text, max);
+        for (let pieceIndex = 0; pieceIndex < pieces.length; pieceIndex++) {
+          const piece = pieces[pieceIndex] as string;
           segments.push({
             id: 's' + index,
             index,
             text: piece,
-            kind: bufferKind,
+            // 超长列表项被软切后，只有第一段保留列表标记，避免导出时每段都重复编号。
+            kind: bufferKind === 'list-item' && pieceIndex > 0 ? 'paragraph' : bufferKind,
             level: bufferLevel,
-            ...(bufferMarker ? { marker: bufferMarker } : {}),
+            ...(bufferMarker && pieceIndex === 0 ? { marker: bufferMarker } : {}),
             page: bufferPage,
             contextPath: currentContext() || undefined,
           });

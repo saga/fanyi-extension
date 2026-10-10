@@ -236,8 +236,17 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     runId: number,
   ): Promise<boolean> {
+    // 本地和服务端模式使用同一份结构化元数据：章节路径/标题层级/列表编号只作为语境，
+    // 不进入翻译正文；服务端模式则通过结构化 endpoint 发送同样字段。
     const jsonContent = JSON.stringify(
-      batch.map((s) => ({ id: s.id, text: s.text })),
+      batch.map((segment) => ({
+        id: segment.id,
+        text: segment.text,
+        ...(segment.contextPath ? { contextPath: segment.contextPath } : {}),
+        kind: segment.kind,
+        ...(segment.level ? { level: segment.level } : {}),
+        ...(segment.marker ? { marker: segment.marker } : {}),
+      })),
     );
 
     const response = (await browser.runtime.sendMessage({

@@ -102,6 +102,11 @@ describe('文档翻译服务端模式', () => {
     });
 
     expect(sendMessage).toHaveBeenCalledTimes(2);
+    const firstMessage = sendMessage.mock.calls[0]?.[0] as { jsonContent: string };
+    const localPayload = JSON.parse(firstMessage.jsonContent);
+    expect(localPayload[0].contextPath).toBe('Introduction');
+    expect(localPayload[1].contextPath).toBe('2 Method > 2.1 Model');
+    expect(localPayload[0].marker).toBeUndefined();
     expect(state.value.translations.get('pdf-s0')).toBe('引言');
     expect(state.value.translations.get('pdf-s1')).toBe('该模型提高了翻译质量。');
     expect(state.value.failedBatches).toEqual([]);

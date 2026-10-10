@@ -171,6 +171,8 @@ let rawText = '';
  * 会不一致（P0：cacheKey 含 glossary hash），导致命中不到初次翻译的缓存，浪费 LLM。
  */
 const glossary = ref<Glossary | undefined>(undefined);
+/** 保留真实上传文件名；PDF 标题可能从正文提取，不应覆盖文件名。 */
+let documentFileName = 'document';
 
 const { state, run, retryFailed, stop: stopTranslation } = useDocumentTranslation();
 
@@ -191,6 +193,7 @@ function onDrop(event: DragEvent) {
 }
 
 async function loadFile(file: File) {
+  documentFileName = file.name;
   parseError.value = '';
   doc.value = null;
   parsing.value = true;
@@ -232,7 +235,7 @@ async function buildTranslationOptions() {
     serverUrl: config.serverUrl,
     provider: config.provider,
     apiKey: config.deepseekApiKey,
-    documentFileName: doc.value.title + '.' + doc.value.format,
+    documentFileName,
     documentTitle: doc.value.title,
     documentFormat: doc.value.format,
     documentWarnings: doc.value.meta.warnings,
@@ -276,6 +279,7 @@ function resetAll() {
   doc.value = null;
   parseError.value = '';
   rawText = '';
+  documentFileName = 'document';
   glossary.value = undefined;
   progress.value = { done: 0, total: 0 };
 }
