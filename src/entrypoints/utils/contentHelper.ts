@@ -478,7 +478,7 @@ function assessArticleRoot(doc: Document, root: Element): RootExtractionAssessme
   }
 }
 
-function findArticleRoot(doc: Document): ContentRoot {
+function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
   const seen = new Set<Element>();
   let bestEffort: { candidate: ContentRoot; assessment: RootExtractionAssessment } | null = null;
 
@@ -534,7 +534,7 @@ function findArticleRoot(doc: Document): ContentRoot {
 
   // 只有当前层级的候选未通过预检，才尝试下一层。
   // 尤其不要在显式选择器已经命中有效正文时，无条件执行 Readability 克隆整页。
-  const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
+  const pageUrl = pageUrlOverride ?? (typeof window !== 'undefined' ? window.location.href : '');
   const siteRule = pageUrl ? matchSiteRule(pageUrl)?.siteRule : undefined;
   if (siteRule?.articleRootSelector) {
     try {
@@ -938,13 +938,13 @@ function isPdfJsViewerHtml(root: Document | Element): boolean {
   return doc.getElementById('viewerContainer') !== null;
 }
 
-export function prepareDocument(root: Document | Element): {
+export function prepareDocument(root: Document | Element, pageUrl?: string): {
   blocks: TextBlock[];
   chunks: Chunk[];
   fullText: string;
 } {
   // 优先使用文章容器，减少 TreeWalker 遍历范围
-  const rootOrContent = root instanceof Document ? findArticleRoot(root) : root;
+  const rootOrContent = root instanceof Document ? findArticleRoot(root, pageUrl) : root;
   const effectiveRoot: Element =
     rootOrContent instanceof Element ? rootOrContent : rootOrContent.element;
 

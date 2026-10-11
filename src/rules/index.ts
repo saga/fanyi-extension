@@ -6,6 +6,7 @@ import { hackernewsRule } from './hackernews-rules';
 import { fortuneRule } from './fortune-rules';
 import { youtubeRule } from './youtube-rules';
 import { gartnerRule } from './gartner-rules';
+import { stateOfDevsRule } from './stateofdevs-rules';
 
 const RULES: SiteRule[] = [
   githubRule,
@@ -14,6 +15,7 @@ const RULES: SiteRule[] = [
   fortuneRule,
   youtubeRule,
   gartnerRule,
+  stateOfDevsRule,
 ];
 
 export function matchSiteRule(url: string): MatchedRule | null {
