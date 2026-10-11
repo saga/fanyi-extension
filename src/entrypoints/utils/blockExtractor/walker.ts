@@ -225,7 +225,7 @@ function acceptWalkerNode(
   // 也不应被整棵剪枝，仅跳过自身、继续下钻提取内部正文。
   // （div/section 即使含内容 token 也不豁免，否则 ad-content / sponsored-content
   // 等噪声 div 会被下钻提取。article/main 是语义内容根，可安全豁免。）
-  const nodeCls = classifyNode(el);
+  const nodeCls = classifyNode(el, site.skipClassPatternExceptions);
   if (nodeCls.nodeNoise) {
     if (nodeCls.structuralContainer) {
       counters.skipped++;
@@ -417,6 +417,7 @@ export function collectBlocks(
   blockIdRef: { value: number },
   seenTexts: Set<string>,
   skipPreviouslySeen = false,
+  pageUrl?: string,
 ): WalkerCounters {
   const counters = { rejected: 0, skipped: 0, accepted: 0 };
   // Per-walker: 被 REJECT 的元素入表 + soft score hint 缓存。
@@ -426,7 +427,7 @@ export function collectBlocks(
 
   // 站点级 walker 选项：每次遍历取一次（getSiteRule 内部按 URL 缓存）。
   // 无站点规则时两个开关都关闭 → 与历史行为完全一致。
-  const site = getSiteWalkOptions();
+  const site = getSiteWalkOptions(pageUrl);
 
   const walker = document.createTreeWalker(
     startNode,
@@ -471,7 +472,7 @@ export function collectBlocks(
   }
 
   // TreeWalker 不跨 shadow root 边界, 手动遍历 open shadow roots。
-  collectFromShadowHosts(startNode, blocks, blockIdRef, seenTexts);
+  collectFromShadowHosts(startNode, blocks, blockIdRef, seenTexts, pageUrl);
 
   return counters;
 }
@@ -484,7 +485,8 @@ function collectFromShadowHosts(
   root: Node,
   blocks: TextBlock[],
   blockIdRef: { value: number },
-  seenTexts: Set<string>
+  seenTexts: Set<string>,
+  pageUrl?: string,
 ): void {
   const treeWalker = document.createTreeWalker(
     root,
@@ -497,7 +499,7 @@ function collectFromShadowHosts(
     if (!(currentNode instanceof Element)) continue;
     const shadow = currentNode.shadowRoot;
     if (shadow && shadow.mode === 'open') {
-      collectBlocks(shadow, blocks, blockIdRef, seenTexts, true);
+      collectBlocks(shadow, blocks, blockIdRef, seenTexts, true, pageUrl);
     }
   }
 }

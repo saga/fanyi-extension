@@ -404,7 +404,7 @@ function containsOpenShadowRoot(root: Element): boolean {
   return false;
 }
 
-function assessArticleRoot(doc: Document, root: Element): RootExtractionAssessment {
+function assessArticleRoot(doc: Document, root: Element, pageUrl?: string): RootExtractionAssessment {
   const rootTextLength = (root.textContent || '').trim().length;
   const pageTextLength = (doc.body?.textContent || '').trim().length;
   const blockedAncestor = !!root.closest(
@@ -426,7 +426,7 @@ function assessArticleRoot(doc: Document, root: Element): RootExtractionAssessme
 
   try {
     const probe = root.cloneNode(true) as Element;
-    const extracted = extractBlocks(probe);
+    const extracted = extractBlocks(probe, pageUrl);
     const [usableBlocks] = filterNoiseBlocks(extracted);
     const extractedTextLength = usableBlocks.reduce((sum, block) => sum + block.text.length, 0);
     const coverage = rootTextLength > 0 ? extractedTextLength / rootTextLength : 0;
@@ -480,6 +480,7 @@ function assessArticleRoot(doc: Document, root: Element): RootExtractionAssessme
 
 function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
   const seen = new Set<Element>();
+  const pageUrl = pageUrlOverride ?? (typeof window !== 'undefined' ? window.location.href : '');
   let bestEffort: { candidate: ContentRoot; assessment: RootExtractionAssessment } | null = null;
 
   const addCandidate = (
@@ -498,7 +499,7 @@ function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
   };
 
   const evaluateCandidate = (candidate: ContentRoot): ContentRoot | null => {
-    const assessment = assessArticleRoot(doc, candidate.element);
+    const assessment = assessArticleRoot(doc, candidate.element, pageUrl);
     logger.debug(
       '[ContentHelper] Root preflight: source=' + candidate.source +
       ', tag=' + candidate.element.tagName +
@@ -534,7 +535,6 @@ function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
 
   // 只有当前层级的候选未通过预检，才尝试下一层。
   // 尤其不要在显式选择器已经命中有效正文时，无条件执行 Readability 克隆整页。
-  const pageUrl = pageUrlOverride ?? (typeof window !== 'undefined' ? window.location.href : '');
   const siteRule = pageUrl ? matchSiteRule(pageUrl)?.siteRule : undefined;
   if (siteRule?.articleRootSelector) {
     try {
@@ -955,7 +955,7 @@ export function prepareDocument(root: Document | Element, pageUrl?: string): {
     hideBodyOverlays(root, effectiveRoot);
   }
 
-  let blocks = extractBlocks(effectiveRoot);
+  let blocks = extractBlocks(effectiveRoot, pageUrl);
 
   // 后处理噪声过滤：移除 UI 控件 / 媒体播放器 / 工具栏块。
   // 覆盖 class-less 站点（archive.md 等）内联样式噪声无法被 walker class 规则拦截的问题。
@@ -969,7 +969,7 @@ export function prepareDocument(root: Document | Element, pageUrl?: string): {
     logger.warn(
       `[ContentHelper] Detected root <${effectiveRoot.tagName}> yielded 0 blocks, falling back to <body>`,
     );
-    blocks = extractBlocks(root.body || root.documentElement);
+    blocks = extractBlocks(root.body || root.documentElement, pageUrl);
   }
 
   // Data Island fallback: SPA 站点（Next.js / Nuxt / SvelteKit）首屏 DOM

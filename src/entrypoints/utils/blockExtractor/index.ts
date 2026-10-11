@@ -60,7 +60,7 @@ export function collapseSpacedText(text: string): string {
  * @param rootNode Document 或 DocumentFragment
  * @returns 顺序的 TextBlock 数组
  */
-export function extractBlocks(rootNode: Node): TextBlock[] {
+export function extractBlocks(rootNode: Node, pageUrl?: string): TextBlock[] {
   const blocks: TextBlock[] = [];
   const blockIdRef = { value: 0 };
   // 记录主 DOM 树中的文本，只有跨入 Shadow DOM 时用于抑制 light-DOM 镜像内容。
@@ -79,7 +79,7 @@ export function extractBlocks(rootNode: Node): TextBlock[] {
     return [];
   }
 
-  collectBlocks(startNode, blocks, blockIdRef, seenTexts);
+  collectBlocks(startNode, blocks, blockIdRef, seenTexts, false, pageUrl);
 
   // 后处理：合并 CSS letter-spacing 渲染的分散单词。
   // 在 collectBlocks 之后做，避免 collapse 后的归一化文本影响 Shadow DOM 镜像去重。

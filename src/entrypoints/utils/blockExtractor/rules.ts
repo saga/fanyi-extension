@@ -38,8 +38,8 @@ import {
 let cachedRule: SiteRule | null = null;
 let cachedUrl: string | null = null;
 
-function getSiteRule(): SiteRule | null {
-  const currentUrl = window.location.href;
+function getSiteRule(pageUrlOverride?: string): SiteRule | null {
+  const currentUrl = pageUrlOverride ?? window.location.href;
   if (cachedUrl === currentUrl) {
     return cachedRule;
   }
@@ -121,11 +121,16 @@ function isNoiseSafeValve(el: Element): boolean {
  * 安全阀：若元素 textContent > 5000 字符，即使 class 命中噪声模式也不跳过，
  * 防止误杀长 FAQ / 长隐私政策等正文内容。
  */
-export function shouldSkipByClass(el: Element): boolean {
+export function shouldSkipByClass(
+  el: Element,
+  patternExceptions: readonly string[] = [],
+): boolean {
   const tokens = tokenizeClass(el);
   if (tokens.length === 0) return false;
   for (const token of tokens) {
     for (const pattern of SKIP_CLASS_PATTERNS) {
+      // 站点级豁免只跳过指定的通用模式，不改变其它噪声规则。
+      if (patternExceptions.includes(pattern)) continue;
       if (matchesSkipClass(token, pattern)) {
         // 安全阀：噪声类元素若 text > 5000 字符则不视为噪声
         if (isNoiseSafeValve(el)) return false;
@@ -153,8 +158,11 @@ export interface NodeClassification {
   subtreePrune: boolean;
 }
 
-export function classifyNode(el: Element): NodeClassification {
-  const nodeNoise = shouldSkipByClass(el) || shouldSkipBySiteRules(el);
+export function classifyNode(
+  el: Element,
+  patternExceptions: readonly string[] = [],
+): NodeClassification {
+  const nodeNoise = shouldSkipByClass(el, patternExceptions) || shouldSkipBySiteRules(el);
   const tag = el.tagName.toLowerCase();
   const structuralContainer = tag === 'article' || tag === 'main';
   return {
@@ -233,22 +241,27 @@ export interface SiteWalkOptions {
   excludeFromText: readonly string[] | undefined;
   /** 是否放行 SKIP_SET 里的 <table> 系标签。 */
   translateTables: boolean;
+  /** 针对特定站点，声明通用噪声类名模式的豁免项。 */
+  skipClassPatternExceptions: readonly string[] | undefined;
 }
 
-/** 无站点规则时的默认选项（两个开关都关闭 = 历史行为）。 */
+/** 无站点规则时关闭所有站点专属行为，保持历史默认值。 */
 const DEFAULT_SITE_WALK_OPTIONS: SiteWalkOptions = {
   excludeFromText: undefined,
   translateTables: false,
+  skipClassPatternExceptions: undefined,
 };
 
-export function getSiteWalkOptions(): SiteWalkOptions {
-  const rule = getSiteRule();
+export function getSiteWalkOptions(pageUrl?: string): SiteWalkOptions {
+  const rule = getSiteRule(pageUrl);
   if (!rule) return DEFAULT_SITE_WALK_OPTIONS;
 
   const exclude = rule.excludeFromTextSelectors;
+  const exceptions = rule.skipClassPatternExceptions;
   return {
     excludeFromText: exclude && exclude.length > 0 ? exclude : undefined,
     translateTables: rule.translateTables === true,
+    skipClassPatternExceptions: exceptions && exceptions.length > 0 ? exceptions : undefined,
   };
 }
 
