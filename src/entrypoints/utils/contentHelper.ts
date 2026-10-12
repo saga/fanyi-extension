@@ -478,6 +478,47 @@ function assessArticleRoot(doc: Document, root: Element, pageUrl?: string): Root
   }
 }
 
+/**
+ * 识别由多个并列正文区域组成的页面（搜索/调查结果/专题首页）。
+ * 只在 main 下存在至少两个互不嵌套、具备段落内容的区域，且它们共同
+ * 覆盖了 main 的相当部分时才返回 true；普通单篇文章不会因此扩大根范围。
+ */
+function hasMultipleContentRegions(main: Element): boolean {
+  const mainTextLength = (main.textContent || '').trim().length;
+  if (mainTextLength < 300) return false;
+
+  const candidates = Array.from(
+    main.querySelectorAll('section, article, [role="article"]'),
+  ).filter((el) => {
+    if (el.closest('nav, aside, footer, [hidden], [aria-hidden="true"], [contenteditable]:not([contenteditable="false"])')) {
+      return false;
+    }
+    const textLength = (el.textContent || '').trim().length;
+    if (textLength < 80) return false;
+    return el.querySelector('p, li, blockquote') !== null;
+  });
+  const candidateSet = new Set(candidates);
+  const topRegions = candidates.filter((el) => {
+    let parent = el.parentElement;
+    while (parent && parent !== main) {
+      if (candidateSet.has(parent)) return false;
+      parent = parent.parentElement;
+    }
+    return true;
+  });
+
+  if (topRegions.length < 2) return false;
+  const regionTextLength = topRegions.reduce(
+    (sum, el) => sum + (el.textContent || '').trim().length,
+    0,
+  );
+  const largestRegion = Math.max(
+    ...topRegions.map((el) => (el.textContent || '').trim().length),
+  );
+  return regionTextLength >= largestRegion * 1.3 &&
+    regionTextLength / mainTextLength >= 0.35;
+}
+
 function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
   const seen = new Set<Element>();
   const pageUrl = pageUrlOverride ?? (typeof window !== 'undefined' ? window.location.href : '');
@@ -551,6 +592,19 @@ function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
       }
     } catch (error) {
       logger.warn('[ContentHelper] Invalid site rule articleRootSelector:', error);
+    }
+  }
+
+  // 多分区页面优先尝试聚合 main，但仅在没有显式站点根规则时启用。
+  // 聚合根仍走同一套真实抽取预检；预检失败就继续原有候选链。
+  if (!siteRule?.articleRootSelector) {
+    const main = doc.querySelector('main');
+    if (main && hasMultipleContentRegions(main)) {
+      const candidate = addCandidate(main, 'multi-region-main', 0.88);
+      if (candidate) {
+        const selected = evaluateCandidate(candidate);
+        if (selected) return selected;
+      }
     }
   }
 
