@@ -134,14 +134,15 @@ describe('buildChunks', () => {
     ];
 
     const chunks = buildChunks(blocks);
-    // b1 is ~770 tokens, close to TARGET_TOKENS=800
-    // The heading may or may not start a new chunk depending on exact token count
-    // Verify all blocks are present across chunks
-    const totalBlocks = chunks.reduce((sum, c) => sum + c.blocks.length, 0);
-    expect(totalBlocks).toBe(3);
-    // Verify the heading is present
+    // b1 超过单块长度上限，会拆成内部片段；这些片段必须都存在，
+    // 且原有标题与下一段仍完整保留。
     const allBlocks = chunks.flatMap(c => c.blocks);
-    expect(allBlocks.some(b => b.tag === 'h2')).toBe(true);
+    const longTextParts = allBlocks.filter((b) => b.segmentOf === 'b1');
+    expect(longTextParts.length).toBeGreaterThan(1);
+    expect(longTextParts.map((b) => b.text).join('')).toContain('aaaaaaaaaa');
+    expect(allBlocks.some(b => b.tag === 'h2' && b.id === 'b2')).toBe(true);
+    expect(allBlocks.some(b => b.id === 'b3')).toBe(true);
+    expect(allBlocks.filter((b) => b.id === 'b1')).toHaveLength(0);
   });
 
   // --- warmup token target tests ---
