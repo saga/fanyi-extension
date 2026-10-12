@@ -115,13 +115,13 @@ function grabNode(node: Node, site: SiteWalkOptions): Element | false {
       const hasDirectSetDescendant = el.querySelector(DIRECT_SET_CSS_SELECTOR) !== null;
       if (hasDirectSetDescendant) return false;
     }
-    return isValidText(getBlockText(el, site.excludeFromText)) ? el : false;
+    return isValidText(getBlockText(el, site.excludeFromText), site.pageUrl) ? el : false;
   }
 
   // 2) 内联元素: 在 article 内且无块级父 → 单独抓; 否则跳过
   if (INLINE_SET.has(tag)) {
     if (isInsideArticle(el) && !hasBlockLevelParent(el)) {
-      return isValidText(getBlockText(el, site.excludeFromText)) ? el : false;
+      return isValidText(getBlockText(el, site.excludeFromText), site.pageUrl) ? el : false;
     }
     return false;
   }
@@ -130,7 +130,7 @@ function grabNode(node: Node, site: SiteWalkOptions): Element | false {
   const { hasDirectText, hasNonInlineChild } = classifyChildren(el);
   if (hasNonInlineChild) return false; // 容器,子树会被独立处理
   if (hasDirectText) {
-    return isValidText(getBlockText(el, site.excludeFromText)) ? el : false;
+    return isValidText(getBlockText(el, site.excludeFromText), site.pageUrl) ? el : false;
   }
   return false;
 }
@@ -225,7 +225,7 @@ function acceptWalkerNode(
   // 也不应被整棵剪枝，仅跳过自身、继续下钻提取内部正文。
   // （div/section 即使含内容 token 也不豁免，否则 ad-content / sponsored-content
   // 等噪声 div 会被下钻提取。article/main 是语义内容根，可安全豁免。）
-  const nodeCls = classifyNode(el, site.skipClassPatternExceptions);
+  const nodeCls = classifyNode(el, site.skipClassPatternExceptions, site.pageUrl);
   if (nodeCls.nodeNoise) {
     if (nodeCls.structuralContainer) {
       counters.skipped++;
@@ -306,7 +306,7 @@ function acceptWalkerNode(
     }
     // 文本有效性用「剔除站点装饰后的文本」判定：否则只剩导航文字的包裹容器
     // （HN 的 comhead 包裹 div / 顶栏 td）会被当成有效块抓出来。
-    if (isValidText(getBlockText(el, site.excludeFromText))) {
+    if (isValidText(getBlockText(el, site.excludeFromText), site.pageUrl)) {
       counters.accepted++;
       // 段落类容器整体成块 → 子树不再单独抓。
       //
@@ -334,7 +334,7 @@ function acceptWalkerNode(
     return NodeFilter.FILTER_SKIP;
   }
   if (hasDirectText || hasNonEmptyElement) {
-    if (isValidText(getBlockText(el, site.excludeFromText))) {
+    if (isValidText(getBlockText(el, site.excludeFromText), site.pageUrl)) {
       counters.accepted++;
       return NodeFilter.FILTER_ACCEPT;
     }

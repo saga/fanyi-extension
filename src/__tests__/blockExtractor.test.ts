@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { extractBlocks, findBlockNode, buildNodeMap, collapseSpacedText } from '../entrypoints/utils/blockExtractor';
-import { shouldSkipByClass, isLowPriorityElement, isOverlayElement, classifyNode, isParagraphLikeElement, normalizeBlockText } from '../entrypoints/utils/blockExtractor/rules';
+import { shouldSkipByClass, isLowPriorityElement, isOverlayElement, classifyNode, isParagraphLikeElement, normalizeBlockText, isElementHidden } from '../entrypoints/utils/blockExtractor/rules';
 import { applyBlockTranslation } from '../entrypoints/utils/translationDisplay';
 
 // Mock matchSiteRule for shouldSkipBySiteRules tests
@@ -257,12 +257,18 @@ describe('extractBlocks - Text Length Filtering', () => {
     expect(blocks[0].text).toContain('longer paragraph');
   });
 
-  it('should skip very long text (3072+ chars)', () => {
-    const longText = 'a'.repeat(3100);
-    setupHTML(`
-      <p>${longText}</p>
-      <p>Normal length paragraph here.</p>
-    `);
+  it('keeps long readable paragraphs below the safety ceiling', () => {
+    const longText = 'This is a long but valid paragraph. '.repeat(130);
+    setupHTML(`<p>${longText}</p><p>Normal length paragraph here.</p>`);
+
+    const blocks = extractBlocks(document);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].text).toContain('This is a long but valid paragraph.');
+  });
+
+  it('rejects pathological single-block text above the safety ceiling', () => {
+    const longText = 'a'.repeat(16_400);
+    setupHTML(`<p>${longText}</p><p>Normal length paragraph here.</p>`);
 
     const blocks = extractBlocks(document);
     expect(blocks).toHaveLength(1);
@@ -1690,15 +1696,16 @@ describe('blockExtractor - isElementHidden performance (regression: layout thras
     document.body.innerHTML = '';
   });
 
-  it('detects hidden attribute without walking parent chain', () => {
+  it('detects visibility changes on the same DOM node across scans', () => {
     const div = document.createElement('div');
-    div.setAttribute('hidden', '');
+    div.textContent = 'A reusable SPA node';
     document.body.appendChild(div);
 
-    // jsdom 不一定支持 getComputedStyle,
-    // 但 hidden 属性是 cheap path, 不需要走 computed。
-    // 这里只验证 cheap path 命中 hidden 属性。
-    expect(div.hasAttribute('hidden')).toBe(true);
+    expect(isElementHidden(div)).toBe(false);
+    div.setAttribute('aria-hidden', 'true');
+    expect(isElementHidden(div)).toBe(true);
+    div.removeAttribute('aria-hidden');
+    expect(isElementHidden(div)).toBe(false);
   });
 
 

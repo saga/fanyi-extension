@@ -20,7 +20,7 @@ parseHTML → walker 提取 blocks → chunkBuilder 分块 → LLM 翻译 → �
 
 ```
 POST /fanyi/page
-Body: { html, url, apiKey, source, target, mode }
+Body: { html, url, blocks, apiKey, source, target, mode }
 ```
 
 服务端行为分支：
@@ -30,7 +30,7 @@ Body: { html, url, apiKey, source, target, mode }
 | HTML 中**没有** `data-fanyi-block-id` | 走原有流程：parseHTML → walker → chunkBuilder → 翻译 → 回填 |
 | HTML 中**有** `data-fanyi-block-id` | **跳过 walker**，直接从 HTML 收集标记元素 → chunkBuilder → 翻译 → 回填 |
 
-> 扩展端无需发送 `blocks` 或 `chunks`，只需发送标记了 `data-fanyi-block-id` 的 HTML。
+> 扩展端同时发送标记后的 HTML 与 `blocks` 文本快照。服务端校验每个 ID、标签、数量和顺序都与标记 DOM 对应后，使用浏览器端的文本作为翻译来源；旧版本没有 `blocks` 时仍兼容从 HTML 提取。
 
 ### 2.1 显示模式
 
@@ -47,6 +47,9 @@ interface FanyiPageRequest {
 
   /** 页面原始 URL，用于计算 <base> href 和相对路径解析 */
   url: string;
+
+  /** 浏览器端实际抽取的文本；服务端按 ID 定位回填，不重新拼接 textContent */
+  blocks?: Array<{ id: string; tag: string; text: string }>;
 
   /** DeepSeek API Key，服务端用此 Key 调用 DeepSeek API（必填） */
   apiKey: string;
@@ -69,7 +72,7 @@ interface FanyiPageRequest {
 }
 ```
 
-> 当前扩展端实际发送的字段为 `html`、`url`、`apiKey`、`source`、`target`。
+> 当前扩展端发送字段包括 `html`、`url`、`blocks`、`apiKey`、`source`、`target`。
 > `mode` 固定为 `bilingual`；`/fanyi/page` 固定使用 DeepSeek 作为 LLM provider。
 
 扩展端 walker 在浏览器中执行时，给每个被接受的 DOM 元素设置 `data-fanyi-block-id` 属性：

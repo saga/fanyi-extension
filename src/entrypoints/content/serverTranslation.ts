@@ -165,7 +165,23 @@ function buildClientInfo() {
  * @returns 形如 `b1:h1|b2:p|...` 的字符串，直接作为 contentHash 发给服务端。
  */
 export function computeBlocksFingerprint(blocks: TextBlock[]): string {
-  return blocks.map((b) => `${b.id}:${b.tag}`).join('|');
+  // 正文文本变化时缓存应失效；纯百分比/互动计数等短动态指标除外。
+  const isVolatileCounter = (text: string): boolean => {
+    const value = text.trim();
+    if (value.length > 48) return false;
+    return /^(?:[+\-]?\d[\d,.]*%?|[+\-]?\d[\d,.]*\s+(?:likes?|views?|comments?|replies?|votes?|followers?|following|points?|stars?|results?))$/i.test(value);
+  };
+  const source = blocks
+    .map((b) => `${b.id}:${b.tag}:${isVolatileCounter(b.text) ? '<counter>' : normalizeForMatch(b.text)}`)
+    .join('\u001f');
+  let hashA = 0x811c9dc5;
+  let hashB = 0x9e3779b9;
+  for (let i = 0; i < source.length; i++) {
+    const code = source.charCodeAt(i);
+    hashA = Math.imul(hashA ^ code, 0x01000193) >>> 0;
+    hashB = Math.imul(hashB ^ (code + i), 0x85ebca6b) >>> 0;
+  }
+  return `v2:${blocks.length}:${hashA.toString(36)}:${hashB.toString(36)}`;
 }
 
 /** 归一化文本用于映射校验：去掉零宽/不可见格式字符 + 折叠空白。 */
@@ -357,6 +373,8 @@ export async function translateViaServer(
   const body: Record<string, any> = {
     html,
     url,
+    // 使用浏览器端实际抽取的文本；服务端只按标记 ID 定位回填。
+    blocks: blocks.map(({ id, tag, text }) => ({ id, tag, text })),
     source: config.sourceLang,
     target: config.targetLang,
     // 扩展端只支持双语对照模式，服务端也已强制此模式

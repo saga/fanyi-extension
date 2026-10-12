@@ -3,6 +3,7 @@ import {
   translateViaServer,
   checkServerCache,
   applyServerTranslatedHtml,
+  computeBlocksFingerprint,
 } from '../entrypoints/content/serverTranslation';
 import type { Config } from '../entrypoints/utils/config';
 import type { TextBlock } from '../entrypoints/utils/blockExtractor';
@@ -107,8 +108,12 @@ describe('translateViaServer', () => {
     expect(body.promptStyle).toBe('default');
     // 结构指纹随 POST 发出：服务端把它存进 content_hash，下次 check 时用它判断
     // 缓存里的 block id 映射是否仍与当前页面一致（不一致就 410 重译，避免译文错位）。
-    expect(body.contentHash).toContain('b1:h1');
-    expect(body.contentHash).toContain('b2:p');
+    expect(body.contentHash).toMatch(/^v2:2:/);
+    expect(body.contentHash.length).toBeLessThan(64);
+    expect(body.blocks).toEqual([
+      { id: 'b1', tag: 'h1', text: 'Hello World' },
+      { id: 'b2', tag: 'p', text: 'This is a test paragraph.' },
+    ]);
 
     expect(result.translatedIds.size).toBe(2);
     expect(result.translatedIds.has('b1')).toBe(true);
@@ -371,4 +376,21 @@ describe('applyServerTranslatedHtml', () => {
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '你好世界');
   });
 
+
+  it('invalidates server cache for changed prose but ignores short counters', () => {
+    const base: TextBlock[] = [
+      { id: 'b1', xpath: '', tag: 'p', text: 'This paragraph describes a stable implementation detail.' },
+      { id: 'b2', xpath: '', tag: 'span', text: '73%' },
+    ];
+    const changedProse: TextBlock[] = [
+      { ...base[0], text: 'This paragraph describes a changed implementation detail.' },
+      base[1],
+    ];
+    const changedCounter: TextBlock[] = [
+      base[0],
+      { ...base[1], text: '81%' },
+    ];
+    expect(computeBlocksFingerprint(base)).not.toBe(computeBlocksFingerprint(changedProse));
+    expect(computeBlocksFingerprint(base)).toBe(computeBlocksFingerprint(changedCounter));
+  });
 });

@@ -98,20 +98,12 @@ function matchesSkipClass(token: string, pattern: string): boolean {
  */
 const NOISE_TEXT_SAFE_VALVE = 5000;
 
-const _noiseSafeValveMemo = new WeakSet<Element>();
-
 /**
- * 检查元素是否因文本过长而豁免噪声判定。
- * 用 WeakSet 缓存，同一元素不会重复计算 textContent。
+ * 检查元素是否因当前文本长度而豁免噪声判定。
+ * 不跨扫描缓存：SPA 可能复用同一节点并替换文本。
  */
 function isNoiseSafeValve(el: Element): boolean {
-  if (_noiseSafeValveMemo.has(el)) return true;
-  const text = el.textContent || '';
-  if (text.length > NOISE_TEXT_SAFE_VALVE) {
-    _noiseSafeValveMemo.add(el);
-    return true;
-  }
-  return false;
+  return (el.textContent || '').length > NOISE_TEXT_SAFE_VALVE;
 }
 
 /**
@@ -161,8 +153,9 @@ export interface NodeClassification {
 export function classifyNode(
   el: Element,
   patternExceptions: readonly string[] = [],
+  pageUrl?: string,
 ): NodeClassification {
-  const nodeNoise = shouldSkipByClass(el, patternExceptions) || shouldSkipBySiteRules(el);
+  const nodeNoise = shouldSkipByClass(el, patternExceptions) || shouldSkipBySiteRules(el, pageUrl);
   const tag = el.tagName.toLowerCase();
   const structuralContainer = tag === 'article' || tag === 'main';
   return {
@@ -216,8 +209,8 @@ export function hasContentTokens(el: Element): boolean {
  * 站点特殊规则 (src/rules/): 命中后整棵子树拒绝。
  * 通过 CSS selector 匹配,允许站点级更复杂的命中 (e.g. 复合选择器)。
  */
-export function shouldSkipBySiteRules(el: Element): boolean {
-  const rule = getSiteRule();
+export function shouldSkipBySiteRules(el: Element, pageUrl?: string): boolean {
+  const rule = getSiteRule(pageUrl);
   if (!rule?.skipSelectors) return false;
 
   for (const selector of rule.skipSelectors) {
@@ -237,6 +230,8 @@ export function shouldSkipBySiteRules(el: Element): boolean {
  * 对用 table 做整页布局的站点（Hacker News）等于整页零块。
  */
 export interface SiteWalkOptions {
+  /** 当前抽取任务 URL，确保所有站点判定使用同一上下文。 */
+  pageUrl: string;
   /** 抽取块文本时需剔除的选择器；undefined = 走 textContent 快路径（默认）。 */
   excludeFromText: readonly string[] | undefined;
   /** 是否放行 SKIP_SET 里的 <table> 系标签。 */
@@ -246,19 +241,21 @@ export interface SiteWalkOptions {
 }
 
 /** 无站点规则时关闭所有站点专属行为，保持历史默认值。 */
-const DEFAULT_SITE_WALK_OPTIONS: SiteWalkOptions = {
+const DEFAULT_SITE_WALK_OPTIONS: Omit<SiteWalkOptions, 'pageUrl'> = {
   excludeFromText: undefined,
   translateTables: false,
   skipClassPatternExceptions: undefined,
 };
 
 export function getSiteWalkOptions(pageUrl?: string): SiteWalkOptions {
-  const rule = getSiteRule(pageUrl);
-  if (!rule) return DEFAULT_SITE_WALK_OPTIONS;
+  const currentUrl = pageUrl ?? (typeof window !== 'undefined' ? window.location.href : '');
+  const rule = getSiteRule(currentUrl);
+  if (!rule) return { ...DEFAULT_SITE_WALK_OPTIONS, pageUrl: currentUrl };
 
   const exclude = rule.excludeFromTextSelectors;
   const exceptions = rule.skipClassPatternExceptions;
   return {
+    pageUrl: currentUrl,
     excludeFromText: exclude && exclude.length > 0 ? exclude : undefined,
     translateTables: rule.translateTables === true,
     skipClassPatternExceptions: exceptions && exceptions.length > 0 ? exceptions : undefined,
@@ -282,11 +279,8 @@ export function getSiteWalkOptions(pageUrl?: string): SiteWalkOptions {
  *   3. 如果实测有漏网, 可以升级为带 memoization 的实现 (WeakSet 已查过 visible
  *      的元素跳过 computed style 查), 见 _elementVisibilityMemo。
  */
-const _elementVisibilityMemo = new WeakSet<Element>();
-
 export function isElementHidden(el: Element): boolean {
-  // 已确认可见的, 不再查 (避免在子树中重复 layout)
-  if (_elementVisibilityMemo.has(el)) return false;
+  // 每次扫描都读取当前状态；SPA 可能复用节点并改变隐藏属性或样式。
 
   // Cheap: 显式属性
   if (el.hasAttribute('hidden')) return true;
@@ -310,8 +304,6 @@ export function isElementHidden(el: Element): boolean {
     }
   }
 
-  // 标记可见, 后续子孙中的同元素 (e.g. 多个 walker visit 同一节点) 跳过
-  _elementVisibilityMemo.add(el);
   return false;
 }
 
@@ -357,7 +349,7 @@ export function normalizeBlockText(text: string): string {
  * 调用方应传入 `normalizeBlockText()` 规整后的文本（或 `getBlockText()` 的返回值），
  * 否则首尾的零宽字符会被算进长度。
  */
-export function isValidText(text: string | undefined | null): boolean {
+export function isValidText(text: string | undefined | null, pageUrl?: string): boolean {
   if (!text) return false;
 
   const trimmed = text.trim();
@@ -380,7 +372,7 @@ export function isValidText(text: string | undefined | null): boolean {
   if (PATTERNS.BASE64.test(trimmed)) return false;
 
   // 站点特殊文本规则 (e.g. Reddit 的 Sentry chunk 列表)
-  const rule = getSiteRule();
+  const rule = getSiteRule(pageUrl);
   if (rule?.skipTextPatterns) {
     for (const pattern of rule.skipTextPatterns) {
       try {
@@ -590,16 +582,11 @@ export function hasTranslateBlockClass(el: Element): boolean {
 //   2. 用 WeakSet 缓存结果,同一元素不会重复计算
 //   3. 放在 walker 的 class/站点规则检查之后,优先用廉价规则过滤
 
-const _cookieBannerMemo = new WeakSet<Element>();
-const _popupMemo = new WeakSet<Element>();
-const _adSizeMemo = new WeakSet<Element>();
-
 /**
  * 是否因文本内容命中 Cookie Banner / Consent 弹窗关键词。
- * 命中后整棵子树拒绝,避免翻译 "Accept All" / "Manage Cookies" 等 UI 文本。
+ * 命中后整棵子树拒绝；不缓存正向命中，因为 SPA 可能复用节点并替换文本。
  */
 export function isCookieBannerByText(el: Element): boolean {
-  if (_cookieBannerMemo.has(el)) return true;
 
   const tag = el.tagName.toLowerCase();
   if (!DYNAMIC_NOISE_CONTAINER_TAGS.has(tag)) return false;
@@ -614,7 +601,6 @@ export function isCookieBannerByText(el: Element): boolean {
 
   const matched = Array.from(COOKIE_BANNER_TEXT_PATTERNS).some(p => directText.includes(p));
   if (matched) {
-    _cookieBannerMemo.add(el);
     return true;
   }
   return false;
@@ -625,7 +611,6 @@ export function isCookieBannerByText(el: Element): boolean {
  * 命中后整棵子树拒绝,避免翻译 Newsletter 订阅框、登录弹窗、促销浮层等。
  */
 export function isPopupByStyle(el: Element): boolean {
-  if (_popupMemo.has(el)) return true;
   if (!(el instanceof HTMLElement)) return false;
 
   const tag = el.tagName.toLowerCase();
@@ -648,7 +633,6 @@ export function isPopupByStyle(el: Element): boolean {
     const coverRatio = area / viewportArea;
     if (coverRatio < POPUP_STYLE_DETECTION.MIN_VIEWPORT_COVER_RATIO) return false;
 
-    _popupMemo.add(el);
     return true;
   } catch {
     // jsdom 等无 layout 环境,静默忽略
@@ -661,7 +645,6 @@ export function isPopupByStyle(el: Element): boolean {
  * 命中后整棵子树拒绝。
  */
 export function isAdBySize(el: Element): boolean {
-  if (_adSizeMemo.has(el)) return true;
   if (!(el instanceof HTMLElement)) return false;
 
   const tag = el.tagName.toLowerCase();
@@ -671,7 +654,6 @@ export function isAdBySize(el: Element): boolean {
     const rect = el.getBoundingClientRect();
     for (const [w, h] of AD_SIZE_PATTERNS) {
       if (Math.abs(rect.width - w) <= 5 && Math.abs(rect.height - h) <= 5) {
-        _adSizeMemo.add(el);
         return true;
       }
     }
