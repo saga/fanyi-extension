@@ -152,24 +152,25 @@ function buildClientInfo() {
 }
 
 /**
- * 计算 blocks 的「结构指纹」——id + tag 序列。
+ * 计算 blocks 的内容指纹——包含 ID、标签和可翻译文本。
  *
  * 为什么需要它：服务端缓存里的双语 HTML 靠 `data-fanyi-block-id` 回填，而这些
  * id 只在**生成缓存时那次抽取**里才有意义。页面动态变化（插入/删除/重排块）会让
  * 同一个 id 指向不同元素，缓存命中后译文就会贴到错误的块上（a16z.news 故障：
  * 标题拿到正文段落的译文）。
  *
- * 只取 id+tag 而**不含文本**：文本变化（点赞数 142→184）不影响 id→元素的对应关系，
- * 不应让整页缓存失效；而块集合的结构变化一定会改变这个序列。
+ * 正文变化必须让整页缓存失效；只有带明确互动标签的短计数（例如 `73 views`）
+ * 会被归一化，从而避免常见动态数字无谓触发重译。百分比不能当成普通计数，
+ * 因为调查结果中的 `73%` 本身就是需要保持最新的业务内容。
  *
- * @returns 形如 `b1:h1|b2:p|...` 的字符串，直接作为 contentHash 发给服务端。
+ * @returns 紧凑的确定性指纹，直接作为 contentHash 发给服务端。
  */
 export function computeBlocksFingerprint(blocks: TextBlock[]): string {
-  // 正文文本变化时缓存应失效；纯百分比/互动计数等短动态指标除外。
+  // 正文文本变化时缓存应失效；仅排除带明确互动标签的短动态计数，不忽略调查百分比。
   const isVolatileCounter = (text: string): boolean => {
     const value = text.trim();
     if (value.length > 48) return false;
-    return /^(?:[+\-]?\d[\d,.]*%?|[+\-]?\d[\d,.]*\s+(?:likes?|views?|comments?|replies?|votes?|followers?|following|points?|stars?|results?))$/i.test(value);
+    return /^[+\-]?\d[\d,.]*\s+(?:likes?|views?|comments?|replies?|votes?|followers?|following|points?|stars?|results?)$/i.test(value);
   };
   const source = blocks
     .map((b) => `${b.id}:${b.tag}:${isVolatileCounter(b.text) ? '<counter>' : normalizeForMatch(b.text)}`)
@@ -231,6 +232,8 @@ export async function checkServerCache(
   checkUrl.searchParams.set('url', window.location.href);
   checkUrl.searchParams.set('source', config.sourceLang || 'en');
   checkUrl.searchParams.set('target', config.targetLang || 'zh');
+  checkUrl.searchParams.set('provider', config.provider || 'deepseek');
+  checkUrl.searchParams.set('promptStyle', config.promptStyle || 'default');
   if (blocks.length > 0) {
     checkUrl.searchParams.set('contentHash', computeBlocksFingerprint(blocks));
   }

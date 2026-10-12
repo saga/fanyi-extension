@@ -9,6 +9,11 @@ export interface TextBlock {
   xpath: string;
   tag: string;
   text: string;
+  /** 内部超长文本分片元数据；只用于翻译时合并，不映射为独立 DOM 节点。 */
+  segmentOf?: string;
+  segmentIndex?: number;
+  segmentCount?: number;
+  separatorBefore?: string;
   /** 文档翻译章节语境；普通网页翻译块通常不设置。 */
   contextPath?: string;
   kind?: string;

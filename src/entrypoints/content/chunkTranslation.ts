@@ -1,5 +1,6 @@
 import browser from 'webextension-polyfill';
 import type { Chunk } from '../utils/contentHelper';
+import { mergeSegmentTranslations } from '../utils/chunkBuilder';
 import type { Glossary } from '../service/_service';
 import { TranslationQueue } from '../utils/translationQueue';
 import {
@@ -129,6 +130,13 @@ export async function translateChunksViaBackground(
   let hasFailure = false;
   const applyPromises: Promise<void>[] = [];
   const translatedIds = new Set<string>();
+  const segmentBlockById = new Map<string, Chunk['blocks'][number]>();
+  const segmentTranslations = new Map<string, string>();
+  for (const chunk of chunks) {
+    for (const block of chunk.blocks) {
+      if (block.segmentOf) segmentBlockById.set(block.id, block);
+    }
+  }
   const stats = {
     fullyOk: 0,
     neededRetry: 0,
@@ -151,8 +159,16 @@ export async function translateChunksViaBackground(
           glossary,
           promptStyle,
           onFailure: () => { hasFailure = true; },
-          onApply: (chunkMap) =>
-            applyPromises.push(applyTranslationsWithRAF(chunkMap, nodeMap, state)),
+          onApply: (chunkMap) => {
+            const directMap = new Map<string, string>();
+            for (const [id, text] of chunkMap) {
+              if (segmentBlockById.has(id)) segmentTranslations.set(id, text);
+              else directMap.set(id, text);
+            }
+            if (directMap.size > 0) {
+              applyPromises.push(applyTranslationsWithRAF(directMap, nodeMap, state));
+            }
+          },
           onChunkComplete: (outcome, recovered, stillMissing, errMsg) => {
             if (outcome === 'fully-ok') stats.fullyOk++;
             else if (outcome === 'needed-retry') {
@@ -176,6 +192,17 @@ export async function translateChunksViaBackground(
 
   await pool.addAllWithWarmup(tasks, 2, maxConcurrency);
   await Promise.all(applyPromises);
+
+  if (segmentBlockById.size > 0) {
+    // 分片不能逐片写回同一个 DOM 元素，否则最后一个片段会覆盖前面的内容。
+    // 所有片段成功后才合并并回填原始块；任意片段缺失时保留原文并报告 missing。
+    for (const segmentId of segmentBlockById.keys()) translatedIds.delete(segmentId);
+    const mergedSegments = mergeSegmentTranslations(chunks, segmentTranslations);
+    for (const originalId of mergedSegments.keys()) translatedIds.add(originalId);
+    if (mergedSegments.size > 0) {
+      await applyTranslationsWithRAF(mergedSegments, nodeMap, state);
+    }
+  }
 
   const errorCatStr = Object.keys(stats.errorsByCategory).length > 0
     ? ' ' + Object.entries(stats.errorsByCategory)

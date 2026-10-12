@@ -381,16 +381,25 @@ describe('applyServerTranslatedHtml', () => {
     const base: TextBlock[] = [
       { id: 'b1', xpath: '', tag: 'p', text: 'This paragraph describes a stable implementation detail.' },
       { id: 'b2', xpath: '', tag: 'span', text: '73%' },
+      { id: 'b3', xpath: '', tag: 'span', text: '73 views' },
     ];
     const changedProse: TextBlock[] = [
       { ...base[0], text: 'This paragraph describes a changed implementation detail.' },
       base[1],
+      base[2],
+    ];
+    const changedPercentage: TextBlock[] = [
+      base[0],
+      { ...base[1], text: '81%' },
+      base[2],
     ];
     const changedCounter: TextBlock[] = [
       base[0],
-      { ...base[1], text: '81%' },
+      base[1],
+      { ...base[2], text: '81 views' },
     ];
     expect(computeBlocksFingerprint(base)).not.toBe(computeBlocksFingerprint(changedProse));
+    expect(computeBlocksFingerprint(base)).not.toBe(computeBlocksFingerprint(changedPercentage));
     expect(computeBlocksFingerprint(base)).toBe(computeBlocksFingerprint(changedCounter));
   });
 });
