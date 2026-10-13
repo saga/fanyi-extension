@@ -9,6 +9,7 @@ export interface ShortcutConfig {
 }
 
 export type Provider = 'deepseek' | 'cloudflare' | 'openrouter' | 'nvidia' | 'gemini' | 'opencode';
+export type LocalAgentProvider = 'workbuddy' | 'opencode';
 
 export interface Config {
   sourceLang: string;
@@ -29,6 +30,15 @@ export interface Config {
   useServerTranslation: boolean;
   /** 服务端翻译地址，留空时使用默认地址 */
   serverUrl: string;
+  /** 直接把翻译请求交给本机的 Workbuddy/OpenCode Provider。启用后优先于远程服务设置。 */
+  useLocalAgent: boolean;
+  localAgentProvider: LocalAgentProvider;
+  /** 本机服务根地址，不包含 /v1/chat/completions。 */
+  localAgentUrl: string;
+  /** 可选模型覆盖；auto 表示使用本机服务的环境配置。 */
+  localAgentModel: string;
+  /** 与本机服务 LOCAL_AGENT_TOKEN 对应的共享令牌。 */
+  localAgentToken: string;
 }
 
 const defaultConfig: Config = {
@@ -45,6 +55,11 @@ const defaultConfig: Config = {
   },
   useServerTranslation: false,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+  useLocalAgent: false,
+  localAgentProvider: 'opencode',
+  localAgentUrl: 'http://127.0.0.1:8789',
+  localAgentModel: 'auto',
+  localAgentToken: '',
 };
 
 export async function getConfig(): Promise<Config> {

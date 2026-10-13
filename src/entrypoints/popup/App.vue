@@ -2,7 +2,7 @@
   <div class="popup-container">
     <h2>简简单单翻译</h2>
     <div class="settings">
-      <div class="input-item">
+      <div v-if="!config.useLocalAgent" class="input-item">
         <label>DeepSeek API Key</label>
         <input
           type="password"
@@ -47,9 +47,42 @@
       </div>
 
       <label class="switch-item">
-        <input type="checkbox" v-model="config.useServerTranslation" @change="saveConfig" />
+        <input type="checkbox" v-model="config.useLocalAgent" @change="onLocalAgentToggle" />
+        <span>使用本机 Workbuddy/OpenCode 翻译</span>
+      </label>
+
+      <div v-if="config.useLocalAgent" class="server-group local-agent-group">
+        <div class="select-item">
+          <label>本机 Agent</label>
+          <select v-model="config.localAgentProvider" @change="saveConfig">
+            <option value="workbuddy">Workbuddy / CodeBuddy SDK</option>
+            <option value="opencode">OpenCode CLI</option>
+          </select>
+        </div>
+        <div class="input-item">
+          <label>本机服务地址</label>
+          <input type="text" v-model="config.localAgentUrl" placeholder="http://127.0.0.1:8789" @change="saveConfig" />
+        </div>
+        <div class="input-item">
+          <label>模型覆盖（可选）</label>
+          <input type="text" v-model="config.localAgentModel" placeholder="auto；或 OpenCode 的 provider/model" @change="saveConfig" />
+          <span class="hint-text">auto 使用本机服务环境变量；OpenCode 示例：openai/gpt-5.4；Workbuddy 填本机 SDK 模型 ID。</span>
+        </div>
+        <div class="input-item">
+          <label>本机服务 Token</label>
+          <input type="password" v-model="config.localAgentToken" placeholder="与 LOCAL_AGENT_TOKEN 保持一致" @change="saveConfig" />
+        </div>
+        <button type="button" class="server-toggle" @click="checkApiKey">测试本机服务连接</button>
+        <span v-if="apiStatus === 'checking'" class="status-text checking">正在检查本机服务…</span>
+        <span v-else-if="apiStatus === 'ok'" class="status-text success">本机服务可连接</span>
+        <span v-else-if="apiStatus === 'fail'" class="status-text error">本机服务不可用，请检查地址、Token 和服务进程</span>
+      </div>
+
+      <label class="switch-item">
+        <input type="checkbox" v-model="config.useServerTranslation" :disabled="config.useLocalAgent" @change="saveConfig" />
         <span>通过远程服务翻译当前页面</span>
       </label>
+      <span v-if="config.useLocalAgent" class="hint-text">本机 Provider 已启用，翻译及 EPUB/PDF 文学分析/审校优先走本机。</span>
 
       <div v-if="config.useServerTranslation" class="server-section">
         <button
@@ -120,6 +153,11 @@ const config = ref<Config>({
   },
   useServerTranslation: false,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+  useLocalAgent: false,
+  localAgentProvider: 'opencode',
+  localAgentUrl: 'http://127.0.0.1:8789',
+  localAgentModel: 'auto',
+  localAgentToken: '',
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
@@ -135,6 +173,12 @@ onMounted(async () => {
 
 async function saveConfig() {
   await setConfig(config.value);
+}
+
+async function onLocalAgentToggle() {
+  if (config.value.useLocalAgent) config.value.useServerTranslation = false;
+  await saveConfig();
+  await checkApiKey();
 }
 
 function onApiKeyChange() {
@@ -158,11 +202,10 @@ function onServerUrlChange() {
 }
 
 async function checkApiKey() {
-  if (!config.value.deepseekApiKey) {
+  if (!config.value.useLocalAgent && !config.value.deepseekApiKey) {
     apiStatus.value = 'fail';
     return;
   }
-  
   apiStatus.value = 'checking';
   try {
     const response = await browser.runtime.sendMessage({ action: 'checkConfig' });

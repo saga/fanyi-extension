@@ -78,7 +78,8 @@ function buildTranslationBody(
   targetLang: string,
   sitePrompt?: string,
   glossary?: Glossary,
-  style?: PromptStyle
+  style?: PromptStyle,
+  modelOverride = MODEL,
 ) {
   const hasDocumentContext = blocks.some((block) => !!block.contextPath?.trim() || !!block.kind || !!block.marker);
   const blocksJson = JSON.stringify(
@@ -99,7 +100,7 @@ function buildTranslationBody(
   const systemContent = buildSystemContent(sourceLang, targetLang, sitePrompt, hasGlossaryEntries(glossary) ? glossary : undefined, style);
   logger.debug('[DeepSeek] System prompt built:\n' + systemContent);
   return {
-    model: MODEL,
+    model: modelOverride,
     messages: [
       {
         role: 'system' as const,
@@ -123,10 +124,11 @@ function buildTranslationBody(
 
 async function callApi(
   apiKey: string,
-  body: string
+  body: string,
+  endpoint = DEFAULT_API_URL,
 ): Promise<string> {
   try {
-    const response = await fetch(DEFAULT_API_URL, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: buildHeaders(apiKey),
       body,
@@ -194,10 +196,14 @@ export class DeepSeekTranslationService implements TranslationService {
   private apiKey: string;
   /** 翻译文风，默认 undefined 表示使用通用直译风格 */
   private style?: PromptStyle;
+  private endpoint: string;
+  private model: string;
 
-  constructor(apiKey: string, style?: PromptStyle) {
+  constructor(apiKey: string, style?: PromptStyle, options?: { endpoint?: string; model?: string }) {
     this.apiKey = apiKey;
     this.style = style;
+    this.endpoint = options?.endpoint || DEFAULT_API_URL;
+    this.model = options?.model || MODEL;
   }
 
   async translate(
@@ -215,10 +221,11 @@ export class DeepSeekTranslationService implements TranslationService {
       targetLang,
       context,
       hasGlossaryEntries(glossary) ? glossary : undefined,
-      this.style
+      this.style,
+      this.model,
     );
 
-    const raw = await callApi(this.apiKey, JSON.stringify(body));
+    const raw = await callApi(this.apiKey, JSON.stringify(body), this.endpoint);
     return logUnchangedBlocks(raw, blocks);
   }
 
@@ -229,6 +236,12 @@ export class DeepSeekTranslationService implements TranslationService {
     glossary?: Glossary,
     context?: string,
   ): AsyncGenerator<string, string, unknown> {
+    // 本机 Agent 服务暂不流式输出，生成完整 chunk 后作为最后一个 partial 返回。
+    if (this.endpoint !== DEFAULT_API_URL) {
+      const finalContent = await this.translate(jsonContent, sourceLang, targetLang, glossary, context);
+      yield finalContent;
+      return finalContent;
+    }
     const blocks = JSON.parse(jsonContent);
 
     const bodyObj = buildTranslationBody(
@@ -237,12 +250,13 @@ export class DeepSeekTranslationService implements TranslationService {
       targetLang,
       context,
       hasGlossaryEntries(glossary) ? glossary : undefined,
-      this.style
+      this.style,
+      this.model,
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);
 
-    const response = await fetch(DEFAULT_API_URL, {
+    const response = await fetch(this.endpoint, {
       method: 'POST',
       headers: buildHeaders(this.apiKey),
       body,

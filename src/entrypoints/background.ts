@@ -120,9 +120,24 @@ export default defineBackground({
       return null;
     }
 
-    // Service instances are lightweight; create per request.
-    function getService(apiKey: string, style?: PromptStyle): DeepSeekTranslationService {
-      return new DeepSeekTranslationService(apiKey, style);
+    // 远程 Provider 继续走原有 API；本机模式把相同翻译 prompt 发给本机 OpenAI-compatible 入口。
+    function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle): DeepSeekTranslationService {
+      if (config.useLocalAgent) {
+        const base = (config.localAgentUrl || 'http://127.0.0.1:8789').replace(/\\/+$/, '');
+        const endpoint = new URL('/v1/chat/completions', base).toString();
+        const override = (config.localAgentModel || 'auto').trim();
+        const model = override && override.toLowerCase() !== 'auto'
+          ? (/^(workbuddy|opencode):/i.test(override) ? override : config.localAgentProvider + ':' + override)
+          : config.localAgentProvider;
+        return new DeepSeekTranslationService(config.localAgentToken || '', style, { endpoint, model });
+      }
+      return new DeepSeekTranslationService(config.deepseekApiKey, style);
+    }
+
+    function getEffectiveProviderKey(config: Awaited<ReturnType<typeof getConfig>>): string {
+      return config.useLocalAgent
+        ? ['local-agent', config.localAgentProvider, config.localAgentModel || 'auto', config.localAgentUrl || ''].join(':')
+        : config.provider;
     }
 
     browser.runtime.onInstalled.addListener(() => {
@@ -280,7 +295,7 @@ export default defineBackground({
     ) {
       try {
         const config = await getConfig();
-        if (!config.deepseekApiKey) {
+        if (!config.useLocalAgent && !config.deepseekApiKey) {
           sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
           return;
         }
@@ -309,7 +324,7 @@ export default defineBackground({
             jsonContent,
             sourceLang,
             targetLang,
-            config.provider,
+            getEffectiveProviderKey(config),
             promptStyle,
             glossary,
             effectivePrompt,
@@ -323,7 +338,7 @@ export default defineBackground({
           return;
         }
 
-        const service = getService(config.deepseekApiKey, promptStyle);
+        const service = getService(config, promptStyle);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
         // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
@@ -458,7 +473,7 @@ export default defineBackground({
     ) {
       try {
         const config = await getConfig();
-        if (!config.deepseekApiKey) {
+        if (!config.useLocalAgent && !config.deepseekApiKey) {
           sendResponse({ success: false, error: 'DeepSeek API Key not configured' });
           return;
         }
@@ -471,7 +486,7 @@ export default defineBackground({
         // 文风：同 handleTranslateChunk，优先用页级检测结果，缺省回退配置。
         const promptStyle = message.promptStyle ?? config.promptStyle;
 
-        const service = getService(config.deepseekApiKey, promptStyle);
+        const service = getService(config, promptStyle);
 
         const stream = service.translateStream(
           jsonContent,
@@ -594,7 +609,14 @@ export default defineBackground({
     async function handleCheckConfig(sendResponse: (response: CheckConfigResponse) => void) {
       try {
         const config = await getConfig();
-        if (config.deepseekApiKey) {
+        if (config.useLocalAgent) {
+          const base = (config.localAgentUrl || 'http://127.0.0.1:8789').replace(/\\/+$/, '');
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (config.localAgentToken) headers.Authorization = 'Bearer ' + config.localAgentToken;
+          const response = await fetch(new URL('/health', base).toString(), { headers });
+          if (!response.ok) throw new Error('本机服务返回 HTTP ' + response.status);
+          sendResponse({ success: true, config });
+        } else if (config.deepseekApiKey) {
           sendResponse({ success: true, config });
         } else {
           sendResponse({ success: false, error: 'API Key 未配置' });
