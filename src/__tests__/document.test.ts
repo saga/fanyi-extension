@@ -6,6 +6,8 @@ import { parseHtmlDocument, decodeEntities } from '../entrypoints/utils/document
 import { parseJsonDocument, collectJsonLeaves } from '../entrypoints/utils/document/parsers/json';
 import { buildSegmentBatches } from '../entrypoints/utils/document/batcher';
 import { buildDocumentPages } from '../entrypoints/utils/document/pagination';
+import JSZip from 'jszip';
+import { parseEpubDocument } from '../entrypoints/utils/document/parsers/office';
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
@@ -23,6 +25,40 @@ describe('detectFormat', () => {
   });
 
 
+});
+
+describe('parseEpubDocument', () => {
+  it('按 OPF spine 顺序并发解析章节，跳过目录文件并报告进度', async () => {
+    const zip = new JSZip();
+    zip.file('META-INF/container.xml',
+      '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>');
+    zip.file('OEBPS/content.opf', [
+      '<package><metadata><dc:title>Book &amp; Title</dc:title></metadata><manifest>',
+      '<item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>',
+      '<item id="chapter2" href="text/chapter2.xhtml" media-type="application/xhtml+xml"/>',
+      '<item id="chapter1" href="text/chapter1.xhtml" media-type="application/xhtml+xml"/>',
+      '</manifest><spine><itemref idref="chapter2"/><itemref idref="chapter1"/></spine></package>',
+    ].join(''));
+    zip.file('OEBPS/nav.xhtml', '<html><body><h1>Table of Contents</h1><p>Should not appear.</p></body></html>');
+    zip.file('OEBPS/text/chapter1.xhtml', '<html><head><title>Chapter One</title></head><body><h1>Chapter One</h1><p>First chapter.</p></body></html>');
+    zip.file('OEBPS/text/chapter2.xhtml', '<html><head><title>Chapter Two</title></head><body><h1>Chapter Two</h1><p>Second chapter.</p></body></html>');
+
+    const progress: Array<[number, number]> = [];
+    const buffer = await zip.generateAsync({ type: 'arraybuffer' });
+    const doc = await parseEpubDocument(buffer, {
+      fileName: 'book.epub',
+      onProgress: (done, total) => progress.push([done, total]),
+    });
+
+    expect(doc.title).toBe('Book & Title');
+    expect(doc.segments.filter((segment) => segment.kind === 'heading').map((segment) => segment.text))
+      .toEqual(['Chapter Two', 'Chapter One']);
+    expect(doc.segments[0]?.contextPath).toBe('Chapter Two');
+    expect(doc.segments[0]?.path).toBe('OEBPS/text/chapter2.xhtml');
+    expect(doc.segments.some((segment) => segment.text.includes('Should not appear'))).toBe(false);
+    expect(progress[0]).toEqual([0, 2]);
+    expect(progress[progress.length - 1]).toEqual([2, 2]);
+  });
 });
 
 // ============================================================

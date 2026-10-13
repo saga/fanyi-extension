@@ -265,9 +265,16 @@ async function loadFile(file: File) {
     doc.value = await parseDocument(input, {
       onProgress: (done, total) => { progress.value = { done, total }; },
     });
-    // 一次性抽出术语表，startTranslate / retry 必须复用同一份（见 glossary ref 注释）
-    const fullText = doc.value.segments.map((s) => s.text).join('\n');
-    glossary.value = extractGlossaryLocal(fullText);
+    // 术语抽取不需要扫描整本书：限制在前 12,000 个字符，避免超长 EPUB
+    // 在首次显示阅读器前把整本内容拼接、复制并交给 NLP 分析。重试继续复用这份结果。
+    const glossaryLimit = 12_000;
+    let glossarySample = '';
+    for (const segment of doc.value.segments) {
+      if (glossarySample.length >= glossaryLimit) break;
+      const remaining = glossaryLimit - glossarySample.length;
+      glossarySample += segment.text.slice(0, remaining) + '\n';
+    }
+    glossary.value = extractGlossaryLocal(glossarySample);
     const config = await getConfig();
     sourceLang.value = config.sourceLang || 'auto';
     targetLang.value = config.targetLang || 'zh';
