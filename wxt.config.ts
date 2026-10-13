@@ -32,8 +32,9 @@ export default defineConfig({
         'contextMenus', 
         'tabs',
         'activeTab',
-        'scripting', 
-        'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*', 'file:///*'];
+        'scripting',
+        'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*',
+        'http://127.0.0.1:8789/*', 'http://localhost:8789/*', 'file:///*'];
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
@@ -55,6 +56,8 @@ export default defineConfig({
         'https://api.deepseek.com/*',
         'https://s.sunxiunan.com/*',
         'https://ss.dal.workers.dev/*',
+        'http://127.0.0.1:8789/*',
+        'http://localhost:8789/*',
         'https://*/*',
         'http://*/*',
         'file:///*',

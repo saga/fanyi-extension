@@ -123,7 +123,8 @@ export default defineBackground({
     // 远程 Provider 继续走原有 API；本机模式把相同翻译 prompt 发给本机 OpenAI-compatible 入口。
     function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle): DeepSeekTranslationService {
       if (config.useLocalAgent) {
-        const base = (config.localAgentUrl || 'http://127.0.0.1:8789').replace(/\\/+$/, '');
+        let base = config.localAgentUrl || 'http://127.0.0.1:8789';
+        while (base.endsWith('/')) base = base.slice(0, -1);
         const endpoint = new URL('/v1/chat/completions', base).toString();
         const override = (config.localAgentModel || 'auto').trim();
         const model = override && override.toLowerCase() !== 'auto'
@@ -610,7 +611,8 @@ export default defineBackground({
       try {
         const config = await getConfig();
         if (config.useLocalAgent) {
-          const base = (config.localAgentUrl || 'http://127.0.0.1:8789').replace(/\\/+$/, '');
+        let base = config.localAgentUrl || 'http://127.0.0.1:8789';
+        while (base.endsWith('/')) base = base.slice(0, -1);
           const headers: Record<string, string> = { 'Content-Type': 'application/json' };
           if (config.localAgentToken) headers.Authorization = 'Bearer ' + config.localAgentToken;
           const response = await fetch(new URL('/health', base).toString(), { headers });

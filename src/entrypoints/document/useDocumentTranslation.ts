@@ -46,6 +46,12 @@ export interface TranslateOptions {
   promptStyle?: PromptStyle;
   /** 跟随扩展全局设置：将已重建的文档片段交给 vocal-saga 服务端翻译。 */
   useServerTranslation?: boolean;
+  /** 本机 Workbuddy/OpenCode Provider；启用时不调用远程 document endpoint。 */
+  useLocalAgent?: boolean;
+  localAgentProvider?: 'workbuddy' | 'opencode';
+  localAgentUrl?: string;
+  localAgentModel?: string;
+  localAgentToken?: string;
   serverUrl?: string;
   provider?: string;
   model?: string;
@@ -106,6 +112,23 @@ interface ServerDocumentTranslationResponse {
  * 将各部署模式的现有 serverUrl 规范化为结构化文档端点。
  * 默认设置是 /fanyi/page；文档接口与之同域，但路径独立，服务端不会接收 PDF 二进制。
  */
+function resolveLocalAgentEndpoint(localAgentUrl: string | undefined, endpointPath: string): string {
+  const url = new URL(localAgentUrl?.trim() || 'http://127.0.0.1:8789');
+  url.pathname = endpointPath;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+function requestHeaders(options: TranslateOptions): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...(options.useLocalAgent && options.localAgentToken
+      ? { Authorization: 'Bearer ' + options.localAgentToken }
+      : {}),
+  };
+}
+
 function resolveServerDocumentEndpoint(
   serverUrl?: string,
   endpointPath = '/api/translate/document/segments',
@@ -296,11 +319,15 @@ async function analyzeLiteraryChapterViaServer(
 ): Promise<{ memory: LiteraryBookMemory; analyzed: boolean; warning?: string } | null> {
   const sampled = selectLiteraryChapterSample(segments);
   if (!sampled.length) return { memory, analyzed: false, warning: '当前内容没有足够的正文片段供实体分析' };
-  const endpoint = resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/analyze');
-  const provider = options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
+  const endpoint = options.useLocalAgent
+    ? resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/analyze')
+    : resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/analyze');
+  const provider = options.useLocalAgent
+    ? (options.localAgentProvider || 'opencode')
+    : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: requestHeaders(options),
     body: JSON.stringify({
       chapterTitle,
       segments: sampled.map((segment) => ({
@@ -312,7 +339,8 @@ async function analyzeLiteraryChapterViaServer(
       glossary: options.glossary,
       promptStyle: options.promptStyle,
       provider,
-      model: options.model,
+      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'opencode' } : {}),
+      model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });
@@ -343,11 +371,15 @@ async function reviewLiteraryBatchViaServer(
     }] : [];
   });
   if (!candidates.length) return { translations: new Map(), findings: [] };
-  const endpoint = resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/review');
-  const provider = options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
+  const endpoint = options.useLocalAgent
+    ? resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/review')
+    : resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/review');
+  const provider = options.useLocalAgent
+    ? (options.localAgentProvider || 'opencode')
+    : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: requestHeaders(options),
     body: JSON.stringify({
       chapterTitle: candidates[0]?.contextPath || options.documentTitle,
       segments: candidates,
@@ -357,7 +389,8 @@ async function reviewLiteraryBatchViaServer(
       glossary: options.glossary,
       promptStyle: options.promptStyle,
       provider,
-      model: options.model,
+      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'opencode' } : {}),
+      model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });

@@ -595,7 +595,12 @@ async function buildTranslationOptions() {
     glossary: glossary.value,
     promptStyle: config.promptStyle,
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
-    useServerTranslation: config.useServerTranslation,
+    useServerTranslation: config.useServerTranslation && !config.useLocalAgent,
+    useLocalAgent: config.useLocalAgent,
+    localAgentProvider: config.localAgentProvider,
+    localAgentUrl: config.localAgentUrl,
+    localAgentModel: config.localAgentModel,
+    localAgentToken: config.localAgentToken,
     literaryMode: literaryMode.value && (doc.value.format === 'epub' || doc.value.format === 'pdf'),
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
