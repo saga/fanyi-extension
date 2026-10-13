@@ -136,6 +136,7 @@ describe('文档翻译服务端模式', () => {
         analyzedChapters: 1,
         reviewedSegments: 7,
         warnings: ['某段 reviewer 未返回，保留初译'],
+        reviewFindings: [{ id: 'book-s0', category: 'style', priority: 'optional', sourceExcerpt: 'nothing', draftExcerpt: '无事', reason: '风格建议', suggestion: '可调整' }],
       },
       analyzedChapterKeys: ['Chapter One'],
       lastRunSegmentIds: ['book-s0', 'book-s1'],
@@ -148,6 +149,7 @@ describe('文档翻译服务端模式', () => {
     expect(literaryMemory.value.entities[0]?.target).toBe('艾丽丝');
     expect(literaryStatus.value.bookProfileReady).toBe(true);
     expect(literaryStatus.value.reviewedSegments).toBe(7);
+    expect(literaryStatus.value.reviewFindings[0]?.priority).toBe('optional');
 
     const snapshot = getSnapshot();
     expect(snapshot.analyzedChapterKeys).toEqual(['Chapter One']);

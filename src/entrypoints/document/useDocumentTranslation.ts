@@ -682,6 +682,11 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     preserveExisting = false,
   ) {
+    const startsLiteraryBook = !!options.literaryMode &&
+      (options.documentFormat === 'epub' || options.documentFormat === 'pdf');
+    // reset() normally clears a previous document. Preserve a user-authored glossary entered
+    // before the first translation run, then merge the AI book analysis into it below.
+    const preseededMemory = startsLiteraryBook ? sanitizeLiteraryMemory(literaryMemory.value) : undefined;
     if (preserveExisting) {
       generation++;
       state.value.failedBatches = [];
@@ -689,10 +694,10 @@ export function useDocumentTranslation() {
       state.value.running = false;
     } else {
       reset();
+      if (preseededMemory) literaryMemory.value = preseededMemory;
     }
     const runId = generation;
-    const literaryEnabled = !!options.literaryMode &&
-      (options.documentFormat === 'epub' || options.documentFormat === 'pdf');
+    const literaryEnabled = startsLiteraryBook;
     literaryStatus.value.enabled = literaryEnabled;
     if (!literaryEnabled) {
       literaryMemory.value = createEmptyLiteraryMemory();
