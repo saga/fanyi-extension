@@ -5,6 +5,7 @@ import { parseSrt, parseVtt, parseSubtitleDocument } from '../entrypoints/utils/
 import { parseHtmlDocument, decodeEntities } from '../entrypoints/utils/document/parsers/html';
 import { parseJsonDocument, collectJsonLeaves } from '../entrypoints/utils/document/parsers/json';
 import { buildSegmentBatches } from '../entrypoints/utils/document/batcher';
+import { buildDocumentPages } from '../entrypoints/utils/document/pagination';
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
@@ -182,6 +183,68 @@ describe('buildSegmentBatches', () => {
     const batches = buildSegmentBatches(mk(1, 5000), { maxChars: 100, maxSegments: 3 });
     expect(batches).toHaveLength(1);
     expect(batches[0]?.[0]?.text).toHaveLength(5000);
+  });
+});
+
+describe('buildDocumentPages', () => {
+  const seg = (
+    id: string,
+    text: string,
+    extra: Partial<DocumentSegment> = {},
+  ): DocumentSegment => ({
+    id,
+    index: Number(id.replace(/\D/g, '') || '0'),
+    text,
+    kind: 'paragraph',
+    ...extra,
+  });
+
+  it('EPUB 按章节分页，并把超长章节切成适合阅读的子页', () => {
+    const doc = {
+      format: 'epub' as const,
+      title: 'A Book',
+      segments: [
+        seg('s0', 'Chapter One', { kind: 'heading', path: 'Text/ch1.xhtml', contextPath: 'Chapter One' }),
+        seg('s1', 'a'.repeat(60), { path: 'Text/ch1.xhtml', contextPath: 'Chapter One' }),
+        seg('s2', 'b'.repeat(60), { path: 'Text/ch1.xhtml', contextPath: 'Chapter One' }),
+        seg('s3', 'Chapter Two', { kind: 'heading', path: 'Text/ch2.xhtml', contextPath: 'Chapter Two' }),
+      ],
+      meta: { charCount: 142, segmentCount: 4, warnings: [] },
+    };
+    const pages = buildDocumentPages(doc, { maxChars: 100, maxSegments: 10 });
+    expect(pages).toHaveLength(3);
+    expect(pages[0]?.sectionTitle).toBe('Chapter One');
+    expect(pages[0]?.segments.map((item) => item.id)).toEqual(['s0', 's1']);
+    expect(pages[1]?.title).toContain('2/2');
+    expect(pages[2]?.sectionTitle).toBe('Chapter Two');
+    expect(pages.flatMap((page) => page.segments).map((item) => item.id))
+      .toEqual(doc.segments.map((item) => item.id));
+  });
+
+  it('长文本分页不丢失片段，且每页遵循片段数预算', () => {
+    const doc = {
+      format: 'txt' as const,
+      title: 'Notes',
+      segments: Array.from({ length: 7 }, (_, index) => seg('s' + index, 'x'.repeat(20))),
+      meta: { charCount: 140, segmentCount: 7, warnings: [] },
+    };
+    const pages = buildDocumentPages(doc, { maxChars: 45, maxSegments: 2 });
+    expect(pages).toHaveLength(4);
+    expect(pages.flatMap((page) => page.segments)).toHaveLength(7);
+    expect(pages.every((page) => page.segments.length <= 2)).toBe(true);
+  });
+
+  it('PDF 优先保留原始页码边界', () => {
+    const doc = {
+      format: 'pdf' as const,
+      title: 'Paper',
+      segments: [
+        seg('s0', 'page one', { page: 1 }),
+        seg('s1', 'page two', { page: 2 }),
+      ],
+      meta: { charCount: 16, segmentCount: 2, warnings: [] },
+    };
+    expect(buildDocumentPages(doc).map((page) => page.title)).toEqual(['PDF 第 1 页', 'PDF 第 2 页']);
   });
 });
 

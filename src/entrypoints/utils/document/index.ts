@@ -14,6 +14,7 @@ import { detectFormat, isWithinSizeLimit, MAX_DOCUMENT_BYTES } from './detect';
 export * from './types';
 export * from './detect';
 export * from './batcher';
+export * from './pagination';
 export * from './export';
 
 export interface ParseDocumentOptions {
@@ -103,6 +104,7 @@ export async function parseDocument(
       return parseEpubDocument(getBuffer(), {
         maxSegmentChars: options.maxSegmentChars,
         fileName: input.fileName,
+        onProgress: options.onProgress,
       });
     }
     case 'pdf': {

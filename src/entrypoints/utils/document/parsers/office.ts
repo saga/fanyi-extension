@@ -44,6 +44,8 @@ function pushSegments(
 export interface ParseOfficeOptions {
   maxSegmentChars?: number;
   fileName?: string;
+  /** 文档解析进度；EPUB 按章节报告，避免长书一直显示无进度。 */
+  onProgress?: (done: number, total: number) => void;
 }
 
 /** DOCX：按 w:p 切块，从 pStyle / outlineLvl 识别标题层级与列表。 */
@@ -149,7 +151,7 @@ function resolvePath(base: string, relative: string): string {
   return stack.join('/');
 }
 
-/** EPUB：container.xml → OPF → spine 顺序逐章解析，保证阅读顺序正确。 */
+/** EPUB：按 OPF spine 保留阅读顺序；有限并发解压，避免逐章串行等待。 */
 export async function parseEpubDocument(
   arrayBuffer: ArrayBuffer,
   options: ParseOfficeOptions = {},
@@ -166,49 +168,93 @@ export async function parseEpubDocument(
   if (!opfPath) return emptyResult('epub', options.fileName, ['EPUB container.xml 中未找到 rootfile']);
 
   const opfFile = zip.file(opfPath);
-  if (!opfFile) return emptyResult('epub', options.fileName, [`EPUB 缺少 ${opfPath}`]);
+  if (!opfFile) return emptyResult('epub', options.fileName, ['EPUB 缺少 ' + opfPath]);
   const opfXml = await opfFile.async('string');
   const opfDir = dirOf(opfPath);
 
-  let title = (/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/.exec(opfXml)?.[1] ?? '').trim();
+  let title = decodeEntities((/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/.exec(opfXml)?.[1] ?? '').trim());
 
   const manifest = new Map<string, string>();
+  const navIds = new Set<string>();
   const manifestRe = /<item\b[^>]*>/g;
   let mm: RegExpExecArray | null;
   while ((mm = manifestRe.exec(opfXml)) !== null) {
     const tag = mm[0];
     const id = /\bid="([^"]+)"/.exec(tag)?.[1];
     const href = /\bhref="([^"]+)"/.exec(tag)?.[1];
-    if (id && href) manifest.set(id, href);
+    const properties = /\bproperties="([^"]+)"/.exec(tag)?.[1] ?? '';
+    if (id && href) {
+      manifest.set(id, href);
+      if (properties.split(/\s+/).includes('nav')) navIds.add(id);
+    }
   }
 
   const spineIds = [...opfXml.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g)]
     .map((match) => match[1] as string)
-    .filter((id) => manifest.has(id));
+    .filter((id) => manifest.has(id) && !navIds.has(id));
 
-  // spine 为空（部分 EPUB 不写 spine）时退化为"所有 XHTML 按文件名排序"
+  // EPUB 正常按 spine 阅读；只有没有 spine 时才退化为 XHTML 文件名排序。
   const chapters = spineIds.length
     ? spineIds.map((id) => manifest.get(id) as string)
-    : [...manifest.values()].filter((h) => /\.(x?html|xml)$/i.test(h)).sort();
+    : [...manifest.entries()]
+        .filter(([id, href]) => !navIds.has(id) && /\.(x?html|xml)$/i.test(href))
+        .map(([, href]) => href)
+        .sort();
 
   const segments: DocumentSegment[] = [];
   let index = 0;
+  const parseChapter = async (href: string) => {
+    // 章节链接可能带 fragment/query；它们不是 ZIP 内部文件名的一部分。
+    const resourceHref = href.split(/[?#]/, 1)[0] || href;
+    const resolvedPath = resolvePath(opfDir, resourceHref);
+    let decodedPath = resolvedPath;
+    try {
+      decodedPath = decodeURIComponent(resolvedPath);
+    } catch {
+      // 某些非规范 EPUB 的路径含有裸百分号；保留 ZIP 内原路径继续查找。
+    }
+    const file = zip.file(decodedPath) ?? zip.file(resolvedPath) ?? zip.file(resourceHref) ?? zip.file(href);
+    if (!file) return null;
 
-  for (const href of chapters) {
-    const fullPath = decodeURIComponent(resolvePath(opfDir, href));
-    const file = zip.file(fullPath) ?? zip.file(href);
-    if (!file) continue;
     const html = await file.async('string');
     const chapter = parseHtmlDocument(html, { maxSegmentChars: max, fileName: href });
-    if (!chapter.segments.length) continue;
+    if (!chapter.segments.length) return { href, fullPath: decodedPath, chapter, chapterTitle: '' };
 
-    // 章节标题：优先用本章第一个 heading，其次用文件名
-    if (!index && !title) title = chapter.segments[0]?.text.slice(0, 60) ?? '';
+    const heading = chapter.segments.find((segment) => segment.kind === 'heading');
+    const fileTitle = resourceHref.split('/').pop()?.replace(/\.(x?html|xml)$/i, '') ?? '';
+    const chapterTitle = (heading?.text || chapter.title || fileTitle || '未命名章节')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+    return { href, fullPath: decodedPath, chapter, chapterTitle };
+  };
 
-    for (const segment of chapter.segments) {
-      segments.push({ ...segment, id: `s${index}`, index, path: fullPath });
-      index++;
+  // JSZip 的 async('string') 会触发各条目解压。一次只展开 4 章，兼顾速度与内存峰值。
+  const CHAPTER_CONCURRENCY = 4;
+  options.onProgress?.(0, chapters.length);
+  for (let offset = 0; offset < chapters.length; offset += CHAPTER_CONCURRENCY) {
+    const batch = chapters.slice(offset, offset + CHAPTER_CONCURRENCY);
+    const parsedChapters = await Promise.all(batch.map(parseChapter));
+
+    // Promise.all 的返回顺序与输入一致，所以并发解压不会打乱 spine 阅读顺序。
+    for (const parsed of parsedChapters) {
+      if (!parsed || !parsed.chapter.segments.length) continue;
+      if (!title) title = parsed.chapterTitle || parsed.chapter.title;
+
+      for (const segment of parsed.chapter.segments) {
+        segments.push({
+          ...segment,
+          id: 's' + index,
+          index,
+          path: parsed.fullPath,
+          contextPath: parsed.chapterTitle || parsed.href,
+        });
+        index++;
+      }
     }
+    options.onProgress?.(Math.min(offset + batch.length, chapters.length), chapters.length);
+    // 让出主线程，确保进度能绘制出来，也让用户在解析长书时仍可操作页面。
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 
   if (!segments.length) warnings.push('未从 EPUB 中提取到正文');

@@ -43,6 +43,8 @@ export interface TranslateOptions {
   documentTitle?: string;
   documentFormat?: string;
   documentWarnings?: string[];
+  /** 首批优先翻译当前阅读页；其他片段随后继续翻译。 */
+  prioritySegmentIds?: string[];
 }
 
 /**
@@ -59,7 +61,15 @@ function resolveDocumentStyle(
   segments: DocumentSegment[],
   options: TranslateOptions,
 ): PromptStyle | undefined {
-  const detected = detectLanguage(segments.map((s) => s.text).join('\n'));
+  // 语言识别只需要有代表性的样本。不要把整本 EPUB 拼成超大字符串，
+  // 否则正式发送第一个翻译请求之前，还要额外复制并扫描整本书。
+  const SAMPLE_LIMIT = 20_000;
+  let sample = '';
+  for (const segment of segments) {
+    if (sample.length >= SAMPLE_LIMIT) break;
+    sample += segment.text.slice(0, SAMPLE_LIMIT - sample.length) + '\n';
+  }
+  const detected = detectLanguage(sample);
   return shouldUseJapaneseSource(options.promptStyle, detected.language, options.targetLang)
     ? 'ja-source-natural'
     : options.promptStyle;
@@ -160,35 +170,6 @@ async function translateSegmentsViaServer(
   return { ...data, translations: normalized };
 }
 
-/** 把服务端结果合并进当前运行状态，并按客户端原有批次重新计算完整度。 */
-function applyServerDocumentResult(
-  segments: DocumentSegment[],
-  result: ServerDocumentTranslationResponse,
-  batches: DocumentSegment[][],
-  state: { value: DocumentTranslateState },
-): void {
-  const expectedIds = new Set(segments.map((segment) => segment.id));
-  for (const [id, value] of Object.entries(result.translations ?? {})) {
-    if (expectedIds.has(id) && typeof value === 'string' && value.trim()) {
-      state.value.translations.set(id, value);
-    }
-  }
-  state.value.done = batches.filter((batch) =>
-    batch.every((segment) => !!state.value.translations.get(segment.id)?.trim()),
-  ).length;
-  state.value.failedBatches = batches
-    .map((batch, index) => ({ batch, index }))
-    .filter(({batch}) => batch.some((segment) => !state.value.translations.get(segment.id)?.trim()))
-    .map(({index}) => index);
-  const serverErrors = Array.isArray(result.errors)
-    ? result.errors.filter((error): error is string => typeof error === 'string')
-    : [];
-  const missingCount = segments.filter((segment) => !state.value.translations.get(segment.id)?.trim()).length;
-  state.value.error = missingCount
-    ? serverErrors.join('；') || ('仍有 ' + missingCount + ' 个片段未翻译完成')
-    : '';
-}
-
 export interface DocumentTranslateState {
   /** segmentId → 译文 */
   translations: Map<string, string>;
@@ -211,10 +192,13 @@ export function useDocumentTranslation() {
 
   // 每次运行有独立 generation；停止或启动新任务时递增，丢弃旧请求的迟到结果。
   let generation = 0;
+  // 重试必须沿用上一轮批次顺序（其中可能把当前阅读页提到了最前面）。
+  let lastRunSegmentIds: string[] = [];
   const isCurrentRun = (runId: number) => generation === runId;
 
   function reset() {
     generation++;
+    lastRunSegmentIds = [];
     state.value = {
       translations: new Map(),
       total: 0,
@@ -236,8 +220,31 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     runId: number,
   ): Promise<boolean> {
-    // 本地和服务端模式使用同一份结构化元数据：章节路径/标题层级/列表编号只作为语境，
-    // 不进入翻译正文；服务端模式则通过结构化 endpoint 发送同样字段。
+    if (options.useServerTranslation) {
+      // 服务端与本地翻译都按相同预算逐批提交。不要把整本书放入单个 HTTP 请求，
+      // 否则用户在最后一批返回前看不到译文，也无法按批次重试。
+      const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun);
+      if (!result || !isCurrentRun(runId)) return false;
+      const expectedIds = batch.map((segment) => segment.id);
+      for (const [id, value] of Object.entries(result.translations ?? {})) {
+        if (expectedIds.includes(id) && typeof value === 'string' && value.trim()) {
+          state.value.translations.set(id, value);
+        }
+      }
+      const missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
+      if (missingIds.length) {
+        const serverErrors = Array.isArray(result.errors)
+          ? result.errors.filter((error): error is string => typeof error === 'string')
+          : [];
+        throw new Error(
+          serverErrors.join('；') ||
+          ('服务端翻译结果不完整，缺少 ' + missingIds.length + '/' + expectedIds.length + ' 个片段'),
+        );
+      }
+      return isCurrentRun(runId);
+    }
+
+    // 本地模式与服务端模式使用同一份结构化片段元数据。
     const jsonContent = JSON.stringify(
       batch.map((segment) => ({
         id: segment.id,
@@ -265,9 +272,7 @@ export function useDocumentTranslation() {
 
     const expectedIds = batch.map((segment) => segment.id);
     const normalized = normalizeDocumentBatchResult(response.result, expectedIds);
-    // 保留有效部分，但漏掉任何预期 ID 都必须走重试/失败路径，不能把 HTTP 成功当作完整成功。
     for (const [id, text] of normalized) state.value.translations.set(id, text);
-    // 对重试响应允许只返回剩余 ID；用当前批次累计已提交的结果做对账，避免误报仍缺失。
     const missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
     if (missingIds.length) {
       throw new Error(
@@ -281,33 +286,23 @@ export function useDocumentTranslation() {
   async function run(segments: DocumentSegment[], options: TranslateOptions) {
     reset();
     const runId = generation;
-    const batches = buildSegmentBatches(segments, options.budget);
+    const priorityIds = new Set(options.prioritySegmentIds ?? []);
+    const orderedSegments = priorityIds.size
+      ? [
+          ...segments.filter((segment) => priorityIds.has(segment.id)),
+          ...segments.filter((segment) => !priorityIds.has(segment.id)),
+        ]
+      : [...segments];
+    lastRunSegmentIds = orderedSegments.map((segment) => segment.id);
+    const batches = buildSegmentBatches(orderedSegments, options.budget);
     state.value.total = batches.length;
     state.value.running = true;
 
-    // 文档级语言检测（整篇只做一次），结果贯穿本批全部批次与重试。
+    // 文档级语言检测只使用有限样本；不再拼接、扫描整本 EPUB。
     const effectiveOptions: TranslateOptions = {
       ...options,
       promptStyle: resolveDocumentStyle(segments, options),
     };
-
-    if (effectiveOptions.useServerTranslation) {
-      try {
-        const response = await translateSegmentsViaServer(segments, effectiveOptions, runId, isCurrentRun);
-        if (response && isCurrentRun(runId)) {
-          applyServerDocumentResult(segments, response, batches, state);
-        }
-      } catch (error) {
-        if (isCurrentRun(runId)) {
-          state.value.failedBatches = batches.map((_, index) => index);
-          state.value.error = error instanceof Error ? error.message : String(error);
-        }
-      } finally {
-        if (isCurrentRun(runId)) state.value.running = false;
-      }
-      return state.value;
-    }
-
     const concurrency = Math.max(1, options.concurrency ?? 3);
     const retries = options.retries ?? 1;
     let cursor = 0;
@@ -327,8 +322,8 @@ export function useDocumentTranslation() {
               state.value.failedBatches.push(index);
               state.value.error = (err as Error).message;
             } else {
-              // 简单退避：避免连续 429；停止或切换文档后不会进入下一轮。
-              await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+              // 简单退避，避免连续 429；停止或切换文档后不会进入下一轮。
+              await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
             }
           }
         }
@@ -338,12 +333,13 @@ export function useDocumentTranslation() {
     };
 
     await Promise.all(
-      Array.from({ length: Math.min(concurrency, batches.length) }, () => {
-        return worker();
-      }),
+      Array.from({ length: Math.min(concurrency, batches.length) }, () => worker()),
     );
 
-    if (isCurrentRun(runId)) state.value.running = false;
+    if (isCurrentRun(runId)) {
+      state.value.failedBatches.sort((a, b) => a - b);
+      state.value.running = false;
+    }
     return state.value;
   }
 
@@ -354,7 +350,11 @@ export function useDocumentTranslation() {
   ) {
     const failed = [...state.value.failedBatches];
     if (!failed.length) return;
-    const batches = buildSegmentBatches(segments, options.budget);
+    const byId = new Map(segments.map((segment) => [segment.id, segment]));
+    const orderedSegments = lastRunSegmentIds.length
+      ? lastRunSegmentIds.map((id) => byId.get(id)).filter((segment): segment is DocumentSegment => !!segment)
+      : [...segments];
+    const batches = buildSegmentBatches(orderedSegments, options.budget);
     const runId = ++generation;
     state.value.failedBatches = [];
     state.value.error = '';
@@ -367,21 +367,6 @@ export function useDocumentTranslation() {
       promptStyle: resolveDocumentStyle(segments, options),
     };
 
-    if (effectiveOptions.useServerTranslation) {
-      const missing = failed.flatMap((index) => batches[index] ?? [])
-        .filter((segment) => !state.value.translations.get(segment.id)?.trim());
-      try {
-        const response = await translateSegmentsViaServer(missing, effectiveOptions, runId, isCurrentRun);
-        if (response && isCurrentRun(runId)) applyServerDocumentResult(segments, response, batches, state);
-      } catch (error) {
-        if (isCurrentRun(runId)) {
-          state.value.error = error instanceof Error ? error.message : String(error);
-        }
-      } finally {
-        if (isCurrentRun(runId)) state.value.running = false;
-      }
-      return state.value;
-    }
 
     for (const index of failed) {
       if (!isCurrentRun(runId)) break;
@@ -398,7 +383,10 @@ export function useDocumentTranslation() {
         state.value.error = (err as Error).message;
       }
     }
-    if (isCurrentRun(runId)) state.value.running = false;
+    if (isCurrentRun(runId)) {
+      state.value.failedBatches.sort((a, b) => a - b);
+      state.value.running = false;
+    }
   }
 
   return { state, run, retryFailed, stop, reset };

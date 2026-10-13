@@ -22,7 +22,7 @@
 
     <!-- 2. 解析中 -->
     <section v-if="parsing" class="panel">
-      <p class="muted">正在解析{{ progress.total > 1 ? `（${progress.done}/${progress.total} 页）` : '…' }}</p>
+      <p class="muted">正在解析{{ progress.total > 1 ? `（${progress.done}/${progress.total} 个处理单元）` : '…' }}</p>
       <div v-if="progress.total > 1" class="progress"><div class="bar"
         :style="{ width: (progress.done / progress.total) * 100 + '%' }"></div></div>
     </section>
@@ -81,7 +81,7 @@
         <div class="grow"></div>
 
         <button v-if="!state.running && state.done === 0" class="btn primary" @click="startTranslate">
-          开始翻译
+          翻译全文（先翻本页）
         </button>
         <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
         <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
@@ -98,9 +98,39 @@
         </span>
       </section>
 
-      <!-- 正文 -->
-      <article class="reader">
-        <div v-for="seg in doc.segments" :key="seg.id" class="seg"
+      <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->
+      <section class="panel reader-navigation" aria-label="阅读位置">
+        <div class="reader-navigation-main">
+          <div class="reader-location">
+            <strong>{{ currentPage?.title || doc.title }}</strong>
+            <span class="muted small">
+              第 {{ currentPageIndex + 1 }} / {{ pages.length }} 页
+              · {{ (currentPage?.charCount ?? 0).toLocaleString() }} 字
+            </span>
+            <span class="muted small">
+              本页已译 {{ currentPageTranslatedCount }}/{{ visibleSegments.length }} 段
+              · 全文已译 {{ translatedSegmentCount }}/{{ doc.meta.segmentCount }} 段
+            </span>
+          </div>
+          <div class="reader-navigation-controls">
+            <button class="btn" :disabled="currentPageIndex <= 0" @click="currentPageIndex--">上一页</button>
+            <select v-model.number="currentPageIndex" aria-label="跳转阅读页" class="page-select">
+              <option v-for="(page, index) in pages" :key="page.id" :value="index">
+                {{ index + 1 }}. {{ page.title }}
+              </option>
+            </select>
+            <button class="btn" :disabled="currentPageIndex >= pages.length - 1" @click="currentPageIndex++">下一页</button>
+          </div>
+        </div>
+        <div class="reader-progress" role="progressbar"
+          :aria-valuenow="currentPageIndex + 1" :aria-valuemin="1" :aria-valuemax="Math.max(pages.length, 1)">
+          <div class="reader-progress-bar" :style="{ width: (pages.length ? ((currentPageIndex + 1) / pages.length) * 100 : 0) + '%' }"></div>
+        </div>
+      </section>
+
+      <!-- 当前阅读页：译文逐批到达后即时显示，不必等待整本书结束。 -->
+      <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
+        <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
           :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0)]">
           <div v-if="viewMode !== 'translation'" class="or">{{ seg.text }}</div>
           <div v-if="viewMode !== 'original'" class="tr">
@@ -128,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { getConfig } from '@/entrypoints/utils/config';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
@@ -140,6 +170,7 @@ import {
   type ExportFormat,
 } from '@/entrypoints/utils/document';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
+import { buildDocumentPages } from '@/entrypoints/utils/document/pagination';
 import { useDocumentTranslation } from './useDocumentTranslation';
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -163,6 +194,8 @@ const progress = ref({ done: 0, total: 0 });
 const sourceLang = ref('auto');
 const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
+const currentPageIndex = ref(0);
+const readerRef = ref<HTMLElement | null>(null);
 /** 原始文本，json 导出回填时用。 */
 let rawText = '';
 /**
@@ -174,7 +207,29 @@ const glossary = ref<Glossary | undefined>(undefined);
 /** 保留真实上传文件名；PDF 标题可能从正文提取，不应覆盖文件名。 */
 let documentFileName = 'document';
 
-const { state, run, retryFailed, stop: stopTranslation } = useDocumentTranslation();
+const {
+  state,
+  run,
+  retryFailed,
+  stop: stopTranslation,
+  reset: resetTranslation,
+} = useDocumentTranslation();
+
+/** 页级分页不改变原始片段顺序，导出仍以完整文档为准。 */
+const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
+const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
+const visibleSegments = computed(() => currentPage.value?.segments ?? []);
+const currentPageTranslatedCount = computed(() =>
+  visibleSegments.value.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length,
+);
+const translatedSegmentCount = computed(() =>
+  doc.value?.segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length ?? 0,
+);
+
+watch(currentPageIndex, async () => {
+  await nextTick();
+  readerRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 function pickFile() {
   fileInput.value?.click();
@@ -194,6 +249,8 @@ function onDrop(event: DragEvent) {
 
 async function loadFile(file: File) {
   documentFileName = file.name;
+  resetTranslation();
+  currentPageIndex.value = 0;
   parseError.value = '';
   doc.value = null;
   parsing.value = true;
@@ -232,6 +289,8 @@ async function buildTranslationOptions() {
     promptStyle: config.promptStyle,
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
     useServerTranslation: config.useServerTranslation,
+    // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
+    prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
     serverUrl: config.serverUrl,
     provider: config.provider,
     apiKey: config.deepseekApiKey,
@@ -276,7 +335,9 @@ function doExport(format: ExportFormat) {
 }
 
 function resetAll() {
+  resetTranslation();
   doc.value = null;
+  currentPageIndex.value = 0;
   parseError.value = '';
   rawText = '';
   documentFileName = 'document';
@@ -351,23 +412,93 @@ function resetAll() {
 .small { font-size: .78rem; }
 .err-text { color: #a40e26; }
 
-.reader { margin: 1rem 0; }
+.reader-navigation {
+  position: sticky;
+  top: .5rem;
+  z-index: 5;
+  background: rgba(255, 255, 255, .97);
+  backdrop-filter: blur(10px);
+}
+.reader-navigation-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.reader-location {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  min-width: 10rem;
+  flex: 1;
+}
+.reader-location strong {
+  font-size: .98rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.reader-navigation-controls {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+.page-select {
+  max-width: min(42vw, 21rem);
+  min-width: 8rem;
+  padding: .4rem .5rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2328;
+}
+.reader-progress {
+  margin-top: .75rem;
+  height: 3px;
+  background: #eaeef2;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.reader-progress-bar {
+  height: 100%;
+  background: #0969da;
+  transition: width .2s ease;
+}
+.reader {
+  max-width: 50rem;
+  min-height: 55vh;
+  margin: 1rem auto;
+  padding: clamp(1.1rem, 4vw, 3rem);
+  background: #fff;
+  border: 1px solid #e6e9ed;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(31, 35, 40, .035);
+}
 .seg {
-  padding: .5rem .25rem;
+  padding: .75rem .25rem;
   border-bottom: 1px solid #f0f2f4;
   content-visibility: auto;
   contain-intrinsic-size: auto 4rem;
-  line-height: 1.75;
+  line-height: 1.9;
 }
 .seg .or { color: #1f2328; white-space: pre-wrap; }
 .seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .15em; }
 .tr-pending { color: #b0b8c0; font-size: .8rem; }
-.seg.kind-heading .or, .seg.kind-heading .tr { font-weight: 600; }
-.seg.kind-heading.level-1 { font-size: 1.3rem; }
-.seg.kind-heading.level-2 { font-size: 1.15rem; }
+.seg.kind-heading .or, .seg.kind-heading .tr { font-weight: 650; }
+.seg.kind-heading { border-bottom: 0; padding-top: 1.25rem; }
+.seg.kind-heading.level-1 { font-size: 1.45rem; line-height: 1.5; }
+.seg.kind-heading.level-2 { font-size: 1.2rem; line-height: 1.6; }
 .seg.kind-quote { border-left: 3px solid #d0d7de; padding-left: .75rem; color: #57606a; }
 .seg.kind-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; background: #f6f8fa; }
 .timecode { font-size: .72rem; color: #8b949e; }
 
 .export { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .doc-page { padding: 1rem .75rem 3rem; }
+  .reader-navigation { position: static; }
+  .reader-navigation-controls { width: 100%; justify-content: space-between; }
+  .page-select { flex: 1; max-width: none; }
+  .reader { min-height: 50vh; padding: 1rem; border-radius: 8px; }
+}
 </style>
