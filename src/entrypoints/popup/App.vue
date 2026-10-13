@@ -69,8 +69,8 @@
           <span class="hint-text">auto 使用本机服务环境变量；OpenCode 示例：openai/gpt-5.4；Workbuddy 填本机 SDK 模型 ID。</span>
         </div>
         <div class="input-item">
-          <label>本机服务 Token</label>
-          <input type="password" v-model="config.localAgentToken" placeholder="与 LOCAL_AGENT_TOKEN 保持一致" @change="saveConfig" />
+          <label>本机服务 Token（可选）</label>
+          <input type="password" v-model="config.localAgentToken" placeholder="默认可留空；仅服务端配置 Token 时填写" @change="saveConfig" />
         </div>
         <button type="button" class="server-toggle" @click="checkApiKey">测试本机服务连接</button>
         <span v-if="apiStatus === 'checking'" class="status-text checking">正在检查本机服务…</span>
