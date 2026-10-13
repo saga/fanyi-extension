@@ -285,10 +285,15 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext } = message;
 
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
+        // 仅书籍文档请求会传 literaryContext。合并到 service prompt 与 cache fingerprint，
+        // 普通网页不传该字段，因此网页翻译行为和既有缓存 key 保持不变。
+        const effectivePrompt = [sitePrompt, literaryContext?.trim()]
+          .filter((value): value is string => !!value)
+          .join('\n\n');
 
         // 文风：优先使用 content script 页级语言检测后的结果（message.promptStyle）。
         // 缺省回退 config.promptStyle —— 兼容旧调用方，以及无页面上下文的调用点。
@@ -307,7 +312,7 @@ export default defineBackground({
             config.provider,
             promptStyle,
             glossary,
-            sitePrompt,
+            effectivePrompt,
           );
 
         const cached = await getCachedTranslation(cacheKey);
@@ -345,7 +350,7 @@ export default defineBackground({
 
         const jsonResult = await translateSingleflight(cacheKey, () =>
           globalQueue.add(() =>
-            service.translate(jsonContent, sourceLang, targetLang, glossary, sitePrompt)
+            service.translate(jsonContent, sourceLang, targetLang, glossary, effectivePrompt)
           )
         );
 

@@ -77,6 +77,13 @@
             <option value="original">仅原文</option>
           </select>
         </label>
+        <label v-if="doc.format === 'epub' || doc.format === 'pdf'" class="field literary-toggle">
+          <span>书籍翻译</span>
+          <span class="literary-toggle-control">
+            <input v-model="literaryMode" type="checkbox" />
+            实体一致性与文风审校
+          </span>
+        </label>
 
         <div class="grow"></div>
 
@@ -84,7 +91,7 @@
           v-if="!state.running && (state.total === 0 || state.done < state.total)"
           class="btn primary"
           @click="startTranslate">
-          {{ state.total > 0 ? '继续翻译剩余内容' : '翻译全文（先翻本页）' }}
+          {{ state.total > 0 ? '继续翻译剩余内容' : (literaryMode ? '开始书籍翻译（按章节推进）' : '翻译全文（先翻本页）') }}
         </button>
         <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
         <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
@@ -99,6 +106,22 @@
           {{ state.done }}/{{ state.total }} 批
           <template v-if="state.error"> · <span class="err-text">{{ state.error }}</span></template>
         </span>
+      </section>
+
+      <section v-if="literaryStatus.enabled" class="panel literary-status">
+        <div class="literary-status-title">
+          <strong>书籍一致性与文风审校</strong>
+          <span class="chip">{{ literaryStatus.bookProfileReady ? '已建立全书记忆' : '全书预分析中/待重试' }}</span>
+          <span class="chip">已增补 {{ Math.max(0, literaryStatus.analyzedChapters - (literaryStatus.bookProfileReady ? 1 : 0)) }} 章</span>
+          <span class="chip">已审校 {{ literaryStatus.reviewedSegments }} 段</span>
+          <span class="chip">记忆实体 {{ literaryMemory.entities.length }} 个</span>
+        </div>
+        <p class="muted small" v-if="literaryStatus.chapterTitle">
+          当前分析章节：{{ literaryStatus.chapterTitle }}
+        </p>
+        <p v-for="(warning, index) in literaryStatus.warnings.slice(-3)" :key="index" class="warn">
+          {{ warning }}
+        </p>
       </section>
 
       <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->
@@ -197,6 +220,7 @@ const progress = ref({ done: 0, total: 0 });
 const sourceLang = ref('auto');
 const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
+const literaryMode = ref(false);
 const currentPageIndex = ref(0);
 const readerRef = ref<HTMLElement | null>(null);
 /** 原始文本，json 导出回填时用。 */
@@ -216,6 +240,8 @@ const {
   retryFailed,
   stop: stopTranslation,
   reset: resetTranslation,
+  literaryMemory,
+  literaryStatus,
 } = useDocumentTranslation();
 
 /** 页级分页不改变原始片段顺序，导出仍以完整文档为准。 */
@@ -268,6 +294,8 @@ async function loadFile(file: File) {
     doc.value = await parseDocument(input, {
       onProgress: (done, total) => { progress.value = { done, total }; },
     });
+    // EPUB/PDF 默认启用书籍级实体记忆和独立文风审校；用户可以在工具栏关闭。
+    literaryMode.value = doc.value.format === 'epub' || doc.value.format === 'pdf';
     // 术语抽取不需要扫描整本书：限制在前 12,000 个字符，避免超长 EPUB
     // 在首次显示阅读器前把整本内容拼接、复制并交给 NLP 分析。重试继续复用这份结果。
     const glossaryLimit = 12_000;
@@ -299,6 +327,7 @@ async function buildTranslationOptions() {
     promptStyle: config.promptStyle,
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
     useServerTranslation: config.useServerTranslation,
+    literaryMode: literaryMode.value && (doc.value.format === 'epub' || doc.value.format === 'pdf'),
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
     serverUrl: config.serverUrl,
@@ -349,6 +378,7 @@ function resetAll() {
   resetTranslation();
   doc.value = null;
   currentPageIndex.value = 0;
+  literaryMode.value = false;
   parseError.value = '';
   rawText = '';
   documentFileName = 'document';
@@ -422,6 +452,23 @@ function resetAll() {
 .muted { color: #57606a; }
 .small { font-size: .78rem; }
 .err-text { color: #a40e26; }
+
+.literary-toggle-control {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  color: #1f2328;
+  white-space: nowrap;
+}
+.literary-toggle-control input { accent-color: #6b4e9b; }
+.literary-status-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.literary-status-title strong { font-size: .9rem; }
+.literary-status .warn { overflow-wrap: anywhere; }
 
 .reader-navigation {
   position: sticky;

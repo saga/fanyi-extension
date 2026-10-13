@@ -147,6 +147,71 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.done).toBe(state.value.total);
   });
 
+  it('本地翻译的 EPUB 也先分析书籍实体，再调用独立 reviewer', async () => {
+    sendMessage.mockResolvedValueOnce({
+      success: true,
+      result: [['book-s0', '她打开了旧门。']],
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/translate/document/literary/analyze')) {
+        return okJson({
+          analyzed: true,
+          memory: {
+            version: 1,
+            entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', aliases: ['Miss Alice'] }],
+            relationships: [{ subject: 'Alice', predicate: 'protects', object: 'Bob' }],
+            styleGuide: { narrativeVoice: '克制的第三人称' },
+            chapterSummaries: [{ chapter: 'Chapter One', summary: 'Alice opens an old door.' }],
+            recentExamples: [],
+          },
+        });
+      }
+      if (url.endsWith('/api/translate/document/literary/review')) {
+        return okJson({
+          translations: { 'book-s0': '她轻轻推开那扇旧门。' },
+          reviewedIds: ['book-s0'],
+          missingIds: [],
+        });
+      }
+      throw new Error('unexpected URL: ' + url);
+    });
+
+    const { run, state, literaryMemory, literaryStatus } = useDocumentTranslation();
+    await run([{
+      id: 'book-s0',
+      index: 0,
+      text: 'She opened the old door.',
+      kind: 'paragraph',
+      path: 'Text/chapter1.xhtml',
+      contextPath: 'Chapter One',
+    }], {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      useServerTranslation: false,
+      serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+      provider: 'deepseek',
+      apiKey: 'test-key',
+      documentFileName: 'book.epub',
+      documentTitle: 'Book',
+      documentFormat: 'epub',
+      literaryMode: true,
+      budget: { maxChars: 3000, maxSegments: 24 },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const firstMessage = sendMessage.mock.calls[0]?.[0] as {
+      literaryContext?: string;
+      jsonContent: string;
+    };
+    expect(firstMessage.literaryContext).toContain('自然的文学表达');
+    expect(JSON.parse(firstMessage.jsonContent)[0].contextPath).toContain('艾丽丝');
+    expect(state.value.translations.get('book-s0')).toBe('她轻轻推开那扇旧门。');
+    expect(literaryMemory.value.entities[0]?.target).toBe('艾丽丝');
+    expect(literaryStatus.value.analyzedChapters).toBe(2);
+    expect(literaryStatus.value.bookProfileReady).toBe(true);
+    expect(literaryStatus.value.reviewedSegments).toBe(1);
+  });
+
   it('部分成功时保留已有译文，重试请求只包含缺失片段', async () => {
     fetchMock
       .mockResolvedValueOnce(okJson({
