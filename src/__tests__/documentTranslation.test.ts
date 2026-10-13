@@ -203,7 +203,7 @@ describe('文档翻译服务端模式', () => {
       literaryContext?: string;
       jsonContent: string;
     };
-    expect(firstMessage.literaryContext).toContain('自然的文学表达');
+    expect(firstMessage.literaryContext).toContain('自然、有文学质感');
     expect(JSON.parse(firstMessage.jsonContent)[0].contextPath).toContain('艾丽丝');
     expect(state.value.translations.get('book-s0')).toBe('她轻轻推开那扇旧门。');
     expect(literaryMemory.value.entities[0]?.target).toBe('艾丽丝');
