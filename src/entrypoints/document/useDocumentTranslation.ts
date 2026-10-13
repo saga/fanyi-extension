@@ -304,7 +304,8 @@ export function useDocumentTranslation() {
       promptStyle: resolveDocumentStyle(segments, options),
     };
     const concurrency = Math.max(1, options.concurrency ?? 3);
-    const retries = options.retries ?? 1;
+    // 服务端明确返回 partial 时保留缺失片段并暴露给用户重试；不要在一次点击中自动吞掉 partial。
+    const retries = effectiveOptions.useServerTranslation ? 0 : (options.retries ?? 1);
     let cursor = 0;
 
     const worker = async () => {
@@ -370,8 +371,10 @@ export function useDocumentTranslation() {
 
     for (const index of failed) {
       if (!isCurrentRun(runId)) break;
-      const batch = batches[index];
-      if (!batch) continue;
+      const batch = (batches[index] ?? [])
+        // 部分成功的批次只提交缺失片段，已成功的译文不重复消耗请求与 token。
+        .filter((segment) => !state.value.translations.get(segment.id)?.trim());
+      if (!batch.length) continue;
       try {
         const ok = await translateBatch(batch, effectiveOptions, runId);
         if (!isCurrentRun(runId)) break;
