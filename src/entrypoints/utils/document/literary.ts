@@ -208,9 +208,11 @@ export function addLiteraryExamples(memoryInput: unknown, examples: LiteraryExam
 export function buildLiteraryContextForText(memoryInput: unknown, sourceText: string): string {
   const memory = sanitizeLiteraryMemory(memoryInput);
   const source = sourceText.toLocaleLowerCase();
-  const entities = memory.entities.filter((entity) =>
+  const matchedEntities = memory.entities.filter((entity) =>
     [entity.source, ...(entity.aliases ?? [])].some((name) => name && source.includes(name.toLocaleLowerCase())),
-  ).slice(0, 10);
+  );
+  // 代词或省略主语句也需要指代锚点；没有直接命中的名称时附带少量近期实体。
+  const entities = (matchedEntities.length ? matchedEntities : memory.entities.slice(-5)).slice(0, 10);
   const names = new Set(entities.map((entity) => entity.source.toLocaleLowerCase()));
   const relationships = memory.relationships.filter((relation) =>
     names.has(relation.subject.toLocaleLowerCase()) || names.has(relation.object.toLocaleLowerCase()),
@@ -227,7 +229,7 @@ export function buildLiteraryContextForText(memoryInput: unknown, sourceText: st
 export function buildLiteraryTranslationContextPrompt(chapterTitle = ''): string {
   return [
     '任务模式：书籍/文学作品的章节翻译，不要套用网页翻译的简短、信息压缩式表达。',
-    '忠实保留原意、叙述视角、人物动机、事实细节和关系，在此基础上使用自然、有文学质感的目标语言。',
+    '忠实保留原意、叙述视角、人物动机、事实细节和关系，在此基础上使用自然的文学表达，保留文字的节奏、味道和人物声音。',
     '各片段的 contextPath 可能含有只读书籍记忆 JSON；用它维持人名、地名、关键物品名、别名、实体关系和整体声线的一致性。不得把 metadata/contextPath 混入译文。',
     '关系记忆只用于消歧，不要把角色关系说明写进正文。不要擅自解释悬念、含混、反讽和信息差。',
     '保持叙述声音、时代感、语域、句子节奏、对话口吻和用词习惯；不同人物不能被润色成同一种声音。',

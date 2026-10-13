@@ -274,7 +274,7 @@ async function analyzeLiteraryChapterViaServer(
   const sampled = selectLiteraryChapterSample(segments);
   if (!sampled.length) return { memory, analyzed: false, warning: '当前内容没有足够的正文片段供实体分析' };
   const endpoint = resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/analyze');
-  const provider = options.provider || 'deepseek';
+  const provider = options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -290,7 +290,7 @@ async function analyzeLiteraryChapterViaServer(
       promptStyle: options.promptStyle,
       provider,
       model: options.model,
-      ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+      ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });
   let data: { memory?: unknown; analyzed?: unknown; warning?: unknown; error?: string };
@@ -321,7 +321,7 @@ async function reviewLiteraryBatchViaServer(
   });
   if (!candidates.length) return new Map();
   const endpoint = resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/review');
-  const provider = options.provider || 'deepseek';
+  const provider = options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -335,7 +335,7 @@ async function reviewLiteraryBatchViaServer(
       promptStyle: options.promptStyle,
       provider,
       model: options.model,
-      ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+      ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });
   let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; error?: string };
@@ -644,6 +644,8 @@ export function useDocumentTranslation() {
           if (chapterKeys.size === 1) {
             const onlyChapter = chapterKeys.values().next().value as string | undefined;
             if (onlyChapter) analyzedChapterKeys.add(onlyChapter);
+            // 单章节书籍的全书抽样已经覆盖该章；避免第二次付费分析，但状态仍反映该章已分析。
+            if (literaryStatus.value.analyzedChapters === 0) literaryStatus.value.analyzedChapters = 1;
           }
         }
         if (profile.warning) literaryStatus.value.warnings.push(profile.warning);
@@ -655,14 +657,25 @@ export function useDocumentTranslation() {
       }
     }
 
+    // 文学模式每次只推进一个尚未完成的章节/PDF 上下文单元。
+    // 上一单元的初译、reviewer 与译例更新完成后，再由用户继续下一章。
+    let workBatches = pendingBatches;
+    if (literaryEnabled && pendingBatches.length > 0) {
+      const firstPending = pendingBatches[0]!;
+      const chapterKey = literaryChapterKey(firstPending.batch[0]!, true, options.documentFormat);
+      workBatches = pendingBatches.filter((item) =>
+        literaryChapterKey(item.batch[0]!, true, options.documentFormat) === chapterKey,
+      );
+    }
+
     const retries = effectiveOptions.useServerTranslation ? 0 : (options.retries ?? 1);
     // 文学模式按章节串行推进，使先完成的章节记忆能稳定影响后续章节。
     const concurrency = literaryEnabled ? 1 : Math.max(1, options.concurrency ?? 3);
     let cursor = 0;
 
     const worker = async () => {
-      while (cursor < pendingBatches.length && isCurrentRun(runId)) {
-        const item = pendingBatches[cursor++];
+      while (cursor < workBatches.length && isCurrentRun(runId)) {
+        const item = workBatches[cursor++];
         if (!item) continue;
         const { index, batch } = item;
         if (literaryEnabled) {
@@ -704,7 +717,7 @@ export function useDocumentTranslation() {
     };
 
     await Promise.all(
-      Array.from({ length: Math.min(concurrency, pendingBatches.length) }, () => worker()),
+      Array.from({ length: Math.min(concurrency, workBatches.length) }, () => worker()),
     );
 
     if (isCurrentRun(runId)) {

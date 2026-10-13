@@ -207,7 +207,7 @@ describe('文档翻译服务端模式', () => {
     expect(JSON.parse(firstMessage.jsonContent)[0].contextPath).toContain('艾丽丝');
     expect(state.value.translations.get('book-s0')).toBe('她轻轻推开那扇旧门。');
     expect(literaryMemory.value.entities[0]?.target).toBe('艾丽丝');
-    expect(literaryStatus.value.analyzedChapters).toBe(0);
+    expect(literaryStatus.value.analyzedChapters).toBe(1);
     expect(literaryStatus.value.bookProfileReady).toBe(true);
     expect(literaryStatus.value.reviewedSegments).toBe(1);
   });

@@ -80,7 +80,7 @@
         <label v-if="doc.format === 'epub' || doc.format === 'pdf'" class="field literary-toggle">
           <span>书籍翻译</span>
           <span class="literary-toggle-control">
-            <input v-model="literaryMode" type="checkbox" />
+            <input v-model="literaryMode" type="checkbox" :disabled="state.total > 0" />
             实体一致性与文风审校
           </span>
         </label>
@@ -91,7 +91,7 @@
           v-if="!state.running && (state.total === 0 || state.done < state.total)"
           class="btn primary"
           @click="startTranslate">
-          {{ state.total > 0 ? '继续翻译剩余内容' : (literaryMode ? '开始书籍翻译（按章节推进）' : '翻译全文（先翻本页）') }}
+          {{ literaryMode ? (state.total > 0 ? '继续翻译下一章' : '开始书籍翻译（按章节推进）') : (state.total > 0 ? '继续翻译剩余内容' : '翻译全文（先翻本页）') }}
         </button>
         <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
         <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
