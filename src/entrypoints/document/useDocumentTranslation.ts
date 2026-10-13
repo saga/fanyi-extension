@@ -283,8 +283,20 @@ export function useDocumentTranslation() {
     return isCurrentRun(runId);
   }
 
-  async function run(segments: DocumentSegment[], options: TranslateOptions) {
-    reset();
+  async function run(
+    segments: DocumentSegment[],
+    options: TranslateOptions,
+    preserveExisting = false,
+  ) {
+    // 新任务清空状态；继续任务保留现有译文，仅提交还没有译文的片段。
+    if (preserveExisting) {
+      generation++;
+      state.value.failedBatches = [];
+      state.value.error = '';
+      state.value.running = false;
+    } else {
+      reset();
+    }
     const runId = generation;
     const priorityIds = new Set(options.prioritySegmentIds ?? []);
     const orderedSegments = priorityIds.size
@@ -294,24 +306,37 @@ export function useDocumentTranslation() {
         ]
       : [...segments];
     lastRunSegmentIds = orderedSegments.map((segment) => segment.id);
-    const batches = buildSegmentBatches(orderedSegments, options.budget);
-    state.value.total = batches.length;
-    state.value.running = true;
+    const allBatches = buildSegmentBatches(orderedSegments, options.budget);
+    // 进度按整份文档计算；续跑时，已经完成的批次仍计入 done。
+    state.value.total = allBatches.length;
+    state.value.done = allBatches.filter((batch) =>
+      batch.every((segment) => !!state.value.translations.get(segment.id)?.trim()),
+    ).length;
+    const pendingBatches = allBatches
+      .map((batch, index) => ({
+        index,
+        // 失败批次可能只成功返回一部分，续跑时只发送缺失内容。
+        batch: batch.filter((segment) => !state.value.translations.get(segment.id)?.trim()),
+      }))
+      .filter((item) => item.batch.length > 0);
+    state.value.running = pendingBatches.length > 0;
+    if (pendingBatches.length === 0) return state.value;
 
     // 文档级语言检测只使用有限样本；不再拼接、扫描整本 EPUB。
     const effectiveOptions: TranslateOptions = {
       ...options,
       promptStyle: resolveDocumentStyle(segments, options),
     };
-    const concurrency = Math.max(1, options.concurrency ?? 3);
-    // 服务端明确返回 partial 时保留缺失片段并暴露给用户重试；不要在一次点击中自动吞掉 partial。
+    // 服务端 partial 保留失败状态，供用户点继续或重试；本地模式仍自动重试一次。
     const retries = effectiveOptions.useServerTranslation ? 0 : (options.retries ?? 1);
+    const concurrency = Math.max(1, options.concurrency ?? 3);
     let cursor = 0;
 
     const worker = async () => {
-      while (cursor < batches.length && isCurrentRun(runId)) {
-        const index = cursor++;
-        const batch = batches[index] as DocumentSegment[];
+      while (cursor < pendingBatches.length && isCurrentRun(runId)) {
+        const item = pendingBatches[cursor++];
+        if (!item) continue;
+        const { index, batch } = item;
         let ok = false;
         for (let attempt = 0; attempt <= retries && isCurrentRun(runId); attempt++) {
           try {
@@ -334,7 +359,7 @@ export function useDocumentTranslation() {
     };
 
     await Promise.all(
-      Array.from({ length: Math.min(concurrency, batches.length) }, () => worker()),
+      Array.from({ length: Math.min(concurrency, pendingBatches.length) }, () => worker()),
     );
 
     if (isCurrentRun(runId)) {
@@ -343,6 +368,7 @@ export function useDocumentTranslation() {
     }
     return state.value;
   }
+
 
   /** 只重跑失败的批次。 */
   async function retryFailed(

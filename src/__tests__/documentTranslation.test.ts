@@ -113,6 +113,40 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.done).toBe(state.value.total);
   });
 
+  it('停止或部分失败后继续翻译时保留已完成译文，只发送未翻译片段', async () => {
+    fetchMock
+      .mockResolvedValueOnce(okJson({
+        translations: { 'pdf-s0': '引言' },
+        failedBatches: [0],
+        errors: ['batch 0: pdf-s1 missing'],
+        complete: false,
+        missingSegmentIds: ['pdf-s1'],
+      }))
+      .mockResolvedValueOnce(okJson({
+        translations: { 'pdf-s1': '该模型提高了翻译质量。' },
+        failedBatches: [],
+        errors: [],
+        complete: true,
+        missingSegmentIds: [],
+      }));
+
+    const { run, state } = useDocumentTranslation();
+    await run(sampleSegments, options);
+    expect(state.value.translations.get('pdf-s0')).toBe('引言');
+    expect(state.value.failedBatches).toEqual([0]);
+
+    await run(sampleSegments, options, true);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retryPayload = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body));
+    expect(retryPayload.segments).toHaveLength(1);
+    expect(retryPayload.segments[0].id).toBe('pdf-s1');
+    expect(state.value.translations.get('pdf-s0')).toBe('引言');
+    expect(state.value.translations.get('pdf-s1')).toBe('该模型提高了翻译质量。');
+    expect(state.value.failedBatches).toEqual([]);
+    expect(state.value.done).toBe(state.value.total);
+  });
+
   it('部分成功时保留已有译文，重试请求只包含缺失片段', async () => {
     fetchMock
       .mockResolvedValueOnce(okJson({

@@ -80,8 +80,11 @@
 
         <div class="grow"></div>
 
-        <button v-if="!state.running && state.done === 0" class="btn primary" @click="startTranslate">
-          翻译全文（先翻本页）
+        <button
+          v-if="!state.running && (state.total === 0 || state.done < state.total)"
+          class="btn primary"
+          @click="startTranslate">
+          {{ state.total > 0 ? '继续翻译剩余内容' : '翻译全文（先翻本页）' }}
         </button>
         <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
         <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
@@ -311,7 +314,8 @@ async function buildTranslationOptions() {
 async function startTranslate() {
   if (!doc.value) return;
   const options = await buildTranslationOptions();
-  await run(doc.value.segments, options);
+  // 停止、网络中断或部分失败后继续执行；保留已有译文并只发送缺失片段。
+  await run(doc.value.segments, options, state.value.total > 0);
 }
 
 async function retry() {
