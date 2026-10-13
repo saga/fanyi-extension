@@ -342,7 +342,7 @@ async function reviewLiteraryBatchViaServer(
       id: segment.id, source: segment.text, draft, kind: segment.kind, contextPath: segment.contextPath,
     }] : [];
   });
-  if (!candidates.length) return new Map();
+  if (!candidates.length) return { translations: new Map(), findings: [] };
   const endpoint = resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/review');
   const provider = options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {

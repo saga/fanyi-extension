@@ -852,11 +852,30 @@ async function resetAll() {
 
 .export { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 
+.literary-dictionary details + details { margin-top: .65rem; }
+.literary-dictionary summary { cursor: pointer; padding: .35rem 0; }
+.literary-editor-list { display: grid; gap: .55rem; margin-top: .6rem; }
+.literary-editor-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(7rem, 1fr) minmax(7rem, 1fr) auto auto auto;
+  align-items: end;
+  gap: .45rem;
+  padding: .6rem 0;
+  border-bottom: 1px solid #eaeef2;
+}
+.literary-editor-row label { display: flex; flex-direction: column; gap: .2rem; min-width: 0; font-size: .75rem; color: #57606a; }
+.literary-editor-row input { min-width: 0; width: 100%; box-sizing: border-box; padding: .4rem .45rem; border: 1px solid #d0d7de; border-radius: 6px; color: #1f2328; }
+.literary-review-finding { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid #eaeef2; overflow-wrap: anywhere; }
+.literary-review-finding p { margin: .35rem 0 0; line-height: 1.5; }
+.literary-review-finding .chip { margin-right: .4rem; }
+
 @media (max-width: 640px) {
   .doc-page { padding: 1rem .75rem 3rem; }
   .reader-navigation { position: static; }
   .reader-navigation-controls { width: 100%; justify-content: space-between; }
   .page-select { flex: 1; max-width: none; }
   .reader { min-height: 50vh; padding: 1rem; border-radius: 8px; }
+  .literary-editor-row { grid-template-columns: 1fr 1fr; }
+  .literary-editor-row .chip { align-self: center; }
 }
 </style>
