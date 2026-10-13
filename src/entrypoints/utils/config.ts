@@ -37,7 +37,7 @@ export interface Config {
   localAgentUrl: string;
   /** 可选模型覆盖；auto 表示使用本机服务的环境配置。 */
   localAgentModel: string;
-  /** 与本机服务 LOCAL_AGENT_TOKEN 对应的共享令牌。 */
+  /** 可选共享令牌；本机服务未配置 LOCAL_AGENT_TOKEN 时留空即可。 */
   localAgentToken: string;
 }
 
