@@ -180,7 +180,7 @@ describe('文档翻译服务端模式', () => {
     await run([{
       id: 'book-s0',
       index: 0,
-      text: 'She opened the old door.',
+      text: 'Alice opened the old door.',
       kind: 'paragraph',
       path: 'Text/chapter1.xhtml',
       contextPath: 'Chapter One',
