@@ -21,8 +21,8 @@ export class ServerTranslationError extends Error {
   }
 }
 
-// 服务端单次请求使用 4MB 的保守预算，按 UTF-8 字节计算而不是 JS 字符数。
-const MAX_FULL_HTML_BYTES = 4_000_000;
+// 超过此阈值时只做轻量压缩，不作为请求大小上限。最终请求大小由部署平台决定。
+const REDUCE_LARGE_HTML_THRESHOLD_BYTES = 4_000_000;
 
 /** 扩展端注入到 DOM 的 UI 选择器，发送 HTML 前需要移除。 */
 const EXTENSION_UI_SELECTORS = [
@@ -87,14 +87,17 @@ async function prepareHtmlForServer(): Promise<string> {
   await inlineStylesheetsInClone(clone);
 
   const fullHtml = clone.outerHTML;
-  if (utf8ByteLength(fullHtml) <= MAX_FULL_HTML_BYTES) return fullHtml;
+  const fullHtmlBytes = utf8ByteLength(fullHtml);
 
-  // 体积超限时先删除展示缓存不需要的脚本与预加载提示。
-  // 旧做法直接只发 <body>，会把刚刚内联的 CSS 全丢掉，缓存页因此退化成裸 HTML。
-  // 服务端翻译依赖已经生成的 data-fanyi-block-id，不依赖页面脚本重新渲染正文。
+  // 4 MB 只是压缩非正文资源的触发阈值，不是请求上限。
+  // 小页面保持原样；大页面会优先移除脚本和预加载提示，以减少无助于服务端翻译的字节数。
+  // 绝不截断 HTML，也不删除 head/style 或 data-fanyi-block-id；压缩后仍然很大时照常发送。
+  if (fullHtmlBytes <= REDUCE_LARGE_HTML_THRESHOLD_BYTES) return fullHtml;
+
   logger.warn(
-    '[ServerTranslation] HTML exceeds request budget (' +
-      utf8ByteLength(fullHtml) + ' bytes); removing scripts and preload hints before retrying.',
+    '[ServerTranslation] Large HTML payload (' +
+      fullHtmlBytes +
+      ' UTF-8 bytes); removing scripts and preload hints, without truncating the document.',
   );
   clone.querySelectorAll('script').forEach((node) => node.remove());
   clone.querySelectorAll(
@@ -102,15 +105,15 @@ async function prepareHtmlForServer(): Promise<string> {
   ).forEach((node) => node.remove());
 
   const reducedHtml = clone.outerHTML;
-  if (utf8ByteLength(reducedHtml) <= MAX_FULL_HTML_BYTES) return reducedHtml;
-
-  // 超大型正文仍然超过平台限制时，明确报错比丢掉 head/style 后继续翻译更可靠。
-  // 用户可以改用本地翻译，或先关闭页面内的超大嵌入内容再重试。
-  throw new Error(
-    '页面 HTML 仍超过服务端单次请求大小限制（' +
-      utf8ByteLength(reducedHtml) +
-      ' bytes）。为避免丢失 CSS 和正文映射，已停止发送不完整页面；请改用本地翻译或简化页面后重试。',
-  );
+  const reducedHtmlBytes = utf8ByteLength(reducedHtml);
+  if (reducedHtmlBytes > REDUCE_LARGE_HTML_THRESHOLD_BYTES) {
+    logger.warn(
+      '[ServerTranslation] Sending full reduced document (' +
+        reducedHtmlBytes +
+        ' UTF-8 bytes); no client-side hard size limit is applied.',
+    );
+  }
+  return reducedHtml;
 }
 
 /** 返回 HTML 的 UTF-8 字节数，用于判断最终 JSON 请求体的页面内容预算。 */
