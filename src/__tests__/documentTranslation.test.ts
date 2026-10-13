@@ -147,6 +147,94 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.done).toBe(state.value.total);
   });
 
+  it('文学书籍按原顺序每次只推进一章，第二次继续才翻译下一章', async () => {
+    sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
+      const blocks = JSON.parse(message.jsonContent) as Array<{ id: string }>;
+      return {
+        success: true,
+        result: blocks.map((block) => [block.id, '初译-' + block.id]),
+      };
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (url.endsWith('/api/translate/document/literary/analyze')) {
+        const previous = body.memory?.entities ?? [];
+        const additions = body.chapterTitle === 'Chapter Two'
+          ? [{ source: 'London', target: '伦敦', kind: 'place' }]
+          : body.chapterTitle === 'Chapter One'
+            ? [{ source: 'Alice', target: '艾丽丝', kind: 'person' }]
+            : [
+                { source: 'Alice', target: '艾丽丝', kind: 'person' },
+                { source: 'London', target: '伦敦', kind: 'place' },
+              ];
+        return okJson({
+          analyzed: true,
+          memory: {
+            version: 1,
+            entities: [...previous, ...additions],
+            relationships: body.memory?.relationships ?? [],
+            styleGuide: body.memory?.styleGuide?.narrativeVoice
+              ? body.memory.styleGuide
+              : { narrativeVoice: '克制的第三人称' },
+            chapterSummaries: body.memory?.chapterSummaries ?? [],
+            recentExamples: body.memory?.recentExamples ?? [],
+          },
+        });
+      }
+      if (url.endsWith('/api/translate/document/literary/review')) {
+        const translations = Object.fromEntries(
+          body.segments.map((segment: { id: string }) => [segment.id, '审校-' + segment.id]),
+        );
+        return okJson({ translations, reviewedIds: Object.keys(translations), missingIds: [] });
+      }
+      throw new Error('unexpected URL: ' + url);
+    });
+
+    const { run, state, literaryMemory, literaryStatus } = useDocumentTranslation();
+    const segments = [
+      {
+        id: 'chapter1-s0', index: 0, text: 'Alice enters the room.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One', path: 'Text/ch1.xhtml',
+      },
+      {
+        id: 'chapter2-s0', index: 1, text: 'She sees the lights of London.',
+        kind: 'paragraph' as const, contextPath: 'Chapter Two', path: 'Text/ch2.xhtml',
+      },
+    ];
+    const options = {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      useServerTranslation: false,
+      serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+      provider: 'deepseek',
+      apiKey: 'test-key',
+      documentFileName: 'book.epub',
+      documentTitle: 'Book',
+      documentFormat: 'epub',
+      literaryMode: true,
+      budget: { maxChars: 3000, maxSegments: 24 },
+    };
+
+    await run(segments, options);
+    expect(state.value.total).toBe(2);
+    expect(state.value.done).toBe(1);
+    expect(state.value.translations.get('chapter1-s0')).toBe('审校-chapter1-s0');
+    expect(state.value.translations.has('chapter2-s0')).toBe(false);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // 全书预分析 + 第一章分析 + 第一章审校
+
+    await run(segments, options, true);
+    expect(state.value.done).toBe(2);
+    expect(state.value.translations.get('chapter2-s0')).toBe('审校-chapter2-s0');
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(5); // 第二章分析 + 第二章审校
+    expect(literaryMemory.value.entities.map((entity) => entity.source)).toContain('Alice');
+    expect(literaryMemory.value.entities.map((entity) => entity.source)).toContain('London');
+    expect(literaryStatus.value.bookProfileReady).toBe(true);
+    expect(literaryStatus.value.analyzedChapters).toBe(2);
+    expect(literaryStatus.value.reviewedSegments).toBe(2);
+  });
+
   it('本地翻译的 EPUB 也先分析书籍实体，再调用独立 reviewer', async () => {
     sendMessage.mockResolvedValueOnce({
       success: true,
