@@ -161,6 +161,38 @@ describe('translateViaServer', () => {
     expect(document.querySelector('#oversized-test-script')).not.toBeNull();
     expect(result.translatedIds.has('b1')).toBe(true);
   });
+  it('sends complete HTML larger than 4 MB without truncating CSS or block mappings', async () => {
+    const translatedHtml =
+      '<html><body><p data-fanyi-block-id="b1">' +
+      '<span class="fanyi-original">Hello World</span>' +
+      '<span class="fanyi-translation">你好世界</span></p></body></html>';
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => translatedHtml,
+    });
+
+    document.head.innerHTML = '<style id="source-css">article{color:red}</style>';
+    document.body.innerHTML =
+      '<article><p data-fanyi-block-id="b1">Hello World</p>' +
+      '<div id="large-content">' + 'x'.repeat(4_100_000) + '</div></article>';
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/p', tag: 'p', text: 'Hello World' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('p')!]]);
+
+    const result = await translateViaServer(baseConfig, blocks, nodeMap);
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(new TextEncoder().encode(requestBody.html).byteLength).toBeGreaterThan(4_000_000);
+    expect(requestBody.html).toContain('<style id="source-css">article{color:red}</style>');
+    expect(requestBody.html).toContain('data-fanyi-block-id="b1"');
+    expect(requestBody.html).toContain('id="large-content"');
+    expect(requestBody.html).toContain('x'.repeat(1024));
+    expect(result.translatedIds.has('b1')).toBe(true);
+  });
+
   it('skips blocks whose translation span is missing', async () => {
     const translatedHtml = `
       <html><body>
