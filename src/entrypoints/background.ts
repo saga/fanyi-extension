@@ -615,7 +615,8 @@ export default defineBackground({
         while (base.endsWith('/')) base = base.slice(0, -1);
           const headers: Record<string, string> = { 'Content-Type': 'application/json' };
           if (config.localAgentToken) headers.Authorization = 'Bearer ' + config.localAgentToken;
-          const response = await fetch(new URL('/health', base).toString(), { headers });
+          // /v1/models checks that the service is online and that the shared token is valid.
+          const response = await fetch(new URL('/v1/models', base).toString(), { headers });
           if (!response.ok) throw new Error('本机服务返回 HTTP ' + response.status);
           sendResponse({ success: true, config });
         } else if (config.deepseekApiKey) {
