@@ -113,6 +113,48 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.done).toBe(state.value.total);
   });
 
+  it('刷新恢复快照时保留译文、书籍记忆和未完成状态', () => {
+    const { restoreSnapshot, getSnapshot, state, literaryMemory, literaryStatus } = useDocumentTranslation();
+    restoreSnapshot({
+      translations: [['book-s0', '艾丽丝走进房间。']],
+      total: 8,
+      done: 3,
+      failedBatches: [2],
+      error: '上次请求被中断',
+      literaryMemory: {
+        version: 1,
+        entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person' }],
+        relationships: [{ subject: 'Alice', predicate: 'protects', object: 'Bob' }],
+        styleGuide: { narrativeVoice: '克制的第三人称' },
+        chapterSummaries: [{ chapter: 'Chapter One', summary: 'Alice enters the room.' }],
+        recentExamples: [],
+      },
+      literaryStatus: {
+        enabled: true,
+        bookProfileReady: true,
+        chapterTitle: 'Chapter Two',
+        analyzedChapters: 1,
+        reviewedSegments: 7,
+        warnings: ['某段 reviewer 未返回，保留初译'],
+      },
+      analyzedChapterKeys: ['Chapter One'],
+      lastRunSegmentIds: ['book-s0', 'book-s1'],
+    });
+
+    expect(state.value.running).toBe(false);
+    expect(state.value.translations.get('book-s0')).toBe('艾丽丝走进房间。');
+    expect(state.value.total).toBe(8);
+    expect(state.value.failedBatches).toEqual([2]);
+    expect(literaryMemory.value.entities[0]?.target).toBe('艾丽丝');
+    expect(literaryStatus.value.bookProfileReady).toBe(true);
+    expect(literaryStatus.value.reviewedSegments).toBe(7);
+
+    const snapshot = getSnapshot();
+    expect(snapshot.analyzedChapterKeys).toEqual(['Chapter One']);
+    expect(snapshot.lastRunSegmentIds).toEqual(['book-s0', 'book-s1']);
+    expect(snapshot.translations).toEqual([['book-s0', '艾丽丝走进房间。']]);
+  });
+
   it('停止或部分失败后继续翻译时保留已完成译文，只发送未翻译片段', async () => {
     fetchMock
       .mockResolvedValueOnce(okJson({

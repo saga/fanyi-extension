@@ -7,6 +7,28 @@
       </div>
     </header>
 
+    <!-- 上次阅读快照仅包含最近一本书；正文与译文保存在扩展本地 IndexedDB。 -->
+    <section v-if="!doc && !parsing && savedSessionSummary" class="panel saved-session">
+      <div class="saved-session-copy">
+        <strong>继续上次阅读</strong>
+        <span>{{ savedSessionSummary.title || savedSessionSummary.fileName }}</span>
+        <span class="muted small">
+          {{ FORMAT_LABEL[savedSessionSummary.format] || savedSessionSummary.format }}
+          · {{ savedSessionSummary.segmentCount.toLocaleString() }} 段
+          · 已保存 {{ savedSessionSummary.translatedSegmentCount.toLocaleString() }} 段译文
+        </span>
+        <span class="muted small">上次保存：{{ new Date(savedSessionSummary.updatedAt).toLocaleString() }}</span>
+      </div>
+      <div class="saved-session-actions">
+        <button class="btn primary" @click="restoreLastSession">恢复阅读</button>
+        <button class="btn ghost" @click="clearSavedSession">清除记录</button>
+      </div>
+    </section>
+
+    <section v-if="persistenceMessage" class="panel persistence-notice">
+      <span>{{ persistenceMessage }}</span>
+    </section>
+
     <!-- 1. 未选择文件：选择 / 拖拽 -->
     <section v-if="!doc && !parsing" class="dropzone" :class="{ dragover }"
       @dragover.prevent="dragover = true" @dragleave.prevent="dragover = false"
@@ -184,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { getConfig } from '@/entrypoints/utils/config';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
@@ -197,6 +219,15 @@ import {
 } from '@/entrypoints/utils/document';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
 import { buildDocumentPages } from '@/entrypoints/utils/document/pagination';
+import {
+  clearActiveDocumentSession,
+  createActiveDocumentSession,
+  getActiveDocumentSessionSummary,
+  loadActiveDocumentSession,
+  saveActiveDocumentProgress,
+  type ActiveDocumentSessionSummary,
+  type SavedViewMode,
+} from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -222,6 +253,11 @@ const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
 const literaryMode = ref(false);
 const currentPageIndex = ref(0);
+const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
+const persistenceMessage = ref('');
+const activeSessionReady = ref(false);
+const persistedTranslations = ref(new Map<string, string>());
+let persistenceQueue: Promise<void> = Promise.resolve();
 const readerRef = ref<HTMLElement | null>(null);
 /** 原始文本，json 导出回填时用。 */
 let rawText = '';
@@ -242,6 +278,8 @@ const {
   reset: resetTranslation,
   literaryMemory,
   literaryStatus,
+  getSnapshot,
+  restoreSnapshot,
 } = useDocumentTranslation();
 
 /** 页级分页不改变原始片段顺序，导出仍以完整文档为准。 */
@@ -260,6 +298,119 @@ watch(currentPageIndex, async () => {
   readerRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
+/** 阅读位置与显示设置也是会话的一部分；保存失败只提示用户，不中断阅读或翻译。 */
+watch([currentPageIndex, sourceLang, targetLang, viewMode, literaryMode], () => {
+  void persistCurrentSession();
+});
+
+onMounted(() => {
+  void refreshSavedSessionSummary();
+});
+
+async function refreshSavedSessionSummary() {
+  try {
+    savedSessionSummary.value = await getActiveDocumentSessionSummary();
+  } catch (error) {
+    // 无痕/测试环境可能不提供 IndexedDB；正常阅读仍可继续。
+    if (typeof indexedDB === 'undefined') return;
+    persistenceMessage.value = '无法读取本地恢复记录：' +
+      (error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function persistCurrentSession() {
+  if (!activeSessionReady.value || !doc.value) return;
+  const snapshot = getSnapshot();
+  const delta = snapshot.translations.filter(([id, text]) =>
+    persistedTranslations.value.get(id) !== text,
+  );
+  const input = {
+    sourceLang: sourceLang.value,
+    targetLang: targetLang.value,
+    viewMode: viewMode.value as SavedViewMode,
+    literaryMode: literaryMode.value,
+    currentPageIndex: currentPageIndex.value,
+    snapshot,
+    translationDelta: delta,
+    translatedSegmentCount: snapshot.translations.length,
+  };
+
+  // 多个 Vue watcher 和翻译批次可能同时请求保存，按顺序写入，避免旧快照覆盖新状态。
+  const write = persistenceQueue.then(async () => {
+    await saveActiveDocumentProgress(input);
+    for (const [id, text] of delta) persistedTranslations.value.set(id, text);
+    persistenceMessage.value = '阅读位置、译文和书籍记忆已自动保存到本机；刷新页面后可以继续。';
+  });
+  persistenceQueue = write.catch(() => undefined);
+  try {
+    await write;
+  } catch (error) {
+    persistenceMessage.value = '本地自动保存失败；翻译仍会继续。请检查浏览器扩展存储空间。' +
+      (error instanceof Error ? ' ' + error.message : '');
+  }
+}
+
+async function restoreLastSession() {
+  parsing.value = true;
+  parseError.value = '';
+  persistenceMessage.value = '';
+  try {
+    const saved = await loadActiveDocumentSession();
+    if (!saved) {
+      savedSessionSummary.value = null;
+      persistenceMessage.value = '没有可恢复的阅读记录。';
+      return;
+    }
+
+    resetTranslation();
+    activeSessionReady.value = false;
+    persistedTranslations.value = new Map(saved.translations);
+    documentFileName = saved.fileName;
+    rawText = saved.rawText;
+    doc.value = saved.document;
+    glossary.value = saved.glossary;
+    sourceLang.value = saved.sourceLang;
+    targetLang.value = saved.targetLang;
+    viewMode.value = saved.viewMode;
+    literaryMode.value = saved.literaryMode;
+    currentPageIndex.value = Math.min(
+      Math.max(0, saved.currentPageIndex),
+      Math.max(0, buildDocumentPages(saved.document).length - 1),
+    );
+
+    restoreSnapshot({
+      translations: saved.translations,
+      total: saved.total,
+      done: saved.done,
+      failedBatches: saved.failedBatches,
+      error: saved.error,
+      literaryMemory: saved.literaryMemory,
+      literaryStatus: saved.literaryStatus,
+      analyzedChapterKeys: saved.analyzedChapterKeys,
+      lastRunSegmentIds: saved.lastRunSegmentIds,
+    });
+    activeSessionReady.value = true;
+    await nextTick();
+    await persistCurrentSession();
+  } catch (error) {
+    parseError.value = '恢复上次阅读失败：' +
+      (error instanceof Error ? error.message : String(error));
+  } finally {
+    parsing.value = false;
+  }
+}
+
+async function clearSavedSession() {
+  try {
+    await clearActiveDocumentSession();
+    savedSessionSummary.value = null;
+    persistenceMessage.value = '已清除本机保存的阅读记录。';
+  } catch (error) {
+    persistenceMessage.value = '清除恢复记录失败：' +
+      (error instanceof Error ? error.message : String(error));
+  }
+}
+
 function pickFile() {
   fileInput.value?.click();
 }
@@ -277,7 +428,13 @@ function onDrop(event: DragEvent) {
 }
 
 async function loadFile(file: File) {
+  // 先落盘上一册的最新状态，再开始解析新文件。
+  await persistCurrentSession();
+  stopTranslation();
   documentFileName = file.name;
+  activeSessionReady.value = false;
+  persistedTranslations.value = new Map();
+  persistenceMessage.value = '';
   resetTranslation();
   currentPageIndex.value = 0;
   parseError.value = '';
@@ -309,6 +466,29 @@ async function loadFile(file: File) {
     const config = await getConfig();
     sourceLang.value = config.sourceLang || 'auto';
     targetLang.value = config.targetLang || 'zh';
+
+    // 保存已解析的结构化文档一次；后续翻译过程只增量写译文与小型状态。
+    // IndexedDB 配额/权限异常不会阻止正常翻译。
+    try {
+      await createActiveDocumentSession({
+        fileName: documentFileName,
+        document: doc.value,
+        rawText,
+        glossary: glossary.value,
+        sourceLang: sourceLang.value,
+        targetLang: targetLang.value,
+        viewMode: viewMode.value,
+        literaryMode: literaryMode.value,
+        currentPageIndex: currentPageIndex.value,
+      });
+      activeSessionReady.value = true;
+      await persistCurrentSession();
+      savedSessionSummary.value = await getActiveDocumentSessionSummary();
+    } catch (storageError) {
+      activeSessionReady.value = false;
+      persistenceMessage.value = '本地会话创建失败；本次仍可继续翻译。' +
+        (storageError instanceof Error ? ' ' + storageError.message : '');
+    }
   } catch (err) {
     parseError.value = (err as Error).message;
   } finally {
@@ -337,6 +517,7 @@ async function buildTranslationOptions() {
     documentTitle: doc.value.title,
     documentFormat: doc.value.format,
     documentWarnings: doc.value.meta.warnings,
+    onCheckpoint: persistCurrentSession,
   };
 }
 
@@ -374,7 +555,10 @@ function doExport(format: ExportFormat) {
   URL.revokeObjectURL(url);
 }
 
-function resetAll() {
+async function resetAll() {
+  // 先等待最后一笔 checkpoint 落盘；换文件不会删除上一本书的恢复快照。
+  await persistCurrentSession();
+  activeSessionReady.value = false;
   resetTranslation();
   doc.value = null;
   currentPageIndex.value = 0;
@@ -384,6 +568,8 @@ function resetAll() {
   documentFileName = 'document';
   glossary.value = undefined;
   progress.value = { done: 0, total: 0 };
+  persistedTranslations.value = new Map();
+  await refreshSavedSessionSummary();
 }
 </script>
 
@@ -402,6 +588,31 @@ function resetAll() {
   margin-bottom: 1rem;
 }
 .doc-header h1 { font-size: 1.25rem; margin: 0; }
+
+.saved-session {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-color: #c9d8ea;
+}
+.saved-session-copy {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  min-width: 12rem;
+  flex: 1;
+}
+.saved-session-copy strong { font-size: .95rem; }
+.saved-session-copy > span:nth-child(2) { overflow-wrap: anywhere; }
+.saved-session-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.persistence-notice {
+  background: #f6f8fa;
+  color: #57606a;
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
 
 .dropzone {
   border: 2px dashed #d0d7de;

@@ -14,7 +14,9 @@ import {
   createEmptyLiteraryMemory,
   mergeLiteraryMemory,
   type LiteraryBookMemory,
+  sanitizeLiteraryMemory,
 } from '../utils/document/literary';
+import type { DocumentTranslationSnapshot } from '../utils/document/sessionStore';
 
 /**
  * 文档翻译执行器。
@@ -55,6 +57,8 @@ export interface TranslateOptions {
   prioritySegmentIds?: string[];
   /** 仅 EPUB/PDF 可开启：逐章实体分析、书籍记忆、文学译稿审校。 */
   literaryMode?: boolean;
+  /** 每批结束、书籍记忆更新或审校结果返回时调用，供阅读器做增量持久化。 */
+  onCheckpoint?: () => Promise<void> | void;
 }
 
 /**
@@ -401,6 +405,71 @@ export function useDocumentTranslation() {
   let lastRunSegmentIds: string[] = [];
   const isCurrentRun = (runId: number) => generation === runId;
 
+  async function checkpoint(options: TranslateOptions): Promise<void> {
+    try {
+      await options.onCheckpoint?.();
+    } catch (error) {
+      // 存储故障不能把翻译任务标成失败；UI 自己展示持久化警告。
+      console.warn('[document-reader] checkpoint failed', error);
+    }
+  }
+
+  /** 创建不含 Vue Proxy 的纯数据快照，供 IndexedDB structured-clone 使用。 */
+  function getSnapshot(): DocumentTranslationSnapshot {
+    return {
+      translations: Array.from(state.value.translations.entries()),
+      total: state.value.total,
+      done: state.value.done,
+      failedBatches: [...state.value.failedBatches],
+      error: state.value.error,
+      literaryMemory: JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory,
+      literaryStatus: JSON.parse(JSON.stringify(literaryStatus.value)) as LiteraryStatus,
+      analyzedChapterKeys: [...analyzedChapterKeys],
+      lastRunSegmentIds: [...lastRunSegmentIds],
+    };
+  }
+
+  /** 刷新后恢复文档状态。running 一律恢复为 false，避免 UI 显示一个实际不存在的请求。 */
+  function restoreSnapshot(snapshot: Partial<DocumentTranslationSnapshot>): void {
+    generation++;
+    analyzedChapterKeys = new Set(
+      Array.isArray(snapshot.analyzedChapterKeys)
+        ? snapshot.analyzedChapterKeys.filter((key): key is string => typeof key === 'string')
+        : [],
+    );
+    lastRunSegmentIds = Array.isArray(snapshot.lastRunSegmentIds)
+      ? snapshot.lastRunSegmentIds.filter((id): id is string => typeof id === 'string')
+      : [];
+    const restoredTranslations = Array.isArray(snapshot.translations)
+      ? snapshot.translations.filter((item): item is [string, string] =>
+          Array.isArray(item) && typeof item[0] === 'string' && typeof item[1] === 'string')
+      : [];
+    const status = snapshot.literaryStatus;
+    literaryMemory.value = sanitizeLiteraryMemory(snapshot.literaryMemory);
+    literaryStatus.value = {
+      enabled: status?.enabled === true,
+      bookProfileReady: status?.bookProfileReady === true,
+      chapterTitle: typeof status?.chapterTitle === 'string' ? status.chapterTitle : '',
+      analyzedChapters: typeof status?.analyzedChapters === 'number' && Number.isFinite(status.analyzedChapters)
+        ? status.analyzedChapters : 0,
+      reviewedSegments: typeof status?.reviewedSegments === 'number' && Number.isFinite(status.reviewedSegments)
+        ? status.reviewedSegments : 0,
+      warnings: Array.isArray(status?.warnings)
+        ? status.warnings.filter((warning): warning is string => typeof warning === 'string').slice(-20)
+        : [],
+    };
+    state.value = {
+      translations: new Map(restoredTranslations),
+      total: Number.isFinite(snapshot.total) ? Math.max(0, Number(snapshot.total)) : 0,
+      done: Number.isFinite(snapshot.done) ? Math.max(0, Number(snapshot.done)) : 0,
+      failedBatches: Array.isArray(snapshot.failedBatches)
+        ? snapshot.failedBatches.filter((index): index is number => Number.isInteger(index) && index >= 0)
+        : [],
+      running: false,
+      error: typeof snapshot.error === 'string' ? snapshot.error : '',
+    };
+  }
+
   function reset() {
     generation++;
     lastRunSegmentIds = [];
@@ -534,6 +603,7 @@ export function useDocumentTranslation() {
         }
       }
     }
+    await checkpoint(options);
     return isCurrentRun(runId);
   }
 
@@ -562,6 +632,7 @@ export function useDocumentTranslation() {
     }
     // 即使分析服务失败也只尝试一次，避免每批反复支付同一分析的成本。
     analyzedChapterKeys.add(key);
+    await checkpoint(options);
     return isCurrentRun(runId);
   }
 
@@ -651,15 +722,17 @@ export function useDocumentTranslation() {
           }
         }
         if (profile.warning) literaryStatus.value.warnings.push(profile.warning);
+        await checkpoint(effectiveOptions);
       } catch (error) {
         literaryStatus.value.warnings.push(
           '全书预分析失败，将逐章补充实体记忆：' +
           (error instanceof Error ? error.message : String(error)),
         );
+        await checkpoint(effectiveOptions);
       }
     }
 
-    // 文学模式每次只推进一个尚未完成的章节/PDF 上下文单元。
+    // 文学模式每次只推进一个尚未完成的章节/PDF 上下文单元.
     // 上一单元的初译、reviewer 与译例更新完成后，再由用户继续下一章。
     let workBatches = pendingBatches;
     if (literaryEnabled && pendingBatches.length > 0) {
@@ -715,6 +788,7 @@ export function useDocumentTranslation() {
             }));
           }
         }
+        await checkpoint(effectiveOptions);
       }
     };
 
@@ -725,6 +799,7 @@ export function useDocumentTranslation() {
     if (isCurrentRun(runId)) {
       state.value.failedBatches.sort((a, b) => a - b);
       state.value.running = false;
+      await checkpoint(effectiveOptions);
     }
     return state.value;
   }
@@ -777,17 +852,23 @@ export function useDocumentTranslation() {
         if (!isCurrentRun(runId)) break;
         if (ok) state.value.done++;
         else state.value.failedBatches.push(index);
+        await checkpoint(effectiveOptions);
       } catch (err) {
         if (!isCurrentRun(runId)) break;
         state.value.failedBatches.push(index);
         state.value.error = (err as Error).message;
+        await checkpoint(effectiveOptions);
       }
     }
     if (isCurrentRun(runId)) {
       state.value.failedBatches.sort((a, b) => a - b);
       state.value.running = false;
+      await checkpoint(effectiveOptions);
     }
   }
 
-  return { state, run, retryFailed, stop, reset, literaryMemory, literaryStatus };
+  return {
+    state, run, retryFailed, stop, reset, literaryMemory, literaryStatus,
+    getSnapshot, restoreSnapshot,
+  };
 }
