@@ -82,7 +82,7 @@
         <input type="checkbox" v-model="config.useServerTranslation" :disabled="config.useLocalAgent" @change="saveConfig" />
         <span>通过远程服务翻译当前页面</span>
       </label>
-      <span v-if="config.useLocalAgent" class="hint-text">本机 Provider 已启用，翻译及 EPUB/PDF 文学分析/审校优先走本机。</span>
+      <span v-if="config.useLocalAgent" class="hint-text">本机 Provider 已启用，网页/文档翻译、对话及 EPUB/PDF 文学分析/审校均走本机。</span>
 
       <div v-if="config.useServerTranslation" class="server-section">
         <button

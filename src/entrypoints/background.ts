@@ -123,16 +123,33 @@ export default defineBackground({
     // 远程 Provider 继续走原有 API；本机模式把相同翻译 prompt 发给本机 OpenAI-compatible 入口。
     function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle): DeepSeekTranslationService {
       if (config.useLocalAgent) {
-        let base = config.localAgentUrl || 'http://127.0.0.1:8789';
-        while (base.endsWith('/')) base = base.slice(0, -1);
-        const endpoint = new URL('/v1/chat/completions', base).toString();
-        const override = (config.localAgentModel || 'auto').trim();
-        const model = override && override.toLowerCase() !== 'auto'
-          ? (/^(workbuddy|opencode):/i.test(override) ? override : config.localAgentProvider + ':' + override)
-          : config.localAgentProvider;
-        return new DeepSeekTranslationService(config.localAgentToken || '', style, { endpoint, model });
+        const endpoint = new URL('/v1/chat/completions', getLocalAgentBaseUrl(config)).toString();
+        return new DeepSeekTranslationService(config.localAgentToken || '', style, {
+          endpoint,
+          model: getLocalAgentModelId(config),
+        });
       }
       return new DeepSeekTranslationService(config.deepseekApiKey, style);
+    }
+
+    function getLocalAgentModelId(config: Awaited<ReturnType<typeof getConfig>>): string {
+      const override = (config.localAgentModel || 'auto').trim();
+      return override && override.toLowerCase() !== 'auto'
+        ? (/^(workbuddy|opencode):/i.test(override) ? override : config.localAgentProvider + ':' + override)
+        : config.localAgentProvider;
+    }
+
+    function getLocalAgentBaseUrl(config: Awaited<ReturnType<typeof getConfig>>): string {
+      let base = config.localAgentUrl || 'http://127.0.0.1:8789';
+      while (base.endsWith('/')) base = base.slice(0, -1);
+      return base;
+    }
+
+    function getLocalAgentHeaders(config: Awaited<ReturnType<typeof getConfig>>): Record<string, string> {
+      return {
+        'Content-Type': 'application/json',
+        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+      };
     }
 
     function getEffectiveProviderKey(config: Awaited<ReturnType<typeof getConfig>>): string {
@@ -750,8 +767,8 @@ export default defineBackground({
         if (m.type !== 'chat') return;
 
         const config = await getConfig();
-        if (!config.deepseekApiKey) {
-          port.postMessage({ type: 'error', message: '未配置 DeepSeek API Key，请在插件设置中填写' });
+        if (!config.useLocalAgent && !config.deepseekApiKey) {
+          port.postMessage({ type: 'error', message: '未配置 DeepSeek API Key，请在插件设置中填写，或启用本机 Workbuddy/OpenCode Provider' });
           return;
         }
 
@@ -760,6 +777,32 @@ export default defineBackground({
           const llmMessages: ChatMessage[] = [{ role: 'system', content: system }, ...(m.history ?? [])];
           let full = '';
           let usage: ChatUsage | null = null;
+          if (config.useLocalAgent) {
+            const response = await fetch(new URL('/v1/chat/completions', getLocalAgentBaseUrl(config)).toString(), {
+              method: 'POST',
+              headers: getLocalAgentHeaders(config),
+              signal: controller.signal,
+              body: JSON.stringify({
+                model: getLocalAgentModelId(config),
+                messages: llmMessages,
+                ...(m.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+              }),
+            });
+            const data = await response.json().catch(() => ({})) as {
+              choices?: Array<{ message?: { content?: unknown } }>;
+              error?: { message?: string } | string;
+            };
+            if (!response.ok) {
+              const detail = typeof data.error === 'string' ? data.error : data.error?.message;
+              throw new Error(detail || '本机 Agent 服务返回 HTTP ' + response.status);
+            }
+            const content = data.choices?.[0]?.message?.content;
+            if (typeof content !== 'string' || !content.trim()) throw new Error('本机 Agent 未返回对话内容');
+            full = content;
+            port.postMessage({ type: 'partial', text: full });
+            port.postMessage({ type: 'done', text: full, usage: null });
+            return;
+          }
           for await (const partial of chatStream(config.deepseekApiKey, llmMessages, {
             jsonMode: m.jsonMode,
             signal: controller.signal,
