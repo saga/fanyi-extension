@@ -137,6 +137,7 @@
           <span class="chip">已补充分析 {{ literaryStatus.analyzedChapters }} 章</span>
           <span class="chip">已审校 {{ literaryStatus.reviewedSegments }} 段</span>
           <span class="chip">记忆实体 {{ literaryMemory.entities.length }} 个</span>
+          <span class="chip">审校记录 {{ literaryStatus.reviewFindings.length }} 条</span>
         </div>
         <p class="muted small" v-if="literaryStatus.chapterTitle">
           当前分析章节：{{ literaryStatus.chapterTitle }}
@@ -144,6 +145,55 @@
         <p v-for="(warning, index) in literaryStatus.warnings.slice(-3)" :key="index" class="warn">
           {{ warning }}
         </p>
+      </section>
+
+
+      <!-- 词典/关系表可人工修订；确认状态会随本地会话保存，并影响后续章节。 -->
+      <section v-if="literaryMode" class="panel literary-dictionary">
+        <details open>
+          <summary><strong>实体词典</strong>（{{ literaryMemory.entities.length }} 项；已确认项优先于模型建议）</summary>
+          <div class="literary-editor-list">
+            <div v-for="(entity, index) in literaryMemory.entities" :key="'entity-' + index" class="literary-editor-row">
+              <label>原文名称<input v-model="entity.source" @change="markEntitySuggested(entity)" /></label>
+              <label>规范译名<input v-model="entity.target" @change="markEntitySuggested(entity)" /></label>
+              <label>别名（逗号分隔）<input :value="(entity.aliases || []).join(', ')" @change="setEntityAliases(entity, $event)" /></label>
+              <span class="chip">{{ entity.reviewStatus === 'confirmed' ? '已确认' : '待确认' }}</span>
+              <button class="btn ghost" :disabled="!entity.source.trim() || !entity.target.trim()" @click="confirmEntity(entity)">确认</button>
+              <button class="btn ghost" @click="removeEntity(index)">删除</button>
+            </div>
+            <button class="btn" @click="addEntity">新增实体</button>
+          </div>
+        </details>
+        <details>
+          <summary><strong>人物/事物关系表</strong>（{{ literaryMemory.relationships.length }} 项）</summary>
+          <div class="literary-editor-list">
+            <div v-for="(relation, index) in literaryMemory.relationships" :key="'relation-' + index" class="literary-editor-row">
+              <label>主体<input v-model="relation.subject" @change="markRelationshipSuggested(relation)" /></label>
+              <label>关系<input v-model="relation.predicate" @change="markRelationshipSuggested(relation)" /></label>
+              <label>对象<input v-model="relation.object" @change="markRelationshipSuggested(relation)" /></label>
+              <span class="chip">{{ relation.reviewStatus === 'confirmed' ? '已确认' : '待确认' }}</span>
+              <button class="btn ghost" :disabled="!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()" @click="confirmRelationship(relation)">确认</button>
+              <button class="btn ghost" @click="removeRelationship(index)">删除</button>
+            </div>
+            <button class="btn" @click="addRelationship">新增关系</button>
+          </div>
+        </details>
+        <p class="muted small">编辑后会重新标记为“待确认”；点击“确认”后才作为人工规范项传给后续章节。修改会保存在本机阅读会话中。</p>
+      </section>
+
+      <section v-if="literaryStatus.reviewFindings.length" class="panel literary-review-findings">
+        <strong>Reviewer 审校记录</strong>
+        <p class="muted small">明确的事实/术语错误会自动修正；风格偏好仅作参考，不会自动覆盖译文。</p>
+        <div v-for="(finding, index) in literaryStatus.reviewFindings" :key="'finding-' + index" class="literary-review-finding">
+          <div>
+            <span class="chip">{{ finding.priority === 'must_fix' ? '必须修正（已应用）' : '可选风格/措辞建议' }}</span>
+            <span class="muted small">{{ finding.id }} · {{ finding.category }}</span>
+          </div>
+          <p v-if="finding.sourceExcerpt"><strong>原文：</strong>{{ finding.sourceExcerpt }}</p>
+          <p v-if="finding.draftExcerpt"><strong>初译：</strong>{{ finding.draftExcerpt }}</p>
+          <p v-if="finding.reason"><strong>原因：</strong>{{ finding.reason }}</p>
+          <p v-if="finding.suggestion"><strong>建议：</strong>{{ finding.suggestion }}</p>
+        </div>
       </section>
 
       <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->
@@ -229,6 +279,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
+import type { LiteraryEntity, LiteraryRelationship } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -302,6 +353,10 @@ watch(currentPageIndex, async () => {
 watch([currentPageIndex, sourceLang, targetLang, viewMode, literaryMode], () => {
   void persistCurrentSession();
 });
+
+watch(literaryMemory, () => {
+  if (literaryMode.value) void persistCurrentSession();
+}, { deep: true });
 
 onMounted(() => {
   void refreshSavedSessionSummary();
@@ -409,6 +464,40 @@ async function clearSavedSession() {
     persistenceMessage.value = '清除恢复记录失败：' +
       (error instanceof Error ? error.message : String(error));
   }
+}
+
+function markEntitySuggested(entity: LiteraryEntity) {
+  entity.reviewStatus = 'suggested';
+}
+function confirmEntity(entity: LiteraryEntity) {
+  if (!entity.source.trim() || !entity.target.trim()) return;
+  entity.reviewStatus = 'confirmed';
+  persistenceMessage.value = '已确认规范译名：' + entity.source + ' → ' + entity.target;
+}
+function setEntityAliases(entity: LiteraryEntity, event: Event) {
+  const value = (event.target as HTMLInputElement | null)?.value ?? '';
+  entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
+  entity.reviewStatus = 'suggested';
+}
+function addEntity() {
+  literaryMemory.value.entities.push({ source: '', target: '', kind: 'other', aliases: [], reviewStatus: 'suggested' });
+}
+function removeEntity(index: number) {
+  literaryMemory.value.entities.splice(index, 1);
+}
+function markRelationshipSuggested(relation: LiteraryRelationship) {
+  relation.reviewStatus = 'suggested';
+}
+function confirmRelationship(relation: LiteraryRelationship) {
+  if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) return;
+  relation.reviewStatus = 'confirmed';
+  persistenceMessage.value = '已确认关系：' + relation.subject + ' — ' + relation.predicate + ' → ' + relation.object;
+}
+function addRelationship() {
+  literaryMemory.value.relationships.push({ subject: '', predicate: '', object: '', reviewStatus: 'suggested' });
+}
+function removeRelationship(index: number) {
+  literaryMemory.value.relationships.splice(index, 1);
 }
 
 function pickFile() {

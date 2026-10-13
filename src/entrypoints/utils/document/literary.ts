@@ -13,12 +13,14 @@ export interface LiteraryEntity {
   aliases?: string[];
   description?: string;
   evidence?: string;
+  reviewStatus?: 'suggested' | 'confirmed';
 }
 export interface LiteraryRelationship {
   subject: string;
   predicate: string;
   object: string;
   evidence?: string;
+  reviewStatus?: 'suggested' | 'confirmed';
 }
 export interface LiteraryStyleGuide {
   narrativeVoice?: string;
@@ -27,6 +29,17 @@ export interface LiteraryStyleGuide {
   dialogue?: string;
   diction?: string;
   avoid?: string[];
+}
+export type LiteraryReviewCategory = 'accuracy' | 'terminology' | 'style';
+export type LiteraryReviewPriority = 'must_fix' | 'optional';
+export interface LiteraryReviewFinding {
+  id: string;
+  category: LiteraryReviewCategory;
+  priority: LiteraryReviewPriority;
+  sourceExcerpt: string;
+  draftExcerpt: string;
+  reason: string;
+  suggestion: string;
 }
 export interface LiteraryExample {
   source: string;
@@ -104,6 +117,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(aliases.length ? { aliases } : {}),
         ...(safeText(entity.description, 200) ? { description: safeText(entity.description, 200) } : {}),
         ...(safeText(entity.evidence, 160) ? { evidence: safeText(entity.evidence, 160) } : {}),
+        reviewStatus: entity.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
       });
     }
   }
@@ -119,6 +133,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       relationships.push({
         subject, predicate, object,
         ...(safeText(rel.evidence, 160) ? { evidence: safeText(rel.evidence, 160) } : {}),
+        reviewStatus: rel.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
       });
     }
   }
@@ -218,7 +233,7 @@ export function buildLiteraryContextForText(memoryInput: unknown, sourceText: st
     names.has(relation.subject.toLocaleLowerCase()) || names.has(relation.object.toLocaleLowerCase()),
   ).slice(0, 8);
   return JSON.stringify({
-    entities: entities.map(({ source, target, kind, aliases }) => ({ source, target, kind, aliases })),
+    entities: entities.map(({ source, target, kind, aliases, reviewStatus }) => ({ source, target, kind, aliases, reviewStatus })),
     relationships,
     styleGuide: memory.styleGuide,
     recentExamples: memory.recentExamples.slice(-2),
@@ -231,6 +246,7 @@ export function buildLiteraryTranslationContextPrompt(chapterTitle = ''): string
     '任务模式：书籍/文学作品的章节翻译，不要套用网页翻译的简短、信息压缩式表达。',
     '忠实保留原意、叙述视角、人物动机、事实细节和关系，在此基础上使用自然的文学表达，保留文字的节奏、味道和人物声音。',
     '各片段的 contextPath 可能含有只读书籍记忆 JSON；用它维持人名、地名、关键物品名、别名、实体关系和整体声线的一致性。不得把 metadata/contextPath 混入译文。',
+    'reviewStatus=confirmed 表示人工确认过的规范译名/关系，必须遵守；suggested 是模型建议，原文有明确反证时应报告冲突，不得静默改动人工确认项。',
     '关系记忆只用于消歧，不要把角色关系说明写进正文。不要擅自解释悬念、含混、反讽和信息差。',
     '保持叙述声音、时代感、语域、句子节奏、对话口吻和用词习惯；不同人物不能被润色成同一种声音。',
     '去掉翻译腔和 AI 味：避免机械对应原文语序、模板化转折、重复总结、无意义强调、解释性补句和过度工整的排比。不要为了显得文学而添加原文没有的比喻或情绪。',

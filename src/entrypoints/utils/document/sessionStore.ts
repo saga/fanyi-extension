@@ -9,7 +9,7 @@
  */
 
 import type { Glossary } from '../../service/_service';
-import type { LiteraryBookMemory } from './literary';
+import type { LiteraryBookMemory, LiteraryReviewFinding } from './literary';
 import type { ParsedDocument } from './types';
 
 const DATABASE_NAME = 'fanyi-document-reader';
@@ -35,6 +35,7 @@ export interface DocumentTranslationSnapshot {
     analyzedChapters: number;
     reviewedSegments: number;
     warnings: string[];
+    reviewFindings: LiteraryReviewFinding[];
   };
   analyzedChapterKeys: string[];
   lastRunSegmentIds: string[];
@@ -229,6 +230,7 @@ function sessionFromCreate(input: CreateActiveDocumentSessionInput, now: number)
       analyzedChapters: 0,
       reviewedSegments: 0,
       warnings: [],
+      reviewFindings: [],
     },
     analyzedChapterKeys: [],
     lastRunSegmentIds: [],

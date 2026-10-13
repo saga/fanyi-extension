@@ -227,7 +227,9 @@ describe('文档翻译服务端模式', () => {
         const translations = Object.fromEntries(
           body.segments.map((segment: { id: string }) => [segment.id, '审校-' + segment.id]),
         );
-        return okJson({ translations, reviewedIds: Object.keys(translations), missingIds: [] });
+        return okJson({ translations, reviewedIds: Object.keys(translations), missingIds: [], findings: [
+          { id: body.segments[0].id, category: 'style', priority: 'must_fix', reason: '只是风格偏好', suggestion: '可考虑调整措辞' },
+        ] });
       }
       throw new Error('unexpected URL: ' + url);
     });
@@ -275,6 +277,7 @@ describe('文档翻译服务端模式', () => {
     expect(literaryStatus.value.bookProfileReady).toBe(true);
     expect(literaryStatus.value.analyzedChapters).toBe(2);
     expect(literaryStatus.value.reviewedSegments).toBe(2);
+    expect(literaryStatus.value.reviewFindings[0]?.priority).toBe('optional');
   });
 
   it('本地翻译的 EPUB 也先分析书籍实体，再调用独立 reviewer', async () => {

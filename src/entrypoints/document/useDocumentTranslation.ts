@@ -15,6 +15,7 @@ import {
   mergeLiteraryMemory,
   type LiteraryBookMemory,
   sanitizeLiteraryMemory,
+  type LiteraryReviewFinding,
 } from '../utils/document/literary';
 import type { DocumentTranslationSnapshot } from '../utils/document/sessionStore';
 
@@ -97,6 +98,8 @@ interface ServerDocumentTranslationResponse {
   missingSegmentIds?: unknown;
   reviewedSegmentCount?: unknown;
   reviewerErrors?: unknown;
+  reviewFindings?: unknown;
+  findings?: unknown;
 }
 
 /**
@@ -203,6 +206,7 @@ interface LiteraryStatus {
   analyzedChapters: number;
   reviewedSegments: number;
   warnings: string[];
+  reviewFindings: LiteraryReviewFinding[];
 }
 
 /** 从长章中均匀抽样；分析请求有界，书籍全文不会送进单个请求。 */
@@ -331,7 +335,7 @@ async function reviewLiteraryBatchViaServer(
   memory: LiteraryBookMemory,
   runId: number,
   isCurrentRun: (runId: number) => boolean,
-): Promise<Map<string, string> | null> {
+): Promise<{ translations: Map<string, string>; findings: LiteraryReviewFinding[] } | null> {
   const candidates = segments.flatMap((segment) => {
     const draft = drafts.get(segment.id);
     return draft?.trim() ? [{
@@ -357,7 +361,7 @@ async function reviewLiteraryBatchViaServer(
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });
-  let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; error?: string };
+  let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; findings?: unknown; reviewFindings?: unknown; error?: string };
   try { data = await response.json() as typeof data; }
   catch { throw new Error('文学审校接口返回了无法解析的响应'); }
   if (!isCurrentRun(runId)) return null;
@@ -369,7 +373,35 @@ async function reviewLiteraryBatchViaServer(
       if (allowed.has(id) && typeof value === 'string' && value.trim()) reviewed.set(id, value.trim());
     }
   }
-  return reviewed;
+  return { translations: reviewed, findings: normalizeLiteraryReviewFindings(data.findings ?? data.reviewFindings) };
+}
+
+function normalizeLiteraryReviewFindings(input: unknown): LiteraryReviewFinding[] {
+  if (!Array.isArray(input)) return [];
+  return input.slice(0, 240).flatMap((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const item = raw as Record<string, unknown>;
+    if (typeof item.id !== 'string' || !item.id) return [];
+    if (item.category !== 'accuracy' && item.category !== 'terminology' && item.category !== 'style') return [];
+    const priority = item.category !== 'style' && item.priority === 'must_fix' ? 'must_fix' : 'optional';
+    const finding: LiteraryReviewFinding = {
+      id: item.id.slice(0, 160), category: item.category, priority,
+      sourceExcerpt: typeof item.sourceExcerpt === 'string' ? item.sourceExcerpt.slice(0, 240) : '',
+      draftExcerpt: typeof item.draftExcerpt === 'string' ? item.draftExcerpt.slice(0, 240) : '',
+      reason: typeof item.reason === 'string' ? item.reason.slice(0, 400) : '',
+      suggestion: typeof item.suggestion === 'string' ? item.suggestion.slice(0, 400) : '',
+    };
+    return finding.reason || finding.suggestion ? [finding] : [];
+  });
+}
+
+function appendLiteraryReviewFindings(input: unknown, existing: LiteraryReviewFinding[]): LiteraryReviewFinding[] {
+  const byKey = new Map<string, LiteraryReviewFinding>();
+  for (const item of [...existing, ...normalizeLiteraryReviewFindings(input)]) {
+    const key = [item.id, item.category, item.priority, item.draftExcerpt, item.reason].join('|');
+    byKey.set(key, item);
+  }
+  return Array.from(byKey.values()).slice(-240);
 }
 
 export interface DocumentTranslateState {
@@ -395,7 +427,7 @@ export function useDocumentTranslation() {
   // 文学记忆属于当前阅读会话，继续/重试保留；切换文档时重置。
   const literaryMemory = ref<LiteraryBookMemory>(createEmptyLiteraryMemory());
   const literaryStatus = ref<LiteraryStatus>({
-    enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0, warnings: [],
+    enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0, warnings: [], reviewFindings: [],
   });
   let analyzedChapterKeys = new Set<string>();
 
@@ -457,6 +489,7 @@ export function useDocumentTranslation() {
       warnings: Array.isArray(status?.warnings)
         ? status.warnings.filter((warning): warning is string => typeof warning === 'string').slice(-20)
         : [],
+      reviewFindings: normalizeLiteraryReviewFindings(status?.reviewFindings),
     };
     state.value = {
       translations: new Map(restoredTranslations),
@@ -476,7 +509,7 @@ export function useDocumentTranslation() {
     analyzedChapterKeys = new Set<string>();
     literaryMemory.value = createEmptyLiteraryMemory();
     literaryStatus.value = {
-      enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0, warnings: [],
+      enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0, warnings: [], reviewFindings: [],
     };
     state.value = {
       translations: new Map(),
@@ -522,6 +555,11 @@ export function useDocumentTranslation() {
       }
       const reviewedCount = typeof result.reviewedSegmentCount === 'number' ? result.reviewedSegmentCount : 0;
       if (reviewedCount > 0) literaryStatus.value.reviewedSegments += reviewedCount;
+      if (options.literaryMode) {
+        literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
+          result.reviewFindings ?? result.findings, literaryStatus.value.reviewFindings,
+        );
+      }
       if (Array.isArray(result.reviewerErrors)) {
         for (const warning of result.reviewerErrors) {
           if (typeof warning === 'string' && warning) literaryStatus.value.warnings.push(warning);
@@ -586,11 +624,14 @@ export function useDocumentTranslation() {
           batch, drafts, options, bookMemory, runId, isCurrentRun,
         );
         if (reviewed && isCurrentRun(runId)) {
-          for (const [id, text] of reviewed) {
+          for (const [id, text] of reviewed.translations) {
             if (expectedIds.includes(id) && text.trim()) state.value.translations.set(id, text);
           }
-          literaryStatus.value.reviewedSegments += reviewed.size;
-          const missingReview = expectedIds.filter((id) => !reviewed.has(id));
+          literaryStatus.value.reviewedSegments += reviewed.translations.size;
+          literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
+            reviewed.findings, literaryStatus.value.reviewFindings,
+          );
+          const missingReview = expectedIds.filter((id) => !reviewed.translations.has(id));
           if (missingReview.length) {
             literaryStatus.value.warnings.push('本批审校未返回 ' + missingReview.length + ' 段，已保留初译');
           }
