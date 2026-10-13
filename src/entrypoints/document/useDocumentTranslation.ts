@@ -224,11 +224,11 @@ function selectLiteraryChapterSample(segments: DocumentSegment[]): DocumentSegme
  * 全书预分析采用跨章节均匀抽样，不把全文送进一个请求。
  * 先保证目录中不同章节都有代表，再填充额外段落；后续每章仍会按需增补新实体。
  */
-function selectLiteraryBookSample(segments: DocumentSegment[]): DocumentSegment[] {
+function selectLiteraryBookSample(segments: DocumentSegment[], format?: string): DocumentSegment[] {
   const valid = segments.filter((segment) => segment.text.trim());
   const groups = new Map<string, Array<{ segment: DocumentSegment; index: number }>>();
   valid.forEach((segment, index) => {
-    const key = literaryChapterKey(segment, true);
+    const key = literaryChapterKey(segment, true, format);
     const group = groups.get(key) ?? [];
     group.push({ segment, index });
     groups.set(key, group);
@@ -522,10 +522,17 @@ export function useDocumentTranslation() {
     return isCurrentRun(runId);
   }
 
-  function literaryChapterKey(segment: DocumentSegment, enabled: boolean): string {
+  function literaryChapterKey(segment: DocumentSegment, enabled: boolean, format?: string): string {
     if (!enabled) return '';
-    return segment.contextPath?.trim()
-      || (segment.page ? 'PDF 第 ' + segment.page + ' 页' : '正文');
+    const context = segment.contextPath?.trim();
+    if (context) return context;
+    if (format === 'pdf' && segment.page) {
+      // 没有可识别章节标题的 PDF 不要把每页都当成一章，否则几百页会触发几百次实体分析。
+      // 每 8 页合成一个分析窗口；真正翻译仍然保持原始 PDF 页边界。
+      const firstPage = Math.floor((segment.page - 1) / 8) * 8 + 1;
+      return 'PDF 第 ' + firstPage + '-' + (firstPage + 7) + ' 页';
+    }
+    return segment.page ? 'PDF 第 ' + segment.page + ' 页' : '正文';
   }
 
   async function prepareLiteraryChapter(
@@ -620,7 +627,7 @@ export function useDocumentTranslation() {
       try {
         const profile = await analyzeLiteraryChapterViaServer(
           '全书预分析',
-          selectLiteraryBookSample(segments),
+          selectLiteraryBookSample(segments, options.documentFormat),
           effectiveOptions,
           literaryMemory.value,
           runId,
@@ -629,7 +636,16 @@ export function useDocumentTranslation() {
         if (!profile || !isCurrentRun(runId)) return state.value;
         literaryMemory.value = profile.memory;
         literaryStatus.value.bookProfileReady = profile.analyzed;
-        if (profile.analyzed) literaryStatus.value.analyzedChapters++;
+        if (profile.analyzed) {
+          // 单章文件的全书抽样已经覆盖了本章，无须为同一章再付一次分析请求。
+          const chapterKeys = new Set(
+            segments.map((segment) => literaryChapterKey(segment, true, options.documentFormat)),
+          );
+          if (chapterKeys.size === 1) {
+            const onlyChapter = chapterKeys.values().next().value as string | undefined;
+            if (onlyChapter) analyzedChapterKeys.add(onlyChapter);
+          }
+        }
         if (profile.warning) literaryStatus.value.warnings.push(profile.warning);
       } catch (error) {
         literaryStatus.value.warnings.push(
@@ -650,8 +666,9 @@ export function useDocumentTranslation() {
         if (!item) continue;
         const { index, batch } = item;
         if (literaryEnabled) {
-          const key = literaryChapterKey(batch[0]!, literaryEnabled);
-          const chapterSegments = segments.filter((segment) => literaryChapterKey(segment, literaryEnabled) === key);
+          const key = literaryChapterKey(batch[0]!, literaryEnabled, options.documentFormat);
+          const chapterSegments = segments.filter((segment) =>
+            literaryChapterKey(segment, literaryEnabled, options.documentFormat) === key);
           if (!(await prepareLiteraryChapter(key, chapterSegments, effectiveOptions, runId))) return;
         }
         let ok = false;
@@ -733,8 +750,9 @@ export function useDocumentTranslation() {
       if (!batch.length) continue;
       try {
         if (options.literaryMode) {
-          const key = literaryChapterKey(batch[0]!, true);
-          const chapterSegments = segments.filter((segment) => literaryChapterKey(segment, true) === key);
+          const key = literaryChapterKey(batch[0]!, true, options.documentFormat);
+          const chapterSegments = segments.filter((segment) =>
+            literaryChapterKey(segment, true, options.documentFormat) === key);
           if (!(await prepareLiteraryChapter(key, chapterSegments, effectiveOptions, runId))) break;
         }
         const ok = await translateBatch(

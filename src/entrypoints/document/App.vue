@@ -112,7 +112,7 @@
         <div class="literary-status-title">
           <strong>书籍一致性与文风审校</strong>
           <span class="chip">{{ literaryStatus.bookProfileReady ? '已建立全书记忆' : '全书预分析中/待重试' }}</span>
-          <span class="chip">已增补 {{ Math.max(0, literaryStatus.analyzedChapters - (literaryStatus.bookProfileReady ? 1 : 0)) }} 章</span>
+          <span class="chip">已补充分析 {{ literaryStatus.analyzedChapters }} 章</span>
           <span class="chip">已审校 {{ literaryStatus.reviewedSegments }} 段</span>
           <span class="chip">记忆实体 {{ literaryMemory.entities.length }} 个</span>
         </div>
