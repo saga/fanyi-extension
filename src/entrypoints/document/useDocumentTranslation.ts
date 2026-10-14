@@ -66,6 +66,13 @@ export interface TranslateOptions {
   documentFileName?: string;
   /** Stable per-document identity passed only to the local Agent for scoped SDK Sessions. */
   documentSessionId?: string;
+  /** Force cache bypass for the selected page; successful results replace normal cache entries. */
+  forceRefresh?: boolean;
+  /** Translate only the currently displayed page instead of the surrounding EPUB chapter. */
+  onlyPrioritySegments?: boolean;
+  currentPageTitle?: string;
+  documentSystemPromptOverride?: string;
+  documentUserPromptTemplate?: string;
   documentTitle?: string;
   documentFormat?: string;
   documentWarnings?: string[];
@@ -230,6 +237,9 @@ async function translateSegmentsViaServer(
     target: options.targetLang,
     glossary: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? undefined : options.glossary,
     promptStyle: options.promptStyle,
+    forceRefresh: options.forceRefresh,
+    documentSystemPromptOverride: options.documentSystemPromptOverride,
+    documentUserPromptTemplate: options.documentUserPromptTemplate,
     translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
     ...(options.translationMode === 'literary' || (options.literaryMode && bookMemory)
       ? {
@@ -810,6 +820,9 @@ export function useDocumentTranslation() {
         translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
         documentSessionId: options.documentSessionId,
         documentSessionLane: resolveDocumentSessionLane(options, segments),
+        forceRefresh: options.forceRefresh,
+        documentSystemPromptOverride: options.documentSystemPromptOverride,
+        documentUserPromptTemplate: options.documentUserPromptTemplate,
         ...((options.literaryMode || options.translationMode === 'literary') && bookMemory ? {
           // Keep the system instruction stable across chapters; chapter identity and book memory
           // are already included as user-payload context for each batch.
