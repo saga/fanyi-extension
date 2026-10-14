@@ -283,7 +283,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import type { LiteraryEntity, LiteraryRelationship } from '@/entrypoints/utils/document/literary';
+import { createEmptyLiteraryMemory, type LiteraryEntity, type LiteraryRelationship } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -513,8 +513,16 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       ? snapshot.translations.filter((entry: unknown): entry is [string, string] =>
           Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string')
       : [];
-    const literaryMemory = snapshot.literaryMemory as ReturnType<typeof getSnapshot>['literaryMemory'];
-    const literaryStatus = snapshot.literaryStatus as ReturnType<typeof getSnapshot>['literaryStatus'];
+    const literaryMemory = (snapshot.literaryMemory ?? createEmptyLiteraryMemory()) as ReturnType<typeof getSnapshot>['literaryMemory'];
+    const literaryStatus = (snapshot.literaryStatus ?? {
+      enabled: payload.literaryMode === true,
+      bookProfileReady: false,
+      chapterTitle: '',
+      analyzedChapters: 0,
+      reviewedSegments: 0,
+      warnings: [],
+      reviewFindings: [],
+    }) as ReturnType<typeof getSnapshot>['literaryStatus'];
     return {
       fileName: typeof payload.fileName === 'string' ? payload.fileName : (session?.title || document.title || 'document'),
       title: session?.title || document.title || '未命名文档',
