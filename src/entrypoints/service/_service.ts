@@ -27,6 +27,8 @@ export interface GlossaryEntry {
 /** Optional metadata used only by the local-agent adapter to isolate a document's SDK Session. */
 export interface TranslationSessionContext {
   documentSessionId: string;
+  /** Stable parallel lane for technical document batches; literary books use one serial lane. */
+  sessionLane?: string;
   role: 'translation';
   sourceLang: string;
   targetLang: string;
