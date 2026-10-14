@@ -173,8 +173,8 @@ export default defineContentScript({
           // 记录当前整页翻译对应的 videoId，供 SPA 导航时检测是否需要清理
           translatedVideoId = extractVideoId();
           const config = await getConfig();
-          if (config.deepseekApiKey) {
-            void startYouTubeCaptionTranslation(config.deepseekApiKey, youTubeStatusCallback);
+          if (config.useLocalAgent || config.deepseekApiKey) {
+            void startYouTubeCaptionTranslation(config.deepseekApiKey || '', youTubeStatusCallback);
           }
         }
       } else if (action === 'restore') {
