@@ -480,7 +480,22 @@ async function reviewLiteraryBatchViaServer(
       if (allowed.has(id) && typeof value === 'string' && value.trim()) reviewed.set(id, value.trim());
     }
   }
-  return { translations: reviewed, findings: normalizeLiteraryReviewFindings(data.findings ?? data.reviewFindings) };
+  const findings = normalizeLiteraryReviewFindings(data.findings ?? data.reviewFindings);
+  const mustFixIds = new Set(findings.filter((finding) => finding.priority === 'must_fix').map((finding) => finding.id));
+  // Style findings remain proposals until the user explicitly accepts the full reviewed translation.
+  // Accuracy/terminology fixes still auto-apply, because the Reviewer classified those as must-fix.
+  const actionableFindings = findings.map((finding) => {
+    if (finding.category === 'style' && !mustFixIds.has(finding.id)) {
+      const proposedTranslation = reviewed.get(finding.id);
+      return proposedTranslation
+        ? { ...finding, proposedTranslation, applicationStatus: 'pending' as const }
+        : finding;
+    }
+    return mustFixIds.has(finding.id)
+      ? { ...finding, applicationStatus: 'applied' as const }
+      : finding;
+  });
+  return { translations: reviewed, findings: actionableFindings };
 }
 
 function normalizeLiteraryReviewFindings(input: unknown): LiteraryReviewFinding[] {
@@ -497,6 +512,12 @@ function normalizeLiteraryReviewFindings(input: unknown): LiteraryReviewFinding[
       draftExcerpt: typeof item.draftExcerpt === 'string' ? item.draftExcerpt.slice(0, 240) : '',
       reason: typeof item.reason === 'string' ? item.reason.slice(0, 400) : '',
       suggestion: typeof item.suggestion === 'string' ? item.suggestion.slice(0, 400) : '',
+      ...(typeof item.proposedTranslation === 'string' && item.proposedTranslation.trim()
+        ? { proposedTranslation: item.proposedTranslation.slice(0, 5000) }
+        : {}),
+      ...(item.applicationStatus === 'pending' || item.applicationStatus === 'applied' || item.applicationStatus === 'dismissed'
+        ? { applicationStatus: item.applicationStatus }
+        : {}),
     };
     return finding.reason || finding.suggestion ? [finding] : [];
   });
@@ -882,8 +903,16 @@ export function useDocumentTranslation() {
         batch, new Map(drafts), options, bookMemory, runId, isCurrentRun,
       );
       if (reviewed && isCurrentRun(runId)) {
+        const mustFixIds = new Set(reviewed.findings.filter((finding) => finding.priority === 'must_fix').map((finding) => finding.id));
+        const pendingStyleIds = new Set(reviewed.findings
+          .filter((finding) => finding.category === 'style' && finding.applicationStatus === 'pending' && !mustFixIds.has(finding.id))
+          .map((finding) => finding.id));
         for (const [id, text] of reviewed.translations) {
-          if (expectedIds.includes(id) && text.trim()) state.value.translations.set(id, text);
+          // Accuracy/terminology errors are corrected automatically. Pure style preferences stay
+          // as explicit proposals; users can compare and apply the complete alternative below.
+          if (expectedIds.includes(id) && text.trim() && !pendingStyleIds.has(id)) {
+            state.value.translations.set(id, text);
+          }
         }
         literaryStatus.value.reviewedSegments += reviewed.translations.size;
         literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
@@ -897,7 +926,10 @@ export function useDocumentTranslation() {
         literaryMemory.value = refreshLiteraryExampleTargets(
           literaryMemory.value,
           batch.flatMap((segment) => {
-            const target = reviewed.translations.get(segment.id) ?? drafts.get(segment.id);
+            const styleProposalPending = pendingStyleIds.has(segment.id);
+            const target = styleProposalPending
+              ? drafts.get(segment.id)
+              : (reviewed.translations.get(segment.id) ?? drafts.get(segment.id));
             return target ? [{
               source: segment.text, target, chapter: segment.contextPath || '',
             }] : [];
