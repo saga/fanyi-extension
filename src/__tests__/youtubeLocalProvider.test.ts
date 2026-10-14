@@ -54,6 +54,41 @@ describe('YouTube captions with the local Agent provider', () => {
     expect(result.get('caption-1')).toBe('你好');
   });
 
+  it('reports local HTTP failures with provider and request ID and never contacts a remote API', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: async () => JSON.stringify({
+        error: {
+          message: '本机 Agent 返回内容不是有效 JSON',
+          type: 'local_agent_error',
+          request_id: 'yt-local-req-502',
+          provider: 'opencode',
+        },
+      }),
+    });
+
+    await expect(translateBatch('', [{ id: 'caption-1', text: 'Hello' }]))
+      .rejects.toThrow(/本机 Agent 字幕翻译失败：HTTP 502.*yt-local-req-502.*不会回退到远程 API/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
+  });
+
+  it('surfaces invalid JSON from the local model instead of silently marking captions failed', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'this is not JSON' } }],
+      }),
+    });
+
+    await expect(translateBatch('', [{ id: 'caption-1', text: 'Hello' }]))
+      .rejects.toThrow(/本机 Agent 字幕翻译返回了无效 JSON/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
+  });
+
   it('adds the local token only when one was configured', async () => {
     mocks.getConfig.mockResolvedValue({
       useLocalAgent: true,
