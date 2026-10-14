@@ -12,7 +12,7 @@
  * **「核心规则完全共用，只有文风段落变化」** 这条结构约束。
  */
 import { describe, it, expect } from 'vitest';
-import { buildSystemContent, type PromptStyle } from '../entrypoints/service/deepseek';
+import { buildSystemContent, type PromptStyle, type TranslationMode } from '../entrypoints/service/deepseek';
 import type { Glossary } from '../entrypoints/service/_service';
 
 const sourceLang = 'en';
@@ -23,9 +23,10 @@ function build(
   source: string,
   target: string,
   glossary?: Glossary,
-  style?: PromptStyle
+  style?: PromptStyle,
+  mode: TranslationMode = 'technical',
 ): string {
-  return buildSystemContent(source, target, undefined, glossary, style);
+  return buildSystemContent(source, target, undefined, glossary, style, mode);
 }
 
 /** 所有文风共用的段落标记。 */
@@ -130,6 +131,31 @@ describe('glossary 注入', () => {
     }
   });
 
+});
+
+
+describe('translation profile', () => {
+  it('literary mode uses its own prompt and ignores extracted term candidates', () => {
+    const glossary = { document_terms: ['Erasmus', 'Blackthorne', 'Dutch', 'Spanish'] };
+    const literary = build(sourceLang, targetLang, glossary, 'default', 'literary');
+    expect(literary).toContain('<文学翻译目标>');
+    expect(literary).toContain('人物对白');
+    expect(literary).toContain('习语、隐喻、双关');
+    expect(literary).not.toContain('<术语表>');
+    expect(literary).not.toContain('Erasmus');
+    expect(literary).not.toContain('Blackthorne');
+    expect(literary).not.toContain('Dutch');
+    expect(literary).not.toContain('Spanish');
+  });
+
+  it('technical mode keeps the established glossary behavior', () => {
+    const glossary = { document_terms: ['React', 'OpenAPI'] };
+    const technical = build(sourceLang, targetLang, glossary, 'default', 'technical');
+    expect(technical).toContain('<术语表>');
+    expect(technical).toContain('React');
+    expect(technical).toContain('OpenAPI');
+    expect(technical).not.toContain('<文学翻译目标>');
+  });
 });
 
 describe('ja-source-natural 文风', () => {
