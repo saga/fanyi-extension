@@ -24,20 +24,15 @@ describe('local service document batch planning', () => {
     expect(shouldUseRemoteDocumentTranslation({ useLocalAgent: false, useServerTranslation: true })).toBe(true);
   });
 
-  it('uses service-planned IDs and preserves original segment objects/order', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ batches: [[{ id: 's1' }, { id: 's2' }], [{ id: 's3' }]] }),
-    });
+  it('plans local batches on the CPU without an unnecessary HTTP request', async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const result = await planDocumentBatches(segments, { maxChars: 3000, maxSegments: 24 }, {
+    const result = await planDocumentBatches(segments, { maxChars: 10, maxSegments: 10 }, {
       sourceLang: 'en', targetLang: 'zh', useLocalAgent: true,
       localAgentUrl: 'http://127.0.0.1:8789/', localAgentToken: 'local-token',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8789/api/documents/batches');
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toEqual([[segments[0], segments[1]], [segments[2]]]);
-    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer local-token');
   });
 
   it('falls back only to deterministic CPU batching (not to any remote translation API) if planning is unavailable', async () => {
