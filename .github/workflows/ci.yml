@@ -25,7 +25,11 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Type check
+        run: pnpm compile
       - name: Unit tests
         run: pnpm test
-      - name: Build extension
+      - name: Build Chrome extension
         run: pnpm build
+      - name: Build Firefox extension
+        run: pnpm build:firefox
