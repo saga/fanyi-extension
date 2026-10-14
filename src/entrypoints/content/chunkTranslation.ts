@@ -90,6 +90,7 @@ export interface ChunkCallContext {
    * 只能读 config.promptStyle（那样会把日语页面的 default 又打回通用直译）。
    */
   promptStyle?: PromptStyle;
+  translationMode: TranslationMode;
   onFailure: () => void;
   onApply: (chunkMap: Map<string, string>) => void;
   translatedIds: Set<string>;
@@ -163,6 +164,7 @@ export async function translateChunksViaBackground(
           targetLang,
           glossary,
           promptStyle,
+          translationMode,
           onFailure: () => { hasFailure = true; },
           onApply: (chunkMap) => {
             const directMap = new Map<string, string>();
@@ -336,6 +338,75 @@ async function translateChunkPayload(
       logger.debug(
         `[ContentScript] ${label} retry recovered ${recoveredIds.length}/${chunkMissing.length} block(s)`,
       );
+    }
+
+    // Literary web pages use two model passes: initial translation, then independent copy-editing.
+    // Drafts have already been applied for responsive UI; accepted revisions replace them here.
+    // Reviewer failures are non-fatal and never turn a successful translation chunk into a failure.
+    if (!isRetry && ctx.translationMode === 'literary' && chunkMap.size > 0) {
+      const reviewBlocks = chunk.blocks.flatMap((block) => {
+        const draft = chunkMap.get(block.id);
+        return draft?.trim()
+          ? [{
+              id: block.id,
+              text: JSON.stringify({
+                source: block.text,
+                draft,
+                kind: block.tag || 'paragraph',
+              }),
+            }]
+          : [];
+      });
+      if (reviewBlocks.length > 0) {
+        try {
+          const reviewResponse = await browser.runtime.sendMessage({
+            action: 'translateChunk',
+            jsonContent: JSON.stringify(reviewBlocks),
+            sourceLang: ctx.sourceLang,
+            targetLang: ctx.targetLang,
+            pageUrl: window.location.href,
+            promptStyle: ctx.promptStyle,
+            translationMode: 'literary',
+            taskInstructions: buildLiteraryPageReviewInstructions(),
+          }) as TranslateChunkResponse;
+          if (reviewResponse?.success) {
+            const reviewed = normalizeChunkTranslationEntries(
+              reviewResponse.result,
+              reviewBlocks.map((block) => block.id),
+            );
+            const revised = new Map(chunkMap);
+            let appliedRevision = false;
+            for (const [id, raw] of reviewed) {
+              if (!raw.trim()) continue;
+              try {
+                const parsed: unknown = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+                const value = parsed as Record<string, unknown>;
+                if (typeof value.finalTranslation !== 'string' || !value.finalTranslation.trim()) continue;
+                const findings = Array.isArray(value.findings) ? value.findings : [];
+                const actionable = findings.some((finding) =>
+                  !!finding && typeof finding === 'object' && !Array.isArray(finding) &&
+                  ['accuracy', 'terminology', 'style'].includes(
+                    String((finding as Record<string, unknown>).category),
+                  ),
+                );
+                if (actionable) {
+                  revised.set(id, value.finalTranslation.trim());
+                  appliedRevision = true;
+                }
+              } catch {
+                // Bad review JSON is ignored; the already-visible first translation remains intact.
+              }
+            }
+            if (appliedRevision) ctx.onApply(revised);
+          } else {
+            logger.warn('[ContentScript] Literary review did not succeed; preserving initial chunk translation:', reviewResponse?.error);
+          }
+        } catch (reviewError) {
+          logger.warn('[ContentScript] Literary review failed; preserving initial chunk translation:',
+            reviewError instanceof Error ? reviewError.message : String(reviewError));
+        }
+      }
     }
 
     if (!isRetry) {
