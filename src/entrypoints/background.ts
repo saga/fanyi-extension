@@ -379,7 +379,7 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions } = message;
         // A document may explicitly enter literary mode even when the global profile is technical.
         const translationMode: TranslationMode = message.translationMode === 'literary' || !!literaryContext
           ? 'literary'
@@ -412,7 +412,7 @@ export default defineBackground({
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
         // 仅书籍文档请求会传 literaryContext。合并到 service prompt 与 cache fingerprint，
         // 普通网页不传该字段，因此网页翻译行为和既有缓存 key 保持不变。
-        const effectivePrompt = [sitePrompt, literaryContext?.trim()]
+        const effectivePrompt = [sitePrompt, literaryContext?.trim(), taskInstructions?.trim()]
           .filter((value): value is string => !!value)
           .join('\n\n');
 
