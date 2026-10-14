@@ -433,49 +433,44 @@ async function persistDocumentCheckpointToLocalService(input: {
     base.pathname = '/api/documents/session/save';
     base.search = '';
     base.hash = '';
+
+    // 本次增量以“上一次已确认写入 SQLite 的译文”为基准，而非 IndexedDB 的游标。
+    // 服务暂时离线后，之前未成功写入的译文仍会包含在下次请求中。
+    const localTranslationDelta = input.snapshot.translations.filter(([id, text]) =>
+      localPersistedTranslations.get(id) !== text,
+    );
+    const { translations: _allTranslations, ...snapshotWithoutTranslations } = input.snapshot;
+    const localSnapshot = localSessionDocumentSaved ? snapshotWithoutTranslations : input.snapshot;
+    const payload = {
+      ...input,
+      snapshot: localSnapshot,
+      translationDelta: localTranslationDelta,
+      ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
+    };
+
     const response = await fetch(base.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
       },
-      // 第一次创建副本时保存完整译文列表；后续只传新的译文对和小型状态。
-      // localPersistedTranslations 只有在 SQLite 确认写入成功后才前进，避免临时断线后漏掉旧增量。
-      const localTranslationDelta = input.snapshot.translations.filter(([id, text]) =>
-        localPersistedTranslations.get(id) !== text,
-      );
-      const { translations: _allTranslations, ...snapshotWithoutTranslations } = input.snapshot;
-      const localSnapshot = localSessionDocumentSaved ? snapshotWithoutTranslations : input.snapshot;
-      const payload = {
-        ...input,
-        snapshot: localSnapshot,
-        translationDelta: localTranslationDelta,
-        ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
+      body: JSON.stringify({
+        sessionId: LOCAL_DOCUMENT_SESSION_ID,
+        title: doc.value.title || documentFileName,
+        format: doc.value.format,
+        mergeExisting: localSessionDocumentSaved,
+        payload,
+      }),
+    });
+    if (response.ok) {
+      localSessionDocumentSaved = true;
+      for (const [id, text] of localTranslationDelta) localPersistedTranslations.set(id, text);
+      localSessionSummary.value = {
+        title: doc.value.title || documentFileName,
+        format: doc.value.format,
+        updatedAt: new Date().toISOString(),
       };
-      const response = await fetch(base.toString(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
-        },
-        body: JSON.stringify({
-          sessionId: LOCAL_DOCUMENT_SESSION_ID,
-          title: doc.value.title || documentFileName,
-          format: doc.value.format,
-          mergeExisting: localSessionDocumentSaved,
-          payload,
-        }),
-      });
-      if (response.ok) {
-        localSessionDocumentSaved = true;
-        for (const [id, text] of localTranslationDelta) localPersistedTranslations.set(id, text);
-        localSessionSummary.value = {
-          title: doc.value.title || documentFileName,
-          format: doc.value.format,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-    else {
+    } else {
       if (response.status === 413) localSessionDisabled = true;
       console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
     }
