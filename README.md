@@ -42,7 +42,9 @@ Chrome：需要自己build
 
 ## 本机 Workbuddy / OpenCode Provider（可选）
 
-扩展可把翻译、侧栏对话和 EPUB/PDF 的书籍实体分析与 Reviewer 请求交给本机服务，不需要配置 DeepSeek API Key。这个 Provider 与远程 Vocal Saga 服务相互独立；启用“使用本机 Workbuddy/OpenCode 翻译”后，翻译和审校请求失败会明确报错或保留初译，不会偷偷回退到远程服务。关闭本机 Provider 后，原有远程/DeepSeek 路径继续可用。
+扩展可把翻译、侧栏对话和 EPUB/PDF 的书籍实体分析与 Reviewer 请求交给本机服务，不需要配置 DeepSeek API Key。这个 Provider 与远程 Vocal Saga 服务相互独立；启用“使用本机 Workbuddy/OpenCode 翻译”后，本机模型调用失败会明确报错或保留已有初译，不会偷偷回退到远程服务。关闭本机 Provider 后，原有远程/DeepSeek 路径继续可用。
+
+本机模式返回 HTTP 502 时，扩展日志会显示本机错误类型、request ID 和模型输出长度；本机终端使用同一 request ID 输出请求阶段、provider/model、耗时和堆栈。若出现“返回内容不是有效 JSON”，请查看终端中 `invalid-json` 的响应预览，或检查 `GET /api/history?limit=30`。默认只在解析失败时记录最多 600 字符预览；设置 `LOCAL_AGENT_LOG_RESPONSE_PREVIEW=false` 可关闭。
 
 ### 启动本机服务
 
