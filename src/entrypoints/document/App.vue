@@ -391,7 +391,7 @@ async function refreshLocalSessionSummary() {
   localSessionSummary.value = null;
   try {
     const config = await getConfig();
-    if (!config.useLocalAgent) return;
+    // SQLite 中只读摘要，不会调用模型。即使当前切回远程翻译模式，也允许找回之前保存的本机阅读会话。
     const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/summary';
     base.search = '';
@@ -444,7 +444,8 @@ async function persistDocumentCheckpointToLocalService(input: {
     const payload = {
       ...input,
       snapshot: localSnapshot,
-      translationDelta: localTranslationDelta,
+      // 首次写入已有完整 snapshot.translations，不再重复携带一份同样大小的增量数组。
+      translationDelta: localSessionDocumentSaved ? localTranslationDelta : [],
       ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
     };
 
@@ -482,8 +483,8 @@ async function persistDocumentCheckpointToLocalService(input: {
 
 async function loadDocumentCheckpointFromLocalService() {
   const config = await getConfig();
-  if (!config.useLocalAgent) return null;
   try {
+    // 仅恢复此前的本机快照，不调用本机模型；恢复不应依赖当前翻译 Provider 开关。
     const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/get';
     base.search = '';
