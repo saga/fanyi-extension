@@ -9,6 +9,7 @@ import type { DocumentSegment } from '../utils/document/types';
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../utils/document/translationResult';
 import {
   addLiteraryExamples,
+  autoConfirmLiteraryMemory,
   buildLiteraryContextForText,
   buildLiteraryTranslationContextPrompt,
   createEmptyLiteraryMemory,
@@ -367,7 +368,7 @@ async function analyzeLiteraryChapterViaServer(
     throw new Error(message + requestId);
   }
   return {
-    memory: mergeLiteraryMemory(memory, data.memory),
+    memory: mergeLiteraryMemory(memory, autoConfirmLiteraryMemory(data.memory)),
     analyzed: data.analyzed === true,
     ...(typeof data.warning === 'string' && data.warning ? { warning: data.warning } : {}),
   };
@@ -641,45 +642,59 @@ export function useDocumentTranslation() {
     }
 
     // 本地初译依旧走扩展现有 provider；仅在书籍模式追加受限的书籍记忆 prompt。
-    const jsonContent = JSON.stringify(
-      batch.map((segment) => ({
-        id: segment.id,
-        text: segment.text,
-        ...(segment.contextPath || (options.literaryMode && bookMemory)
-          ? {
-              contextPath: [
-                segment.contextPath || '',
-                options.literaryMode && bookMemory
-                  ? buildLiteraryContextForText(bookMemory, segment.text)
-                  : '',
-              ].filter(Boolean).join('\n书籍记忆（只读数据）：'),
-            }
-          : {}),
-        kind: segment.kind,
-        ...(segment.level ? { level: segment.level } : {}),
-        ...(segment.marker ? { marker: segment.marker } : {}),
-      })),
-    );
-    const chapterTitle = batch[0]?.contextPath || options.documentTitle || '';
-    const response = (await browser.runtime.sendMessage({
-      action: 'translateChunk',
-      jsonContent,
-      sourceLang: options.sourceLang,
-      targetLang: options.targetLang,
-      pageUrl: 'fanyi://document',
-      glossary: options.glossary,
-      promptStyle: options.promptStyle,
-      ...(options.literaryMode && bookMemory ? {
-        literaryContext: buildLiteraryTranslationContextPrompt(chapterTitle),
-      } : {}),
-    })) as TranslateChunkResponse;
-
-    if (!isCurrentRun(runId)) return false;
-    if (!response?.success) throw new Error(response?.error || '翻译失败');
-
+    // 大包下模型偶发只回第一条就停（10 段回 1 段），同样的整批重试只会复现同样结果：
+    // 缺失则对半缩小重发，指数收敛；每轮已拿到的逐段提交，不丢。
+    const normalized = new Map<string, string>();
     const expectedIds = batch.map((segment) => segment.id);
-    const normalized = normalizeDocumentBatchResult(response.result, expectedIds);
-    for (const [id, text] of normalized) state.value.translations.set(id, text);
+    let pending = batch;
+    const maxRounds = 6;
+    for (let round = 0; round < maxRounds && pending.length > 0; round++) {
+      const current = round === 0 ? pending : pending.slice(0, Math.max(1, Math.ceil(pending.length / 2)));
+      const rest = round === 0 ? [] : pending.slice(current.length);
+      const jsonContent = JSON.stringify(
+        current.map((segment) => ({
+          id: segment.id,
+          text: segment.text,
+          ...(segment.contextPath || (options.literaryMode && bookMemory)
+            ? {
+                contextPath: [
+                  segment.contextPath || '',
+                  options.literaryMode && bookMemory
+                    ? buildLiteraryContextForText(bookMemory, segment.text)
+                    : '',
+                ].filter(Boolean).join('\n书籍记忆（只读数据）：'),
+              }
+            : {}),
+          kind: segment.kind,
+          ...(segment.level ? { level: segment.level } : {}),
+          ...(segment.marker ? { marker: segment.marker } : {}),
+        })),
+      );
+      const chapterTitle = batch[0]?.contextPath || options.documentTitle || '';
+      const response = (await browser.runtime.sendMessage({
+        action: 'translateChunk',
+        jsonContent,
+        sourceLang: options.sourceLang,
+        targetLang: options.targetLang,
+        pageUrl: 'fanyi://document',
+        glossary: options.glossary,
+        promptStyle: options.promptStyle,
+        ...(options.literaryMode && bookMemory ? {
+          literaryContext: buildLiteraryTranslationContextPrompt(chapterTitle),
+        } : {}),
+      })) as TranslateChunkResponse;
+
+      if (!isCurrentRun(runId)) return false;
+      if (!response?.success) throw new Error(response?.error || '翻译失败');
+
+      const roundIds = current.map((segment) => segment.id);
+      for (const [id, text] of normalizeDocumentBatchResult(response.result, roundIds)) {
+        normalized.set(id, text);
+        state.value.translations.set(id, text);
+      }
+      const missing = new Set(getMissingDocumentBatchIds(roundIds, normalized));
+      pending = [...rest, ...current.filter((segment) => missing.has(segment.id))];
+    }
     const missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
     if (missingIds.length) {
       throw new Error(

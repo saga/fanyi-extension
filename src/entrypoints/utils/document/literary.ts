@@ -187,6 +187,12 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     if (!prior) { entityMap.set(key, entity); continue; }
     entityMap.set(key, {
       ...prior,
+      // 跨章节印证：旧的待确认 + 新分析给出相同译名，自动转正确认，
+      // 免去逐条点击；译名不一致时沿用旧目标（先到先得，不静默改名）。
+      ...(prior.reviewStatus !== 'confirmed' && entity.reviewStatus === 'confirmed' &&
+        prior.target === entity.target
+        ? { reviewStatus: 'confirmed' as const }
+        : {}),
       aliases: Array.from(new Set([...(prior.aliases ?? []), ...(entity.aliases ?? [])])).slice(0, 8),
       description: prior.description || entity.description,
       evidence: prior.evidence || entity.evidence,
@@ -217,6 +223,30 @@ export function addLiteraryExamples(memoryInput: unknown, examples: LiteraryExam
     return source && target ? [{ source, target, ...(chapter ? { chapter } : {}) }] : [];
   });
   return sanitizeLiteraryMemory({ ...memory, recentExamples: [...memory.recentExamples, ...appended].slice(-MAX_EXAMPLES) });
+}
+
+/**
+ * 新分析入库时的自动确认：有原文依据（evidence）的规范项直接标 confirmed，
+ * 免去逐条点击；无依据的仍待人工过目（面板可一键确认剩余）。
+ * 有依据≠人工审过：confirmed 在此表示"模型已给出处、可直接当规范用"，
+ * 用户编辑/删除仍随时覆盖。
+ */
+export function autoConfirmLiteraryMemory(input: unknown): LiteraryBookMemory {
+  const memory = sanitizeLiteraryMemory(input);
+  for (const entity of memory.entities) {
+    if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target && entity.evidence) {
+      entity.reviewStatus = 'confirmed';
+    }
+  }
+  for (const relation of memory.relationships) {
+    if (
+      relation.reviewStatus !== 'confirmed' && relation.subject &&
+      relation.predicate && relation.object && relation.evidence
+    ) {
+      relation.reviewStatus = 'confirmed';
+    }
+  }
+  return memory;
 }
 
 /** 将当前片段真正相关的实体映射与声线压成只读 JSON 数据，放入 user payload。 */

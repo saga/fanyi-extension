@@ -11,7 +11,7 @@ import { parseEpubDocument } from '../entrypoints/utils/document/parsers/office'
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
-import { mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
 
 // ============================================================
 // detect
@@ -336,6 +336,38 @@ describe('文学书籍记忆', () => {
     });
     expect(memory.entities[0]?.source).not.toContain('<');
     expect(memory.entities[0]?.target).not.toContain('\n');
+  });
+
+  it('入库自动确认有原文依据的规范项，无依据的保持待确认', () => {
+    const memory = autoConfirmLiteraryMemory({
+      entities: [
+        { source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice said' },
+        { source: 'Bob', target: '鲍勃', kind: 'person' },
+      ],
+      relationships: [
+        { subject: 'Alice', predicate: 'sister of', object: 'Bob', evidence: 'her sister' },
+        { subject: 'Alice', predicate: 'likes', object: 'Tea' },
+      ],
+    });
+    expect(memory.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'Bob')?.reviewStatus).toBe('suggested');
+    expect(memory.relationships.find((rel) => rel.predicate === 'sister of')?.reviewStatus).toBe('confirmed');
+    expect(memory.relationships.find((rel) => rel.predicate === 'likes')?.reviewStatus).toBe('suggested');
+  });
+
+  it('跨章节印证同一译名时自动转正确认，译名冲突时沿用旧目标', () => {
+    const first = sanitizeLiteraryMemory({
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'suggested' }],
+    });
+    const corroborated = mergeLiteraryMemory(first, autoConfirmLiteraryMemory({
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice smiled' }],
+    }));
+    expect(corroborated.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
+    const conflicted = mergeLiteraryMemory(first, autoConfirmLiteraryMemory({
+      entities: [{ source: 'Alice', target: '爱丽斯', kind: 'person', evidence: 'Alice nodded' }],
+    }));
+    expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.target).toBe('艾丽丝');
+    expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
   });
 });
 

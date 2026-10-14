@@ -154,7 +154,7 @@
       <!-- 词典/关系表可人工修订；确认状态会随本地会话保存，并影响后续章节。 -->
       <section v-if="literaryMode" class="panel literary-dictionary">
         <details open>
-          <summary><strong>实体词典</strong>（{{ literaryMemory.entities.length }} 项；已确认项优先于模型建议）</summary>
+          <summary><strong>实体词典</strong>（{{ literaryMemory.entities.length }} 项；有原文依据的入库自动确认，无依据的待人工过目）</summary>
           <div class="literary-editor-list">
             <div v-for="(entity, index) in literaryMemory.entities" :key="'entity-' + index" class="literary-editor-row">
               <label>原文名称<input v-model="entity.source" @change="markEntitySuggested(entity)" /></label>
@@ -165,6 +165,7 @@
               <button class="btn ghost" @click="removeEntity(index)">删除</button>
             </div>
             <button class="btn" @click="addEntity">新增实体</button>
+            <button class="btn" @click="confirmAllEntities">一键确认剩余</button>
           </div>
         </details>
         <details>
@@ -179,9 +180,10 @@
               <button class="btn ghost" @click="removeRelationship(index)">删除</button>
             </div>
             <button class="btn" @click="addRelationship">新增关系</button>
+            <button class="btn" @click="confirmAllRelationships">一键确认剩余</button>
           </div>
         </details>
-        <p class="muted small">编辑后会重新标记为“待确认”；点击“确认”后才作为人工规范项传给后续章节。修改会保存在本机阅读会话中。</p>
+        <p class="muted small">有原文依据的入库自动确认；编辑后会重新标记为“待确认”，剩余项可一键确认。修改会保存在本机阅读会话中。</p>
       </section>
 
       <section v-if="literaryStatus.reviewFindings.length" class="panel literary-review-findings">
@@ -747,6 +749,17 @@ function confirmEntity(entity: LiteraryEntity) {
   entity.reviewStatus = 'confirmed';
   persistenceMessage.value = '已确认规范译名：' + entity.source + ' → ' + entity.target;
 }
+// 剩余待确认一键确认：内容为空的跳过（confirmEntity 本来就会拒绝）。
+function confirmAllEntities() {
+  let count = 0;
+  for (const entity of literaryMemory.value.entities) {
+    if (entity.reviewStatus !== 'confirmed' && entity.source.trim() && entity.target.trim()) {
+      entity.reviewStatus = 'confirmed';
+      count++;
+    }
+  }
+  persistenceMessage.value = count > 0 ? '已确认剩余规范译名 ' + count + ' 项' : '没有待确认的规范译名';
+}
 function setEntityAliases(entity: LiteraryEntity, event: Event) {
   const value = (event.target as HTMLInputElement | null)?.value ?? '';
   entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
@@ -765,6 +778,16 @@ function confirmRelationship(relation: LiteraryRelationship) {
   if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) return;
   relation.reviewStatus = 'confirmed';
   persistenceMessage.value = '已确认关系：' + relation.subject + ' — ' + relation.predicate + ' → ' + relation.object;
+}
+function confirmAllRelationships() {
+  let count = 0;
+  for (const relation of literaryMemory.value.relationships) {
+    if (relation.reviewStatus !== 'confirmed' && relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
+      relation.reviewStatus = 'confirmed';
+      count++;
+    }
+  }
+  persistenceMessage.value = count > 0 ? '已确认剩余关系 ' + count + ' 项' : '没有待确认的关系';
 }
 function addRelationship() {
   literaryMemory.value.relationships.push({ subject: '', predicate: '', object: '', reviewStatus: 'suggested' });
