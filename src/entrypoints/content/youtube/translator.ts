@@ -169,6 +169,10 @@ export async function translateBatch(
     };
   }
 
+  logger.debug(
+    useLocalAgent ? '[LocalAgent][YouTubeCaptions] request start' : '[YouTubeCaptions] DeepSeek request start',
+    { endpoint, model: requestBody.model, blocks: blocks.length, inputChars: blocksJson.length },
+  );
   const response = await fetch(endpoint, {
     method: 'POST',
     headers,
@@ -177,14 +181,53 @@ export async function translateBatch(
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error('DeepSeek API error: HTTP ' + response.status + ' - ' + text.substring(0, 200));
+    const responseText = await response.text().catch(() => '');
+    if (useLocalAgent) {
+      let message = responseText.slice(0, 1000);
+      let requestId = '';
+      let provider = '';
+      try {
+        const parsed = JSON.parse(responseText);
+        const error = parsed?.error;
+        if (error && typeof error === 'object') {
+          message = typeof error.message === 'string' ? error.message : message;
+          requestId = typeof error.request_id === 'string' ? error.request_id : '';
+          provider = typeof error.provider === 'string' ? error.provider : '';
+        } else if (typeof error === 'string') {
+          message = error;
+        }
+      } catch { /* keep a bounded raw response preview for diagnostics */ }
+      logger.error('[LocalAgent][YouTubeCaptions] HTTP request failed', {
+        endpoint, status: response.status, provider, requestId, responseBody: responseText.slice(0, 2000),
+      });
+      throw new Error(
+        '本机 Agent 字幕翻译失败：HTTP ' + response.status + ' - ' + message +
+        (provider ? ' (provider: ' + provider + ')' : '') +
+        (requestId ? ' (本机 request ID: ' + requestId + ')' : '') +
+        '。当前为强制本机模式，不会回退到远程 API。',
+      );
+    }
+    throw new Error('DeepSeek API error: HTTP ' + response.status + ' - ' + responseText.substring(0, 200));
   }
 
-  const data = await response.json();
+  let data: any;
+  try {
+    data = await response.json();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(useLocalAgent
+      ? '本机 Agent 字幕翻译返回了非 JSON 响应：' + detail
+      : 'DeepSeek 返回了无效响应：响应体不是合法 JSON');
+  }
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
+  if (!content || typeof content !== 'string') {
+    logger.error(
+      useLocalAgent ? '[LocalAgent][YouTubeCaptions] Invalid response' : '[YouTubeCaptions] Invalid response',
+      { endpoint, responsePreview: JSON.stringify(data).substring(0, 1000) },
+    );
+    throw new Error(useLocalAgent
+      ? '本机 Agent 字幕翻译返回了无效响应：缺少 choices[0].message.content'
+      : 'DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
   }
 
   let cleaned = stripThinkingTags(content);
@@ -201,8 +244,19 @@ export async function translateBatch(
     try {
       const parsed = JSON.parse(repaired);
       return parseTranslations(parsed);
-    } catch {
-      logger.warn('[YouTubeCaptions] Failed to parse translation:', cleaned.substring(0, 120));
+    } catch (parseError) {
+      logger.warn(
+        useLocalAgent
+          ? '[LocalAgent][YouTubeCaptions] Failed to parse translation JSON:'
+          : '[YouTubeCaptions] Failed to parse translation JSON:',
+        { responsePreview: cleaned.substring(0, 1000), error: parseError instanceof Error ? parseError.message : String(parseError) },
+      );
+      if (useLocalAgent) {
+        throw new Error(
+          '本机 Agent 字幕翻译返回了无效 JSON；检查本机服务终端中对应请求 ID 的日志后重试。响应预览：' +
+          cleaned.substring(0, 300),
+        );
+      }
       return new Map();
     }
   }
