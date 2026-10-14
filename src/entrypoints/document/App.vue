@@ -143,12 +143,12 @@
       <!-- 当前阅读页：译文逐批到达后即时显示，不必等待整本书结束。 -->
       <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
         <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
-          :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0)]">
+          :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0), { 'is-active': state.activeSegmentIds?.has(seg.id) }]">
           <div v-if="viewMode !== 'translation'" class="or">{{ seg.text }}</div>
           <div v-if="viewMode !== 'original'" class="tr">
             <template v-if="state.translations.get(seg.id)">{{ state.translations.get(seg.id) }}</template>
-            <span v-else-if="state.running" class="tr-pending">翻译中…</span>
-            <span v-else-if="state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
+            <span v-else-if="state.running && state.activeSegmentIds?.has(seg.id)" class="tr-pending">翻译中…</span>
+            <span v-else-if="!state.running && state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
           </div>
           <div v-if="seg.kind === 'caption' && (seg.start || seg.end)" class="timecode">
             {{ seg.start }} → {{ seg.end }}
@@ -1289,7 +1289,7 @@ async function resetAll() {
   transition: width .2s ease;
 }
 .reader {
-  max-width: 50rem;
+  max-width: 56rem;
   min-height: 55vh;
   margin: 1rem auto;
   padding: clamp(1.1rem, 4vw, 3rem);
@@ -1299,22 +1299,31 @@ async function resetAll() {
   box-shadow: 0 8px 28px rgba(31, 35, 40, .035);
 }
 .seg {
-  padding: .75rem .25rem;
+  padding: .8rem .25rem;
   border-bottom: 1px solid #f0f2f4;
   content-visibility: auto;
-  contain-intrinsic-size: auto 4rem;
-  line-height: 1.9;
+  contain-intrinsic-size: auto 5rem;
+  /* 正文基准字号：PDF 解析出的段落默认偏小，0.98rem 太小、1.06rem 接近书页阅读密度。 */
+  font-size: 1.06rem;
+  line-height: 1.75;
+}
+/* 正在翻译的段：左侧色条 + 淡底，让当前焦点可见；排队的段保持无占位。 */
+.seg.is-active {
+  border-left: 2px solid #0969da;
+  background: linear-gradient(90deg, rgba(9, 105, 218, .045), transparent 40%);
+  padding-left: .85rem;
 }
 .seg .or { color: #1f2328; white-space: pre-wrap; }
-.seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .15em; }
-.tr-pending { color: #b0b8c0; font-size: .8rem; }
+.seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .2em; }
+.tr-pending { color: #b0b8c0; font-size: .92rem; }
 .seg.kind-heading .or, .seg.kind-heading .tr { font-weight: 650; }
-.seg.kind-heading { border-bottom: 0; padding-top: 1.25rem; }
-.seg.kind-heading.level-1 { font-size: 1.45rem; line-height: 1.5; }
-.seg.kind-heading.level-2 { font-size: 1.2rem; line-height: 1.6; }
+.seg.kind-heading { border-bottom: 0; padding-top: 1.35rem; }
+.seg.kind-heading.level-1 { font-size: 1.7rem; line-height: 1.45; }
+.seg.kind-heading.level-2 { font-size: 1.4rem; line-height: 1.55; }
 .seg.kind-quote { border-left: 3px solid #d0d7de; padding-left: .75rem; color: #57606a; }
-.seg.kind-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; background: #f6f8fa; }
-.timecode { font-size: .72rem; color: #8b949e; }
+.seg.kind-quote.is-active { border-left-color: #0969da; }
+.seg.kind-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .96rem; background: #f6f8fa; }
+.timecode { font-size: .78rem; color: #8b949e; }
 
 .export { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 

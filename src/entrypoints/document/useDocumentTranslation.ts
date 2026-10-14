@@ -496,6 +496,11 @@ export interface DocumentTranslateState {
   workDone: number;
   /** 当前阶段（实体分析中/翻译中/审校中），仅 running 时有意义，方便定位慢在哪一步。 */
   workStage: string;
+  /**
+   * 正在被翻译的 segmentId 集合（并发同时在跑的批）。
+   * 阅读页只给这些段显示「翻译中…」，排队的段保持安静——满屏占位会盖过正文。
+   */
+  activeSegmentIds: Set<string>;
 }
 
 
@@ -528,6 +533,7 @@ export function useDocumentTranslation() {
     workTotal: 0,
     workDone: 0,
     workStage: '',
+    activeSegmentIds: new Set(),
   });
 
   // 文学记忆属于当前阅读会话，继续/重试保留；切换文档时重置。
@@ -611,6 +617,7 @@ export function useDocumentTranslation() {
       workTotal: 0,
       workDone: 0,
       workStage: '',
+      activeSegmentIds: new Set(),
     };
   }
 
@@ -633,6 +640,7 @@ export function useDocumentTranslation() {
       workTotal: 0,
       workDone: 0,
       workStage: '',
+      activeSegmentIds: new Set(),
     };
   }
 
@@ -963,6 +971,7 @@ export function useDocumentTranslation() {
       }))
       .filter((item) => item.batch.length > 0);
     state.value.running = pendingBatches.length > 0;
+    state.value.activeSegmentIds = new Set();
     if (pendingBatches.length === 0) return state.value;
 
     const effectiveOptions: TranslateOptions = {
@@ -1079,6 +1088,11 @@ export function useDocumentTranslation() {
         const item = workBatches[cursor++];
         if (!item) continue;
         const { index, batch } = item;
+        const batchIds = batch.map((segment) => segment.id);
+        // 每批进场登记、退场注销：阅读页只给这些段显示「翻译中…」。
+        if (isCurrentRun(runId)) {
+          state.value.activeSegmentIds = new Set([...state.value.activeSegmentIds, ...batchIds]);
+        }
         let ok = false;
         for (let attempt = 0; attempt <= retries && isCurrentRun(runId); attempt++) {
           try {
@@ -1118,6 +1132,10 @@ export function useDocumentTranslation() {
           }
         }
         if (!isCurrentRun(runId)) return;
+        // 无论成败都摘出活跃集合：失败的段不再显示「翻译中…」，否则会永久挂着。
+        state.value.activeSegmentIds = new Set(
+          [...state.value.activeSegmentIds].filter((id) => !batchIds.includes(id)),
+        );
         if (ok) {
           state.value.done++;
           state.value.workDone++;
@@ -1149,6 +1167,7 @@ export function useDocumentTranslation() {
       state.value.failedBatches.sort((a, b) => a - b);
       state.value.running = false;
       state.value.workStage = '';
+      state.value.activeSegmentIds = new Set();
       await checkpoint(effectiveOptions);
     }
     return state.value;
@@ -1174,6 +1193,8 @@ export function useDocumentTranslation() {
     state.value.failedBatches = [];
     state.value.error = '';
     state.value.running = true;
+    // 上一次 run 被打断（停止/新 run）时可能留下活跃 id，这里先清零再由 worker 逐批登记。
+    state.value.activeSegmentIds = new Set();
 
     // 与 run 同一份解析结果：重试批次必须沿用同一文风，否则缓存 key 不同、
     // 且同一文档会出现文风割裂。
