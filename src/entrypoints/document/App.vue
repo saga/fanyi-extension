@@ -376,6 +376,7 @@ async function refreshSavedSessionSummary() {
 
 const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
 let localSessionDocumentSaved = false;
+let localSessionDisabled = false;
 
 async function persistDocumentCheckpointToLocalService(input: {
   sourceLang: string; targetLang: string; viewMode: SavedViewMode; literaryMode: boolean;
@@ -383,7 +384,7 @@ async function persistDocumentCheckpointToLocalService(input: {
   translationDelta: Array<[string, string]>; translatedSegmentCount: number;
 }) {
   const config = await getConfig();
-  if (!config.useLocalAgent || !doc.value) return;
+  if (!config.useLocalAgent || !doc.value || localSessionDisabled) return;
   try {
     const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/save';
@@ -407,7 +408,10 @@ async function persistDocumentCheckpointToLocalService(input: {
       }),
     });
     if (response.ok) localSessionDocumentSaved = true;
-    else console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
+    else {
+      if (response.status === 413) localSessionDisabled = true;
+      console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
+    }
   } catch (error) {
     // IndexedDB remains primary; a stopped local service must not interrupt translation.
     console.debug('[document-reader] local SQLite checkpoint unavailable:', error);
@@ -505,6 +509,7 @@ async function restoreLastSession() {
     documentFileName = saved.fileName;
     rawText = saved.rawText;
     localSessionDocumentSaved = false;
+    localSessionDisabled = false;
     doc.value = saved.document;
     glossary.value = saved.glossary;
     sourceLang.value = saved.sourceLang;
@@ -611,6 +616,7 @@ async function loadFile(file: File) {
   currentPageIndex.value = 0;
   parseError.value = '';
   localSessionDocumentSaved = false;
+  localSessionDisabled = false;
   doc.value = null;
   parsing.value = true;
   progress.value = { done: 0, total: 0 };
@@ -738,6 +744,7 @@ async function resetAll() {
   await persistCurrentSession();
   activeSessionReady.value = false;
   localSessionDocumentSaved = false;
+  localSessionDisabled = false;
   resetTranslation();
   doc.value = null;
   currentPageIndex.value = 0;
