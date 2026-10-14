@@ -1,5 +1,6 @@
 import { prepareDocument, createOverlayHider, type OverlayHider } from '../utils/contentHelper';
 import { buildNodeMap } from '../utils/blockExtractor';
+import { buildChunks } from '../utils/chunkBuilder';
 import { getConfig } from '../utils/config';
 import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
 import { DOMObserverManager } from '../utils/domObserver';
@@ -233,7 +234,15 @@ async function handleFullTranslation(
   // （block id+tag 序列）。服务端用它判断缓存里的 id→元素映射是否仍与当前页面一致，
   // 不一致就返回 410 让本次走完整翻译 —— 否则页面结构一变，缓存里按旧 id 回填的
   // 译文会贴到错误的块上（a16z.news 故障：小节标题拿到正文段落的译文）。
-  const { blocks, chunks, fullText } = prepareDocument(document);
+  const { blocks, chunks: defaultChunks, fullText } = prepareDocument(document);
+  // Local Agent calls have a higher fixed cost per chunk. Use moderately larger batches to
+  // reduce calls; keep remote-provider chunking unchanged to preserve its prompt/KV cache behavior.
+  const chunks = config.useLocalAgent
+    ? buildChunks(blocks, { targetTokens: 1600, warmupTargetTokens: 800 })
+    : defaultChunks;
+  if (config.useLocalAgent) {
+    logger.debug('[ContentScript] Local Agent chunk plan', { chunks: chunks.length, targetTokens: 1600 });
+  }
 
   // 服务端翻译模式下，查询服务端缓存，命中即可跳过 prepareHtmlForServer 等重计算。
   let cachedHtml: string | null = null;
