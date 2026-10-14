@@ -84,18 +84,33 @@ export class ShardedCache {
         const legacy = await storage.getItem<Record<string, CacheEntry<unknown>>>(this.legacyStorageKey!);
         if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) return;
 
+        const now = Date.now();
+        const validEntries = Object.entries(legacy).filter(([, entry]) =>
+          isCacheEntry(entry) && now - entry.timestamp <= entry.ttl
+        );
+
         // Cache can be recalculated; removing the legacy blob first avoids a double-quota peak.
         await storage.removeItem(this.legacyStorageKey!);
-        let index = await this.readIndex();
-        const now = Date.now();
-        for (const [cacheKey, entry] of Object.entries(legacy)) {
-          if (!isCacheEntry(entry) || now - entry.timestamp > entry.ttl) continue;
-          const storageKey = this.makeKey(cacheKey);
-          if (!index.includes(cacheKey)) {
+        const index = await this.readIndex();
+        const indexedKeys = new Set(index);
+        for (const [cacheKey] of validEntries) {
+          if (!indexedKeys.has(cacheKey)) {
             index.push(cacheKey);
-            await storage.setItem(this.indexKey, index);
+            indexedKeys.add(cacheKey);
           }
-          await storage.setItem(storageKey, entry);
+        }
+        // Write the whole index once, not once per cache entry (which would be O(N²)).
+        if (index.length !== indexedKeys.size || validEntries.length > 0) {
+          await storage.setItem(this.indexKey, index);
+        }
+
+        for (const [cacheKey, entry] of validEntries) {
+          try {
+            await storage.setItem(this.makeKey(cacheKey), entry);
+          } catch {
+            // A missing shard is a cache miss; pruneExpired() can remove its index entry.
+          }
+          // Keep valid migrated values available in memory for this session even if disk writes fail.
           this.memoryCache.set(cacheKey, entry);
         }
       }).catch(() => {
