@@ -678,7 +678,7 @@ async function clearSavedSession() {
     localPersistedTranslations.clear();
     if (indexedDbCleared) persistenceMessage.value = '已清除扩展与本机 SQLite 中保存的阅读记录。';
   } catch (error) {
-    localSessionSummary.value = null;
+    // SQLite 未能删除时保留摘要，用户可以重新启动服务后再次执行删除。
     if (indexedDbCleared) {
       persistenceMessage.value = '已清除扩展恢复记录，但本机 SQLite 副本未能删除（服务未运行或连接失败）。';
     } else {
