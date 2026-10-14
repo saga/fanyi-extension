@@ -66,7 +66,7 @@
         <div class="input-item">
           <label>模型覆盖（可选）</label>
           <input type="text" v-model="config.localAgentModel" placeholder="auto；或 OpenCode 的 provider/model" @change="saveConfig" />
-          <span class="hint-text">auto 使用本机服务环境变量；OpenCode 示例：openai/gpt-5.4；Workbuddy 填本机 SDK 模型 ID。</span>
+          <span class="hint-text">auto 优先使用本机服务环境变量；未设置时使用运行时默认模型。OpenCode 覆盖示例：openai/gpt-5.4；Workbuddy 填本机 SDK 模型 ID。</span>
         </div>
         <div class="input-item">
           <label>本机服务 Token（可选）</label>
