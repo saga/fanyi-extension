@@ -54,6 +54,7 @@ export async function retryGlobalMissing(
     undefined,
     promptStyle,
     config.useLocalAgent === true,
+    config.translationMode || 'technical',
   );
 
   let recoveredCount = 0;
@@ -187,7 +188,8 @@ export function setupDynamicContentObserver(
             // 沿用整页翻译时解析出的文风：动态新增的单个 block 通常过短，
             // 单独做语言检测会触发短文本保护而退回 default，导致同页文风不一致。
             promptStyle,
-          }) as TranslateChunkResponse;
+          translationMode: config.translationMode || 'technical',
+             }) as TranslateChunkResponse;
           if (response.success && response.result.length > 0) {
             const node = findNodeByText(block.text);
             if (node) {
