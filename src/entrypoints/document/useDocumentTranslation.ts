@@ -80,6 +80,25 @@ export interface TranslateOptions {
 }
 
 /**
+ * Literary book translation is intentionally one serial lane so each chapter can inherit the
+ * previous chapter's voice and wording. Technical documents do not need shared chat history;
+ * distribute stable segment IDs across four bounded lanes so chunks can run concurrently
+ * without sharing unrelated chunk conversations.
+ */
+function resolveDocumentSessionLane(
+  options: Pick<TranslateOptions, 'literaryMode' | 'translationMode'>,
+  segments: DocumentSegment[],
+): string {
+  if (options.literaryMode || options.translationMode === 'literary') return 'book';
+  const id = segments[0]?.id || 'empty-batch';
+  let hash = 0;
+  for (let index = 0; index < id.length; index++) {
+    hash = (Math.imul(hash, 31) + id.charCodeAt(index)) | 0;
+  }
+  return 'lane-' + ((hash >>> 0) % 4);
+}
+
+/**
  * 解析本次文档翻译应使用的文风。
  *
  * 与网页翻译、PDF 翻译同一策略：日语原文 → 非日语目标语言时，把 default
@@ -769,6 +788,7 @@ export function useDocumentTranslation() {
         promptStyle: options.promptStyle,
         translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
         documentSessionId: options.documentSessionId,
+        documentSessionLane: resolveDocumentSessionLane(options, segments),
         ...((options.literaryMode || options.translationMode === 'literary') && bookMemory ? {
           // Keep the system instruction stable across chapters; chapter identity and book memory
           // are already included as user-payload context for each batch.
