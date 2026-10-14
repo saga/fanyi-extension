@@ -82,6 +82,12 @@ export interface TranslateChunkMessage {
   documentSessionId?: string;
   /** 文档翻译的并行通道；文学书籍固定使用 book，技术文档使用有限的 lane-*。 */
   documentSessionLane?: string;
+  /** 强制本批重新调用模型；绕过扩展与本机 SQLite 的翻译缓存，结果仍回写缓存。 */
+  forceRefresh?: boolean;
+  /** 用户编辑的文档 System Prompt；空值使用内置提示词。 */
+  documentSystemPromptOverride?: string;
+  /** 用户编辑的 User Prompt 模板；{{CONTENT}} 会替换为当前批次 JSON。 */
+  documentUserPromptTemplate?: string;
   /** Optional task-specific instruction, used by the literary post-edit pass. */
   taskInstructions?: string;
   /**
