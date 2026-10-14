@@ -261,7 +261,7 @@ async function translateChunkPayload(
       pageUrl: window.location.href,
       glossary: ctx.glossary,
       promptStyle: ctx.promptStyle,
-      translationMode,
+      translationMode: ctx.translationMode,
     }) as TranslateChunkResponse;
 
     if (!response.success) {
