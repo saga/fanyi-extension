@@ -64,6 +64,8 @@ export interface TranslateOptions {
   model?: string;
   apiKey?: string;
   documentFileName?: string;
+  /** Stable per-document identity passed only to the local Agent for scoped SDK Sessions. */
+  documentSessionId?: string;
   documentTitle?: string;
   documentFormat?: string;
   documentWarnings?: string[];
@@ -380,6 +382,7 @@ async function analyzeLiteraryChapterViaServer(
       glossary: undefined,
       promptStyle: options.promptStyle,
       translationMode: 'literary',
+      documentSessionId: options.documentSessionId,
       provider,
       ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'workbuddy' } : {}),
       model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
@@ -435,6 +438,7 @@ async function reviewLiteraryBatchViaServer(
       glossary: undefined,
       promptStyle: options.promptStyle,
       translationMode: 'literary',
+      documentSessionId: options.documentSessionId,
       provider,
       ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'workbuddy' } : {}),
       model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
@@ -764,8 +768,11 @@ export function useDocumentTranslation() {
         glossary: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? undefined : options.glossary,
         promptStyle: options.promptStyle,
         translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
+        documentSessionId: options.documentSessionId,
         ...((options.literaryMode || options.translationMode === 'literary') && bookMemory ? {
-          literaryContext: buildLiteraryTranslationContextPrompt(chapterTitle),
+          // Keep the system instruction stable across chapters; chapter identity and book memory
+          // are already included as user-payload context for each batch.
+          literaryContext: buildLiteraryTranslationContextPrompt(),
         } : {}),
         ...(responseFormat ? { responseFormat } : {}),
       })) as TranslateChunkResponse;
