@@ -41,6 +41,15 @@ export interface Config {
   localAgentModel: string;
   /** 可选共享令牌；本机服务未配置 LOCAL_AGENT_TOKEN 时留空即可。 */
   localAgentToken: string;
+  /** Document reader typography; English and Chinese can be adjusted independently. */
+  documentEnglishFontFamily: string;
+  documentChineseFontFamily: string;
+  documentEnglishFontSize: number;
+  documentChineseFontSize: number;
+  /** Empty means use the generated built-in prompt; non-empty replaces it for document translation. */
+  documentSystemPromptOverride: string;
+  /** Empty means use the built-in user-message wrapper; {{CONTENT}} receives this batch's JSON. */
+  documentUserPromptTemplate: string;
 }
 
 const defaultConfig: Config = {
@@ -63,6 +72,12 @@ const defaultConfig: Config = {
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
+  documentEnglishFontFamily: 'Georgia',
+  documentChineseFontFamily: 'Noto Serif CJK SC',
+  documentEnglishFontSize: 17,
+  documentChineseFontSize: 18,
+  documentSystemPromptOverride: '',
+  documentUserPromptTemplate: '',
 };
 
 export async function getConfig(): Promise<Config> {
