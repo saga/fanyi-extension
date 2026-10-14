@@ -560,12 +560,9 @@ function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Conf
   if (changedFields.includes('sourceLang')) sourceLang.value = config.sourceLang;
   if (changedFields.includes('targetLang')) targetLang.value = config.targetLang;
   if (changedFields.includes('translationMode')) {
-    if (config.translationMode === 'literary') {
-      literaryMode.value = true;
-    } else if (doc.value && doc.value.format !== 'epub' && doc.value.format !== 'pdf') {
-      // 普通文档没有单独的“整本书记忆”开关，切回科技模式时应一并关闭文学流程。
-      literaryMode.value = false;
-    }
+    // 全局翻译类型变化时同步整本书记忆开关，避免界面显示“科技翻译”但后台仍跑文学流程。
+    // EPUB/PDF 用户仍可在确认选择科技模式后，手动再次启用“整本书记忆”覆盖项。
+    literaryMode.value = config.translationMode === 'literary';
   }
 }
 
