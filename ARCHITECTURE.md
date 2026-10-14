@@ -6,7 +6,7 @@
 
 ### 1.1 定位
 
-浏览器扩展，将网页正文逐块翻译为中文（或其他目标语言），以双语对照方式显示。支持本地 DeepSeek API 直译和远程服务端翻译两种模式，并集成 YouTube 字幕翻译。
+浏览器扩展，将网页正文逐块翻译为中文（或其他目标语言），以双语对照方式显示。当前有三种翻译路由：直连 DeepSeek API、远程 Vocal Saga 服务、以及本机 Workbuddy/OpenCode Agent 服务。启用本机 Provider 后，网页分块、YouTube 字幕、文档翻译及文学分析/审校都严格走本机；本机模型或服务失败时直接报错，不切换到远程 API。
 
 ### 1.2 技术栈
 
@@ -14,13 +14,14 @@
 |------|------|
 | 扩展框架 | WXT (v0.20+) — 基于 Vite 的 WebExtension 开发框架 |
 | 前端框架 | Vue 3 (popup 配置 UI) |
-| 翻译引擎 | DeepSeek API (`deepseek-v4-flash` 模型) |
+| 翻译引擎 | DeepSeek API（直连模式）；本机 Workbuddy/OpenCode Agent；可选 Vocal Saga 远程翻译服务 |
 | 正文提取 | 自研 blockExtractor + @mozilla/readability fallback |
 | 术语提取 | compromise NLP 库 + 自研规则 |
 | 测试 | Vitest + jsdom |
 | 类型 | TypeScript (strict mode) |
 | 包管理 | pnpm |
 | 浏览器 polyfill | webextension-polyfill |
+| 本机服务（可选） | 独立仓库 `devweekly/vocal-saga/local-agent-service`，Express + TypeScript + SQLite；默认 `127.0.0.1:8789` |
 
 ### 1.3 浏览器兼容
 
@@ -138,17 +139,26 @@ fanyi-extension/
 └─────────────────────┼─────────────────────────────────┘
                       │
                       ▼
-          ┌───────────────────────┐
-          │   DeepSeek API         │
-          │   api.deepseek.com     │
-          │   model: v4-flash      │
-          └───────────────────────┘
+             ┌────────────────────┐
+             │   路由选择规则       │
+             │ useLocalAgent 优先  │
+             └─────────┬──────────┘
+                       │
+          ┌────────────┼──────────────────┐
+          │            │                  │
+          ▼            ▼                  ▼
+┌────────────────┐ ┌────────────────┐ ┌──────────────────┐
+│ 本机 Agent 服务 │ │ Vocal Saga     │ │ DeepSeek API     │
+│ 127.0.0.1:8789 │ │ /fanyi/page    │ │ api.deepseek.com │
+│ Express + TS   │ │ 远程服务模式    │ │ 直连模式          │
+│ Workbuddy/     │ └────────────────┘ └──────────────────┘
+│ OpenCode + SQLite│
+└────────────────┘
 
-          ┌───────────────────────┐
-          │   Server Translation   │  (可选, useServerTranslation=true)
-          │   s.sunxiunan.com      │
-          │   /fanyi/page          │
-          └───────────────────────┘
+路由原则：useLocalAgent=true 时强制使用本机；失败即返回错误。
+不会因为本机服务不可用、HTTP 502 或 JSON 格式错误而尝试远程 Provider。
+仅文档批次边界计算可在本机服务不可用时使用扩展内确定性 CPU 算法；
+这不是模型调用，也不发送远程请求。
 ```
 
 ## 4. 核心模块详解
@@ -569,8 +579,13 @@ interface Config {
   provider: Provider;            // 服务端翻译 LLM Provider
   promptStyle: PromptStyle;     // 翻译文风
   shortcuts: ShortcutConfig;    // 快捷键
-  useServerTranslation: boolean; // 是否使用服务端翻译
-  serverUrl: string;             // 服务端翻译地址
+  useServerTranslation: boolean; // 是否使用 Vocal Saga 远程服务
+  serverUrl: string;             // 远程服务地址
+  useLocalAgent: boolean;         // 是否强制走本机 Workbuddy/OpenCode Provider
+  localAgentProvider: 'workbuddy' | 'opencode';
+  localAgentUrl: string;          // 默认 http://127.0.0.1:8789
+  localAgentModel: string;        // auto 或具体模型覆盖
+  localAgentToken: string;        // 可选；与服务端 LOCAL_AGENT_TOKEN 一致
 }
 ```
 
@@ -581,8 +596,9 @@ interface Config {
 
 ### 5.3 配置入口
 
-- **Popup** (`popup/App.vue`): API Key、语言对、文风、服务端翻译开关、Provider
-- **ConfigPanel** (`content/configPanel.ts`): 页面内配置面板（API Key 验证、语言切换）
+- **Popup** (`popup/App.vue`): API Key、语言对、文风、远程服务开关、本机 Provider 开关、运行时、模型、服务地址和可选 Token
+- **ConfigPanel** (`content/configPanel.ts`): 页面内旧配置面板；本机模式开启时禁用远程翻译选项，保存逻辑也会阻止它把本机流量切回远程
+- **本机服务配置**：见 `devweekly/vocal-saga/local-agent-service/README.md`；本机模式不需要 DeepSeek API Key，但如服务端设置了 Token，扩展必须配置同一 Token
 
 ## 6. 构建系统
 
@@ -632,7 +648,7 @@ pnpm test           # 运行测试 (vitest run)
 
 ## 8. 数据流图
 
-### 8.1 本地翻译模式
+### 8.1 直连 DeepSeek API 模式（非本机 Agent 模式）
 
 ```
 用户点击翻译
@@ -670,7 +686,27 @@ handleFullTranslation()
     └── setupDynamicContentObserver()
 ```
 
-### 8.2 服务端翻译模式
+### 8.2 本机 Workbuddy/OpenCode Provider 模式（强制本机）
+
+```
+用户启动翻译 / YouTube 字幕 / 文档翻译
+    │
+    ├── 网页分块 → background.ts → POST 127.0.0.1:8789/v1/chat/completions
+    ├── YouTube 字幕 → 本机 /v1/chat/completions
+    └── EPUB/PDF 文学分析、审校 → 本机 /api/translate/document/literary/*
+              │
+              ▼
+       local-agent-service（Express + TypeScript）
+              ├── Workbuddy SDK 或 OpenCode CLI
+              ├── request ID + provider/model + 耗时/输出长度 + 错误堆栈日志
+              └── SQLite 请求历史、翻译缓存和文档恢复副本
+
+本机请求失败（服务未启动、鉴权失败、运行时错误、模型输出格式错误）→ 显示错误/保留已有初译。
+绝不调用 DeepSeek API 或 Vocal Saga 远程服务作为自动兜底。
+只有本机批次规划接口的失败才允许用扩展内确定性 CPU 算法继续切分。
+```
+
+### 8.3 Vocal Saga 服务端翻译模式
 
 ```
 用户点击翻译 (useServerTranslation=true)
