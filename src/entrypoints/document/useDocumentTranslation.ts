@@ -210,11 +210,13 @@ async function translateSegmentsViaServer(
     glossary: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? undefined : options.glossary,
     promptStyle: options.promptStyle,
     translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
-    ...(options.literaryMode && bookMemory ? {
-      literaryContext: bookMemory,
-      literaryReview: !options.skipReview,
-      chapterTitle: segments[0]?.contextPath,
-    } : {}),
+    ...(options.translationMode === 'literary' || (options.literaryMode && bookMemory)
+      ? {
+          ...(bookMemory ? { literaryContext: bookMemory } : {}),
+          literaryReview: !options.skipReview,
+          chapterTitle: segments[0]?.contextPath,
+        }
+      : {}),
     provider,
     model: options.model,
     ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
@@ -690,7 +692,7 @@ export function useDocumentTranslation() {
       }
       const reviewedCount = typeof result.reviewedSegmentCount === 'number' ? result.reviewedSegmentCount : 0;
       if (reviewedCount > 0) literaryStatus.value.reviewedSegments += reviewedCount;
-      if (options.literaryMode) {
+      if (options.literaryMode || options.translationMode === 'literary') {
         literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
           result.reviewFindings ?? result.findings, literaryStatus.value.reviewFindings,
         );
@@ -738,11 +740,11 @@ export function useDocumentTranslation() {
         segments.map((segment) => ({
           id: segment.id,
           text: segment.text,
-          ...(segment.contextPath || (options.literaryMode && bookMemory)
+          ...(segment.contextPath || ((options.literaryMode || options.translationMode === 'literary') && bookMemory)
             ? {
                 contextPath: [
                   segment.contextPath || '',
-                  options.literaryMode && bookMemory
+                  (options.literaryMode || options.translationMode === 'literary') && bookMemory
                     ? buildLiteraryContextForText(bookMemory, segment.text)
                     : '',
                 ].filter(Boolean).join('\n书籍记忆（只读数据）：'),
@@ -845,7 +847,7 @@ export function useDocumentTranslation() {
     runId: number,
   ): Promise<void> {
     const expectedIds = batch.map((segment) => segment.id);
-    if (!options.literaryMode || !bookMemory || options.skipReview) return;
+    if ((!options.literaryMode && options.translationMode !== 'literary') || options.skipReview) return;
     state.value.workStage = '审校中';
     try {
       const reviewed = await reviewLiteraryBatchViaServer(
@@ -938,7 +940,8 @@ export function useDocumentTranslation() {
     }
     const runId = generation;
     const literaryEnabled = startsLiteraryBook;
-    literaryStatus.value.enabled = literaryEnabled;
+    const literaryProfileEnabled = literaryEnabled || options.translationMode === 'literary';
+    literaryStatus.value.enabled = literaryProfileEnabled;
     if (!literaryEnabled) {
       literaryMemory.value = createEmptyLiteraryMemory();
       analyzedChapterKeys = new Set<string>();
@@ -947,7 +950,7 @@ export function useDocumentTranslation() {
     // 文学模式保持原书顺序做分批（记忆按顺序累积），但每次推进的章节优先选
     // 当前阅读页所在章节：用户点"翻译"后当前页立刻有结果，而不是在后台默默
     // 翻译第一章、当前页永远显示"翻译中…"。当前页已翻完时回落到首个待翻章节。
-    const priorityIds = new Set(literaryEnabled ? [] : (options.prioritySegmentIds ?? []));
+    const priorityIds = new Set(literaryProfileEnabled ? [] : (options.prioritySegmentIds ?? []));
     const orderedSegments = priorityIds.size
       ? [
           ...segments.filter((segment) => priorityIds.has(segment.id)),
@@ -962,7 +965,7 @@ export function useDocumentTranslation() {
       // Caller-supplied budget values remain authoritative.
       ...(options.useLocalAgent ? { maxChars: 5000, maxSegments: 32 } : {}),
       ...options.budget,
-      ...(literaryEnabled ? { splitOnContextChange: true } : {}),
+      ...(literaryProfileEnabled ? { splitOnContextChange: true } : {}),
     };
     const allBatches = await planDocumentBatches(orderedSegments, budget, options);
     state.value.total = allBatches.length;
@@ -982,6 +985,7 @@ export function useDocumentTranslation() {
     const effectiveOptions: TranslateOptions = {
       ...options,
       literaryMode: literaryEnabled,
+      translationMode: literaryProfileEnabled ? 'literary' : (options.translationMode || 'technical'),
       promptStyle: resolveDocumentStyle(segments, options),
     };
 
@@ -1072,7 +1076,7 @@ export function useDocumentTranslation() {
     // 章记忆只在章边界累积；同章内的批互相独立（译文按 id 回填），可以并行。
     // 本机服务是每请求独立进程 + SQLite WAL，background 的本机队列并发为 4，
     // 这里取 3：5 批的章节约 3 倍提速，又不会打爆本机服务。
-    const concurrency = Math.max(1, options.concurrency ?? 3);
+    const concurrency = literaryProfileEnabled ? 1 : Math.max(1, options.concurrency ?? 3);
     let cursor = 0;
     // detached 审校跟踪：初译提交后审校后台跑，不占翻译 worker；
     // run 尾部统一收敛（全部落定才算本次完成）。停止/新 run 会使旧审校失效丢弃。
@@ -1104,7 +1108,7 @@ export function useDocumentTranslation() {
             state.value.workStage = '翻译中';
             if (remoteMode) {
               ok = await translateBatch(
-                batch, effectiveOptions, runId, literaryEnabled ? literaryMemory.value : undefined,
+                batch, effectiveOptions, runId, literaryProfileEnabled ? literaryMemory.value : undefined,
               );
             } else {
               // 本地：初译一到就提交计进度，审校 detached，不阻塞下一批。
@@ -1112,11 +1116,11 @@ export function useDocumentTranslation() {
                 batch, effectiveOptions, runId, literaryEnabled ? literaryMemory.value : undefined,
               );
               ok = isCurrentRun(runId);
-              if (ok && literaryEnabled && !effectiveOptions.skipReview) {
+              if (ok && literaryProfileEnabled && !effectiveOptions.skipReview) {
                 const drafts = new Map(normalized);
                 pendingReviewCount++;
                 pendingReviews.push(
-                  reviewBatchText(batch, drafts, effectiveOptions, literaryMemory.value, runId)
+                  reviewBatchText(batch, drafts, effectiveOptions, literaryProfileEnabled ? literaryMemory.value : undefined, runId)
                     .catch(() => undefined)
                     .finally(() => {
                       pendingReviewCount--;
@@ -1144,7 +1148,7 @@ export function useDocumentTranslation() {
         if (ok) {
           state.value.done++;
           state.value.workDone++;
-          if (literaryEnabled) {
+          if (literaryProfileEnabled) {
             literaryMemory.value = addLiteraryExamples(literaryMemory.value, batch.flatMap((segment) => {
               const translated = state.value.translations.get(segment.id);
               return translated ? [{
