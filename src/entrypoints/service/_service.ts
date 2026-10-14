@@ -24,6 +24,17 @@ export interface GlossaryEntry {
   translation: string;
 }
 
+/** Optional metadata used only by the local-agent adapter to isolate a document's SDK Session. */
+export interface TranslationSessionContext {
+  documentSessionId: string;
+  role: 'translation';
+  sourceLang: string;
+  targetLang: string;
+  promptStyle?: string;
+  translationMode?: string;
+  contextVersion?: string;
+}
+
 export interface TranslationService {
   translate(
     jsonContent: string,
@@ -32,7 +43,8 @@ export interface TranslationService {
     glossary?: Glossary,
     context?: string,
     /** 严格 schema（仅本机升级轮）；缺省沿用 json_object。 */
-    responseFormat?: JsonSchemaResponseFormat
+    responseFormat?: JsonSchemaResponseFormat,
+    sessionContext?: TranslationSessionContext
   ): Promise<string>;
 
   translateStream(
