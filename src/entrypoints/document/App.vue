@@ -279,6 +279,7 @@ import {
   loadActiveDocumentSession,
   saveActiveDocumentProgress,
   type ActiveDocumentSessionSummary,
+  type LoadedActiveDocumentSession,
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
@@ -481,7 +482,7 @@ async function persistDocumentCheckpointToLocalService(input: {
   }
 }
 
-async function loadDocumentCheckpointFromLocalService() {
+async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDocumentSession | null> {
   const config = await getConfig();
   try {
     // 仅恢复此前的本机快照，不调用本机模型；恢复不应依赖当前翻译 Provider 开关。
@@ -498,21 +499,47 @@ async function loadDocumentCheckpointFromLocalService() {
       body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
     });
     if (!response.ok) return null;
-    const result = await response.json() as { found?: boolean; session?: { payload?: Record<string, any> } };
-    const payload = result.session?.payload;
+    const result = await response.json() as {
+      found?: boolean;
+      session?: { title?: string; format?: string; updatedAt?: string; payload?: Record<string, any> };
+    };
+    const session = result.session;
+    const payload = session?.payload;
     if (!result.found || !payload?.document || !payload?.snapshot) return null;
+
     const snapshot = payload.snapshot;
+    const document = payload.document as ParsedDocument;
+    const translations = Array.isArray(snapshot.translations)
+      ? snapshot.translations.filter((entry: unknown): entry is [string, string] =>
+          Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string')
+      : [];
+    const literaryMemory = snapshot.literaryMemory as ReturnType<typeof getSnapshot>['literaryMemory'];
+    const literaryStatus = snapshot.literaryStatus as ReturnType<typeof getSnapshot>['literaryStatus'];
     return {
-      ...payload,
-      translations: Array.isArray(snapshot.translations) ? snapshot.translations : [],
-      total: snapshot.total ?? 0,
-      done: snapshot.done ?? 0,
-      failedBatches: snapshot.failedBatches ?? [],
-      error: snapshot.error ?? '',
-      literaryMemory: snapshot.literaryMemory,
-      literaryStatus: snapshot.literaryStatus,
-      analyzedChapterKeys: snapshot.analyzedChapterKeys,
-      lastRunSegmentIds: snapshot.lastRunSegmentIds,
+      fileName: typeof payload.fileName === 'string' ? payload.fileName : (session?.title || document.title || 'document'),
+      title: session?.title || document.title || '未命名文档',
+      format: session?.format || document.format || 'txt',
+      segmentCount: Number.isFinite(document.meta?.segmentCount) ? document.meta.segmentCount : document.segments.length,
+      charCount: Number.isFinite(document.meta?.charCount) ? document.meta.charCount : 0,
+      updatedAt: Date.parse(session?.updatedAt || '') || Date.now(),
+      translatedSegmentCount: translations.length,
+      total: Number.isFinite(snapshot.total) ? snapshot.total : 0,
+      done: Number.isFinite(snapshot.done) ? snapshot.done : 0,
+      currentPageIndex: Number.isFinite(payload.currentPageIndex) ? Math.max(0, Math.floor(payload.currentPageIndex)) : 0,
+      literaryMode: payload.literaryMode === true,
+      document,
+      rawText: typeof payload.rawText === 'string' ? payload.rawText : '',
+      ...(payload.glossary ? { glossary: payload.glossary as Glossary } : {}),
+      sourceLang: typeof payload.sourceLang === 'string' ? payload.sourceLang : 'auto',
+      targetLang: typeof payload.targetLang === 'string' ? payload.targetLang : 'zh',
+      viewMode: (['bilingual', 'translation', 'original'].includes(payload.viewMode) ? payload.viewMode : 'bilingual') as SavedViewMode,
+      failedBatches: Array.isArray(snapshot.failedBatches) ? snapshot.failedBatches.filter(Number.isInteger) : [],
+      error: typeof snapshot.error === 'string' ? snapshot.error : '',
+      literaryMemory,
+      literaryStatus,
+      analyzedChapterKeys: Array.isArray(snapshot.analyzedChapterKeys) ? snapshot.analyzedChapterKeys.filter((key: unknown): key is string => typeof key === 'string') : [],
+      lastRunSegmentIds: Array.isArray(snapshot.lastRunSegmentIds) ? snapshot.lastRunSegmentIds.filter((id: unknown): id is string => typeof id === 'string') : [],
+      translations,
     };
   } catch {
     return null;
@@ -557,7 +584,7 @@ async function restoreLastSession() {
   parseError.value = '';
   persistenceMessage.value = '';
   try {
-    let saved = null;
+    let saved: LoadedActiveDocumentSession | null = null;
     let restoredFromLocalService = false;
     try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
     if (!saved) {
