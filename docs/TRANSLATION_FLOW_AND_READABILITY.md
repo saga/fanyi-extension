@@ -1,6 +1,6 @@
 # fanyi-extension 翻译判断流程与 Readability 使用分析
 
-> 适用代码（截至 2026-08-12）：
+> 正文提取 / Readability 细节的历史核对日期：2026-08-12；本机 Provider 路由已按 2026-10-14 的 main 代码更新。
 > - 流程编排：`src/entrypoints/content/translation.ts`、`src/entrypoints/content/serverTranslation.ts`
 > - 根判定：`src/entrypoints/utils/contentHelper.ts`（`findArticleRoot`）、`src/entrypoints/utils/contentDetector.ts`（`detectArticleRoot` / `tryReadabilityRoot`）
 > - 块提取：`src/entrypoints/utils/blockExtractor/walker.ts`
@@ -9,7 +9,7 @@
 
 ---
 
-## 1. 总览：两条翻译路径，一个提取内核
+## 1. 总览：三类服务路由，一个提取内核
 
 扩展的翻译入口是 `translation.ts` 的 `start()`。它先 `getConfig()` 决定走哪条路径，但**两条路径都共用同一个提取内核** `prepareDocument()`：
 
@@ -19,23 +19,28 @@
                                 ▼
                           getConfig()
                                 │
-            ┌───────────────────┴───────────────────┐
-            │ useServerTranslation === true ?        │
-            └───────────────────┬───────────────────┘
-              YES               │               NO
-               ▼                │                ▼
-    checkServerCache()     ┌────┴────┐   translateChunksViaBackground()
-    translateViaServer()   │ 都用    │   （本地 DeepSeek / 其他 provider）
-    applyServerTranslatedHtml()  │  prepareDocument() 提取内核
-               │          └────┬────┘          │
-               │                │               │
-               └───────►  blocks / nodeMap ◄────┘
-                          （统一产出，按 data-fanyi-block-id 关联 DOM）
+                  ┌─────────────┴──────────────────┐
+                  │ useLocalAgent === true ?       │
+                  └─────────────┬──────────────────┘
+                    YES         │ NO
+                     ▼          ▼
+       translateChunksViaBackground()     useServerTranslation && !forceDirect ?
+       background → 127.0.0.1:8789                    │
+       本机 Workbuddy/OpenCode                 ┌───────┴───────┐
+                                             YES             NO
+                                              ▼               ▼
+                                      Vocal Saga 远程      translateChunksViaBackground()
+                                      /fanyi/page           background → DeepSeek API
+
+所有分支共用 prepareDocument() 的正文提取与 blocks/nodeMap；
+本机 Provider 是强制路由，模型/服务失败会报错，不切换到远程 API。
 ```
 
-**关键事实（容易混淆）**：「服务端翻译」≠「服务端决定翻译哪些块」。
+**关键事实（容易混淆）**：「服务端翻译」≠「服务端决定翻译哪些块」。当前路由优先级为 `useLocalAgent` → `useServerTranslation`（仅在未启用本机 Provider 且未被站点规则强制直连时）→ 直连 DeepSeek。配置面板会禁用本机模式下的远程开关，代码执行层也再次强制这一优先级。
 
-- **正常翻译路径**（用户点扩展翻译，默认 `useServerTranslation`）：扩展**本地**调用 `prepareDocument()`，用**扩展自己的 walker** 给每个块打 `data-fanyi-block-id`、产出 `blocks`/`nodeMap`，再把整页 HTML 发给 `s.sunxiunan.com/fanyi/page`。服务端**只按这些 id 翻译**，不再重新判断正文范围。
+- **远程服务模式**（需要显式启用 `useServerTranslation`，它不是默认值）：扩展**本地**调用 `prepareDocument()`，用**扩展自己的 walker** 给每个块打 `data-fanyi-block-id`、产出 `blocks`/`nodeMap`，再把整页 HTML 发给 `s.sunxiunan.com/fanyi/page`。服务端**只按这些 id 翻译**，不再重新判断正文范围。
+- **本机 Agent 模式**：`useLocalAgent=true` 时，网页分块通过 background 请求本机 `/v1/chat/completions`；YouTube 字幕直接请求同一本机端点；EPUB/PDF 文档翻译、文学分析和审校请求本机服务。失败只展示错误或保留已有初译，不调用 DeepSeek 或远程 Vocal Saga 兜底。
+- **直连 DeepSeek 模式**：本机模式关闭、远程服务模式也未开启时，分块翻译经 background 调用 DeepSeek API。
 - **`/force/` 与浏览器直译路径**：服务端 `vocal-saga` 的 `prepareDocument` **自己 walk、自己打 id**，不经过扩展 walker。
 
 所以「服务端翻译没翻出某段正文」，在正常路径下真正的根因往往在前端的 `findArticleRoot` + walker；只有 `/force/` 直译才是 `vocal-saga` 的 walker。两仓的 walker 是**独立分叉副本**，修复需各自落地（见第 6 节）。
