@@ -297,6 +297,7 @@ export class DeepSeekTranslationService implements TranslationService {
     if (sessionContext && this.endpoint !== DEFAULT_API_URL) {
       body.metadata = {
         documentSessionId: sessionContext.documentSessionId,
+        sessionLane: sessionContext.sessionLane || 'main',
         sessionRole: sessionContext.role,
         sourceLang: sessionContext.sourceLang,
         targetLang: sessionContext.targetLang,
