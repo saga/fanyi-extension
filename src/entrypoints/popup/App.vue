@@ -46,12 +46,21 @@
         </select>
       </div>
 
-      <label class="switch-item">
+      <label v-if="localAgentAvailable" class="switch-item">
         <input type="checkbox" v-model="config.useLocalAgent" @change="onLocalAgentToggle" />
         <span>使用本机 Workbuddy/OpenCode 翻译</span>
       </label>
 
-      <div v-if="config.useLocalAgent" class="server-group local-agent-group">
+      <div
+        v-if="config.useLocalAgent && !localAgentAvailable"
+        class="local-agent-offline"
+        role="status"
+      >
+        <span>本机翻译模式仍已启用，但检测不到本机服务。不会自动切换到远程 Provider，请启动本机服务后重新打开弹窗。</span>
+        <button type="button" class="server-toggle" @click="disableLocalAgent">关闭本机模式</button>
+      </div>
+
+      <div v-if="config.useLocalAgent && localAgentAvailable" class="server-group local-agent-group">
         <div class="select-item">
           <label>本机 Agent</label>
           <select v-model="config.localAgentProvider" @change="saveConfig">
@@ -136,8 +145,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
+import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 import { openSidePanel } from '@/entrypoints/utils/sidePanel';
 
 const config = ref<Config>({
@@ -162,23 +172,64 @@ const config = ref<Config>({
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
+const localAgentAvailable = ref(false);
 const cacheClearMessage = ref('');
 /** 服务端翻译设置面板折叠状态（默认收起，保持 popup 紧凑）。 */
 const serverExpanded = ref(false);
 let checkTimer: number | null = null;
 let serverUrlTimer: number | null = null;
+let healthPollTimer: number | null = null;
+let healthCheckInProgress = false;
 
 onMounted(async () => {
   config.value = await getConfig();
+  await refreshLocalAgentAvailability();
   checkApiKey();
+  // 弹窗打开期间持续更新：服务启动后可显示开关，服务停止后隐藏开关。
+  healthPollTimer = window.setInterval(() => {
+    void refreshLocalAgentAvailability();
+  }, 4000);
+});
+
+onUnmounted(() => {
+  if (checkTimer) clearTimeout(checkTimer);
+  if (serverUrlTimer) clearTimeout(serverUrlTimer);
+  if (healthPollTimer) clearInterval(healthPollTimer);
 });
 
 async function saveConfig() {
   await setConfig(config.value);
 }
 
+async function refreshLocalAgentAvailability() {
+  if (healthCheckInProgress) return;
+  healthCheckInProgress = true;
+  try {
+    localAgentAvailable.value = await isLocalAgentServiceAvailable(
+      config.value.localAgentUrl || 'http://127.0.0.1:8789',
+    );
+  } finally {
+    healthCheckInProgress = false;
+  }
+}
+
 async function onLocalAgentToggle() {
-  if (config.value.useLocalAgent) config.value.useServerTranslation = false;
+  if (config.value.useLocalAgent) {
+    // 服务可能恰好在上次轮询后退出；开启前再确认一次。
+    await refreshLocalAgentAvailability();
+    if (!localAgentAvailable.value) {
+      config.value.useLocalAgent = false;
+      return;
+    }
+    config.value.useServerTranslation = false;
+  }
+  await saveConfig();
+  await checkApiKey();
+}
+
+async function disableLocalAgent() {
+  // 这是显式切换操作；服务不可用时绝不静默转发原文到远程 Provider。
+  config.value.useLocalAgent = false;
   await saveConfig();
   await checkApiKey();
 }
@@ -496,6 +547,19 @@ h2 {
 .status-text.checking { color: #909399; }
 .status-text.success { color: #67c23a; }
 .status-text.error { color: #f56c6c; }
+
+.local-agent-offline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #f0d5a8;
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #8a5a14;
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .hint-text {
   font-size: 11px;
