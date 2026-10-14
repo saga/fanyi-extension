@@ -78,6 +78,8 @@ export interface TranslateChunkMessage {
   translationMode?: TranslationMode;
   /** 文学电子书模式的书籍记忆指令，仅由文档翻译工作流传入。 */
   literaryContext?: string;
+  /** 稳定的文档指纹；仅传给本机 Agent，用于隔离不同文档的 SDK Session。 */
+  documentSessionId?: string;
   /** Optional task-specific instruction, used by the literary post-edit pass. */
   taskInstructions?: string;
   /**
