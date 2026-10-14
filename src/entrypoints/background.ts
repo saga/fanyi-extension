@@ -706,15 +706,30 @@ export default defineBackground({
 
     async function handleClearCache(sendResponse: (response: ClearCacheResponse) => void) {
       try {
+        // 清理浏览器缓存和本机 SQLite 是两个独立操作；不能把本机请求失败也报告成整体成功。
         await clearAllCache();
         const config = await getConfig();
         if (config.useLocalAgent) {
+          let response: Response;
           try {
-            await fetch(new URL('/api/cache/translation', getLocalAgentBaseUrl(config)).toString(), {
+            response = await fetch(new URL('/api/cache/translation', getLocalAgentBaseUrl(config)).toString(), {
               method: 'DELETE', headers: getLocalAgentHeaders(config),
             });
           } catch (error) {
-            logger.debug('[Background] SQLite cache clear failed:', error);
+            logger.warn('[Background] SQLite cache clear request failed:', error);
+            sendResponse({
+              success: false,
+              error: '浏览器扩展缓存已尝试清理，但本机 SQLite 缓存未能连接清除。请确认本机服务正在运行、地址正确且 Token 一致，然后重试。',
+            });
+            return;
+          }
+          if (!response.ok) {
+            logger.warn('[Background] SQLite cache clear returned HTTP ' + response.status);
+            sendResponse({
+              success: false,
+              error: '浏览器扩展缓存已尝试清理，但本机 SQLite 缓存清理失败（HTTP ' + response.status + '）。请检查服务地址和 Token 后重试。',
+            });
+            return;
           }
         }
         sendResponse({ success: true });
