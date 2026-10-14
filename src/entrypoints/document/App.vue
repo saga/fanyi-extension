@@ -208,7 +208,7 @@
         <label v-if="doc.format === 'epub' || doc.format === 'pdf'" class="field literary-toggle">
           <span>整本书记忆（覆盖翻译类型）</span>
           <span class="literary-toggle-control">
-            <input v-model="literaryMode" type="checkbox" :disabled="state.total > 0" />
+            <input v-model="literaryMode" type="checkbox" :disabled="state.running" />
             实体一致性与文风审校
           </span>
           <small class="muted">启用后使用文学翻译流程，并跨章节维护实体与文风记忆；关闭后按上面的翻译类型执行。</small>
@@ -345,7 +345,7 @@
             </div>
             <div class="relationship-actions">
               <button class="btn" @click="addRelationship">添加关系</button>
-              <button class="btn" :disabled="pendingRelationshipCount === 0" @click="confirmAllRelationships">一键确认待核对项（{{ pendingRelationshipCount }}）</button>
+              <button class="btn" :disabled="confirmableRelationshipCount === 0" @click="confirmAllRelationships">一键确认待核对项（{{ pendingRelationshipCount }}）</button>
             </div>
           </div>
         </details>
@@ -472,6 +472,9 @@ const confirmableEntityCount = computed(() => literaryMemory.value.entities.filt
   entity.reviewStatus !== 'confirmed' && !!entity.source.trim() && !!entity.target.trim(),
 ).length);
 const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
+const confirmableRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) =>
+  relation.reviewStatus !== 'confirmed' && !!relation.subject.trim() && !!relation.predicate.trim() && !!relation.object.trim(),
+).length);
 const filteredLiteraryEntities = computed(() => {
   const query = entitySearch.value.toLocaleLowerCase();
   return literaryMemory.value.entities
