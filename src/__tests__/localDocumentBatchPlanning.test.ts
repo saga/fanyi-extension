@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('webextension-polyfill', () => ({
+  default: { runtime: { sendMessage: vi.fn() } },
+}));
 import { planDocumentBatches } from '../entrypoints/document/useDocumentTranslation';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
 
