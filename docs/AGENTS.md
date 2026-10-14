@@ -12,7 +12,7 @@ pnpm dev:firefox    # Firefox dev mode
 pnpm zip            # package Chrome
 ```
 
-`pnpm compile` must pass before building. The CI workflow runs type checking, tests, and production builds for Chrome and Firefox.
+`pnpm compile` is available for diagnostics, but it currently reports substantial pre-existing type errors across both source and test files, so it is intentionally not a blocking CI step. CI blocks on unit tests and production builds for both Chrome and Firefox. Do not describe the project as type-clean until `pnpm compile` is fixed and re-enabled.
 
 ## Architecture
 
