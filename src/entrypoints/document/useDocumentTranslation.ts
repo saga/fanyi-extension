@@ -3,7 +3,7 @@ import browser from 'webextension-polyfill';
 import type { TranslateChunkResponse } from '../../types/messages';
 import type { Glossary } from '../service/_service';
 import { MODEL_FETCH_TIMEOUT_MS } from '../service/_service';
-import type { PromptStyle } from '../service/deepseek';
+import type { PromptStyle, TranslationMode } from '../service/deepseek';
 import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
 import { buildSegmentBatches, type BatchBudget } from '../utils/document/batcher';
 import type { DocumentSegment } from '../utils/document/types';
@@ -49,6 +49,8 @@ export interface TranslateOptions {
    * 做一次文档级语言检测后填入（见 resolveDocumentStyle）。
    */
   promptStyle?: PromptStyle;
+  /** 全局翻译目标；书籍文学工作流可将当前请求提升为 literary。 */
+  translationMode?: TranslationMode;
   /** 跟随扩展全局设置：将已重建的文档片段交给 vocal-saga 服务端翻译。 */
   useServerTranslation?: boolean;
   /** 本机 Workbuddy/OpenCode Provider；启用时不调用远程 document endpoint。 */
@@ -205,8 +207,9 @@ async function translateSegmentsViaServer(
     warnings: options.documentWarnings ?? [],
     source: options.sourceLang,
     target: options.targetLang,
-    glossary: options.glossary,
+    glossary: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? undefined : options.glossary,
     promptStyle: options.promptStyle,
+    translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
     ...(options.literaryMode && bookMemory ? {
       literaryContext: bookMemory,
       literaryReview: !options.skipReview,
