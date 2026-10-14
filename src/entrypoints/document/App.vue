@@ -270,7 +270,7 @@
           </div>
           <div class="dictionary-actions">
             <button class="btn primary" @click="addEntity">添加实体映射</button>
-            <button class="btn" :disabled="pendingEntityCount === 0" @click="confirmAllEntities">
+            <button class="btn" :disabled="confirmableEntityCount === 0" @click="confirmAllEntities">
               一键确认待核对项（{{ pendingEntityCount }}）
             </button>
           </div>
@@ -278,7 +278,7 @@
 
         <div v-if="filteredLiteraryEntities.length" class="entity-card-list">
           <article v-for="{ entity, index } in filteredLiteraryEntities"
-            :key="'entity-' + index + '-' + entity.source" class="entity-card">
+            :key="'entity-' + index + '-' + entity.source" class="entity-card" :class="{ 'is-pending-card': entity.reviewStatus !== 'confirmed' }">
             <div class="entity-card-header">
               <span class="entity-status" :class="entity.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
                 {{ entity.reviewStatus === 'confirmed' ? '已纳入规范' : '待核对' }}
@@ -345,7 +345,7 @@
             </div>
             <div class="relationship-actions">
               <button class="btn" @click="addRelationship">添加关系</button>
-              <button class="btn" :disabled="!literaryMemory.relationships.some((relation) => relation.reviewStatus !== 'confirmed')" @click="confirmAllRelationships">一键确认待核对项</button>
+              <button class="btn" :disabled="pendingRelationshipCount === 0" @click="confirmAllRelationships">一键确认待核对项（{{ pendingRelationshipCount }}）</button>
             </div>
           </div>
         </details>
@@ -468,6 +468,10 @@ const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
 const pendingEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus !== 'confirmed').length);
 const confirmedEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus === 'confirmed').length);
+const confirmableEntityCount = computed(() => literaryMemory.value.entities.filter((entity) =>
+  entity.reviewStatus !== 'confirmed' && !!entity.source.trim() && !!entity.target.trim(),
+).length);
+const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
 const filteredLiteraryEntities = computed(() => {
   const query = entitySearch.value.toLocaleLowerCase();
   return literaryMemory.value.entities
@@ -1517,7 +1521,7 @@ async function resetAll() {
   border-radius: 9px;
   background: #fff;
 }
-.entity-card:has(.is-pending) { border-left: 3px solid #bf8700; }
+.entity-card.is-pending-card { border-left: 3px solid #bf8700; }
 .entity-card-header {
   display: flex;
   align-items: center;
