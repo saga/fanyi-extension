@@ -131,15 +131,16 @@ export default defineBackground({
     const localAgentQueue = new TranslationQueue(4, 0, 0);
 
     // 远程 Provider 继续走原有 API；本机模式把相同翻译 prompt 发给本机 OpenAI-compatible 入口。
-    function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle): DeepSeekTranslationService {
+    function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle, translationMode: TranslationMode = 'technical'): DeepSeekTranslationService {
       if (config.useLocalAgent) {
         const endpoint = new URL('/v1/chat/completions', getLocalAgentBaseUrl(config)).toString();
         return new DeepSeekTranslationService(config.localAgentToken || '', style, {
           endpoint,
           model: getLocalAgentModelId(config),
+          translationMode,
         });
       }
-      return new DeepSeekTranslationService(config.deepseekApiKey, style);
+      return new DeepSeekTranslationService(config.deepseekApiKey, style, { translationMode });
     }
 
     function getLocalAgentModelId(config: Awaited<ReturnType<typeof getConfig>>): string {
@@ -379,6 +380,13 @@ export default defineBackground({
         }
 
         const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext } = message;
+        // A document may explicitly enter literary mode even when the global profile is technical.
+        const translationMode: TranslationMode = message.translationMode === 'literary' || !!literaryContext
+          ? 'literary'
+          : (message.translationMode === 'technical' ? 'technical' : config.translationMode || 'technical');
+        // Literary translations must never consume the generic term glossary. Entity names are
+        // carried by the literary context/memory and the prompt decides how each name is rendered.
+        const effectiveGlossary = translationMode === 'literary' ? undefined : glossary;
 
         // Cache is keyed per request, but older entries may contain a syntactically valid partial LLM response.
         // Parse IDs before cache lookup so such entries can never masquerade as a full translation.
@@ -416,16 +424,17 @@ export default defineBackground({
 
         // 缓存 key 纳入 glossary + sitePrompt：改术语表/站点规则后不再命中旧脏缓存（分析报告 P0）。
         // glossary/sitePrompt 为空时 key 与改动前一致，旧缓存不无谓失效。
-        const cacheKey =
-          providedCacheKey ||
-          generateTranslationCacheKey(
+        const cacheKey = providedCacheKey
+          ? providedCacheKey + '|mode:' + translationMode
+          : generateTranslationCacheKey(
             jsonContent,
             sourceLang,
             targetLang,
             getEffectiveProviderKey(config),
             promptStyle,
-            glossary,
+            effectiveGlossary,
             effectivePrompt,
+            translationMode,
           );
 
         // Check the extension cache first: an in-memory hit avoids even a loopback HTTP hop.
@@ -464,7 +473,7 @@ export default defineBackground({
           }
         }
 
-        const service = getService(config, promptStyle);
+        const service = getService(config, promptStyle, translationMode);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
         // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
@@ -497,7 +506,7 @@ export default defineBackground({
             let outputChars = 0;
             try {
               const translated = await service.translate(
-                jsonContent, sourceLang, targetLang, glossary, effectivePrompt,
+                jsonContent, sourceLang, targetLang, effectiveGlossary, effectivePrompt,
                 message.responseFormat,
               );
               outputChars = translated.length;
