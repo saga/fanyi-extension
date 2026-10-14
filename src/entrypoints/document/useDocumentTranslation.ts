@@ -761,9 +761,10 @@ export function useDocumentTranslation() {
         sourceLang: options.sourceLang,
         targetLang: options.targetLang,
         pageUrl: 'fanyi://document',
-        glossary: options.glossary,
+        glossary: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? undefined : options.glossary,
         promptStyle: options.promptStyle,
-        ...(options.literaryMode && bookMemory ? {
+        translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
+        ...((options.literaryMode || options.translationMode === 'literary') && bookMemory ? {
           literaryContext: buildLiteraryTranslationContextPrompt(chapterTitle),
         } : {}),
         ...(responseFormat ? { responseFormat } : {}),
@@ -1113,7 +1114,7 @@ export function useDocumentTranslation() {
             } else {
               // 本地：初译一到就提交计进度，审校 detached，不阻塞下一批。
               const normalized = await translateBatchText(
-                batch, effectiveOptions, runId, literaryEnabled ? literaryMemory.value : undefined,
+                batch, effectiveOptions, runId, literaryProfileEnabled ? literaryMemory.value : undefined,
               );
               ok = isCurrentRun(runId);
               if (ok && literaryProfileEnabled && !effectiveOptions.skipReview) {
