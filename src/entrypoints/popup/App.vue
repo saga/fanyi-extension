@@ -36,6 +36,17 @@
       </div>
 
       <div class="select-item">
+        <label>翻译类型</label>
+        <select v-model="config.translationMode" @change="saveConfig">
+          <option value="technical">科技/信息翻译</option>
+          <option value="literary">文学翻译</option>
+        </select>
+        <span class="hint-text">
+          科技模式优先准确、清晰和术语控制；文学模式优先文学表达、人物声音、节奏与实体一致性，并关闭自动术语表。
+        </span>
+      </div>
+
+      <div class="select-item">
         <label>翻译文风</label>
         <select v-model="config.promptStyle" @change="saveConfig">
           <option value="default">通用直译</option>
@@ -160,6 +171,7 @@ const config = ref<Config>({
   deepseekApiKey: '',
   provider: 'deepseek',
   promptStyle: 'default',
+  translationMode: 'technical',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
