@@ -344,11 +344,15 @@ async function analyzeLiteraryChapterViaServer(
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });
-  let data: { memory?: unknown; analyzed?: unknown; warning?: unknown; error?: string };
+  let data: { memory?: unknown; analyzed?: unknown; warning?: unknown; error?: string; requestId?: string };
   try { data = await response.json() as typeof data; }
   catch { throw new Error('书籍实体分析接口返回了无法解析的响应'); }
   if (!isCurrentRun(runId)) return null;
-  if (!response.ok) throw new Error(data.error || ('书籍实体分析失败：HTTP ' + response.status));
+  if (!response.ok) {
+    const message = data.error || ('书籍实体分析失败：HTTP ' + response.status);
+    const requestId = options.useLocalAgent && data.requestId ? ' (本机 request ID: ' + data.requestId + ')' : '';
+    throw new Error(message + requestId);
+  }
   return {
     memory: mergeLiteraryMemory(memory, data.memory),
     analyzed: data.analyzed === true,
@@ -394,11 +398,15 @@ async function reviewLiteraryBatchViaServer(
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   });
-  let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; findings?: unknown; reviewFindings?: unknown; error?: string };
+  let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; findings?: unknown; reviewFindings?: unknown; error?: string; requestId?: string };
   try { data = await response.json() as typeof data; }
   catch { throw new Error('文学审校接口返回了无法解析的响应'); }
   if (!isCurrentRun(runId)) return null;
-  if (!response.ok) throw new Error(data.error || ('文学审校失败：HTTP ' + response.status));
+  if (!response.ok) {
+    const message = data.error || ('文学审校失败：HTTP ' + response.status);
+    const requestId = options.useLocalAgent && data.requestId ? ' (本机 request ID: ' + data.requestId + ')' : '';
+    throw new Error(message + requestId);
+  }
   const allowed = new Set(candidates.map((segment) => segment.id));
   const reviewed = new Map<string, string>();
   if (data.translations && typeof data.translations === 'object' && !Array.isArray(data.translations)) {
