@@ -292,6 +292,19 @@ export class DeepSeekTranslationService implements TranslationService {
       responseFormat,
       this.translationMode,
     );
+    // Document-reader prompt overrides are applied at the final request boundary so the
+    // editor shows what is actually sent, while normal web-page prompts remain untouched.
+    if (sessionContext?.systemPromptOverride?.trim()) {
+      body.messages[0].content = sessionContext.systemPromptOverride.trim();
+    }
+    if (sessionContext?.userPromptTemplate?.trim()) {
+      const contentJson = JSON.stringify(blocks, null, 2);
+      const template = sessionContext.userPromptTemplate;
+      body.messages[1].content = template.includes('{{CONTENT}}')
+        ? template.replaceAll('{{CONTENT}}', contentJson)
+        : template + '\n\nJSON content (IDs and structure must be preserved):\n' + contentJson;
+    }
+
     // The local service uses this metadata to route document batches to one isolated SDK
     // session. Do not send the extension's internal session identifiers to remote providers.
     if (sessionContext && this.endpoint !== DEFAULT_API_URL) {
