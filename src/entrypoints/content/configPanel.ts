@@ -89,6 +89,13 @@ function buildPanelHtml(isMobile: boolean): string {
         </select>
       </div>
       <div class="fanyi-config-row">
+        <label>翻译类型</label>
+        <select class="fanyi-translation-mode">
+          <option value="technical">科技/信息翻译</option>
+          <option value="literary">文学翻译</option>
+        </select>
+      </div>
+      <div class="fanyi-config-row">
         <label>翻译文风</label>
         <select class="fanyi-prompt-style">
           <option value="default">通用直译</option>
@@ -138,6 +145,7 @@ async function loadConfigIntoPanel(panel: HTMLElement, isMobile: boolean): Promi
   (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value = config.sourceLang || 'auto';
   (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value = config.targetLang || 'zh';
   (panel.querySelector('.fanyi-prompt-style') as HTMLSelectElement).value = config.promptStyle || 'default';
+  (panel.querySelector('.fanyi-translation-mode') as HTMLSelectElement).value = config.translationMode || 'technical';
 
   // 服务端翻译开关
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
@@ -243,6 +251,7 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
   config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
   config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
   config.promptStyle = (panel.querySelector('.fanyi-prompt-style') as HTMLSelectElement).value as Config['promptStyle'];
+  config.translationMode = (panel.querySelector('.fanyi-translation-mode') as HTMLSelectElement).value as Config['translationMode'];
 
   config.useServerTranslation = useServer;
   const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
