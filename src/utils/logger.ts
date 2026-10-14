@@ -66,11 +66,51 @@ function isDebugEnabled(): boolean {
  *   `expect(warn.mock.calls[0][0]).toContain('NodeMap mismatch')`
  * —— 拼到字符串里，'NodeMap mismatch' 仍然是首参的子串。
  */
-function withPrefix(level: string, args: LogArgs): LogArgs {
-  if (args.length > 0 && typeof args[0] === 'string') {
-    return [`${PREFIX}:${level}] ${args[0]}`, ...args.slice(1)];
+/**
+ * DevTools differ in how they render objects passed through extension/content-script logs.
+ * Serialize structured values explicitly so failures never collapse to "[object Object]".
+ * Error properties are normally non-enumerable, so copy name/message/stack deliberately.
+ */
+function formatLogArg(value: unknown): unknown {
+  if (value instanceof Error) {
+    return JSON.stringify({
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+      cause: value.cause instanceof Error
+        ? { name: value.cause.name, message: value.cause.message, stack: value.cause.stack }
+        : value.cause,
+    }, null, 2);
   }
-  return [`${PREFIX}:${level}]`, ...args];
+  if (!value || typeof value !== 'object') return value;
+
+  const seen = new WeakSet<object>();
+  try {
+    const serialized = JSON.stringify(value, (_key, current: unknown) => {
+      if (current instanceof Error) {
+        return { name: current.name, message: current.message, stack: current.stack };
+      }
+      if (current && typeof current === 'object') {
+        if (seen.has(current as object)) return '[Circular]';
+        seen.add(current as object);
+      }
+      return current;
+    }, 2);
+    if (serialized == null) return Object.prototype.toString.call(value);
+    return serialized.length > 12000
+      ? serialized.slice(0, 12000) + '\n…[log object truncated at 12000 characters]'
+      : serialized;
+  } catch (error) {
+    return '[unserializable object: ' + (error instanceof Error ? error.message : String(error)) + ']';
+  }
+}
+
+function withPrefix(level: string, args: LogArgs): LogArgs {
+  const formatted = args.map(formatLogArg);
+  if (args.length > 0 && typeof args[0] === 'string') {
+    return [`${PREFIX}:${level}] ${args[0]}`, ...formatted.slice(1)];
+  }
+  return [`${PREFIX}:${level}]`, ...formatted];
 }
 
 export const logger = {
