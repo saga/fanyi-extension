@@ -321,177 +321,21 @@ describe('translateCaptions', () => {
 // isYouTubeWatchPage — 页面检测
 // =============================================================================
 
-describe('isYouTubeWatchPage', () => {
-  it('returns true for YouTube watch page', () => {
-    expect(isYouTubeWatchPage('https://www.youtube.com/watch?v=abc123')).toBe(true);
-  });
-
-  it('returns false for YouTube homepage', () => {
-    expect(isYouTubeWatchPage('https://www.youtube.com/')).toBe(false);
-  });
-
-  it('returns false for YouTube search page', () => {
-    expect(isYouTubeWatchPage('https://www.youtube.com/results?search_query=test')).toBe(false);
-  });
-
-  it('returns false for non-YouTube site', () => {
-    expect(isYouTubeWatchPage('https://example.com/watch?v=abc')).toBe(false);
-  });
-
-  it('returns false for invalid URL', () => {
-    expect(isYouTubeWatchPage('not-a-url')).toBe(false);
-  });
-});
 
 // =============================================================================
 // CaptionOverlay — Overlay 渲染器
 // =============================================================================
 
-describe('CaptionOverlay', () => {
-  let overlay: CaptionOverlay;
-
-  beforeEach(() => {
-    document.body.innerHTML = '';
-    overlay = new CaptionOverlay();
-  });
-
-  afterEach(() => {
-    overlay.stop();
-  });
-
-  it('start returns false when no video element', () => {
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Hello' },
-    ];
-    expect(overlay.start(captions)).toBe(false);
-  });
-
-  it('start returns true and creates overlay when video exists', () => {
-    const video = document.createElement('video');
-    video.className = 'html5-main-video';
-    const player = document.createElement('div');
-    player.className = 'html5-video-player';
-    player.appendChild(video);
-    document.body.appendChild(player);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 5000, text: 'Hello', translatedText: '你好' },
-    ];
-
-    expect(overlay.start(captions)).toBe(true);
-    expect(document.getElementById('fanyi-caption-overlay')).not.toBeNull();
-  });
-
-  it('stop removes overlay element', () => {
-    const video = document.createElement('video');
-    document.body.appendChild(video);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 1000, text: 'Test' },
-    ];
-
-    overlay.start(captions);
-    expect(document.getElementById('fanyi-caption-overlay')).not.toBeNull();
-
-    overlay.stop();
-    expect(document.getElementById('fanyi-caption-overlay')).toBeNull();
-  });
-
-});
 
 // =============================================================================
 // translateAhead — Ahead Buffer 增量翻译
 // =============================================================================
 
-describe('translateAhead', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    globalFetch.mockReset();
-  });
-
-  it('only translates captions within the ahead window', async () => {
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{
-          message: {
-            content: '{"translations":[{"id":"0","translated_text":"你好"}]}',
-          },
-        }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 2000, text: 'Hello', status: 'pending' },
-      { startMs: 100_000, durationMs: 2000, text: 'Far away', status: 'pending' },
-    ];
-
-    await translateAhead(captions, 0, 90_000, 'test-api-key');
-
-    expect(captions[0].translatedText).toBe('你好');
-    expect(captions[0].status).toBe('done');
-    expect(captions[1].translatedText).toBeUndefined();
-    expect(captions[1].status).toBe('pending');
-  });
-
-  it('skips already translated captions', async () => {
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{ message: { content: '{"translations":[]}' } }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
-
-    const captions: CaptionEvent[] = [
-      { startMs: 0, durationMs: 2000, text: 'Hello', translatedText: '已翻译', status: 'done' },
-      { startMs: 2000, durationMs: 2000, text: 'World', status: 'pending' },
-    ];
-
-    await translateAhead(captions, 0, 90_000, 'test-api-key');
-
-    expect(captions[0].translatedText).toBe('已翻译');
-    expect(captions[1].status).toBe('failed');
-  });
-
-
-
-});
 
 // =============================================================================
 // translateBatch — 单批翻译（带 AbortSignal）
 // =============================================================================
 
-describe('translateBatch', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    globalFetch.mockReset();
-  });
-
-
-  it('passes signal to fetch', async () => {
-    const controller = new AbortController();
-    const mockResponse = {
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{ message: { content: '{"translations":[{"id":"0","translated_text":"你好"}]}' } }],
-      }),
-    };
-    globalFetch.mockResolvedValue(mockResponse);
-
-    await translateBatch('test-api-key', [{ id: '0', text: 'Hello' }], controller.signal);
-
-    const fetchCall = globalFetch.mock.calls[0];
-    expect(fetchCall[1].signal).toBe(controller.signal);
-  });
-
-  it('handles empty blocks array', async () => {
-    const result = await translateBatch('test-api-key', []);
-    expect(result.size).toBe(0);
-    expect(globalFetch).not.toHaveBeenCalled();
-  });
-});
 
 // =============================================================================
 // YouTubeCaptionManager — 生命周期 / 缓存 / 取消

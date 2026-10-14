@@ -290,10 +290,10 @@
 
       <section v-if="literaryStatus.reviewFindings.length" class="panel literary-review-findings">
         <strong>Reviewer 审校记录</strong>
-        <p class="muted small">明确的事实/术语错误会自动修正；风格偏好仅作参考，不会自动覆盖译文。</p>
+        <p class="muted small">审校只报明确的事实/术语错误，命中即自动修正译文；文风偏好不在审校范围内。</p>
         <div v-for="(finding, index) in literaryStatus.reviewFindings" :key="'finding-' + index" class="literary-review-finding">
           <div>
-            <span class="chip">{{ finding.priority === 'must_fix' ? '必须修正（已应用）' : '可选风格/措辞建议' }}</span>
+            <span class="chip">{{ finding.priority === 'optional' ? '仅提示（未覆盖译文）' : '必须修正（已应用）' }}</span>
             <span class="muted small">{{ finding.id }} · {{ finding.category }}</span>
           </div>
           <p v-if="finding.sourceExcerpt"><strong>原文：</strong>{{ finding.sourceExcerpt }}</p>

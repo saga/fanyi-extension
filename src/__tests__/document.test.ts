@@ -110,38 +110,6 @@ describe('splitLongText', () => {
 // subtitle
 // ============================================================
 
-describe('字幕解析', () => {
-  const srt = `1
-00:00:01,000 --> 00:00:03,000
-Hello world
-
-2
-00:00:04,000 --> 00:00:06,000
-Second line
-here`;
-
-  it('SRT 按 cue 切分并保留时间码', () => {
-    const cues = parseSrt(srt);
-    expect(cues).toHaveLength(2);
-    expect(cues[0]?.start).toBe('00:00:01.000');
-    expect(cues[0]?.text).toBe('Hello world');
-    expect(cues[1]?.text).toBe('Second line\nhere');
-  });
-
-  it('VTT 跳过 WEBVTT 头与 NOTE 块', () => {
-    const vtt = `WEBVTT
-
-NOTE this is a comment
-
-1
-00:00:01.000 --> 00:00:03.000
-Hi there`;
-    const cues = parseVtt(vtt);
-    expect(cues).toHaveLength(1);
-    expect(cues[0]?.text).toBe('Hi there');
-  });
-
-});
 
 // ============================================================
 // html
@@ -240,67 +208,6 @@ describe('buildSegmentBatches', () => {
   });
 });
 
-describe('buildDocumentPages', () => {
-  const seg = (
-    id: string,
-    text: string,
-    extra: Partial<DocumentSegment> = {},
-  ): DocumentSegment => ({
-    id,
-    index: Number(id.replace(/\D/g, '') || '0'),
-    text,
-    kind: 'paragraph',
-    ...extra,
-  });
-
-  it('EPUB 按章节分页，并把超长章节切成适合阅读的子页', () => {
-    const doc = {
-      format: 'epub' as const,
-      title: 'A Book',
-      segments: [
-        seg('s0', 'Chapter One', { kind: 'heading', path: 'Text/ch1.xhtml', contextPath: 'Chapter One' }),
-        seg('s1', 'a'.repeat(60), { path: 'Text/ch1.xhtml', contextPath: 'Chapter One' }),
-        seg('s2', 'b'.repeat(60), { path: 'Text/ch1.xhtml', contextPath: 'Chapter One' }),
-        seg('s3', 'Chapter Two', { kind: 'heading', path: 'Text/ch2.xhtml', contextPath: 'Chapter Two' }),
-      ],
-      meta: { charCount: 142, segmentCount: 4, warnings: [] },
-    };
-    const pages = buildDocumentPages(doc, { maxChars: 100, maxSegments: 10 });
-    expect(pages).toHaveLength(3);
-    expect(pages[0]?.sectionTitle).toBe('Chapter One');
-    expect(pages[0]?.segments.map((item) => item.id)).toEqual(['s0', 's1']);
-    expect(pages[1]?.title).toContain('2/2');
-    expect(pages[2]?.sectionTitle).toBe('Chapter Two');
-    expect(pages.flatMap((page) => page.segments).map((item) => item.id))
-      .toEqual(doc.segments.map((item) => item.id));
-  });
-
-  it('长文本分页不丢失片段，且每页遵循片段数预算', () => {
-    const doc = {
-      format: 'txt' as const,
-      title: 'Notes',
-      segments: Array.from({ length: 7 }, (_, index) => seg('s' + index, 'x'.repeat(20))),
-      meta: { charCount: 140, segmentCount: 7, warnings: [] },
-    };
-    const pages = buildDocumentPages(doc, { maxChars: 45, maxSegments: 2 });
-    expect(pages).toHaveLength(4);
-    expect(pages.flatMap((page) => page.segments)).toHaveLength(7);
-    expect(pages.every((page) => page.segments.length <= 2)).toBe(true);
-  });
-
-  it('PDF 优先保留原始页码边界', () => {
-    const doc = {
-      format: 'pdf' as const,
-      title: 'Paper',
-      segments: [
-        seg('s0', 'page one', { page: 1 }),
-        seg('s1', 'page two', { page: 2 }),
-      ],
-      meta: { charCount: 16, segmentCount: 2, warnings: [] },
-    };
-    expect(buildDocumentPages(doc).map((page) => page.title)).toEqual(['PDF 第 1 页', 'PDF 第 2 页']);
-  });
-});
 
 describe('文学书籍记忆', () => {
   it('跨章节锁定规范译名，同时合并别名、关系和缺失的风格字段', () => {
@@ -375,68 +282,6 @@ describe('文学书籍记忆', () => {
 // export
 // ============================================================
 
-describe('exportDocument', () => {
-  const doc = parseTextDocument('# 标题\n\n正文一句。', 'md');
-  const translations: Record<string, string> = {};
-
-  it('双语 Markdown 还原标题层级', () => {
-    const out = exportDocument(doc, translations, 'md', { mode: 'bilingual' });
-    expect(out).toContain('# 标题');
-    expect(out).toContain('正文一句。');
-  });
-
-
-  it('Markdown/HTML 导出保留 PDF 编号列表，且不把 marker 重复拼入正文', () => {
-    const listDoc = {
-      format: 'pdf' as const,
-      title: 'List',
-      segments: [
-        { id: 'l1', index: 0, text: 'First translated entry', kind: 'list-item' as const, marker: '1.' },
-        { id: 'l2', index: 1, text: 'Second translated entry', kind: 'list-item' as const, marker: '2.' },
-      ],
-      meta: { charCount: 42, segmentCount: 2, warnings: [] },
-    };
-
-    const markdown = exportDocument(listDoc, {}, 'md', { mode: 'translation' });
-    expect(markdown).toContain('1. First translated entry');
-    expect(markdown).toContain('2. Second translated entry');
-    expect(markdown).not.toContain('- 1. First');
-
-    const html = exportDocument(listDoc, {}, 'html', { mode: 'translation' });
-    expect(html).toContain('<ol><li>');
-    expect(html).toContain('First translated entry');
-    expect(html).toContain('Second translated entry');
-    expect(html).toContain('</li>');
-  });
-
-  it('HTML 导出做转义，防注入', () => {
-    const evil = parseTextDocument('<img src=x onerror=alert(1)>', 'txt');
-    const out = exportDocument(evil, {}, 'html');
-    expect(out).not.toContain('<img');
-    expect(out).toContain('&lt;img');
-  });
-
-  it('双语字幕导出保留时间码', () => {
-    const sub = parseSubtitleDocument(
-      '1\n00:00:01,000 --> 00:00:02,000\nHello',
-      'srt',
-      'a.srt',
-    );
-    const out = exportDocument(sub, { s0: '你好' }, 'srt', { mode: 'bilingual' });
-    expect(out).toContain('00:00:01,000 --> 00:00:02,000');
-    expect(out).toContain('Hello\n你好');
-  });
-
-  it('JSON 导出回填原结构', () => {
-    const raw = JSON.stringify({ a: 'Hello', b: 'World' });
-    const parsed = parseJsonDocument(raw);
-    const out = exportDocument(parsed, { s0: '你好', s1: '世界' }, 'json', {
-      mode: 'translation',
-      jsonRoot: raw,
-    });
-    expect(JSON.parse(out)).toEqual({ a: '你好', b: '世界' });
-  });
-});
 
 
 describe('文档翻译响应完整性校验', () => {

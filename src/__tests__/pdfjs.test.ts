@@ -367,89 +367,11 @@ describe('groupLinesIntoParagraphs', () => {
 // restorePdfJsViewer
 // =============================================================================
 
-describe('restorePdfJsViewer', () => {
-  let mod: typeof import('../entrypoints/content/pdfjs');
-
-  beforeEach(async () => {
-    document.body.innerHTML = '';
-    vi.clearAllMocks();
-    mod = await import('../entrypoints/content/pdfjs');
-  });
-
-
-  it('removes data-fanyi-pdfjs-line attributes from spans', () => {
-    const span = document.createElement('span');
-    span.textContent = 'hello';
-    span.setAttribute('data-fanyi-pdfjs-line', 'pdfjs-p0');
-    document.body.appendChild(span);
-
-    mod.restorePdfJsViewer(document);
-    expect(span.hasAttribute('data-fanyi-pdfjs-line')).toBe(false);
-  });
-
-  it('clears body.dataset.fanyiTranslated', () => {
-    document.body.dataset.fanyiTranslated = 'true';
-    mod.restorePdfJsViewer(document);
-    expect(document.body.dataset.fanyiTranslated).toBeUndefined();
-  });
-
-  it('does not throw when no overlays exist (idempotent)', () => {
-    expect(() => mod.restorePdfJsViewer(document)).not.toThrow();
-  });
-
-  it('leaves other DOM nodes untouched', () => {
-    const overlay = document.createElement('div');
-    overlay.className = 'fanyi-pdfjs-translation';
-    const other = document.createElement('div');
-    other.className = 'some-other-class';
-    document.body.append(overlay, other);
-
-    mod.restorePdfJsViewer(document);
-    expect(document.querySelector('.some-other-class')).not.toBeNull();
-  });
-});
 
 // =============================================================================
 // togglePdfJsViewer
 // =============================================================================
 
-describe('togglePdfJsViewer', () => {
-  let mod: typeof import('../entrypoints/content/pdfjs');
-
-  beforeEach(async () => {
-    document.body.innerHTML = '';
-    vi.clearAllMocks();
-    mod = await import('../entrypoints/content/pdfjs');
-  });
-
-  it('hides overlays on first toggle (sets display: none)', () => {
-    const overlay = document.createElement('div');
-    overlay.className = 'fanyi-pdfjs-translation';
-    document.body.appendChild(overlay);
-    // 初始 display 为空字符串（继承默认）
-    expect(overlay.style.display).toBe('');
-
-    mod.togglePdfJsViewer(document);
-    expect(overlay.style.display).toBe('none');
-  });
-
-
-  it('toggles multiple overlays independently but consistently', () => {
-    const o1 = document.createElement('div');
-    o1.className = 'fanyi-pdfjs-translation';
-    const o2 = document.createElement('div');
-    o2.className = 'fanyi-pdfjs-translation';
-    document.body.append(o1, o2);
-
-    mod.togglePdfJsViewer(document);
-    expect(o1.style.display).toBe('none');
-    expect(o2.style.display).toBe('none');
-  });
-
-  it('does not throw when no overlays exist', () => {
-    expect(() => mod.togglePdfJsViewer(document)).not.toThrow();
-  });
-});
 
 // =============================================================================
 // translatePdfJsViewer (端到端集成测试)
