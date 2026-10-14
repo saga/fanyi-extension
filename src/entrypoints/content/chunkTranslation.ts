@@ -14,6 +14,23 @@ import type { TranslateChunkResponse } from '../../types/messages';
 import type { PromptStyle, TranslationMode } from '../service/deepseek';
 
 import { logger } from '../../utils/logger';
+
+/**
+ * Page-level literary post-edit prompt. The shared translation service still owns the outer
+ * [{ id, translated_text }] response contract, so each translated_text must itself be a JSON
+ * string containing finalTranslation/findings; the caller parses that inner object by id.
+ * Do not build a glossary here: the source and draft plus the nearby page context are the only
+ * evidence available for this independent editorial pass.
+ */
+function buildLiteraryPageReviewInstructions(): string {
+  return [
+    '你是文学翻译的独立第二遍编辑。输入的每个 text 字段是一段 JSON 字符串，包含 source（原文）、draft（初译）和 kind。请编辑译文，不要把这段 JSON 当成要展示给读者的正文。',
+    '目标是准确、自然、有文学质感的目标语言表达：修正生硬直译、别扭搭配、机械句序、无意义连接词、解释性补句、情绪词不准、人物声音同质化和被抹平的节奏。尊重原文简洁、重复、停顿、留白、歧义、反讽与潜台词。',
+    '准确性优先。不可漏译、误译、增加事实、改动人物关系、否定、时态、视角或因果；不得为了华丽而新增比喻、情绪或解释。候选实体/人名/地名/物品名须按原文和输入片段一致处理；不要创建术语表，也不要因为英文大写而保留普通词。',
+    '仅在有明确文本依据时记录 finding。category 只能为 accuracy、terminology 或 style；前两类 priority=must_fix，style priority=optional。style 必须指出具体翻译腔或节奏/语气问题，不能只是个人审美。',
+    '必须遵守通用输出格式：每个输入 id 返回一个 translated_text；translated_text 的值必须是严格 JSON 字符串，形如 {"finalTranslation":"完整修订译文","findings":[{"category":"accuracy|terminology|style","priority":"must_fix|optional","sourceExcerpt":"原文短引","draftExcerpt":"初译问题短引","reason":"具体理由","suggestion":"修订建议"}]}。没有问题时 findings=[]，finalTranslation 原样保留 draft。不要在 translated_text 外添加字段或 Markdown。',
+  ].join('\\n');
+}
 // ============================================================
 // Error categorisation for [SessionSummary]
 // ============================================================
