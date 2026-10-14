@@ -616,8 +616,17 @@ watch(literaryMemory, () => {
 onMounted(async () => {
   // 文档翻译默认沿用 popup 的全局配置；恢复旧会话时，保存的语言选择仍由恢复逻辑覆盖。
   const config = await getConfig();
+  readerConfig.value = config;
   sourceLang.value = config.sourceLang || 'auto';
   targetLang.value = config.targetLang || 'zh';
+  englishFontFamily.value = config.documentEnglishFontFamily || 'Georgia';
+  chineseFontFamily.value = config.documentChineseFontFamily || 'Noto Serif CJK SC';
+  englishFontSize.value = Number.isFinite(config.documentEnglishFontSize) ? config.documentEnglishFontSize : 17;
+  chineseFontSize.value = Number.isFinite(config.documentChineseFontSize) ? config.documentChineseFontSize : 18;
+  documentSystemPromptOverride.value = config.documentSystemPromptOverride || '';
+  documentSystemPromptEditor.value = documentSystemPromptOverride.value || builtInDocumentSystemPrompt.value;
+  documentUserPromptTemplate.value = config.documentUserPromptTemplate || '';
+  documentUserPromptEditor.value = documentUserPromptTemplate.value || BUILT_IN_USER_PROMPT_TEMPLATE;
   if (config.translationMode === 'literary') literaryMode.value = true;
   await refreshSavedSessionSummary();
 });
@@ -664,6 +673,8 @@ function showReviewSegment(id: string) {
 }
 
 /** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
+function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Config)[]) {
+  readerConfig.value = config;
   if (changedFields.includes('sourceLang')) sourceLang.value = config.sourceLang;
   if (changedFields.includes('targetLang')) targetLang.value = config.targetLang;
   if (changedFields.includes('translationMode')) {
@@ -671,6 +682,8 @@ function showReviewSegment(id: string) {
     // EPUB/PDF 用户仍可在确认选择科技模式后，手动再次启用“整本书记忆”覆盖项。
     literaryMode.value = config.translationMode === 'literary';
   }
+  if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
+  if (!documentUserPromptTemplate.value) documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
 }
 
 async function refreshSavedSessionSummary() {
