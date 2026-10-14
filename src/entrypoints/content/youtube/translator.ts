@@ -11,6 +11,7 @@
  * 字幕专用简化 prompt 保持不变（问题 9 Prompt 增强保留为后续迭代）。
  */
 import type { CaptionEvent, ProgressCallback } from './types';
+import { getConfig } from '../../utils/config';
 
 import { logger } from '../../../utils/logger';
 // =============================================================================
@@ -138,13 +139,40 @@ export async function translateBatch(
     stream: false,
   };
 
-  const response = await fetch(CAPTION_API_URL, {
-    method: 'POST',
-    headers: {
+  // YouTube 字幕以前绕开 background，直接请求 DeepSeek；本机 Provider 开启时
+  // 这会让字幕意外流出到远程 API。现在遵守与网页/文档相同的本机优先级。
+  const config = await getConfig();
+  const useLocalAgent = config.useLocalAgent === true;
+  let endpoint = CAPTION_API_URL;
+  let requestBody: typeof body = body;
+  let headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + apiKey,
+  };
+
+  if (useLocalAgent) {
+    let base = config.localAgentUrl || 'http://127.0.0.1:8789';
+    while (base.endsWith('/')) base = base.slice(0, -1);
+    endpoint = new URL('/v1/chat/completions', base).toString();
+
+    const override = (config.localAgentModel || 'auto').trim();
+    const model = override && override.toLowerCase() !== 'auto'
+      ? (/^(workbuddy|opencode):/i.test(override)
+        ? override
+        : (config.localAgentProvider || 'opencode') + ':' + override)
+      : (config.localAgentProvider || 'opencode');
+
+    requestBody = { ...body, model };
+    headers = {
       'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + apiKey,
-    },
-    body: JSON.stringify(body),
+      ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+    };
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(requestBody),
     signal, // 让 fetch 在 abort 时抛 AbortError
   });
 
