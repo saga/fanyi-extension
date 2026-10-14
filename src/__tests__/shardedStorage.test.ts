@@ -115,6 +115,48 @@ describe('ShardedCache', () => {
     expect(result).toBe('value2');
   });
 
+  it('serializes concurrent writes without dropping index entries', async () => {
+    const keys = Array.from({ length: 30 }, (_, index) => 'page-' + index);
+    await Promise.all(keys.map((key) => cache.set(key, 'translation:' + key, 60000)));
+    expect(await cache.size()).toBe(keys.length);
+    for (const key of keys) {
+      expect(await cache.get<string>(key)).toBe('translation:' + key);
+    }
+  });
+
+  it('migrates a legacy cache object to individual storage keys', async () => {
+    store['local:legacy-cache'] = {
+      oldPage: { data: 'old translation', timestamp: Date.now(), ttl: 60000 },
+      expiredPage: { data: 'expired translation', timestamp: Date.now() - 120000, ttl: 1000 },
+    };
+    cache = new ShardedCache('test', 'local:meta:test:index', 'local:legacy-cache');
+
+    expect(await cache.get<string>('oldPage')).toBe('old translation');
+    expect(store).not.toHaveProperty('local:legacy-cache');
+    expect(store).toHaveProperty('local:test:oldPage');
+    expect(await cache.get('expiredPage')).toBeNull();
+    expect(await cache.size()).toBe(1);
+  });
+
+  it('clear after migration also clears migrated in-memory entries', async () => {
+    store['local:legacy-cache'] = {
+      oldPage: { data: 'old translation', timestamp: Date.now(), ttl: 60000 },
+    };
+    cache = new ShardedCache('test', 'local:meta:test:index', 'local:legacy-cache');
+
+    expect(await cache.get<string>('oldPage')).toBe('old translation');
+    await cache.clear();
+    expect(await cache.get('oldPage')).toBeNull();
+    expect(await cache.size()).toBe(0);
+  });
+
+  it('expired items are removed by pruneExpired', async () => {
+    await cache.set('expired', 'value', 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await cache.pruneExpired()).toBe(1);
+    expect(await cache.size()).toBe(0);
+  });
+
   // --- 隔离性 ---
 
 
