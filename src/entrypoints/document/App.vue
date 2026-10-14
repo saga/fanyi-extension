@@ -373,6 +373,79 @@ async function refreshSavedSessionSummary() {
   }
 }
 
+
+const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
+
+async function persistDocumentCheckpointToLocalService(input: {
+  sourceLang: string; targetLang: string; viewMode: SavedViewMode; literaryMode: boolean;
+  currentPageIndex: number; snapshot: ReturnType<typeof getSnapshot>;
+  translationDelta: Array<[string, string]>; translatedSegmentCount: number;
+}) {
+  const config = await getConfig();
+  if (!config.useLocalAgent || !doc.value) return;
+  try {
+    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    base.pathname = '/api/documents/session/save';
+    base.search = '';
+    base.hash = '';
+    const response = await fetch(base.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+      },
+      body: JSON.stringify({
+        sessionId: LOCAL_DOCUMENT_SESSION_ID,
+        title: doc.value.title || documentFileName,
+        format: doc.value.format,
+        payload: { ...input, document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value },
+      }),
+    });
+    if (!response.ok) console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
+  } catch (error) {
+    // IndexedDB remains primary; a stopped local service must not interrupt translation.
+    console.debug('[document-reader] local SQLite checkpoint unavailable:', error);
+  }
+}
+
+async function loadDocumentCheckpointFromLocalService() {
+  const config = await getConfig();
+  if (!config.useLocalAgent) return null;
+  try {
+    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    base.pathname = '/api/documents/session/get';
+    base.search = '';
+    base.hash = '';
+    const response = await fetch(base.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+      },
+      body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
+    });
+    if (!response.ok) return null;
+    const result = await response.json() as { found?: boolean; session?: { payload?: Record<string, any> } };
+    const payload = result.session?.payload;
+    if (!result.found || !payload?.document || !payload?.snapshot) return null;
+    const snapshot = payload.snapshot;
+    return {
+      ...payload,
+      translations: Array.isArray(snapshot.translations) ? snapshot.translations : [],
+      total: snapshot.total ?? 0,
+      done: snapshot.done ?? 0,
+      failedBatches: snapshot.failedBatches ?? [],
+      error: snapshot.error ?? '',
+      literaryMemory: snapshot.literaryMemory,
+      literaryStatus: snapshot.literaryStatus,
+      analyzedChapterKeys: snapshot.analyzedChapterKeys,
+      lastRunSegmentIds: snapshot.lastRunSegmentIds,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function persistCurrentSession() {
   if (!activeSessionReady.value || !doc.value) return;
   const snapshot = getSnapshot();
@@ -393,6 +466,7 @@ async function persistCurrentSession() {
   // 多个 Vue watcher 和翻译批次可能同时请求保存，按顺序写入，避免旧快照覆盖新状态。
   const write = persistenceQueue.then(async () => {
     await saveActiveDocumentProgress(input);
+    await persistDocumentCheckpointToLocalService(input);
     for (const [id, text] of delta) persistedTranslations.value.set(id, text);
     persistenceMessage.value = '阅读位置、译文和书籍记忆已自动保存到本机；刷新页面后可以继续。';
   });
@@ -410,7 +484,7 @@ async function restoreLastSession() {
   parseError.value = '';
   persistenceMessage.value = '';
   try {
-    const saved = await loadActiveDocumentSession();
+    const saved = await loadActiveDocumentSession() ?? await loadDocumentCheckpointFromLocalService();
     if (!saved) {
       savedSessionSummary.value = null;
       persistenceMessage.value = '没有可恢复的阅读记录。';
