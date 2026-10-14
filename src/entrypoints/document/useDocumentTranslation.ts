@@ -112,6 +112,16 @@ interface ServerDocumentTranslationResponse {
  * 将各部署模式的现有 serverUrl 规范化为结构化文档端点。
  * 默认设置是 /fanyi/page；文档接口与之同域，但路径独立，服务端不会接收 PDF 二进制。
  */
+/**
+ * 本机 Provider 是强制路由。即使调用方误把两个开关都设为 true，
+ * 也必须优先使用扩展的本机 provider，绝不触发远程文档翻译 API。
+ */
+export function shouldUseRemoteDocumentTranslation(
+  options: Pick<TranslateOptions, 'useLocalAgent' | 'useServerTranslation'>,
+): boolean {
+  return options.useServerTranslation === true && options.useLocalAgent !== true;
+}
+
 function resolveLocalAgentEndpoint(localAgentUrl: string | undefined, endpointPath: string): string {
   const url = new URL(localAgentUrl?.trim() || 'http://127.0.0.1:8789');
   url.pathname = endpointPath;
@@ -155,6 +165,9 @@ async function translateSegmentsViaServer(
   isCurrentRun: (runId: number) => boolean,
   bookMemory?: LiteraryBookMemory,
 ): Promise<ServerDocumentTranslationResponse | null> {
+  if (options.useLocalAgent) {
+    throw new Error('本机 Provider 已启用，拒绝调用远程文档翻译端点');
+  }
   if (!segments.length) return { translations: {}, failedBatches: [], errors: [], complete: true };
 
   const format = options.documentFormat || 'txt';
@@ -627,7 +640,7 @@ export function useDocumentTranslation() {
     runId: number,
     bookMemory?: LiteraryBookMemory,
   ): Promise<boolean> {
-    if (options.useServerTranslation) {
+    if (shouldUseRemoteDocumentTranslation(options)) {
       // 服务端路径对文学模式执行初译 + 独立 reviewer；普通文档仍走原管线。
       const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun, bookMemory);
       if (!result || !isCurrentRun(runId)) return false;
