@@ -150,6 +150,31 @@ describe('ShardedCache', () => {
     expect(await cache.size()).toBe(0);
   });
 
+  it('persistent storage failures degrade to memory cache without throwing', async () => {
+    const storageModule = await import('@wxt-dev/storage');
+    const originalSet = storageModule.storage.setItem;
+    storageModule.storage.setItem = vi.fn(async () => {
+      throw new Error('Storage quota exceeded');
+    });
+
+    await expect(cache.set('key1', 'value1', 60000)).resolves.toBeUndefined();
+    expect(await cache.get<string>('key1')).toBe('value1');
+
+    storageModule.storage.setItem = originalSet;
+  });
+
+  it('storage read failures return cache miss instead of throwing', async () => {
+    const storageModule = await import('@wxt-dev/storage');
+    const originalGet = storageModule.storage.getItem;
+    storageModule.storage.getItem = vi.fn(async () => {
+      throw new Error('Storage unavailable');
+    });
+
+    await expect(cache.get('missing')).resolves.toBeNull();
+
+    storageModule.storage.getItem = originalGet;
+  });
+
   it('expired items are removed by pruneExpired', async () => {
     await cache.set('expired', 'value', 1);
     await new Promise((resolve) => setTimeout(resolve, 10));
