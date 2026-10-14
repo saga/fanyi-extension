@@ -442,7 +442,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { createEmptyLiteraryMemory, type LiteraryEntity, type LiteraryRelationship } from '@/entrypoints/utils/document/literary';
+import { createEmptyLiteraryMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -598,7 +598,47 @@ onMounted(async () => {
 });
 
 /** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
-function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Config)[]) {
+/** 将 Reviewer 的完整文风候选稿明确应用到正文，而不是只把一条建议标成已读。 */
+async function applyReviewProposal(finding: LiteraryReviewFinding) {
+  if (!doc.value || !finding.proposedTranslation?.trim()) return;
+  const segmentExists = doc.value.segments.some((segment) => segment.id === finding.id);
+  if (!segmentExists) {
+    persistenceMessage.value = '无法定位片段 ' + finding.id + '，当前文档可能已更换。';
+    return;
+  }
+  state.value.translations.set(finding.id, finding.proposedTranslation);
+  for (const item of literaryStatus.value.reviewFindings) {
+    if (item.id === finding.id && item.category === 'style' &&
+        item.proposedTranslation === finding.proposedTranslation) {
+      item.applicationStatus = 'applied';
+    }
+  }
+  persistenceMessage.value = '已采用 Reviewer 候选译文：' + finding.id + '。你可以在阅读页继续编辑并导出。';
+  await persistCurrentSession();
+}
+
+async function dismissReviewProposal(finding: LiteraryReviewFinding) {
+  for (const item of literaryStatus.value.reviewFindings) {
+    if (item.id === finding.id && item.category === 'style' &&
+        item.proposedTranslation === finding.proposedTranslation) {
+      item.applicationStatus = 'dismissed';
+    }
+  }
+  persistenceMessage.value = '已保留当前译文：' + finding.id;
+  await persistCurrentSession();
+}
+
+function showReviewSegment(id: string) {
+  const pageIndex = pages.value.findIndex((page) => page.segments.some((segment) => segment.id === id));
+  if (pageIndex < 0) {
+    persistenceMessage.value = '当前文档中找不到片段 ' + id + '。';
+    return;
+  }
+  currentPageIndex.value = pageIndex;
+  activeTab.value = 'reading';
+}
+
+/** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
   if (changedFields.includes('sourceLang')) sourceLang.value = config.sourceLang;
   if (changedFields.includes('targetLang')) targetLang.value = config.targetLang;
   if (changedFields.includes('translationMode')) {
