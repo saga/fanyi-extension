@@ -11,7 +11,7 @@ import {
 import { applyBlockTranslation } from '../utils/translationDisplay';
 import type { TranslationState } from './translationTypes';
 import type { TranslateChunkResponse } from '../../types/messages';
-import type { PromptStyle } from '../service/deepseek';
+import type { PromptStyle, TranslationMode } from '../service/deepseek';
 
 import { logger } from '../../utils/logger';
 // ============================================================
@@ -118,6 +118,7 @@ export async function translateChunksViaBackground(
   state?: TranslationState,
   promptStyle?: PromptStyle,
   skipWarmup: boolean = false,
+  translationMode: TranslationMode = 'technical',
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
   const runStartedAt = Date.now();
   logger.debug('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
