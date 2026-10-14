@@ -35,6 +35,10 @@ export interface TranslationSessionContext {
   promptStyle?: string;
   translationMode?: string;
   contextVersion?: string;
+  /** Optional full system prompt override, used only by document-reader requests. */
+  systemPromptOverride?: string;
+  /** Optional user-message template; {{CONTENT}} is replaced with the current batch JSON. */
+  userPromptTemplate?: string;
 }
 
 export interface TranslationService {
