@@ -517,7 +517,7 @@ export default defineBackground({
                       targetLang,
                       promptStyle,
                       translationMode,
-                      contextVersion: 'book-session-v1',
+                      contextVersion: 'book-session-v2',
                     }
                   : undefined,
               );
