@@ -511,6 +511,7 @@ export default defineBackground({
                 config.useLocalAgent && message.documentSessionId
                   ? {
                       documentSessionId: message.documentSessionId,
+                      sessionLane: message.documentSessionLane,
                       role: 'translation',
                       sourceLang,
                       targetLang,
