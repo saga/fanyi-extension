@@ -1,4 +1,5 @@
 import { storage } from '@wxt-dev/storage';
+import { shardedCache } from './shardedStorage';
 
 export interface CacheEntry<T> {
   data: T;
@@ -127,4 +128,5 @@ export class CacheManager {
 }
 
 export const analysisCache = new CacheManager('local:analysisCache');
-export const translationCache = new CacheManager('local:translationCache');
+// 翻译缓存量大且并发写入频繁，使用逐条分片存储；旧单对象缓存会按需迁移。
+export const translationCache = shardedCache;
