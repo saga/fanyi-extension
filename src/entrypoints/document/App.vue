@@ -375,6 +375,7 @@ async function refreshSavedSessionSummary() {
 
 
 const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
+let localSessionDocumentSaved = false;
 
 async function persistDocumentCheckpointToLocalService(input: {
   sourceLang: string; targetLang: string; viewMode: SavedViewMode; literaryMode: boolean;
@@ -398,10 +399,15 @@ async function persistDocumentCheckpointToLocalService(input: {
         sessionId: LOCAL_DOCUMENT_SESSION_ID,
         title: doc.value.title || documentFileName,
         format: doc.value.format,
-        payload: { ...input, document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value },
+        mergeExisting: localSessionDocumentSaved,
+        payload: {
+          ...input,
+          ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
+        },
       }),
     });
-    if (!response.ok) console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
+    if (response.ok) localSessionDocumentSaved = true;
+    else console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
   } catch (error) {
     // IndexedDB remains primary; a stopped local service must not interrupt translation.
     console.debug('[document-reader] local SQLite checkpoint unavailable:', error);
@@ -496,6 +502,7 @@ async function restoreLastSession() {
     persistedTranslations.value = new Map(saved.translations);
     documentFileName = saved.fileName;
     rawText = saved.rawText;
+    localSessionDocumentSaved = false;
     doc.value = saved.document;
     glossary.value = saved.glossary;
     sourceLang.value = saved.sourceLang;
