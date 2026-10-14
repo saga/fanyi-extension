@@ -1,6 +1,31 @@
 import { translationCache } from './cacheManager';
 
 import { logger } from '../../utils/logger';
+
+/**
+ * 翻译条目表的严格 JSON Schema（OpenAI json_schema 形状）。
+ * 只用于本机 Agent 重试升级轮：经 --json-schema 约束解码，逼模型吐完整数组。
+ * 必须包一层 object：CLI StructuredOutput 工具不支持顶层 array schema，
+ * 直接传 array 会 deterministic 报 400 invalid function call parameters（已实测）。
+ * 不要求 additionalProperties=false——目标是"数组形状 + 必填 id"，额外字段直接忽略。
+ */
+export const TRANSLATIONS_OBJECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    translations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          translated_text: { type: 'string' },
+        },
+        required: ['id', 'translated_text'],
+      },
+    },
+  },
+  required: ['translations'],
+} as const;
 export async function getCachedTranslation(cacheKey: string): Promise<Map<string, string> | null> {
   const raw = await translationCache.get<Record<string, string>>(cacheKey);
   if (!raw) return null;

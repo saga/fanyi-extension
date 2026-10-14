@@ -76,6 +76,11 @@ export interface TranslateChunkMessage {
   promptStyle?: PromptStyle;
   /** 文学电子书模式的书籍记忆指令，仅由文档翻译工作流传入。 */
   literaryContext?: string;
+  /**
+   * 严格 schema 升级轮（仅文档分批缺失后的本机重试）。
+   * background 原样透传给 service.translate，远端路径不传此字段。
+   */
+  responseFormat?: { type: 'json_schema'; json_schema: unknown };
 }
 
 export interface TranslateChunkStreamMessage {

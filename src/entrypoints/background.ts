@@ -490,7 +490,10 @@ export default defineBackground({
             });
             let outputChars = 0;
             try {
-              const translated = await service.translate(jsonContent, sourceLang, targetLang, glossary, effectivePrompt);
+              const translated = await service.translate(
+                jsonContent, sourceLang, targetLang, glossary, effectivePrompt,
+                message.responseFormat,
+              );
               outputChars = translated.length;
               return translated;
             } finally {

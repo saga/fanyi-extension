@@ -22,6 +22,7 @@ import {
   getCachedTranslation,
   cacheTranslation,
   clearAllCache,
+  TRANSLATIONS_OBJECT_SCHEMA,
 } from '../entrypoints/utils/translateApi';
 
 describe('hasCompleteTranslationSet', () => {
@@ -96,6 +97,18 @@ describe('processTranslationResult', () => {
     const result = processTranslationResult('{"id":"b1","translated_text":"AWS 新闻博客"}');
     expect(result.size).toBe(1);
     expect(result.get('b1')).toBe('AWS 新闻博客');
+  });
+
+  // 严格 schema 必须包一层 object：CLI StructuredOutput 工具拒收顶层 array。
+  it('TRANSLATIONS_OBJECT_SCHEMA wraps the array in an object', () => {
+    expect(TRANSLATIONS_OBJECT_SCHEMA.type).toBe('object');
+    const schema = TRANSLATIONS_OBJECT_SCHEMA as unknown as {
+      properties: { translations: { type: string; items: { required: string[] } } };
+      required: string[];
+    };
+    expect(schema.properties.translations.type).toBe('array');
+    expect(schema.properties.translations.items.required).toContain('id');
+    expect(schema.required).toContain('translations');
   });
 });
 

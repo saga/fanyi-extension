@@ -1,4 +1,4 @@
-import type { TranslationService, Glossary } from './_service';
+import type { TranslationService, Glossary, JsonSchemaResponseFormat } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
 import { buildStyledSystemContent, type PromptStyle } from './prompt-style';
@@ -80,6 +80,7 @@ function buildTranslationBody(
   glossary?: Glossary,
   style?: PromptStyle,
   modelOverride = MODEL,
+  responseFormat?: JsonSchemaResponseFormat,
 ) {
   const hasDocumentContext = blocks.some((block) => !!block.contextPath?.trim() || !!block.kind || !!block.marker);
   const blocksJson = JSON.stringify(
@@ -113,7 +114,7 @@ function buildTranslationBody(
           : `JSON:\n\n${blocksJson}`,
       },
     ],
-    response_format: { type: 'json_object' },
+    response_format: responseFormat ?? { type: 'json_object' },
     temperature: TRANSLATION_TEMPERATURE,
     max_tokens: estimateMaxTokens(blocksJson),
     user_id: USER_ID,
@@ -254,6 +255,7 @@ export class DeepSeekTranslationService implements TranslationService {
     targetLang: string,
     glossary?: Glossary,
     context?: string,
+    responseFormat?: JsonSchemaResponseFormat,
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
 
@@ -265,6 +267,7 @@ export class DeepSeekTranslationService implements TranslationService {
       hasGlossaryEntries(glossary) ? glossary : undefined,
       this.style,
       this.model,
+      responseFormat,
     );
 
     const raw = await callApi(this.apiKey, JSON.stringify(body), this.endpoint);

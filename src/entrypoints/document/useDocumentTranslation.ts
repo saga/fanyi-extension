@@ -7,6 +7,7 @@ import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetect
 import { buildSegmentBatches, type BatchBudget } from '../utils/document/batcher';
 import type { DocumentSegment } from '../utils/document/types';
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../utils/document/translationResult';
+import { TRANSLATIONS_OBJECT_SCHEMA } from '../utils/translateApi';
 import {
   addLiteraryExamples,
   autoConfirmLiteraryMemory,
@@ -642,17 +643,19 @@ export function useDocumentTranslation() {
     }
 
     // 本地初译依旧走扩展现有 provider；仅在书籍模式追加受限的书籍记忆 prompt。
-    // 大包下模型偶发只回第一条就停（10 段回 1 段），同样的整批重试只会复现同样结果：
-    // 缺失则对半缩小重发，指数收敛；每轮已拿到的逐段提交，不丢。
+    // 模型偶发只回第一条就停（同样的整批重试经实测复现相同结果，只是白烧时间）：
+    // 缺失则对半缩小重发——改变 prompt 本身才可能走出确定性失败，同时指数收敛；
+    // 每轮已拿到的逐段提交，不丢。
     const normalized = new Map<string, string>();
     const expectedIds = batch.map((segment) => segment.id);
-    let pending = batch;
-    const maxRounds = 6;
-    for (let round = 0; round < maxRounds && pending.length > 0; round++) {
-      const current = round === 0 ? pending : pending.slice(0, Math.max(1, Math.ceil(pending.length / 2)));
-      const rest = round === 0 ? [] : pending.slice(current.length);
+    const chapterTitle = batch[0]?.contextPath || options.documentTitle || '';
+    // 发一轮并存好拿到的条目，返回本轮仍缺的 id。
+    const sendRound = async (
+      segments: DocumentSegment[],
+      responseFormat?: { type: 'json_schema'; json_schema: unknown },
+    ): Promise<string[]> => {
       const jsonContent = JSON.stringify(
-        current.map((segment) => ({
+        segments.map((segment) => ({
           id: segment.id,
           text: segment.text,
           ...(segment.contextPath || (options.literaryMode && bookMemory)
@@ -670,7 +673,6 @@ export function useDocumentTranslation() {
           ...(segment.marker ? { marker: segment.marker } : {}),
         })),
       );
-      const chapterTitle = batch[0]?.contextPath || options.documentTitle || '';
       const response = (await browser.runtime.sendMessage({
         action: 'translateChunk',
         jsonContent,
@@ -682,20 +684,42 @@ export function useDocumentTranslation() {
         ...(options.literaryMode && bookMemory ? {
           literaryContext: buildLiteraryTranslationContextPrompt(chapterTitle),
         } : {}),
+        ...(responseFormat ? { responseFormat } : {}),
       })) as TranslateChunkResponse;
 
-      if (!isCurrentRun(runId)) return false;
+      if (!isCurrentRun(runId)) return [];
       if (!response?.success) throw new Error(response?.error || '翻译失败');
 
-      const roundIds = current.map((segment) => segment.id);
+      const roundIds = segments.map((segment) => segment.id);
       for (const [id, text] of normalizeDocumentBatchResult(response.result, roundIds)) {
         normalized.set(id, text);
         state.value.translations.set(id, text);
       }
-      const missing = new Set(getMissingDocumentBatchIds(roundIds, normalized));
+      return getMissingDocumentBatchIds(roundIds, normalized);
+    };
+    let pending = batch;
+    const maxRounds = 6;
+    for (let round = 0; round < maxRounds && pending.length > 0; round++) {
+      const current = round === 0 ? pending : pending.slice(0, Math.max(1, Math.ceil(pending.length / 2)));
+      const rest = round === 0 ? [] : pending.slice(current.length);
+      const missing = new Set(await sendRound(current));
+      if (!isCurrentRun(runId)) return false;
       pending = [...rest, ...current.filter((segment) => missing.has(segment.id))];
     }
-    const missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
+    let missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
+    // 终极升级（仅本机）：缩小循环后仍有缺失，用 --json-schema 把数组形状写死做约束解码。
+    // 普通 json_object 只保证"是 JSON"，确定性失败（如只回第一条）必须升级形状约束才走得出来。
+    // 只追加一单；失败即抛，不循环。
+    if (missingIds.length > 0 && options.useLocalAgent && isCurrentRun(runId)) {
+      const missingSet = new Set(missingIds);
+      const missingSegments = batch.filter((segment) => missingSet.has(segment.id));
+      const stillMissing = new Set(await sendRound(missingSegments, {
+        type: 'json_schema',
+        json_schema: TRANSLATIONS_OBJECT_SCHEMA,
+      }));
+      if (!isCurrentRun(runId)) return false;
+      missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
+    }
     if (missingIds.length) {
       throw new Error(
         '翻译结果不完整，缺少 ' + missingIds.length + '/' + expectedIds.length +

@@ -41,6 +41,30 @@ describe('DeepSeekTranslationService API methods', () => {
       expect(body.stream).toBe(false);
     });
 
+    it('defaults to json_object and passes through a strict json_schema on escalation', async () => {
+      const mockResponse = {
+        ok: true,
+        status: 200,
+        headers: new Map(),
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          choices: [{ message: { content: '{"translations":[]}' } }],
+        })),
+      };
+      globalFetch.mockResolvedValue(mockResponse);
+
+      await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined);
+      expect(JSON.parse(globalFetch.mock.calls[0][1].body).response_format).toEqual({ type: 'json_object' });
+
+      const schema = { type: 'array', items: { type: 'object' } };
+      await service.translate(
+        JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined, undefined,
+        { type: 'json_schema', json_schema: schema },
+      );
+      expect(JSON.parse(globalFetch.mock.calls[1][1].body).response_format).toEqual({
+        type: 'json_schema', json_schema: schema,
+      });
+    });
+
     it('should include glossary in translation request', async () => {
       const mockResponse = {
         ok: true,
