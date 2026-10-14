@@ -40,6 +40,29 @@ Chrome：需要自己build
 3. 设置源语言和目标语言
 4. 选择翻译模式（双语对照 / 仅译文）
 
+## 本机 Workbuddy / OpenCode Provider（可选）
+
+扩展可把翻译、侧栏对话和 EPUB/PDF 的书籍实体分析与 Reviewer 请求交给本机服务，不需要配置 DeepSeek API Key。这个 Provider 与远程 Vocal Saga 服务相互独立；启用“使用本机 Workbuddy/OpenCode 翻译”后，翻译和审校请求失败会明确报错或保留初译，不会偷偷回退到远程服务。关闭本机 Provider 后，原有远程/DeepSeek 路径继续可用。
+
+### 启动本机服务
+
+在 macOS 安装 Node.js 22.13 或更新的 Node 22 版本，然后在 `vocal-saga` 仓库运行：
+
+```bash
+npm run local-agent:install
+npm run local-agent:start
+```
+
+默认监听 `http://127.0.0.1:8789`。需事先完成 Workbuddy/CodeBuddy SDK 登录，或安装并登录 OpenCode CLI。服务只绑定 loopback，不要通过局域网地址、反向代理或隧道公开。
+
+### 配置扩展
+
+在 Popup 中开启“使用本机 Workbuddy/OpenCode 翻译”，选择本机运行时，并点击“测试本机服务连接”。本机服务地址通常保持默认值；模型覆盖和 Token 都是可选项。如果服务端设置了 `LOCAL_AGENT_TOKEN`，扩展中必须填写相同 Token。
+
+本机服务使用 SQLite 保存请求历史、翻译缓存和文档恢复副本，默认数据库位于 `~/.vocal-saga-local-agent/local-agent.sqlite`。请求正文是否记录由 `LOCAL_AGENT_STORE_CONTENT` 控制；翻译缓存和文档检查点是独立业务数据，不受该选项关闭影响。更多配置、数据上限和清理方法见 [本机服务说明](https://github.com/devweekly/vocal-saga/blob/main/local-agent-service/README.md)。
+
+EPUB/PDF 文件选择和容器解析仍由扩展在浏览器中处理；本机服务负责本机模型调用、文学分析/审校、SQLite 翻译缓存以及文档检查点。阅读器优先使用 IndexedDB，SQLite 作为附加恢复副本。要清除所有 SQLite 中的本机内容，除扩展内清除阅读记录/缓存外，也可以在服务停止后删除该数据库文件。
+
 ## 🎮 快捷键
 
 | 操作 | 快捷键 |
