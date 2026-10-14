@@ -60,26 +60,20 @@ function isDebugEnabled(): boolean {
 }
 
 /**
- * 把 `[fanyi:level]` 拼到首参字符串前面；首参不是字符串则前置为独立参数。
- *
- * 之所以不总是用独立参数，是为了保持向后兼容现有测试：
- *   `expect(warn.mock.calls[0][0]).toContain('NodeMap mismatch')`
- * —— 拼到字符串里，'NodeMap mismatch' 仍然是首参的子串。
- */
-/**
  * DevTools differ in how they render objects passed through extension/content-script logs.
  * Serialize structured values explicitly so failures never collapse to "[object Object]".
  * Error properties are normally non-enumerable, so copy name/message/stack deliberately.
  */
 function formatLogArg(value: unknown): unknown {
   if (value instanceof Error) {
+    const cause = (value as Error & { cause?: unknown }).cause;
     return JSON.stringify({
       name: value.name,
       message: value.message,
       stack: value.stack,
-      cause: value.cause instanceof Error
-        ? { name: value.cause.name, message: value.cause.message, stack: value.cause.stack }
-        : value.cause,
+      cause: cause instanceof Error
+        ? { name: cause.name, message: cause.message, stack: cause.stack }
+        : cause,
     }, null, 2);
   }
   if (!value || typeof value !== 'object') return value;
@@ -105,6 +99,10 @@ function formatLogArg(value: unknown): unknown {
   }
 }
 
+/**
+ * 把 `[fanyi:level]` 拼到首参字符串前面；首参不是字符串则前置独立前缀参数。
+ * 保留既有测试和调用方依赖的前缀格式，后续参数统一先做可读序列化。
+ */
 function withPrefix(level: string, args: LogArgs): LogArgs {
   const formatted = args.map(formatLogArg);
   if (args.length > 0 && typeof args[0] === 'string') {
