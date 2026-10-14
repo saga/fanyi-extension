@@ -46,6 +46,16 @@ describe('buildChunks', () => {
     expect(mergeSegmentTranslations(chunks, incomplete).has('b1')).toBe(false);
   });
 
+  it('supports larger provider-specific targets without changing remote defaults', () => {
+    const blocks = Array.from({ length: 24 }, (_, i) => tokenBlock(`b${i + 1}`, 'p', 180));
+    const defaultChunks = buildChunks(blocks);
+    const localChunks = buildChunks(blocks, { targetTokens: 1600, warmupTargetTokens: 800 });
+
+    expect(defaultChunks.length).toBeGreaterThan(localChunks.length);
+    expect(localChunks.flatMap((chunk) => chunk.blocks).map((block) => block.id))
+      .toEqual(defaultChunks.flatMap((chunk) => chunk.blocks).map((block) => block.id));
+  });
+
   it('creates a single chunk for a small set of blocks', () => {
     const blocks = [
       makeBlock('b1', 'p', 'Hello world this is a test paragraph.'),
