@@ -810,14 +810,36 @@ export default defineBackground({
       try {
         const config = await getConfig();
         if (config.useLocalAgent) {
-        let base = config.localAgentUrl || 'http://127.0.0.1:8789';
-        while (base.endsWith('/')) base = base.slice(0, -1);
+          let base = (config.localAgentUrl || 'http://127.0.0.1:8789').trim();
+          while (base.endsWith('/')) base = base.slice(0, -1);
+          // 用户常只填「127.0.0.1:8789」而漏掉协议，直接交给 new URL 会抛 Invalid URL。
+          if (base && !/^https?:\/\//i.test(base)) base = 'http://' + base;
+          let endpoint: string;
+          try {
+            endpoint = new URL('/v1/models', base).toString();
+          } catch {
+            sendResponse({ success: false, error: `本机服务地址无效：${config.localAgentUrl || '(空)'}。请填写完整地址，例如 http://127.0.0.1:8789` });
+            return;
+          }
           const headers: Record<string, string> = { 'Content-Type': 'application/json' };
           if (config.localAgentToken) headers.Authorization = 'Bearer ' + config.localAgentToken;
           // /v1/models checks that the service is online and that the shared token is valid.
-          const response = await fetch(new URL('/v1/models', base).toString(), { headers });
-          if (!response.ok) throw new Error('本机服务返回 HTTP ' + response.status);
-          sendResponse({ success: true, config });
+          try {
+            const response = await fetch(endpoint, { headers });
+            if (!response.ok) throw new Error('本机服务返回 HTTP ' + response.status);
+            sendResponse({ success: true, config });
+          } catch (error) {
+            // fetch 对「连不上」一律只给 TypeError: Failed to fetch，对用户毫无信息量；
+            // 换成能直接照做的提示（服务没起 / 地址端口不对 / Token 不匹配）。
+            const detail = error instanceof Error ? error.message : String(error);
+            const unreachable = /failed to fetch|networkerror|load failed/i.test(detail);
+            sendResponse({
+              success: false,
+              error: unreachable
+                ? `无法连接本机服务（${base}）：端口没在监听或地址不对。请先启动 local-agent-service，或在上方改成本机服务地址后重试。`
+                : `本机服务校验失败：${detail}`,
+            });
+          }
         } else if (config.deepseekApiKey) {
           sendResponse({ success: true, config });
         } else {

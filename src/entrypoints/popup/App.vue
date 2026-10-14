@@ -88,6 +88,7 @@
         <span v-if="apiStatus === 'checking'" class="status-text checking">正在检查本机服务…</span>
         <span v-else-if="apiStatus === 'ok'" class="status-text success">本机服务可连接</span>
         <span v-else-if="apiStatus === 'fail'" class="status-text error">本机服务不可用，请检查地址、Token 和服务进程</span>
+        <span v-if="apiStatus === 'fail' && apiStatusDetail" class="hint-text">{{ apiStatusDetail }}</span>
       </div>
 
       <label class="switch-item">
@@ -175,6 +176,8 @@ const config = ref<Config>({
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
+/** 后端返回的失败原因（如「端口没在监听」），比笼统的「不可用」更可操作。 */
+const apiStatusDetail = ref('');
 const localAgentAvailable = ref(false);
 const cacheClearMessage = ref('');
 /** 服务端翻译设置面板折叠状态（默认收起，保持 popup 紧凑）。 */
@@ -259,14 +262,19 @@ function onServerUrlChange() {
 async function checkApiKey() {
   if (!config.value.useLocalAgent && !config.value.deepseekApiKey) {
     apiStatus.value = 'fail';
+    apiStatusDetail.value = '未配置 API Key，也未启用本机模式';
     return;
   }
   apiStatus.value = 'checking';
+  apiStatusDetail.value = '';
   try {
     const response = await browser.runtime.sendMessage({ action: 'checkConfig' });
     apiStatus.value = response.success ? 'ok' : 'fail';
-  } catch {
+    // 后端已把「连不上」翻译成可操作提示，这里直接展示，别只丢一句「不可用」。
+    apiStatusDetail.value = response.success ? '' : (response.error || '');
+  } catch (error) {
     apiStatus.value = 'fail';
+    apiStatusDetail.value = error instanceof Error ? error.message : String(error);
   }
 }
 
