@@ -295,3 +295,16 @@ describe('extractGlossaryLocal - Context-aware Product Name Extraction (方案 D
     expect(terms).toContain('DeepSeek R1');
   });
 });
+
+
+describe('extractGlossaryLocal - translatable nationalities and languages', () => {
+  it('does not promote demonyms/language adjectives to terms that should remain in English', () => {
+    const text = 'He saw a Dutch man, a Portuguese priest, a Spanish sailor, and an English ship.';
+    const terms = extractGlossaryLocal(text).document_terms.map((term) => term.toLowerCase());
+
+    expect(terms).not.toContain('dutch');
+    expect(terms).not.toContain('portuguese');
+    expect(terms).not.toContain('spanish');
+    expect(terms).not.toContain('english');
+  });
+});
