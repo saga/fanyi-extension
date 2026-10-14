@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('webextension-polyfill', () => ({
   default: { runtime: { sendMessage: vi.fn() } },
 }));
-import { planDocumentBatches } from '../entrypoints/document/useDocumentTranslation';
+import {
+  planDocumentBatches,
+  shouldUseRemoteDocumentTranslation,
+} from '../entrypoints/document/useDocumentTranslation';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
 
 const segments = [
@@ -14,6 +17,12 @@ const segments = [
 
 describe('local service document batch planning', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('never selects the remote document API when the local provider is enabled', () => {
+    expect(shouldUseRemoteDocumentTranslation({ useLocalAgent: true, useServerTranslation: true })).toBe(false);
+    expect(shouldUseRemoteDocumentTranslation({ useLocalAgent: true, useServerTranslation: false })).toBe(false);
+    expect(shouldUseRemoteDocumentTranslation({ useLocalAgent: false, useServerTranslation: true })).toBe(true);
+  });
 
   it('uses service-planned IDs and preserves original segment objects/order', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
@@ -31,7 +40,7 @@ describe('local service document batch planning', () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer local-token');
   });
 
-  it('falls back to deterministic in-extension batching if the local service is unavailable', async () => {
+  it('falls back only to deterministic CPU batching (not to any remote translation API) if planning is unavailable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('service stopped')));
     const result = await planDocumentBatches(segments, { maxChars: 5, maxSegments: 10 }, {
       sourceLang: 'en', targetLang: 'zh', useLocalAgent: true,
