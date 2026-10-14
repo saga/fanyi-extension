@@ -92,7 +92,7 @@ export function createTranslationController(
       const config = await getConfig();
       // 使用服务端翻译且 provider 不是 deepseek 时，才不需要本地 API Key；
       // 其他情况（本地翻译、或服务端翻译但 provider=deepseek）都需要 API Key。
-      const needApiKey = !config.useServerTranslation || config.provider === 'deepseek';
+      const needApiKey = !config.useLocalAgent && (!config.useServerTranslation || config.provider === 'deepseek');
       if (needApiKey && !config.deepseekApiKey) {
         showStatus('API Key 没有配置', 'error');
         setTimeout(hideStatus, 5000);
@@ -227,7 +227,7 @@ async function handleFullTranslation(
   const siteRule = matchSiteRule(window.location.href)?.siteRule;
   const forceDirect = siteRule?.forceDirectTranslation === true;
   const skipGlossary = siteRule?.skipGlossary === true;
-  const useServer = config.useServerTranslation && !forceDirect;
+  const useServer = config.useServerTranslation && !config.useLocalAgent && !forceDirect;
 
   // 必须先 prepareDocument 拿到 blocks：服务端缓存检查要带上本次抽取的结构指纹
   // （block id+tag 序列）。服务端用它判断缓存里的 id→元素映射是否仍与当前页面一致，
