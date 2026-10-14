@@ -378,6 +378,7 @@ async function handleFullTranslation(
     effectiveStyle,
     // 本机无 KV cache，跳过 2 个串行预热直接并行。
     config.useLocalAgent === true,
+    config.translationMode || 'technical',
   );
 
   await retryGlobalMissing(blocks, nodeMap, translatedIds, config, isMobile, effectiveStyle);
