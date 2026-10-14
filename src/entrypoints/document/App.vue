@@ -1102,6 +1102,29 @@ async function loadFile(file: File) {
   }
 }
 
+/**
+ * Stable, opaque identity for a parsed document. The same book gets the same local Agent
+ * session scope after page reload/SQLite restore, while different books do not share SDK history.
+ * This fingerprint never sends raw document text as an ID; only the hash leaves the extension.
+ */
+function buildDocumentAgentSessionId(document: ParsedDocument, fileName: string): string {
+  const first = document.segments.slice(0, 3).map((segment) => segment.text.slice(0, 240)).join('\n');
+  const last = document.segments.slice(-2).map((segment) => segment.text.slice(-240)).join('\n');
+  const sample = [
+    fileName, document.title, document.format,
+    String(document.meta.segmentCount), String(document.meta.charCount), first, last,
+  ].join('\u0000');
+  let firstHash = 0x811c9dc5;
+  let secondHash = 0x9e3779b9;
+  for (let index = 0; index < sample.length; index++) {
+    const code = sample.charCodeAt(index);
+    firstHash = Math.imul(firstHash ^ code, 0x01000193);
+    secondHash = Math.imul(secondHash ^ code, 0x85ebca6b);
+  }
+  const hex = (value: number) => (value >>> 0).toString(16).padStart(8, '0');
+  return 'doc-' + hex(firstHash) + hex(secondHash);
+}
+
 /** 所有翻译入口共用同一份设置，重试时保持 provider、术语表和服务端模式不变。 */
 async function buildTranslationOptions() {
   if (!doc.value) throw new Error('尚未打开文档');
@@ -1130,6 +1153,7 @@ async function buildTranslationOptions() {
     provider: config.provider,
     apiKey: config.deepseekApiKey,
     documentFileName,
+    documentSessionId: buildDocumentAgentSessionId(doc.value, documentFileName),
     documentTitle: doc.value.title,
     documentFormat: doc.value.format,
     documentWarnings: doc.value.meta.warnings,
