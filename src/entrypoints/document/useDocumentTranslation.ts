@@ -896,7 +896,7 @@ export function useDocumentTranslation() {
       );
     }
 
-    const retries = effectiveOptions.useServerTranslation ? 0 : (options.retries ?? 1);
+    const retries = shouldUseRemoteDocumentTranslation(effectiveOptions) ? 0 : (options.retries ?? 1);
     // 文学模式按章节串行推进，使先完成的章节记忆能稳定影响后续章节。
     const concurrency = literaryEnabled ? 1 : Math.max(1, options.concurrency ?? 3);
     let cursor = 0;
