@@ -686,6 +686,52 @@ function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Conf
   if (!documentUserPromptTemplate.value) documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
 }
 
+watch([sourceLang, targetLang, literaryMode], () => {
+  if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
+});
+
+async function saveDocumentTypography() {
+  await setConfig({
+    documentEnglishFontFamily: englishFontFamily.value,
+    documentChineseFontFamily: chineseFontFamily.value,
+    documentEnglishFontSize: englishFontSize.value,
+    documentChineseFontSize: chineseFontSize.value,
+  });
+  readerConfig.value = await getConfig();
+  persistenceMessage.value = '阅读字体设置已保存。';
+}
+
+async function saveDocumentPromptSettings() {
+  const systemDraft = documentSystemPromptEditor.value.trim();
+  const userDraft = documentUserPromptEditor.value.trim();
+  const systemOverride = systemDraft && systemDraft !== builtInDocumentSystemPrompt.value.trim()
+    ? systemDraft
+    : '';
+  const userTemplate = userDraft && userDraft !== BUILT_IN_USER_PROMPT_TEMPLATE.trim()
+    ? userDraft
+    : '';
+  await setConfig({
+    documentSystemPromptOverride: systemOverride,
+    documentUserPromptTemplate: userTemplate,
+  });
+  readerConfig.value = await getConfig();
+  documentSystemPromptOverride.value = systemOverride;
+  documentUserPromptTemplate.value = userTemplate;
+  documentSystemPromptEditor.value = systemOverride || builtInDocumentSystemPrompt.value;
+  documentUserPromptEditor.value = userTemplate || BUILT_IN_USER_PROMPT_TEMPLATE;
+  persistenceMessage.value = '文档翻译 Prompt 已保存；新请求和强制重译会使用新设置，已有译文不会自动改写。';
+}
+
+async function restoreBuiltInDocumentPrompts() {
+  await setConfig({ documentSystemPromptOverride: '', documentUserPromptTemplate: '' });
+  readerConfig.value = await getConfig();
+  documentSystemPromptOverride.value = '';
+  documentUserPromptTemplate.value = '';
+  documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
+  documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
+  persistenceMessage.value = '已恢复内置文档翻译 Prompt。';
+}
+
 async function refreshSavedSessionSummary() {
   savedSessionSummary.value = null;
   try {
@@ -1264,6 +1310,8 @@ async function buildTranslationOptions() {
     glossary: glossary.value,
     promptStyle: config.promptStyle,
     translationMode: config.translationMode || 'technical',
+    documentSystemPromptOverride: config.documentSystemPromptOverride || undefined,
+    documentUserPromptTemplate: config.documentUserPromptTemplate || undefined,
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
     useServerTranslation: config.useServerTranslation && !config.useLocalAgent,
     useLocalAgent: config.useLocalAgent,
