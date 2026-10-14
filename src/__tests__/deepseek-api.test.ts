@@ -92,6 +92,47 @@ describe('DeepSeekTranslationService API methods', () => {
 
 
 
+    it('reports local-agent 502 errors as local failures and preserves the request ID', async () => {
+      const localService = new DeepSeekTranslationService('', undefined, {
+        endpoint: 'http://127.0.0.1:8789/v1/chat/completions',
+        model: 'opencode',
+      });
+      globalFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          error: {
+            message: '本机 Agent 返回内容不是有效 JSON',
+            type: 'local_agent_error',
+            request_id: 'local-req-502',
+            provider: 'opencode',
+            duration_ms: 1234,
+            output_chars: 42,
+          },
+        })),
+      });
+
+      await expect(
+        localService.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined),
+      ).rejects.toThrow(/本机 Agent 服务 error: HTTP 502.*local-req-502.*opencode.*42 chars/s);
+      expect(globalFetch).toHaveBeenCalledTimes(1);
+      expect(globalFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
+    });
+
+    it('never rewrites a local-service connection failure as a remote API failure', async () => {
+      const localService = new DeepSeekTranslationService('', undefined, {
+        endpoint: 'http://127.0.0.1:8789/v1/chat/completions',
+        model: 'opencode',
+      });
+      globalFetch.mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(
+        localService.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined),
+      ).rejects.toThrow(/本机 Agent 服务连接失败.*不会回退到远程 API/);
+      expect(globalFetch).toHaveBeenCalledTimes(1);
+      expect(globalFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
+    });
+
     it('should handle network errors', async () => {
       globalFetch.mockRejectedValue(new TypeError('fetch failed'));
 
