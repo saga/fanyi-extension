@@ -159,8 +159,8 @@ export async function translateBatch(
     const model = override && override.toLowerCase() !== 'auto'
       ? (/^(workbuddy|opencode):/i.test(override)
         ? override
-        : (config.localAgentProvider || 'opencode') + ':' + override)
-      : (config.localAgentProvider || 'opencode');
+        : (config.localAgentProvider || 'workbuddy') + ':' + override)
+      : (config.localAgentProvider || 'workbuddy');
 
     requestBody = { ...body, model };
     headers = {
