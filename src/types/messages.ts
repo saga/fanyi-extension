@@ -21,7 +21,7 @@
 import type browser from 'webextension-polyfill';
 import type { Config } from '../entrypoints/utils/config';
 import type { Glossary } from '../entrypoints/service/_service';
-import type { PromptStyle } from '../entrypoints/service/deepseek';
+import type { PromptStyle, TranslationMode } from '../entrypoints/service/deepseek';
 
 // ============================================================
 // 公共子类型
@@ -74,6 +74,8 @@ export interface TranslateChunkMessage {
    * 无页面上下文的调用点（如按 key 校验）。见 content/translation.ts。
    */
   promptStyle?: PromptStyle;
+  /** 本次请求覆盖全局的科技/文学翻译目标；文学书籍流程自动传 literary。 */
+  translationMode?: TranslationMode;
   /** 文学电子书模式的书籍记忆指令，仅由文档翻译工作流传入。 */
   literaryContext?: string;
   /**
@@ -94,6 +96,8 @@ export interface TranslateChunkStreamMessage {
   tabId?: number;
   /** 已解析的文风；缺省时回退 config.promptStyle */
   promptStyle?: PromptStyle;
+  /** 本次请求覆盖全局翻译类型。 */
+  translationMode?: TranslationMode;
 }
 
 export interface ValidateApiKeyMessage {
