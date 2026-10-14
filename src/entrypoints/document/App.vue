@@ -989,6 +989,7 @@ async function buildTranslationOptions() {
     targetLang: targetLang.value,
     glossary: glossary.value,
     promptStyle: config.promptStyle,
+    translationMode: config.translationMode || 'technical',
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
     useServerTranslation: config.useServerTranslation && !config.useLocalAgent,
     useLocalAgent: config.useLocalAgent,
