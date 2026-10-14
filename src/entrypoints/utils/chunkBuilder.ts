@@ -12,6 +12,12 @@ const MAX_INPUT_TOKENS = 500000;
 const TARGET_TOKENS = 800;
 const WARMUP_TARGET_TOKENS = 400;
 
+/** Provider-specific chunk targets. Defaults preserve the established remote-provider behavior. */
+export interface ChunkBuildOptions {
+  targetTokens?: number;
+  warmupTargetTokens?: number;
+}
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
@@ -170,8 +176,12 @@ export function mergeSegmentTranslations(
   return merged;
 }
 
-export function buildChunks(blocks: TextBlock[]): Chunk[] {
-  logger.debug('[ChunkBuilder] buildChunks called with', blocks.length, 'blocks');
+export function buildChunks(blocks: TextBlock[], options: ChunkBuildOptions = {}): Chunk[] {
+  const targetTokens = Math.max(100, Math.floor(options.targetTokens ?? TARGET_TOKENS));
+  const warmupTargetTokens = Math.max(100, Math.floor(options.warmupTargetTokens ?? WARMUP_TARGET_TOKENS));
+  logger.debug('[ChunkBuilder] buildChunks called with', blocks.length, 'blocks', {
+    targetTokens, warmupTargetTokens,
+  });
   if (blocks.length === 0) return [];
 
   const chunks: Chunk[] = [];
@@ -199,8 +209,8 @@ export function buildChunks(blocks: TextBlock[]): Chunk[] {
     const blockTokens = estimateTokens(block.text) + 20;
 
     const isBoundary = isStructuralBoundary(block);
-    const targetTokens = chunks.length < 2 ? WARMUP_TARGET_TOKENS : TARGET_TOKENS;
-    const wouldExceed = currentTokens + blockTokens > targetTokens;
+    const chunkTargetTokens = chunks.length < 2 ? warmupTargetTokens : targetTokens;
+    const wouldExceed = currentTokens + blockTokens > chunkTargetTokens;
     const mustFlush = currentTokens + blockTokens > MAX_INPUT_TOKENS;
 
     if (mustFlush) {
