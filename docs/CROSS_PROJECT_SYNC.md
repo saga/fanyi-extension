@@ -344,7 +344,7 @@
 ### D. 长期:可选优化
 
 - [x] **B1**:评估 monorepo 化(pnpm workspace)的可行性 — 彻底解决同步,但需合并两个独立仓库 ✅ 已完成:评估文档已创建(vocal-saga/docs/MONOREPO_EVALUATION.md),结论"可行但不推荐立即实施",建议等 A1 稳定 2-3 个月后再评估
-- [x] **S4**:扩展端 storage 分片 — 当前 `@wxt-dev/storage` 把所有缓存塞一个大对象(O(N) 序列化 + 5MB 配额 + 并发写丢失),改用 `browser.storage.local` key 前缀分片或 IndexedDB ✅ 已完成:fanyi-extension 侧创建 ShardedCache(src/entrypoints/utils/shardedStorage.ts),每 key 独立存储避免 O(N) 序列化,15 个测试通过,作为可选方案未替换现有 cacheManager
+- [x] **S4**:扩展端 storage 分片 — 当前 `@wxt-dev/storage` 把所有缓存塞一个大对象(O(N) 序列化 + 5MB 配额 + 并发写丢失),改用 `browser.storage.local` key 前缀分片或 IndexedDB ✅ 已接入翻译缓存：translationCache 使用 ShardedCache，单条独立存储、串行更新索引、读写失败降级为 miss，并在首次使用时尽力迁移旧 local:translationCache 单对象；analysisCache 仍保留 CacheManager
 - [x] **S7**:`isHealthyCachedHtml` 增加翻译完整性校验 — 当前只检查 `<html>` 标签和样式表,不检查翻译是否完整;两端共享 `validateTranslationCompleteness(html, expectedBlockCount)` 函数 ✅ 已完成:vocal-saga 侧创建 translationValidator.ts,validateTranslationCompleteness 校验翻译完整性,isHealthyCachedHtml 已接入,13 个测试通过
 - [x] **S8**:扩展端离线队列 — 网络中断即翻译失败无兜底,用 IndexedDB 维护 failed-translation queue,网络恢复后重试 ✅ 已完成:fanyi-extension 侧创建 offlineQueue.ts(src/entrypoints/utils/),用原生 IndexedDB 维护失败翻译队列,监听 online 事件自动重试,最大重试 3 次
 - [x] **S9**:扩展端→服务端增量回传译文 — 本地翻译结果异步 POST 到 `/fanyi/page/upload`,需解决内容哈希校验、配额限流、隐私问题 ✅ 已完成:fanyi-extension 侧创建 translationUploader.ts(src/entrypoints/utils/),异步回传译文到 /fanyi/page/upload,含隐私保护(shareTranslations 默认关闭)、私有 URL 过滤、900KB 大小限制、10 秒超时
