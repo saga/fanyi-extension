@@ -1,5 +1,5 @@
 <template>
-  <div class="doc-page" :class="{ 'is-empty': !doc }">
+  <div class="doc-page" :class="{ 'is-empty': !doc }" :style="documentStyleVars">
     <header class="doc-header">
       <h1>文档翻译</h1>
       <div class="header-actions">
@@ -101,10 +101,14 @@
             <input v-model="literaryReview" type="checkbox" />
           </label>
           <button
-            v-if="!state.running && (state.total === 0 || state.done < state.total)"
+            v-if="!state.running"
             class="btn primary"
+            :disabled="!currentPagePending"
             @click="startTranslate">
             {{ startLabel }}
+          </button>
+          <button v-if="!state.running && visibleSegments.length" class="btn warn" @click="forceTranslateCurrentPage">
+            强制重译当前页
           </button>
           <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
           <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
