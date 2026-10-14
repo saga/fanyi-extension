@@ -490,7 +490,9 @@ async function restoreLastSession() {
   parseError.value = '';
   persistenceMessage.value = '';
   try {
-    const saved = await loadActiveDocumentSession() ?? await loadDocumentCheckpointFromLocalService();
+    let saved = null;
+    try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
+    if (!saved) saved = await loadDocumentCheckpointFromLocalService();
     if (!saved) {
       savedSessionSummary.value = null;
       persistenceMessage.value = '没有可恢复的阅读记录。';
@@ -608,6 +610,7 @@ async function loadFile(file: File) {
   resetTranslation();
   currentPageIndex.value = 0;
   parseError.value = '';
+  localSessionDocumentSaved = false;
   doc.value = null;
   parsing.value = true;
   progress.value = { done: 0, total: 0 };
@@ -734,6 +737,7 @@ async function resetAll() {
   // 先等待最后一笔 checkpoint 落盘；换文件不会删除上一本书的恢复快照。
   await persistCurrentSession();
   activeSessionReady.value = false;
+  localSessionDocumentSaved = false;
   resetTranslation();
   doc.value = null;
   currentPageIndex.value = 0;
