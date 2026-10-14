@@ -147,6 +147,10 @@ async function callApi(
           errorMessage += ` - ${errorJson.error.message || errorJson.error}`;
           if (errorJson.error.type) errorMessage += ` [${errorJson.error.type}]`;
           if (errorJson.error.code) errorMessage += ` (code: ${errorJson.error.code})`;
+          // Local-agent failures include a request ID that can be matched to the service log/history.
+          if (errorJson.error.request_id) errorMessage += ` (local request: ${errorJson.error.request_id})`;
+          if (errorJson.error.provider) errorMessage += ` (provider: ${errorJson.error.provider})`;
+          if (Number.isFinite(errorJson.error.output_chars)) errorMessage += ` (model output: ${errorJson.error.output_chars} chars)`;
         } else if (errorJson.message) {
           errorMessage += ` - ${errorJson.message}`;
         } else {
