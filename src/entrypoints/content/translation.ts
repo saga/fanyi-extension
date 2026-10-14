@@ -332,7 +332,9 @@ async function handleFullTranslation(
     return { translated: true, observer: null };
   }
 
-  const glossary = skipGlossary ? {} : await extractGlossary(fullText);
+  // Literary mode uses book/entity memory, not a generic term glossary. Automatically extracted
+  // noun phrases can accidentally force names, nationalities and ordinary words to remain English.
+  const glossary = config.translationMode === 'literary' || skipGlossary ? {} : await extractGlossary(fullText);
 
   // ── 页级语言检测（整页只做一次）──
   // 目的：日语原文 → 非日语目标语言时，把 default 文风自动升级为 ja-source-natural
