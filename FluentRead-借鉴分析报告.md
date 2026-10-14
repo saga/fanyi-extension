@@ -1,3 +1,5 @@
+> **状态更新（2026-10-14）**：本文中的缓存接线建议已执行。当前 `translationCache` 已切换为分片存储，支持并发索引写串行化、旧版 `local:translationCache` 的尽力迁移、过期项清理，以及 Storage 失败时降级为缓存未命中；`analysisCache` 仍使用原 `CacheManager`。以下章节保留的是调研时的历史分析，不再代表所有项目现状。
+
 # FluentRead 借鉴分析报告
 
 > 调研对象：`/Users/saga/code-repos/FluentRead`
