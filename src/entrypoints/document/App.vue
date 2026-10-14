@@ -313,6 +313,8 @@ const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
 const localSessionSummary = ref<{ title: string; format: string; updatedAt: string } | null>(null);
 const persistenceMessage = ref('');
 const activeSessionReady = ref(false);
+/** 该阅读会话是否已成功落入 IndexedDB；失败时仍允许写入独立的 SQLite 恢复副本。 */
+let activeSessionIndexedDbWritable = false;
 const persistedTranslations = ref(new Map<string, string>());
 let persistenceQueue: Promise<void> = Promise.resolve();
 const readerRef = ref<HTMLElement | null>(null);
@@ -426,16 +428,16 @@ async function persistDocumentCheckpointToLocalService(input: {
   sourceLang: string; targetLang: string; viewMode: SavedViewMode; literaryMode: boolean;
   currentPageIndex: number; snapshot: ReturnType<typeof getSnapshot>;
   translationDelta: Array<[string, string]>; translatedSegmentCount: number;
-}) {
+}): Promise<boolean> {
   const config = await getConfig();
-  if (!config.useLocalAgent || !doc.value || localSessionDisabled) return;
+  if (!config.useLocalAgent || !doc.value || localSessionDisabled) return false;
   try {
     const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/save';
     base.search = '';
     base.hash = '';
 
-    // 本次增量以“上一次已确认写入 SQLite 的译文”为基准，而非 IndexedDB 的游标。
+    // 增量基于已确认写入 SQLite 的数据，而不是 IndexedDB 的游标。
     // 服务暂时离线后，之前未成功写入的译文仍会包含在下次请求中。
     const localTranslationDelta = input.snapshot.translations.filter(([id, text]) =>
       localPersistedTranslations.get(id) !== text,
@@ -445,7 +447,7 @@ async function persistDocumentCheckpointToLocalService(input: {
     const payload = {
       ...input,
       snapshot: localSnapshot,
-      // 首次写入已有完整 snapshot.translations，不再重复携带一份同样大小的增量数组。
+      // 首次写入已有完整 snapshot.translations，不重复携带同样大小的增量数组。
       translationDelta: localSessionDocumentSaved ? localTranslationDelta : [],
       ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
     };
@@ -464,21 +466,24 @@ async function persistDocumentCheckpointToLocalService(input: {
         payload,
       }),
     });
-    if (response.ok) {
-      localSessionDocumentSaved = true;
-      for (const [id, text] of localTranslationDelta) localPersistedTranslations.set(id, text);
-      localSessionSummary.value = {
-        title: doc.value.title || documentFileName,
-        format: doc.value.format,
-        updatedAt: new Date().toISOString(),
-      };
-    } else {
+    if (!response.ok) {
       if (response.status === 413) localSessionDisabled = true;
       console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
+      return false;
     }
+
+    localSessionDocumentSaved = true;
+    for (const [id, text] of localTranslationDelta) localPersistedTranslations.set(id, text);
+    localSessionSummary.value = {
+      title: doc.value.title || documentFileName,
+      format: doc.value.format,
+      updatedAt: new Date().toISOString(),
+    };
+    return true;
   } catch (error) {
-    // IndexedDB remains primary; a stopped local service must not interrupt translation.
+    // SQLite 是独立备份；本机服务未启动不应中断用户翻译。
     console.debug('[document-reader] local SQLite checkpoint unavailable:', error);
+    return false;
   }
 }
 
@@ -573,10 +578,31 @@ async function persistCurrentSession() {
 
   // 多个 Vue watcher 和翻译批次可能同时请求保存，按顺序写入，避免旧快照覆盖新状态。
   const write = persistenceQueue.then(async () => {
-    await saveActiveDocumentProgress(input);
-    await persistDocumentCheckpointToLocalService(input);
-    for (const [id, text] of delta) persistedTranslations.value.set(id, text);
-    persistenceMessage.value = '阅读位置、译文和书籍记忆已自动保存到本机；刷新页面后可以继续。';
+    let indexedDbError: unknown;
+    let indexedDbSaved = false;
+    if (activeSessionIndexedDbWritable) {
+      try {
+        await saveActiveDocumentProgress(input);
+        indexedDbSaved = true;
+        for (const [id, text] of delta) persistedTranslations.value.set(id, text);
+      } catch (error) {
+        indexedDbError = error;
+      }
+    }
+
+    // 两份存储必须独立尝试。IndexedDB 配额/权限失败时，不能连带跳过 SQLite 备份。
+    const sqliteSaved = await persistDocumentCheckpointToLocalService(input);
+    if (indexedDbSaved && sqliteSaved) {
+      persistenceMessage.value = '阅读位置、译文和书籍记忆已保存到扩展存储与本机 SQLite。';
+    } else if (indexedDbSaved) {
+      persistenceMessage.value = '阅读位置和译文已保存到扩展本地存储；本机 SQLite 备份当前不可用。';
+    } else if (sqliteSaved) {
+      persistenceMessage.value = '扩展 IndexedDB 当前不可用；阅读位置、译文和书籍记忆已保存到本机 SQLite。';
+    } else {
+      throw indexedDbError instanceof Error
+        ? indexedDbError
+        : new Error('扩展 IndexedDB 与本机 SQLite 均未能保存阅读检查点');
+    }
   });
   persistenceQueue = write.catch(() => undefined);
   try {
@@ -607,6 +633,7 @@ async function restoreLastSession() {
 
     resetTranslation();
     activeSessionReady.value = false;
+    activeSessionIndexedDbWritable = false;
     persistedTranslations.value = new Map(saved.translations);
     localPersistedTranslations = restoredFromLocalService
       ? new Map(saved.translations)
@@ -637,6 +664,30 @@ async function restoreLastSession() {
       analyzedChapterKeys: saved.analyzedChapterKeys,
       lastRunSegmentIds: saved.lastRunSegmentIds,
     });
+
+    // SQLite 恢复成功后，尽力重建 IndexedDB 主存储。失败仍可继续使用 SQLite 检查点。
+    if (restoredFromLocalService) {
+      try {
+        await createActiveDocumentSession({
+          fileName: documentFileName,
+          document: saved.document,
+          rawText,
+          glossary: glossary.value,
+          sourceLang: sourceLang.value,
+          targetLang: targetLang.value,
+          viewMode: viewMode.value,
+          literaryMode: literaryMode.value,
+          currentPageIndex: currentPageIndex.value,
+        });
+        activeSessionIndexedDbWritable = true;
+        persistedTranslations.value.clear(); // 新记录还没有译文，需要随后写回全部已完成译文
+      } catch {
+        activeSessionIndexedDbWritable = false;
+      }
+    } else {
+      activeSessionIndexedDbWritable = true;
+    }
+
     activeSessionReady.value = true;
     await nextTick();
     await persistCurrentSession();
@@ -796,13 +847,18 @@ async function loadFile(file: File) {
         literaryMode: literaryMode.value,
         currentPageIndex: currentPageIndex.value,
       });
+      activeSessionIndexedDbWritable = true;
       activeSessionReady.value = true;
       await persistCurrentSession();
       savedSessionSummary.value = await getActiveDocumentSessionSummary();
     } catch (storageError) {
-      activeSessionReady.value = false;
-      persistenceMessage.value = '本地会话创建失败；本次仍可继续翻译。' +
+      // 文件已在内存解析完成。即使 IndexedDB 无法创建，也尝试先建立 SQLite 恢复副本。
+      activeSessionIndexedDbWritable = false;
+      activeSessionReady.value = true;
+      persistenceMessage.value = '扩展本地会话创建失败，正在尝试保存到本机 SQLite。' +
         (storageError instanceof Error ? ' ' + storageError.message : '');
+      await persistCurrentSession();
+      await refreshLocalSessionSummary();
     }
   } catch (err) {
     parseError.value = (err as Error).message;
