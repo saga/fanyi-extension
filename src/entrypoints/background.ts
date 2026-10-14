@@ -9,7 +9,7 @@ import {
   clearAllCache,
 } from './utils/translateApi';
 import { translationCache } from './utils/cacheManager';
-import { globalQueue } from './utils/translationQueue';
+import { globalQueue, TranslationQueue } from './utils/translationQueue';
 import { generateTranslationCacheKey } from './utils/cacheKey';
 import { translateSingleflight } from './utils/singleflight';
 import { matchSiteRule, buildSitePrompt } from '../rules';
@@ -120,6 +120,12 @@ export default defineBackground({
       }
       return null;
     }
+
+    // Keep local-Agent concurrency independent from the remote DeepSeek queue. DeepSeek's
+    // serial queue is deliberately tied to its prompt/KV-cache behavior; applying it to a local
+    // Agent causes every local chunk to wait even when the page-level pool runs in parallel.
+    // Start at 2 to improve overlap without launching too many CLI/SDK jobs at once.
+    const localAgentQueue = new TranslationQueue(2, 0, 0);
 
     // 远程 Provider 继续走原有 API；本机模式把相同翻译 prompt 发给本机 OpenAI-compatible 入口。
     function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle): DeepSeekTranslationService {
@@ -419,27 +425,35 @@ export default defineBackground({
             effectivePrompt,
           );
 
-        // Local mode checks the shared SQLite cache first, then the existing extension cache.
-        // The remote-service path is intentionally unchanged.
-        const localCached = await getLocalSqliteCache(config, cacheKey);
-        if (localCached?.size) {
-          if (validInputIds && hasCompleteTranslationSet(localCached, inputIds)) {
-            sendResponse({ success: true, result: inputIds.map((id) => [id, localCached.get(id)!]) });
-            return;
-          }
-          logger.warn('[Background] Ignoring incomplete/invalid SQLite translation cache entry:', cacheKey);
-          await deleteLocalSqliteCache(config, cacheKey);
-        }
+        // Check the extension cache first: an in-memory hit avoids even a loopback HTTP hop.
+        // In local-agent mode, check SQLite only after an extension-cache miss.
         const cached = await getCachedTranslation(cacheKey);
         if (cached?.size) {
           if (validInputIds && hasCompleteTranslationSet(cached, inputIds)) {
-            if (config.useLocalAgent) await setLocalSqliteCache(config, cacheKey, cached);
+            // Keep the shared SQLite cache warm, but don't make a good cached translation wait on I/O.
+            if (config.useLocalAgent) {
+              void setLocalSqliteCache(config, cacheKey, cached);
+            }
             sendResponse({ success: true, result: inputIds.map((id) => [id, cached.get(id)!]) });
             return;
           }
           logger.warn('[Background] Ignoring incomplete/invalid extension translation cache entry:', cacheKey);
           await translationCache.remove(cacheKey);
-          await deleteLocalSqliteCache(config, cacheKey);
+          if (config.useLocalAgent) await deleteLocalSqliteCache(config, cacheKey);
+        }
+        if (config.useLocalAgent) {
+          const localCached = await getLocalSqliteCache(config, cacheKey);
+          if (localCached?.size) {
+            if (validInputIds && hasCompleteTranslationSet(localCached, inputIds)) {
+              void cacheTranslation(cacheKey, localCached).catch((error) => {
+                logger.debug('[Background] Failed to warm extension cache from SQLite:', error);
+              });
+              sendResponse({ success: true, result: inputIds.map((id) => [id, localCached.get(id)!]) });
+              return;
+            }
+            logger.warn('[Background] Ignoring incomplete/invalid SQLite translation cache entry:', cacheKey);
+            await deleteLocalSqliteCache(config, cacheKey);
+          }
         }
 
         const service = getService(config, promptStyle);
@@ -460,10 +474,27 @@ export default defineBackground({
           `targetLang=${targetLang}`,
         );
 
+        const queue = config.useLocalAgent ? localAgentQueue : globalQueue;
+        const enqueuedAt = performance.now();
         const jsonResult = await translateSingleflight(cacheKey, () =>
-          globalQueue.add(() =>
-            service.translate(jsonContent, sourceLang, targetLang, glossary, effectivePrompt)
-          )
+          queue.add(async () => {
+            const providerStartedAt = performance.now();
+            logger.debug('[Background][Perf] Translation dequeued', {
+              localAgent: config.useLocalAgent,
+              queueWaitMs: Math.round(providerStartedAt - enqueuedAt),
+              queuePending: queue.pendingCount,
+              queueRunning: queue.runningCount,
+              inputChars: jsonContent.length,
+            });
+            try {
+              return await service.translate(jsonContent, sourceLang, targetLang, glossary, effectivePrompt);
+            } finally {
+              logger.debug('[Background][Perf] Translation provider returned', {
+                localAgent: config.useLocalAgent,
+                providerDurationMs: Math.round(performance.now() - providerStartedAt),
+              });
+            }
+          })
         );
 
         // [ChunkTrace] 出参快照：成功解析 → 对比 inputIds 找出 response 里
@@ -519,8 +550,10 @@ export default defineBackground({
 
         const result = processTranslationResult(jsonResult);
         if (validInputIds && hasCompleteTranslationSet(result, inputIds)) {
-          await cacheTranslation(cacheKey, result);
-          await setLocalSqliteCache(config, cacheKey, result);
+          await Promise.all([
+            cacheTranslation(cacheKey, result),
+            setLocalSqliteCache(config, cacheKey, result),
+          ]);
         } else {
           // 不缓存部分结果，否则下一次同一请求会永久命中缺译文的旧缓存。
           logger.warn('[Background] Translation result is incomplete; skipping cache write:', {
