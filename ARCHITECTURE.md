@@ -80,7 +80,7 @@ fanyi-extension/
 │   │   │   ├── translationDisplay.ts # 双语对照 DOM 操作
 │   │   │   ├── translationQueue.ts   # 串行/并行任务队列
 │   │   │   ├── translateApi.ts       # 翻译结果解析 + 缓存
-│   │   │   ├── cacheManager.ts       # 双层缓存 (内存 + storage)
+│   │   │   ├── cacheManager.ts       # analysisCache + translationCache 出口（译文缓存由 ShardedCache 分片持久化）
 │   │   │   ├── cacheKey.ts           # 简单哈希缓存键
 │   │   │   ├── config.ts             # 配置读写 (@wxt-dev/storage)
 │   │   │   ├── glossaryExtractor.ts  # 术语提取 (compromise NLP)
@@ -423,7 +423,7 @@ extractBlocks(rootNode)
 
 #### 4.3.6 缓存系统 (`cacheManager.ts` + `cacheKey.ts` + `translateApi.ts`)
 
-**双层缓存**:
+- L1: `Map<string, CacheEntry>` (内存缓存，即查即用)
 - L1: `Map<string, CacheEntry>` (内存缓存，即查即用)
 - L2: `@wxt-dev/storage` (持久化到 `local:translationCache`)
 - TTL: 7 天
