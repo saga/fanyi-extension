@@ -458,8 +458,8 @@ watch(literaryMemory, () => {
 }, { deep: true });
 
 onMounted(async () => {
-  // The global literary profile enables the book-level entity/style workflow by default for EPUB/PDF.
-  // The checkbox remains an explicit opt-out for users who want literary wording without the extra pass.
+  // The global literary profile enables entity/style memory by default. EPUB/PDF users can still
+  // explicitly turn off book-level memory while keeping the literary prompt and per-batch review.
   const config = await getConfig();
   if (config.translationMode === 'literary') literaryMode.value = true;
   await refreshSavedSessionSummary();
@@ -1003,8 +1003,8 @@ async function buildTranslationOptions() {
     localAgentToken: config.localAgentToken,
     // Global literary profile enables entity/style memory for any structured document;
     // the EPUB/PDF checkbox remains an opt-in for users on the technical profile.
-    literaryMode: config.translationMode === 'literary' ||
-      (literaryMode.value && (doc.value.format === 'epub' || doc.value.format === 'pdf')),
+    literaryMode: literaryMode.value &&
+      (config.translationMode === 'literary' || doc.value.format === 'epub' || doc.value.format === 'pdf'),
     skipReview: !literaryReview.value,
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
