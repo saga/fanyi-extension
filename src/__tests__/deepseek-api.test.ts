@@ -128,7 +128,7 @@ describe('DeepSeekTranslationService API methods', () => {
 
       await expect(
         localService.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined),
-      ).rejects.toThrow(/本机 Agent 服务连接失败.*不会回退到远程 API/);
+      ).rejects.toThrow(/本机 Agent 服务连接失败[\s\S]*不会回退到远程 API/);
       expect(globalFetch).toHaveBeenCalledTimes(1);
       expect(globalFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
     });
