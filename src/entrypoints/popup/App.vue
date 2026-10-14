@@ -56,7 +56,7 @@
         class="local-agent-offline"
         role="status"
       >
-        <span>本机翻译模式仍已启用，但检测不到本机服务。不会自动切换到远程 Provider，请启动本机服务后重新打开弹窗。</span>
+        <span>本机翻译模式仍已启用，但检测不到本机服务。不会自动切换到远程 Provider；启动服务后，此选项会自动重新显示。</span>
         <button type="button" class="server-toggle" @click="disableLocalAgent">关闭本机模式</button>
       </div>
 
