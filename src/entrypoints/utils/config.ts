@@ -1,5 +1,5 @@
 import { storage } from '@wxt-dev/storage';
-import type { PromptStyle } from '../service/deepseek';
+import type { PromptStyle, TranslationMode } from '../service/deepseek';
 
 export interface ShortcutConfig {
   translatePage: string;
@@ -24,6 +24,8 @@ export interface Config {
    * 会自动升级为 ja-source-natural（见 utils/languageDetector）。
    */
   promptStyle: PromptStyle;
+  /** 独立翻译目标：technical 精确技术翻译；literary 文学表达与实体一致性。 */
+  translationMode: TranslationMode;
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
   /** 是否使用服务端翻译（发送到 /fanyi/page） */
@@ -47,6 +49,7 @@ const defaultConfig: Config = {
   deepseekApiKey: '',
   provider: 'deepseek',
   promptStyle: 'default',
+  translationMode: 'technical',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -65,6 +68,7 @@ const defaultConfig: Config = {
 export async function getConfig(): Promise<Config> {
   const config = await storage.getItem<Partial<Config>>('local:config');
   const merged: Config = { ...defaultConfig, ...config };
+  merged.translationMode = merged.translationMode === 'literary' ? 'literary' : 'technical';
   return merged;
 }
 
