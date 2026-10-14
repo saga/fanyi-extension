@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('../entrypoints/utils/config', () => ({
+  getConfig: vi.fn().mockResolvedValue({ useLocalAgent: false }),
+}));
+
 // 导入被测函数（注意：youtube 模块有 DOM 依赖，需要 jsdom 环境）
 import {
   fetchCaptions,
