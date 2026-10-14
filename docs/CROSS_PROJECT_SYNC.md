@@ -43,9 +43,10 @@
 
 ### 1. `cacheKey.ts`
 - `simpleHash(str)` — 字符串哈希函数
-- `generateTranslationCacheKey(jsonContent, sourceLang, targetLang, provider?, promptStyle?)` — 缓存 key 生成,支持 provider/promptStyle 维度(2026-07-16 新增,向后兼容)
-- **完全一致**
-- provider/promptStyle 参数已两端同步(S2)
+- 当前两端签名均为 `generateTranslationCacheKey(jsonContent, sourceLang, targetLang, provider?, promptStyle?, glossary?, sitePrompt?)`。
+- 缓存 key 必须覆盖所有会改变译文的维度：provider、promptStyle、术语表与站点指令。
+- 两端站点规则的输入形态并非完全相同：扩展侧将 `sitePrompt` 文本单独纳入 hash，并纳入 `glossary.document_terms`；服务端的 `withSiteDocumentTerms()` 会将规则词条/指令放入 glossary，并纳入 `document_terms` 与 `site_instructions`。因此签名相同不等于实际 key 一定相同，也不要假设两端缓存可互换。
+- 修改任何一个缓存维度时，必须在两侧分别验证：切换 Provider/文风、编辑术语表、修改站点规则后不会命中旧译文；不带这些可选参数的旧调用仍保持兼容。
 
 ### 2. `chunkRetry.ts`
 - `shouldRetryChunk(chunk, missingCount, isRetry)` — chunk 翻译重试策略
