@@ -38,6 +38,14 @@ describe('generateTranslationCacheKey', () => {
   });
 
 
+
+  it('should keep technical and literary profile caches separate', () => {
+    const json = JSON.stringify([{ id: 'b1', text: 'A literary sentence.' }]);
+    const technical = generateTranslationCacheKey(json, 'en', 'zh', 'deepseek', 'default', undefined, undefined, 'technical');
+    const literary = generateTranslationCacheKey(json, 'en', 'zh', 'deepseek', 'default', undefined, undefined, 'literary');
+    expect(technical).not.toBe(literary);
+  });
+
   it('should use content prefix for faster comparison', () => {
     const longContent = 'a'.repeat(1000);
     const json = JSON.stringify([{ id: 'b1', text: longContent }]);
