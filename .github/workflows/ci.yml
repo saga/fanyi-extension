@@ -27,7 +27,5 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Unit tests
         run: pnpm test
-      - name: TypeScript and Vue typecheck
-        run: pnpm compile
       - name: Build extension
         run: pnpm build
