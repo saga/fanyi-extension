@@ -130,6 +130,7 @@
         <button @click="restoreOriginal" title="恢复原网页">恢复</button>
         <button @click="clearCache" title="清空所有翻译缓存">清除缓存</button>
       </div>
+      <span v-if="cacheClearMessage" class="hint-text" role="status">{{ cacheClearMessage }}</span>
     </div>
   </div>
 </template>
@@ -161,6 +162,7 @@ const config = ref<Config>({
 });
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
+const cacheClearMessage = ref('');
 /** 服务端翻译设置面板折叠状态（默认收起，保持 popup 紧凑）。 */
 const serverExpanded = ref(false);
 let checkTimer: number | null = null;
@@ -256,7 +258,18 @@ async function restoreOriginal() {
 }
 
 async function clearCache() {
-  await browser.runtime.sendMessage({ action: 'clearCache' });
+  cacheClearMessage.value = '正在清理翻译缓存…';
+  try {
+    const result = await browser.runtime.sendMessage({ action: 'clearCache' }) as {
+      success?: boolean;
+      error?: string;
+    };
+    cacheClearMessage.value = result?.success
+      ? '翻译缓存清理完成。'
+      : (result?.error || '清理缓存失败，请重试。');
+  } catch (error) {
+    cacheClearMessage.value = '清理缓存失败：' + (error instanceof Error ? error.message : String(error));
+  }
 }
 </script>
 
