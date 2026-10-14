@@ -12,16 +12,16 @@ pnpm dev:firefox    # Firefox dev mode
 pnpm zip            # package Chrome
 ```
 
-`pnpm compile` must pass before building. `pnpm test` does type inference but no typecheck.
+`pnpm compile` must pass before building. The CI workflow runs type checking, tests, and production builds for Chrome and Firefox.
 
 ## Architecture
 
 WXT extension with entrypoints at `src/entrypoints/`:
-- `background.ts` — orchestrates translation via DeepSeek API, manages cache, handles messages
+- `background.ts` — routes remote and local translation requests, validates translation results, manages browser/SQLite cache, handles messages
 - `content.ts` — injected on all pages, extracts DOM blocks, applies translations inline
 - `content/serverTranslation.ts` — sends pre-marked HTML to `/fanyi/page` server endpoint and applies bilingual translations from the returned HTML
 - `popup/` — Vue 3 app for config UI
-- `service/deepseek.ts` — API client (hardcoded model `deepseek-v4-flash`, endpoint `api.deepseek.com/v1/chat/completions`)
+- `service/deepseek.ts` — shared translation client; uses DeepSeek remotely or the configured OpenAI-compatible loopback endpoint for the local Agent Provider
 - `utils/blockExtractor.ts` — walks DOM with TreeWalker, returns `TextBlock[]`
 - `utils/chunkBuilder.ts` — groups blocks into chunks
 - `utils/config.ts` — `@wxt-dev/storage` at key `local:config`
@@ -39,6 +39,12 @@ Key files for server mode:
 `src/rules/` — site-specific translation rules (GitHub, Reddit, HackerNews). Add files there and register in `index.ts`.
 
 `src/components/` — Vue 3 components (FloatingBall, SelectionTranslator, TranslationStatus).
+
+## Local Agent Provider
+
+`config.useLocalAgent` has priority over `config.useServerTranslation`. When enabled, webpage/chunk translation, document chunk translation, side-panel chat, YouTube subtitles, and EPUB/PDF literary analysis/review must use the configured local Agent endpoint. A local request failure is an error or a retained-draft warning; do not retry it through the remote Vocal Saga/DeepSeek endpoint. The optional `localAgentToken` is sent only when configured. SQLite cache read/write failures are cache misses, but clearing the SQLite cache must report a failed request instead of claiming complete success.
+
+The Express + TypeScript service lives in the sibling `devweekly/vocal-saga/local-agent-service` directory. It binds to loopback and uses SQLite for translation cache, request history, and a document recovery snapshot. IndexedDB remains the extension's primary document store; SQLite's serialized document checkpoint is limited to 5 MiB, so it is not a guaranteed backup for every file the reader can open. Do not describe this copy as unlimited or replace IndexedDB with it.
 
 ## Build output
 
@@ -61,4 +67,4 @@ A build hook (`wxt.config.ts:63`) rewrites absolute asset paths in HTML to relat
 - TreeWalker `currentNode` must NOT be set manually — real Chrome/Firefox behave differently from jsdom (see `blockExtractor.ts:375` comment).
 - Translation cache uses simple string hash (not cryptographic) with 7-day TTL.
 - Config writing uses `JSON.parse(JSON.stringify(...))` to strip Proxy wrappers from Vue refs.
-- Chunks process **serially (concurrency=1)** on both desktop and mobile. The DeepSeek prompt cache (KV cache) only hits from the second request onward when requests share a prefix and are dispatched sequentially — parallel 4-way dispatch all-misses the cache. Serial mode lets every chunk benefit from the prior chunk's cache (`prompt_cache_hit_tokens` returns to 80%+). Per-chunk retry, global retry, and DOM application (`applyTranslationsWithRAF`) all stay as documented.
+- `translateChunksViaBackground()` uses a warm-up phase followed by bounded parallel work: desktop concurrency is 4 and mobile concurrency is 2. Do not assume the whole page is serial or change this policy based on the older prompt-cache note without measuring current provider behavior. Chunk retry, missing-ID validation, and DOM application (`applyTranslationsWithRAF`) remain separate concerns.
