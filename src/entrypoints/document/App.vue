@@ -457,8 +457,12 @@ watch(literaryMemory, () => {
   if (literaryMode.value) void persistCurrentSession();
 }, { deep: true });
 
-onMounted(() => {
-  void refreshSavedSessionSummary();
+onMounted(async () => {
+  // The global literary profile enables the book-level entity/style workflow by default for EPUB/PDF.
+  // The checkbox remains an explicit opt-out for users who want literary wording without the extra pass.
+  const config = await getConfig();
+  if (config.translationMode === 'literary') literaryMode.value = true;
+  await refreshSavedSessionSummary();
 });
 
 async function refreshSavedSessionSummary() {
