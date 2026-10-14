@@ -2,13 +2,13 @@ import type { TranslationService, Glossary, JsonSchemaResponseFormat } from './_
 import { MODEL_FETCH_TIMEOUT_MS } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
-import { buildStyledSystemContent, type PromptStyle } from './prompt-style';
+import { buildStyledSystemContent, type PromptStyle, type TranslationMode } from './prompt-style';
 
 import { logger } from '../../utils/logger';
 
 // 文风类型与调度集中在 service/prompt-style.ts；此处再导出，
 // 让既有 `from '../service/deepseek'` 的引用保持可用。
-export type { PromptStyle };
+export type { PromptStyle, TranslationMode };
 const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 const USER_ID = 'fanyi-extension';
@@ -67,9 +67,10 @@ export function buildSystemContent(
   targetLang: string,
   sitePrompt?: string,
   glossary?: Glossary,
-  style?: PromptStyle
+  style?: PromptStyle,
+  translationMode: TranslationMode = 'technical',
 ): string {
-  const content = buildStyledSystemContent(sourceLang, targetLang, glossary, style);
+  const content = buildStyledSystemContent(sourceLang, targetLang, glossary, style, translationMode);
   return sitePrompt ? content + '\n\nSite-specific rules:\n' + sitePrompt : content;
 }
 
@@ -82,6 +83,7 @@ function buildTranslationBody(
   style?: PromptStyle,
   modelOverride = MODEL,
   responseFormat?: JsonSchemaResponseFormat,
+  translationMode: TranslationMode = 'technical',
 ) {
   const hasDocumentContext = blocks.some((block) => !!block.contextPath?.trim() || !!block.kind || !!block.marker);
   const blocksJson = JSON.stringify(
@@ -99,7 +101,14 @@ function buildTranslationBody(
 
   // user message 精简到 "JSON:" + blocks — 比 "Output JSON only."
   // 更短，同时 "JSON" 字样满足 response_format: json_object 硬约束。
-  const systemContent = buildSystemContent(sourceLang, targetLang, sitePrompt, hasGlossaryEntries(glossary) ? glossary : undefined, style);
+  const systemContent = buildSystemContent(
+    sourceLang,
+    targetLang,
+    sitePrompt,
+    translationMode === 'literary' || !hasGlossaryEntries(glossary) ? undefined : glossary,
+    style,
+    translationMode,
+  );
   logger.debug('[DeepSeek] System prompt built:\n' + systemContent);
   return {
     model: modelOverride,
@@ -251,12 +260,14 @@ export class DeepSeekTranslationService implements TranslationService {
   private style?: PromptStyle;
   private endpoint: string;
   private model: string;
+  private translationMode: TranslationMode;
 
-  constructor(apiKey: string, style?: PromptStyle, options?: { endpoint?: string; model?: string }) {
+  constructor(apiKey: string, style?: PromptStyle, options?: { endpoint?: string; model?: string; translationMode?: TranslationMode }) {
     this.apiKey = apiKey;
     this.style = style;
     this.endpoint = options?.endpoint || DEFAULT_API_URL;
     this.model = options?.model || MODEL;
+    this.translationMode = options?.translationMode === 'literary' ? 'literary' : 'technical';
   }
 
   async translate(
@@ -278,6 +289,7 @@ export class DeepSeekTranslationService implements TranslationService {
       this.style,
       this.model,
       responseFormat,
+      this.translationMode,
     );
 
     const raw = await callApi(this.apiKey, JSON.stringify(body), this.endpoint);
@@ -307,6 +319,8 @@ export class DeepSeekTranslationService implements TranslationService {
       hasGlossaryEntries(glossary) ? glossary : undefined,
       this.style,
       this.model,
+      undefined,
+      this.translationMode,
     );
     bodyObj.stream = true;
     const body = JSON.stringify(bodyObj);
