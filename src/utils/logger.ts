@@ -15,7 +15,9 @@
  * 前缀策略：
  *   - 如果首参是字符串，把 `[fanyi:level]` 拼到字符串前面，便于现有测试
  *     `expect(warn.mock.calls[0][0]).toContain('...')` 不被破坏。
- *   - 否则作为独立参数前置（例如传入 Error 对象时）。
+ *   - 后续对象与 Error 参数先序列化成可读 JSON，确保 content script / background
+ *     日志面板不把诊断内容显示为 `[object Object]`；Error 额外保留 message/stack/cause。
+ *   - 字符串之外的第一个参数也以独立前缀参数开头，保持统一日志格式。
  *
  * 设计权衡：
  *   - 不替换 `console` 全局对象，避免污染页面 JS（content script 场景）。
