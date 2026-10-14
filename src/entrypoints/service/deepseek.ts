@@ -1,4 +1,4 @@
-import type { TranslationService, Glossary, JsonSchemaResponseFormat } from './_service';
+import type { TranslationService, Glossary, JsonSchemaResponseFormat, TranslationSessionContext } from './_service';
 import { MODEL_FETCH_TIMEOUT_MS } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
@@ -277,10 +277,11 @@ export class DeepSeekTranslationService implements TranslationService {
     glossary?: Glossary,
     context?: string,
     responseFormat?: JsonSchemaResponseFormat,
+    sessionContext?: TranslationSessionContext,
   ): Promise<string> {
     const blocks = JSON.parse(jsonContent);
 
-    const body = buildTranslationBody(
+    const body: Record<string, any> = buildTranslationBody(
       blocks,
       sourceLang,
       targetLang,
@@ -291,6 +292,19 @@ export class DeepSeekTranslationService implements TranslationService {
       responseFormat,
       this.translationMode,
     );
+    // The local service uses this metadata to route document batches to one isolated SDK
+    // session. Do not send the extension's internal session identifiers to remote providers.
+    if (sessionContext && this.endpoint !== DEFAULT_API_URL) {
+      body.metadata = {
+        documentSessionId: sessionContext.documentSessionId,
+        sessionRole: sessionContext.role,
+        sourceLang: sessionContext.sourceLang,
+        targetLang: sessionContext.targetLang,
+        promptStyle: sessionContext.promptStyle || this.style || 'default',
+        translationMode: sessionContext.translationMode || this.translationMode,
+        contextVersion: sessionContext.contextVersion || 'book-session-v1',
+      };
+    }
 
     const raw = await callApi(this.apiKey, JSON.stringify(body), this.endpoint);
     return logUnchangedBlocks(raw, blocks);
