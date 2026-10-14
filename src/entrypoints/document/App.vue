@@ -1001,7 +1001,10 @@ async function buildTranslationOptions() {
     localAgentUrl: config.localAgentUrl,
     localAgentModel: config.localAgentModel,
     localAgentToken: config.localAgentToken,
-    literaryMode: literaryMode.value && (doc.value.format === 'epub' || doc.value.format === 'pdf'),
+    // Global literary profile enables entity/style memory for any structured document;
+    // the EPUB/PDF checkbox remains an opt-in for users on the technical profile.
+    literaryMode: config.translationMode === 'literary' ||
+      (literaryMode.value && (doc.value.format === 'epub' || doc.value.format === 'pdf')),
     skipReview: !literaryReview.value,
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
