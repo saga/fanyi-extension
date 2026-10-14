@@ -29,7 +29,7 @@ function buildLiteraryPageReviewInstructions(): string {
     '准确性优先。不可漏译、误译、增加事实、改动人物关系、否定、时态、视角或因果；不得为了华丽而新增比喻、情绪或解释。候选实体/人名/地名/物品名须按原文和输入片段一致处理；不要创建术语表，也不要因为英文大写而保留普通词。',
     '仅在有明确文本依据时记录 finding。category 只能为 accuracy、terminology 或 style；前两类 priority=must_fix，style priority=optional。style 必须指出具体翻译腔或节奏/语气问题，不能只是个人审美。',
     '必须遵守通用输出格式：每个输入 id 返回一个 translated_text；translated_text 的值必须是严格 JSON 字符串，形如 {"finalTranslation":"完整修订译文","findings":[{"category":"accuracy|terminology|style","priority":"must_fix|optional","sourceExcerpt":"原文短引","draftExcerpt":"初译问题短引","reason":"具体理由","suggestion":"修订建议"}]}。没有问题时 findings=[]，finalTranslation 原样保留 draft。不要在 translated_text 外添加字段或 Markdown。',
-  ].join('\\n');
+  ].join('\n');
 }
 // ============================================================
 // Error categorisation for [SessionSummary]
