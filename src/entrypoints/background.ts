@@ -663,6 +663,8 @@ export default defineBackground({
         }
 
         const { jsonContent, sourceLang, targetLang, pageUrl, glossary } = message;
+        const translationMode: TranslationMode = message.translationMode ?? config.translationMode ?? 'technical';
+        const effectiveGlossary = translationMode === 'literary' ? undefined : glossary;
 
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
@@ -670,13 +672,13 @@ export default defineBackground({
         // 文风：同 handleTranslateChunk，优先用页级检测结果，缺省回退配置。
         const promptStyle = message.promptStyle ?? config.promptStyle;
 
-        const service = getService(config, promptStyle);
+        const service = getService(config, promptStyle, translationMode);
 
         const stream = service.translateStream(
           jsonContent,
           sourceLang,
           targetLang,
-          glossary,
+          effectiveGlossary,
           sitePrompt
         );
 
