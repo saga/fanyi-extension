@@ -3,7 +3,7 @@
     <div class="settings-heading">
       <div>
         <h3>翻译设置</h3>
-        <p class="muted small">设置会自动保存，网页翻译和文档翻译共用。开始翻译后再切换类型，不会自动重写已有译文。</p>
+        <p class="muted small">设置会自动保存，网页翻译和文档翻译共用。正在运行的任务沿用启动时配置；改动对下一次翻译或重试生效，不会重写已有译文。</p>
       </div>
       <span v-if="saving" class="save-state">保存中…</span>
       <span v-else-if="saveMessage" class="save-state">{{ saveMessage }}</span>
@@ -79,7 +79,7 @@
       <label class="setting-field">
         <span>本机服务地址</span>
         <input v-model="config.localAgentUrl" type="url" placeholder="http://127.0.0.1:8789"
-          @change="saveConfig('localAgentUrl')" />
+          @change="saveLocalAgentUrl" />
       </label>
       <label class="setting-field">
         <span>模型覆盖（可选）</span>
@@ -184,6 +184,7 @@ onMounted(async () => {
   config.value = await getConfig();
   applyActiveDocumentLanguages();
   initialized.value = true;
+  if (config.value.useLocalAgent) void checkLocalService();
 });
 
 watch(
@@ -218,8 +219,16 @@ async function onLocalAgentToggle() {
   if (config.value.useLocalAgent) {
     config.value.useServerTranslation = false;
     localStatus.value = 'unknown';
+  } else {
+    localStatus.value = 'unknown';
   }
   await saveConfig('useLocalAgent', 'useServerTranslation');
+  if (config.value.useLocalAgent) void checkLocalService();
+}
+
+async function saveLocalAgentUrl() {
+  await saveConfig('localAgentUrl');
+  if (config.value.useLocalAgent) void checkLocalService();
 }
 
 async function checkLocalService() {
@@ -277,6 +286,8 @@ async function checkConfiguration() {
   font-size: 1rem;
 }
 .settings-heading p { margin: .25rem 0 0; line-height: 1.5; }
+.muted { color: #57606a; }
+.small { font-size: .78rem; }
 .save-state { color: #57606a; font-size: .78rem; white-space: nowrap; }
 .settings-grid {
   display: grid;
@@ -353,6 +364,8 @@ async function checkConfiguration() {
   cursor: pointer;
   font-size: .82rem;
 }
+.btn.primary { background: #0969da; border-color: #0969da; color: #fff; }
+.btn.primary:hover { background: #0860ca; }
 .btn:disabled, .link-button:disabled { opacity: .55; cursor: not-allowed; }
 .link-button {
   padding: 0;
