@@ -453,7 +453,7 @@ export interface DocumentTranslateState {
  * local CPU-only logic (never a remote request) so a temporary cache/service issue cannot
  * make a document unreadable.
  */
-async function planDocumentBatches(
+export async function planDocumentBatches(
   segments: DocumentSegment[],
   budget: Partial<BatchBudget>,
   options: TranslateOptions,
