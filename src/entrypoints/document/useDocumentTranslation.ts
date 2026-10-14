@@ -922,8 +922,10 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     preserveExisting = false,
   ) {
-    const startsLiteraryBook = !!options.literaryMode &&
-      (options.documentFormat === 'epub' || options.documentFormat === 'pdf');
+    // Literary mode keeps entity/style memory for every structured document, not only EPUB/PDF.
+    // The global translation profile enables this automatically; the reader checkbox can opt in
+    // to the same workflow for EPUB/PDF while the global profile remains technical.
+    const startsLiteraryBook = !!options.literaryMode;
     // reset() normally clears a previous document. Preserve a user-authored glossary entered
     // before the first translation run, then merge the AI book analysis into it below.
     const preseededMemory = startsLiteraryBook ? sanitizeLiteraryMemory(literaryMemory.value) : undefined;
