@@ -45,6 +45,14 @@
         @change="onFilePicked" />
     </section>
 
+    <!-- 选择文件前也可先配置源/目标语言、翻译类型、文风与运行服务。 -->
+    <DocumentTranslationSettings
+      v-if="!doc && !parsing"
+      :active-source-lang="sourceLang"
+      :active-target-lang="targetLang"
+      @updated="onTranslationSettingsUpdated"
+    />
+
     <!-- 2. 解析中 -->
     <section v-if="parsing" class="panel">
       <p class="muted">正在解析{{ progress.total > 1 ? `（${progress.done}/${progress.total} 个处理单元）` : '…' }}</p>
@@ -169,6 +177,11 @@
       </template>
 
       <template v-else>
+      <DocumentTranslationSettings
+        :active-source-lang="sourceLang"
+        :active-target-lang="targetLang"
+        @updated="onTranslationSettingsUpdated"
+      />
       <section v-if="persistenceMessage" class="panel persistence-notice">
         <span>{{ persistenceMessage }}</span>
       </section>
@@ -185,29 +198,6 @@
 
       <section class="panel controls">
         <label class="field">
-          <span>源语言</span>
-          <select v-model="sourceLang">
-            <option value="auto">自动检测</option>
-            <option value="en">英语</option>
-            <option value="zh">中文</option>
-            <option value="ja">日语</option>
-            <option value="ko">韩语</option>
-            <option value="fr">法语</option>
-            <option value="de">德语</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>目标语言</span>
-          <select v-model="targetLang">
-            <option value="zh">中文</option>
-            <option value="en">英语</option>
-            <option value="ja">日语</option>
-            <option value="ko">韩语</option>
-            <option value="fr">法语</option>
-            <option value="de">德语</option>
-          </select>
-        </label>
-        <label class="field">
           <span>显示</span>
           <select v-model="viewMode">
             <option value="bilingual">双语对照</option>
@@ -216,11 +206,12 @@
           </select>
         </label>
         <label v-if="doc.format === 'epub' || doc.format === 'pdf'" class="field literary-toggle">
-          <span>书籍翻译</span>
+          <span>整本书记忆（覆盖翻译类型）</span>
           <span class="literary-toggle-control">
             <input v-model="literaryMode" type="checkbox" :disabled="state.total > 0" />
             实体一致性与文风审校
           </span>
+          <small class="muted">启用后使用文学翻译流程，并跨章节维护实体与文风记忆；关闭后按上面的翻译类型执行。</small>
         </label>
       </section>
 
@@ -253,39 +244,112 @@
       </section>
 
 
-      <!-- 词典/关系表可人工修订；确认状态会随本地会话保存，并影响后续章节。 -->
+      <!-- 实体映射决定同一人物、地点、组织或重要物品在后续章节统一使用什么译名。 -->
       <section v-if="literaryMode" class="panel literary-dictionary">
-        <details open>
-          <summary><strong>实体词典</strong>（{{ literaryMemory.entities.length }} 项；有原文依据的入库自动确认，无依据的待人工过目）</summary>
-          <div class="literary-editor-list">
-            <div v-for="(entity, index) in literaryMemory.entities" :key="'entity-' + index" class="literary-editor-row">
-              <label>原文名称<input v-model="entity.source" @change="markEntitySuggested(entity)" /></label>
-              <label>规范译名<input v-model="entity.target" @change="markEntitySuggested(entity)" /></label>
-              <label>别名（逗号分隔）<input :value="(entity.aliases || []).join(', ')" @change="setEntityAliases(entity, $event)" /></label>
-              <span class="chip">{{ entity.reviewStatus === 'confirmed' ? '已确认' : '待确认' }}</span>
-              <button class="btn ghost" :disabled="!entity.source.trim() || !entity.target.trim()" @click="confirmEntity(entity)">确认</button>
-              <button class="btn ghost" @click="removeEntity(index)">删除</button>
-            </div>
-            <button class="btn" @click="addEntity">新增实体</button>
-            <button class="btn" @click="confirmAllEntities">一键确认剩余</button>
+        <div class="dictionary-heading">
+          <div>
+            <h3>实体译名表</h3>
+            <p class="muted small">检查原文名称与统一译名是否正确。已有原文依据的 AI 结果会自动纳入规范；没有依据的结果需要核对。修改任何字段后，请点击“确认并应用”。</p>
           </div>
-        </details>
-        <details>
-          <summary><strong>人物/事物关系表</strong>（{{ literaryMemory.relationships.length }} 项）</summary>
+          <span class="chip">共 {{ literaryMemory.entities.length }} 项</span>
+        </div>
+
+        <div class="dictionary-toolbar">
+          <input v-model.trim="entitySearch" type="search" class="entity-search"
+            placeholder="搜索原文名、译名或别名…" aria-label="搜索实体译名" />
+          <div class="entity-filters" aria-label="筛选实体状态">
+            <button class="filter-chip" :class="{ active: entityFilter === 'all' }" @click="entityFilter = 'all'">
+              全部 {{ literaryMemory.entities.length }}
+            </button>
+            <button class="filter-chip" :class="{ active: entityFilter === 'pending' }" @click="entityFilter = 'pending'">
+              待核对 {{ pendingEntityCount }}
+            </button>
+            <button class="filter-chip" :class="{ active: entityFilter === 'confirmed' }" @click="entityFilter = 'confirmed'">
+              已纳入规范 {{ confirmedEntityCount }}
+            </button>
+          </div>
+          <div class="dictionary-actions">
+            <button class="btn primary" @click="addEntity">添加实体映射</button>
+            <button class="btn" :disabled="pendingEntityCount === 0" @click="confirmAllEntities">
+              一键确认待核对项（{{ pendingEntityCount }}）
+            </button>
+          </div>
+        </div>
+
+        <div v-if="filteredLiteraryEntities.length" class="entity-card-list">
+          <article v-for="{ entity, index } in filteredLiteraryEntities"
+            :key="'entity-' + index + '-' + entity.source" class="entity-card">
+            <div class="entity-card-header">
+              <span class="entity-status" :class="entity.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
+                {{ entity.reviewStatus === 'confirmed' ? '已纳入规范' : '待核对' }}
+              </span>
+              <span v-if="entity.kind" class="entity-kind">{{ entityKindLabel(entity.kind) }}</span>
+              <span class="entity-card-spacer"></span>
+              <button class="btn ghost" :disabled="!entity.source.trim() || !entity.target.trim()"
+                @click="toggleEntityConfirmation(entity)">
+                {{ entity.reviewStatus === 'confirmed' ? '撤销确认' : '确认并应用' }}
+              </button>
+              <button class="btn ghost danger-text" @click="removeEntity(index)">移除</button>
+            </div>
+
+            <div class="entity-fields">
+              <label>
+                <span>原文名称 / 写法</span>
+                <input v-model.trim="entity.source" placeholder="例如：Snowflake"
+                  @change="markEntitySuggested(entity)" />
+              </label>
+              <div class="entity-arrow" aria-hidden="true">→</div>
+              <label>
+                <span>统一译名（后续章节采用）</span>
+                <input v-model.trim="entity.target" placeholder="例如：Snowflake"
+                  @change="markEntitySuggested(entity)" />
+              </label>
+            </div>
+
+            <details class="entity-aliases">
+              <summary>别名与其他写法（{{ (entity.aliases || []).length }} 项，可选）</summary>
+              <label>
+                <span>用英文逗号分隔</span>
+                <input :value="(entity.aliases || []).join(', ')"
+                  placeholder="原文中的缩写、别称、其他拼写"
+                  @change="setEntityAliases(entity, $event)" />
+              </label>
+            </details>
+            <p v-if="entity.evidence" class="entity-evidence"><strong>提取依据：</strong>{{ entity.evidence }}</p>
+          </article>
+        </div>
+        <div v-else class="entity-empty">
+          <strong>{{ literaryMemory.entities.length ? '没有符合条件的实体' : '实体表还是空的' }}</strong>
+          <p class="muted small">
+            {{ literaryMemory.entities.length
+              ? '试试其他关键词或切换筛选条件。'
+              : '开始文学翻译后，系统会从正文中提取实体；也可以手动添加实体映射。' }}
+          </p>
+          <button v-if="literaryMemory.entities.length" class="btn" @click="entitySearch = ''; entityFilter = 'all'">
+            清除筛选
+          </button>
+          <button v-else class="btn primary" @click="addEntity">手动添加实体映射</button>
+        </div>
+
+        <details class="relationship-section">
+          <summary><strong>人物 / 事物关系</strong>（{{ literaryMemory.relationships.length }} 项）</summary>
+          <p class="muted small relationship-help">这里记录“谁与谁是什么关系”，用于消歧，不是译名表。只确认有明确原文依据的关系。</p>
           <div class="literary-editor-list">
             <div v-for="(relation, index) in literaryMemory.relationships" :key="'relation-' + index" class="literary-editor-row">
               <label>主体<input v-model="relation.subject" @change="markRelationshipSuggested(relation)" /></label>
               <label>关系<input v-model="relation.predicate" @change="markRelationshipSuggested(relation)" /></label>
               <label>对象<input v-model="relation.object" @change="markRelationshipSuggested(relation)" /></label>
-              <span class="chip">{{ relation.reviewStatus === 'confirmed' ? '已确认' : '待确认' }}</span>
-              <button class="btn ghost" :disabled="!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()" @click="confirmRelationship(relation)">确认</button>
-              <button class="btn ghost" @click="removeRelationship(index)">删除</button>
+              <span class="chip">{{ relation.reviewStatus === 'confirmed' ? '已纳入规范' : '待核对' }}</span>
+              <button class="btn ghost" :disabled="!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()" @click="confirmRelationship(relation)">确认并应用</button>
+              <button class="btn ghost danger-text" @click="removeRelationship(index)">移除</button>
             </div>
-            <button class="btn" @click="addRelationship">新增关系</button>
-            <button class="btn" @click="confirmAllRelationships">一键确认剩余</button>
+            <div class="relationship-actions">
+              <button class="btn" @click="addRelationship">添加关系</button>
+              <button class="btn" :disabled="!literaryMemory.relationships.some((relation) => relation.reviewStatus !== 'confirmed')" @click="confirmAllRelationships">一键确认待核对项</button>
+            </div>
           </div>
         </details>
-        <p class="muted small">有原文依据的入库自动确认；编辑后会重新标记为“待确认”，剩余项可一键确认。修改会保存在本机阅读会话中。</p>
+        <p class="muted small dictionary-footnote">状态含义：已纳入规范＝已有原文依据的自动纳入结果或用户确认的译名；待核对＝AI 建议或被编辑过的映射。变更会保存在本机阅读会话中，并供后续章节参考。</p>
       </section>
 
       <section v-if="literaryStatus.reviewFindings.length" class="panel literary-review-findings">
@@ -312,7 +376,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { getConfig } from '@/entrypoints/utils/config';
+import { getConfig, type Config } from '@/entrypoints/utils/config';
+import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import {
@@ -399,6 +464,23 @@ const {
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
+const entitySearch = ref('');
+const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
+const pendingEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus !== 'confirmed').length);
+const confirmedEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus === 'confirmed').length);
+const filteredLiteraryEntities = computed(() => {
+  const query = entitySearch.value.toLocaleLowerCase();
+  return literaryMemory.value.entities
+    .map((entity, index) => ({ entity, index }))
+    .filter(({ entity }) => {
+      if (entityFilter.value === 'pending' && entity.reviewStatus === 'confirmed') return false;
+      if (entityFilter.value === 'confirmed' && entity.reviewStatus !== 'confirmed') return false;
+      if (!query) return true;
+      return [entity.source, entity.target, ...(entity.aliases ?? [])]
+        .some((value) => value.toLocaleLowerCase().includes(query));
+    });
+});
+
 const currentPageTranslatedCount = computed(() =>
   visibleSegments.value.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length,
 );
@@ -458,12 +540,27 @@ watch(literaryMemory, () => {
 }, { deep: true });
 
 onMounted(async () => {
-  // The global literary profile enables entity/style memory by default. EPUB/PDF users can still
-  // explicitly turn off book-level memory while keeping the literary prompt and per-batch review.
+  // 文档翻译默认沿用 popup 的全局配置；恢复旧会话时，保存的语言选择仍由恢复逻辑覆盖。
   const config = await getConfig();
+  sourceLang.value = config.sourceLang || 'auto';
+  targetLang.value = config.targetLang || 'zh';
   if (config.translationMode === 'literary') literaryMode.value = true;
   await refreshSavedSessionSummary();
 });
+
+/** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
+function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Config)[]) {
+  if (changedFields.includes('sourceLang')) sourceLang.value = config.sourceLang;
+  if (changedFields.includes('targetLang')) targetLang.value = config.targetLang;
+  if (changedFields.includes('translationMode')) {
+    if (config.translationMode === 'literary') {
+      literaryMode.value = true;
+    } else if (doc.value && doc.value.format !== 'epub' && doc.value.format !== 'pdf') {
+      // 普通文档没有单独的“整本书记忆”开关，切回科技模式时应一并关闭文学流程。
+      literaryMode.value = false;
+    }
+  }
+}
 
 async function refreshSavedSessionSummary() {
   savedSessionSummary.value = null;
@@ -837,10 +934,24 @@ async function clearSavedSession() {
 function markEntitySuggested(entity: LiteraryEntity) {
   entity.reviewStatus = 'suggested';
 }
+function entityKindLabel(kind: LiteraryEntity['kind']) {
+  const labels: Record<LiteraryEntity['kind'], string> = {
+    person: '人物', place: '地点', object: '物品', organization: '组织', concept: '概念', other: '其他实体',
+  };
+  return labels[kind] || '其他实体';
+}
 function confirmEntity(entity: LiteraryEntity) {
   if (!entity.source.trim() || !entity.target.trim()) return;
   entity.reviewStatus = 'confirmed';
-  persistenceMessage.value = '已确认规范译名：' + entity.source + ' → ' + entity.target;
+  persistenceMessage.value = '已纳入规范译名：' + entity.source + ' → ' + entity.target;
+}
+function toggleEntityConfirmation(entity: LiteraryEntity) {
+  if (entity.reviewStatus === 'confirmed') {
+    entity.reviewStatus = 'suggested';
+    persistenceMessage.value = '已将“' + entity.source + '”移回待核对列表';
+    return;
+  }
+  confirmEntity(entity);
 }
 // 剩余待确认一键确认：内容为空的跳过（confirmEntity 本来就会拒绝）。
 function confirmAllEntities() {
@@ -851,7 +962,7 @@ function confirmAllEntities() {
       count++;
     }
   }
-  persistenceMessage.value = count > 0 ? '已确认剩余规范译名 ' + count + ' 项' : '没有待确认的规范译名';
+  persistenceMessage.value = count > 0 ? '已将 ' + count + ' 项译名纳入规范，后续章节会优先采用' : '没有待核对的译名';
 }
 function setEntityAliases(entity: LiteraryEntity, event: Event) {
   const value = (event.target as HTMLInputElement | null)?.value ?? '';
@@ -859,7 +970,10 @@ function setEntityAliases(entity: LiteraryEntity, event: Event) {
   entity.reviewStatus = 'suggested';
 }
 function addEntity() {
+  entitySearch.value = '';
+  entityFilter.value = 'all';
   literaryMemory.value.entities.push({ source: '', target: '', kind: 'other', aliases: [], reviewStatus: 'suggested' });
+  persistenceMessage.value = '已添加空白映射：填写原文名称和统一译名，再点击“确认并应用”';
 }
 function removeEntity(index: number) {
   literaryMemory.value.entities.splice(index, 1);
@@ -1352,6 +1466,134 @@ async function resetAll() {
 .literary-review-finding p { margin: .35rem 0 0; line-height: 1.5; }
 .literary-review-finding .chip { margin-right: .4rem; }
 
+.dictionary-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .8rem;
+}
+.dictionary-heading h3 { margin: 0; font-size: 1rem; }
+.dictionary-heading p { margin: .3rem 0 0; line-height: 1.55; }
+.dictionary-toolbar {
+  display: grid;
+  gap: .65rem;
+  margin: .85rem 0;
+  padding-bottom: .8rem;
+  border-bottom: 1px solid #eaeef2;
+}
+.entity-search {
+  width: 100%;
+  padding: .55rem .65rem;
+  border: 1px solid #d0d7de;
+  border-radius: 7px;
+  font: inherit;
+}
+.entity-filters, .dictionary-actions, .relationship-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem;
+}
+.filter-chip {
+  padding: .28rem .65rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #f0f3f6;
+  color: #57606a;
+  cursor: pointer;
+  font-size: .78rem;
+}
+.filter-chip.active {
+  border-color: #0969da;
+  background: #eaf3ff;
+  color: #0969da;
+}
+.dictionary-actions { margin-top: .1rem; }
+.entity-card-list { display: grid; gap: .7rem; }
+.entity-card {
+  min-width: 0;
+  padding: .8rem;
+  border: 1px solid #dce2e8;
+  border-radius: 9px;
+  background: #fff;
+}
+.entity-card:has(.is-pending) { border-left: 3px solid #bf8700; }
+.entity-card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+}
+.entity-card-spacer { flex: 1; }
+.entity-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: .18rem .55rem;
+  font-size: .73rem;
+  font-weight: 600;
+}
+.entity-status.is-confirmed { color: #1a7f37; background: #dafbe1; }
+.entity-status.is-pending { color: #7d4e00; background: #fff1c2; }
+.entity-kind { color: #57606a; font-size: .75rem; }
+.entity-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: .65rem;
+  margin-top: .75rem;
+}
+.entity-fields label, .entity-aliases label {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  min-width: 0;
+  color: #57606a;
+  font-size: .77rem;
+}
+.entity-fields input, .entity-aliases input {
+  min-width: 0;
+  width: 100%;
+  padding: .48rem .55rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  color: #1f2328;
+  font: inherit;
+  font-size: .9rem;
+}
+.entity-arrow { color: #8c959f; padding-bottom: .5rem; }
+.entity-aliases { margin-top: .65rem; }
+.entity-aliases summary { font-size: .78rem; color: #57606a; }
+.entity-aliases label { margin-top: .5rem; }
+.entity-evidence {
+  margin: .55rem 0 0;
+  color: #57606a;
+  font-size: .76rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.entity-evidence strong { color: #1f2328; }
+.entity-empty {
+  display: grid;
+  justify-items: start;
+  gap: .4rem;
+  padding: 1.4rem .8rem;
+  border: 1px dashed #d0d7de;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.entity-empty p { margin: 0; }
+.relationship-section {
+  margin-top: 1rem;
+  padding-top: .8rem;
+  border-top: 1px solid #eaeef2;
+}
+.relationship-section summary { font-size: .9rem; }
+.relationship-help { margin: .35rem 0 .55rem; line-height: 1.5; }
+.relationship-actions { margin-top: .5rem; }
+.dictionary-footnote { margin: .9rem 0 0; padding-top: .7rem; border-top: 1px solid #eaeef2; line-height: 1.55; }
+.danger-text { color: #a40e26; }
+
 @media (max-width: 640px) {
   .doc-page { padding: 1rem .75rem 3rem; }
   .reader-navigation { position: static; }
@@ -1360,5 +1602,10 @@ async function resetAll() {
   .reader { min-height: 50vh; padding: 1rem; border-radius: 8px; }
   .literary-editor-row { grid-template-columns: 1fr 1fr; }
   .literary-editor-row .chip { align-self: center; }
+  .entity-fields { grid-template-columns: 1fr; }
+  .entity-arrow { display: none; }
+  .entity-card-header { align-items: flex-start; }
+  .entity-card-spacer { display: none; }
+  .dictionary-actions { align-items: stretch; }
 }
 </style>
