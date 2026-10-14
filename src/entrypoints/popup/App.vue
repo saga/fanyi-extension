@@ -155,7 +155,7 @@ const config = ref<Config>({
   useServerTranslation: false,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
   useLocalAgent: false,
-  localAgentProvider: 'opencode',
+  localAgentProvider: 'workbuddy',
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
