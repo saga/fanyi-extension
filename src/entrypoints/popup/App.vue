@@ -46,7 +46,7 @@
         </select>
       </div>
 
-      <label v-if="localAgentAvailable" class="switch-item">
+      <label class="switch-item">
         <input type="checkbox" v-model="config.useLocalAgent" @change="onLocalAgentToggle" />
         <span>使用本机 Workbuddy/OpenCode 翻译</span>
       </label>
@@ -56,11 +56,11 @@
         class="local-agent-offline"
         role="status"
       >
-        <span>本机翻译模式仍已启用，但检测不到本机服务。不会自动切换到远程 Provider；启动服务后，此选项会自动重新显示。</span>
+        <span>本机翻译模式仍已启用，但检测不到本机服务。不会自动切换到远程 Provider；服务启动后即可直接使用。</span>
         <button type="button" class="server-toggle" @click="disableLocalAgent">关闭本机模式</button>
       </div>
 
-      <div v-if="config.useLocalAgent && localAgentAvailable" class="server-group local-agent-group">
+      <div v-if="config.useLocalAgent" class="server-group local-agent-group">
         <div class="select-item">
           <label>本机 Agent</label>
           <select v-model="config.localAgentProvider" @change="saveConfig">
@@ -71,6 +71,9 @@
         <div class="input-item">
           <label>本机服务地址</label>
           <input type="text" v-model="config.localAgentUrl" placeholder="http://127.0.0.1:8789" @change="saveConfig" />
+          <span v-if="!localAgentAvailable" class="hint-text">
+            当前未检测到服务。可以先在本页开启本机模式、填好地址，等服务启动后直接可用——不必先关掉再打开。
+          </span>
         </div>
         <div class="input-item">
           <label>模型覆盖（可选）</label>
@@ -185,7 +188,8 @@ onMounted(async () => {
   config.value = await getConfig();
   await refreshLocalAgentAvailability();
   checkApiKey();
-  // 弹窗打开期间持续更新：服务启动后可显示开关，服务停止后隐藏开关。
+  // 弹窗打开期间持续更新：服务启动后状态提示自动转为可连接，服务停止后转为离线提示。
+  // 开关本身常驻（不受可用性影响），否则「关掉本机 + 服务未起」会让用户失去恢复入口。
   healthPollTimer = window.setInterval(() => {
     void refreshLocalAgentAvailability();
   }, 4000);
@@ -215,12 +219,10 @@ async function refreshLocalAgentAvailability() {
 
 async function onLocalAgentToggle() {
   if (config.value.useLocalAgent) {
-    // 服务可能恰好在上次轮询后退出；开启前再确认一次。
+    // 服务可能恰好在上次轮询后退出。探测失败不再静默把开关弹回去：
+    // 本机模式是用户的显式偏好，服务没起时也应能保持开启（地址/服务就绪后直接可用）。
+    // 否则「服务未启动」与「开关不可见」互相锁死，用户没有恢复入口。
     await refreshLocalAgentAvailability();
-    if (!localAgentAvailable.value) {
-      config.value.useLocalAgent = false;
-      return;
-    }
     config.value.useServerTranslation = false;
   }
   await saveConfig();
