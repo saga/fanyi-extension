@@ -8,16 +8,19 @@
     </header>
 
     <!-- 上次阅读快照仅包含最近一本书；正文与译文保存在扩展本地 IndexedDB。 -->
-    <section v-if="!doc && !parsing && savedSessionSummary" class="panel saved-session">
+    <section v-if="!doc && !parsing && (savedSessionSummary || localSessionSummary)" class="panel saved-session">
       <div class="saved-session-copy">
         <strong>继续上次阅读</strong>
-        <span>{{ savedSessionSummary.title || savedSessionSummary.fileName }}</span>
-        <span class="muted small">
+        <span>{{ savedSessionSummary?.title || savedSessionSummary?.fileName || localSessionSummary?.title || '本机阅读记录' }}</span>
+        <span v-if="savedSessionSummary" class="muted small">
           {{ FORMAT_LABEL[savedSessionSummary.format] || savedSessionSummary.format }}
           · {{ savedSessionSummary.segmentCount.toLocaleString() }} 段
           · 已保存 {{ savedSessionSummary.translatedSegmentCount.toLocaleString() }} 段译文
         </span>
-        <span class="muted small">上次保存：{{ new Date(savedSessionSummary.updatedAt).toLocaleString() }}</span>
+        <span v-else-if="localSessionSummary" class="muted small">
+          {{ FORMAT_LABEL[localSessionSummary.format] || localSessionSummary.format }} · 本机 SQLite 恢复副本
+        </span>
+        <span class="muted small">上次保存：{{ new Date(savedSessionSummary?.updatedAt ?? localSessionSummary?.updatedAt ?? Date.now()).toLocaleString() }}</span>
       </div>
       <div class="saved-session-actions">
         <button class="btn primary" @click="restoreLastSession">恢复阅读</button>
@@ -305,6 +308,8 @@ const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
 const literaryMode = ref(false);
 const currentPageIndex = ref(0);
 const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
+/** 当 IndexedDB 不可用时，仅凭 SQLite 的轻量摘要也要显示恢复入口。 */
+const localSessionSummary = ref<{ title: string; format: string; updatedAt: string } | null>(null);
 const persistenceMessage = ref('');
 const activeSessionReady = ref(false);
 const persistedTranslations = ref(new Map<string, string>());
@@ -363,20 +368,58 @@ onMounted(() => {
 });
 
 async function refreshSavedSessionSummary() {
+  savedSessionSummary.value = null;
   try {
     savedSessionSummary.value = await getActiveDocumentSessionSummary();
   } catch (error) {
-    // 无痕/测试环境可能不提供 IndexedDB；正常阅读仍可继续。
-    if (typeof indexedDB === 'undefined') return;
-    persistenceMessage.value = '无法读取本地恢复记录：' +
-      (error instanceof Error ? error.message : String(error));
+    // IndexedDB 可能在无痕模式/配额异常时不可用；仍继续探测 SQLite 备份。
+    if (typeof indexedDB !== 'undefined') {
+      persistenceMessage.value = '无法读取扩展恢复记录：' +
+        (error instanceof Error ? error.message : String(error));
+    }
   }
+  if (!savedSessionSummary.value) await refreshLocalSessionSummary();
 }
-
 
 const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
 let localSessionDocumentSaved = false;
 let localSessionDisabled = false;
+/** 只跟踪真正成功写入 SQLite 的译文，不能复用 IndexedDB 的持久化游标。 */
+let localPersistedTranslations = new Map<string, string>();
+
+async function refreshLocalSessionSummary() {
+  localSessionSummary.value = null;
+  try {
+    const config = await getConfig();
+    if (!config.useLocalAgent) return;
+    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    base.pathname = '/api/documents/session/summary';
+    base.search = '';
+    base.hash = '';
+    const response = await fetch(base.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+      },
+      body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
+    });
+    if (!response.ok) return;
+    const result = await response.json() as {
+      found?: boolean;
+      session?: { title?: string; format?: string; updatedAt?: string };
+    };
+    if (result.found && result.session) {
+      localSessionSummary.value = {
+        title: result.session.title || '本机阅读记录',
+        format: result.session.format || 'txt',
+        updatedAt: result.session.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch {
+    // SQLite 是恢复副本；摘要检查失败不影响正常阅读。
+  }
+}
 
 async function persistDocumentCheckpointToLocalService(input: {
   sourceLang: string; targetLang: string; viewMode: SavedViewMode; literaryMode: boolean;
@@ -396,18 +439,42 @@ async function persistDocumentCheckpointToLocalService(input: {
         'Content-Type': 'application/json',
         ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
       },
-      body: JSON.stringify({
-        sessionId: LOCAL_DOCUMENT_SESSION_ID,
-        title: doc.value.title || documentFileName,
-        format: doc.value.format,
-        mergeExisting: localSessionDocumentSaved,
-        payload: {
-          ...input,
-          ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
+      // 第一次创建副本时保存完整译文列表；后续只传新的译文对和小型状态。
+      // localPersistedTranslations 只有在 SQLite 确认写入成功后才前进，避免临时断线后漏掉旧增量。
+      const localTranslationDelta = input.snapshot.translations.filter(([id, text]) =>
+        localPersistedTranslations.get(id) !== text,
+      );
+      const { translations: _allTranslations, ...snapshotWithoutTranslations } = input.snapshot;
+      const localSnapshot = localSessionDocumentSaved ? snapshotWithoutTranslations : input.snapshot;
+      const payload = {
+        ...input,
+        snapshot: localSnapshot,
+        translationDelta: localTranslationDelta,
+        ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
+      };
+      const response = await fetch(base.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
         },
-      }),
-    });
-    if (response.ok) localSessionDocumentSaved = true;
+        body: JSON.stringify({
+          sessionId: LOCAL_DOCUMENT_SESSION_ID,
+          title: doc.value.title || documentFileName,
+          format: doc.value.format,
+          mergeExisting: localSessionDocumentSaved,
+          payload,
+        }),
+      });
+      if (response.ok) {
+        localSessionDocumentSaved = true;
+        for (const [id, text] of localTranslationDelta) localPersistedTranslations.set(id, text);
+        localSessionSummary.value = {
+          title: doc.value.title || documentFileName,
+          format: doc.value.format,
+          updatedAt: new Date().toISOString(),
+        };
+      }
     else {
       if (response.status === 413) localSessionDisabled = true;
       console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
@@ -495,8 +562,12 @@ async function restoreLastSession() {
   persistenceMessage.value = '';
   try {
     let saved = null;
+    let restoredFromLocalService = false;
     try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
-    if (!saved) saved = await loadDocumentCheckpointFromLocalService();
+    if (!saved) {
+      saved = await loadDocumentCheckpointFromLocalService();
+      restoredFromLocalService = !!saved;
+    }
     if (!saved) {
       savedSessionSummary.value = null;
       persistenceMessage.value = '没有可恢复的阅读记录。';
@@ -506,9 +577,12 @@ async function restoreLastSession() {
     resetTranslation();
     activeSessionReady.value = false;
     persistedTranslations.value = new Map(saved.translations);
+    localPersistedTranslations = restoredFromLocalService
+      ? new Map(saved.translations)
+      : new Map<string, string>();
     documentFileName = saved.fileName;
     rawText = saved.rawText;
-    localSessionDocumentSaved = false;
+    localSessionDocumentSaved = restoredFromLocalService;
     localSessionDisabled = false;
     doc.value = saved.document;
     glossary.value = saved.glossary;
@@ -544,13 +618,42 @@ async function restoreLastSession() {
 }
 
 async function clearSavedSession() {
+  let indexedDbCleared = false;
   try {
     await clearActiveDocumentSession();
+    indexedDbCleared = true;
     savedSessionSummary.value = null;
-    persistenceMessage.value = '已清除本机保存的阅读记录。';
   } catch (error) {
-    persistenceMessage.value = '清除恢复记录失败：' +
+    persistenceMessage.value = '清除扩展恢复记录失败：' +
       (error instanceof Error ? error.message : String(error));
+  }
+
+  // 即使当前已切回远程翻译模式，也不能留下用户通过“清除记录”明确要求删除的 SQLite 副本。
+  try {
+    const config = await getConfig();
+    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    base.pathname = '/api/documents/session/' + encodeURIComponent(LOCAL_DOCUMENT_SESSION_ID);
+    base.search = '';
+    base.hash = '';
+    const response = await fetch(base.toString(), {
+      method: 'DELETE',
+      headers: {
+        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+      },
+    });
+    if (!response.ok) throw new Error('本机 SQLite 返回 HTTP ' + response.status);
+    localSessionSummary.value = null;
+    localSessionDocumentSaved = false;
+    localPersistedTranslations.clear();
+    if (indexedDbCleared) persistenceMessage.value = '已清除扩展与本机 SQLite 中保存的阅读记录。';
+  } catch (error) {
+    localSessionSummary.value = null;
+    if (indexedDbCleared) {
+      persistenceMessage.value = '已清除扩展恢复记录，但本机 SQLite 副本未能删除（服务未运行或连接失败）。';
+    } else {
+      persistenceMessage.value = '清除恢复记录失败：' +
+        (error instanceof Error ? error.message : String(error));
+    }
   }
 }
 
@@ -617,6 +720,8 @@ async function loadFile(file: File) {
   parseError.value = '';
   localSessionDocumentSaved = false;
   localSessionDisabled = false;
+  localPersistedTranslations = new Map<string, string>();
+  localSessionSummary.value = null;
   doc.value = null;
   parsing.value = true;
   progress.value = { done: 0, total: 0 };
