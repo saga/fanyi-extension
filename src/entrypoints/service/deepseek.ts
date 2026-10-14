@@ -140,7 +140,7 @@ async function callApi(
       body,
     });
 
-    logger.debug('[DeepSeek] Response status:', response.status);
+    logger.debug('[' + (isLocalAgentEndpoint ? 'LocalAgent' : 'DeepSeek') + '] Response status:', response.status);
 
     const responseText = await response.text().catch(() => '');
 
@@ -200,8 +200,15 @@ async function callApi(
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
-      logger.error('[DeepSeek] Invalid response structure:', JSON.stringify(data).substring(0, 500));
-      throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
+      logger.error(
+        '[' + (isLocalAgentEndpoint ? 'LocalAgent' : 'DeepSeek') + '] Invalid response structure:',
+        { endpoint, responsePreview: JSON.stringify(data).substring(0, 1000) },
+      );
+      throw new Error(
+        isLocalAgentEndpoint
+          ? '本机 Agent 服务返回了无效响应：缺少 choices[0].message.content'
+          : 'DeepSeek 返回了无效响应: 缺少 choices[0].message.content',
+      );
     }
 
     return content;
