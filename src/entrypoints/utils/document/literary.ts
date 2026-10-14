@@ -40,6 +40,10 @@ export interface LiteraryReviewFinding {
   draftExcerpt: string;
   reason: string;
   suggestion: string;
+  /** Full candidate returned by Reviewer for optional style findings; never auto-applied. */
+  proposedTranslation?: string;
+  /** User-facing workflow state for a style suggestion. */
+  applicationStatus?: 'pending' | 'applied' | 'dismissed';
 }
 export interface LiteraryExample {
   source: string;
