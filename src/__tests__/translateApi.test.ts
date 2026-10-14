@@ -17,11 +17,23 @@ vi.mock('../entrypoints/utils/cacheManager', () => ({
 
 import {
   processTranslationResult,
+  hasCompleteTranslationSet,
   logUnchangedBlocks,
   getCachedTranslation,
   cacheTranslation,
   clearAllCache,
 } from '../entrypoints/utils/translateApi';
+
+describe('hasCompleteTranslationSet', () => {
+  it('accepts only a complete set of non-empty translations with the expected IDs', () => {
+    expect(hasCompleteTranslationSet(new Map([['b1', '你好'], ['b2', '世界']]), ['b1', 'b2'])).toBe(true);
+    expect(hasCompleteTranslationSet(new Map([['b1', '你好']]), ['b1', 'b2'])).toBe(false);
+    expect(hasCompleteTranslationSet(new Map([['b1', '你好'], ['b2', '  ']]), ['b1', 'b2'])).toBe(false);
+    expect(hasCompleteTranslationSet(new Map([['b1', '你好'], ['extra', '多余']]), ['b1'])).toBe(false);
+    expect(hasCompleteTranslationSet(new Map([['b1', '你好']]), ['b1', 'b1'])).toBe(false);
+    expect(hasCompleteTranslationSet(new Map(), [])).toBe(false);
+  });
+});
 
 describe('processTranslationResult', () => {
   it('parses JSON with translations array', () => {
