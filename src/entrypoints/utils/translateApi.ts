@@ -41,8 +41,31 @@ export function hasCompleteTranslationSet(
 }
 
 export function processTranslationResult(jsonResult: string): Map<string, string> {
-  const parsed = JSON.parse(jsonResult);
-  const translations = parsed.translations || parsed;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonResult);
+  } catch {
+    throw new Error(
+      '模型返回不是合法 JSON（输出 ' + jsonResult.length + ' 字符，尾部：' +
+      JSON.stringify(jsonResult.slice(-160)) + '）',
+    );
+  }
+  const translations =
+    parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).translations ?? parsed
+      : parsed;
+  // 模型偶发返回裸对象（如 {"answer": "..."} 或 {"translations": {...}}）：
+  // 直接 for...of 会抛没头没尾的 "translations is not iterable"，定位不到是形状问题。
+  if (!Array.isArray(translations)) {
+    const shape =
+      parsed !== null && typeof parsed === 'object'
+        ? '顶层 keys：' + Object.keys(parsed).join(',')
+        : '顶层类型：' + typeof parsed;
+    throw new Error(
+      '模型返回的 JSON 不是翻译数组（' + shape +
+      '，输出 ' + jsonResult.length + ' 字符，头部：' + jsonResult.slice(0, 200) + '）',
+    );
+  }
   const result = new Map<string, string>();
   for (const item of translations) {
     if (typeof item?.id !== 'string') continue;

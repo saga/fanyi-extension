@@ -81,6 +81,15 @@ describe('processTranslationResult', () => {
   it('throws on invalid JSON', () => {
     expect(() => processTranslationResult('not json')).toThrow();
   });
+
+  // 回归：模型返回裸对象时以前抛 "translations is not iterable"，无形状信息。
+  it('throws a descriptive error when the top level is not a translation array', () => {
+    expect(() => processTranslationResult('{"answer":"hello"}')).toThrow(/不是翻译数组/);
+    expect(() => processTranslationResult('{"answer":"hello"}')).toThrow(/answer/);
+    expect(() => processTranslationResult('{"translations":{"b1":"你好"}}')).toThrow(/不是翻译数组/);
+    expect(() => processTranslationResult('"just a string"')).toThrow(/不是翻译数组/);
+    expect(() => processTranslationResult('42')).toThrow(/不是翻译数组/);
+  });
 });
 
 describe('logUnchangedBlocks', () => {
