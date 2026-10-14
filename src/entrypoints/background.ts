@@ -508,6 +508,17 @@ export default defineBackground({
               const translated = await service.translate(
                 jsonContent, sourceLang, targetLang, effectiveGlossary, effectivePrompt,
                 message.responseFormat,
+                config.useLocalAgent && message.documentSessionId
+                  ? {
+                      documentSessionId: message.documentSessionId,
+                      role: 'translation',
+                      sourceLang,
+                      targetLang,
+                      promptStyle,
+                      translationMode,
+                      contextVersion: 'book-session-v1',
+                    }
+                  : undefined,
               );
               outputChars = translated.length;
               return translated;
