@@ -137,10 +137,11 @@ export class ShardedCache {
       timestamp: Date.now(),
       ttl: Number.isFinite(ttl) && (ttl as number) > 0 ? ttl as number : this.defaultTTL,
     };
-    this.memoryCache.set(cacheKey, entry);
     try {
       await this.ensureMigrated();
       await this.serialize(async () => {
+        // Set memory inside the same queue as migration/clear so older data cannot overwrite it.
+        this.memoryCache.set(cacheKey, entry);
         let index = await this.readIndex();
         if (!index.includes(cacheKey)) {
           index = [...index, cacheKey];
@@ -151,31 +152,34 @@ export class ShardedCache {
       });
     } catch {
       // Translation result remains usable even if persistent caching is unavailable.
+      this.memoryCache.set(cacheKey, entry);
     }
   }
 
   /** 删除单条缓存。 */
   async remove(cacheKey: string): Promise<void> {
-    this.memoryCache.delete(cacheKey);
     try {
       await this.ensureMigrated();
       await this.serialize(async () => {
+        this.memoryCache.delete(cacheKey);
         await storage.removeItem(this.makeKey(cacheKey));
         const index = await this.readIndex();
         const next = index.filter((key) => key !== cacheKey);
         if (next.length !== index.length) await storage.setItem(this.indexKey, next);
       });
     } catch {
+      this.memoryCache.delete(cacheKey);
       // Cache maintenance errors must not interrupt translation.
     }
   }
 
   /** 清空所有翻译缓存（串行执行，避免与并发 set 竞争索引）。 */
   async clear(): Promise<void> {
-    this.memoryCache.clear();
     try {
       await this.ensureMigrated();
       await this.serialize(async () => {
+        // Migration may have populated the memory cache; clear it after migration, too.
+        this.memoryCache.clear();
         const index = await this.readIndex();
         for (const cacheKey of index) {
           await storage.removeItem(this.makeKey(cacheKey));
@@ -184,16 +188,17 @@ export class ShardedCache {
         if (this.legacyStorageKey) await storage.removeItem(this.legacyStorageKey).catch(() => undefined);
       });
     } catch {
+      this.memoryCache.clear();
       // Translation continues even if the browser prevents cache cleanup.
     }
   }
 
   /** 主动清理过期项；同时移除索引中已无数据的孤儿 key。 */
   async pruneExpired(): Promise<number> {
-    this.memoryCache.clear();
     try {
       await this.ensureMigrated();
       return await this.serialize(async () => {
+        this.memoryCache.clear();
         const index = await this.readIndex();
         const keep: string[] = [];
         let removed = 0;
