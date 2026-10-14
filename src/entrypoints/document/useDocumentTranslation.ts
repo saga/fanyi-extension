@@ -336,7 +336,7 @@ async function analyzeLiteraryChapterViaServer(
     ? resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/analyze')
     : resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/analyze');
   const provider = options.useLocalAgent
-    ? (options.localAgentProvider || 'opencode')
+    ? (options.localAgentProvider || 'workbuddy')
     : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -352,7 +352,7 @@ async function analyzeLiteraryChapterViaServer(
       glossary: options.glossary,
       promptStyle: options.promptStyle,
       provider,
-      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'opencode' } : {}),
+      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'workbuddy' } : {}),
       model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
@@ -392,7 +392,7 @@ async function reviewLiteraryBatchViaServer(
     ? resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/review')
     : resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/review');
   const provider = options.useLocalAgent
-    ? (options.localAgentProvider || 'opencode')
+    ? (options.localAgentProvider || 'workbuddy')
     : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -406,7 +406,7 @@ async function reviewLiteraryBatchViaServer(
       glossary: options.glossary,
       promptStyle: options.promptStyle,
       provider,
-      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'opencode' } : {}),
+      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'workbuddy' } : {}),
       model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
@@ -479,45 +479,10 @@ export async function planDocumentBatches(
   budget: Partial<BatchBudget>,
   options: TranslateOptions,
 ): Promise<DocumentSegment[][]> {
-  if (options.useLocalAgent) {
-    try {
-      const base = new URL(options.localAgentUrl?.trim() || 'http://127.0.0.1:8789');
-      base.pathname = '/api/documents/batches';
-      base.search = '';
-      base.hash = '';
-      const response = await fetch(base.toString(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options.localAgentToken ? { Authorization: 'Bearer ' + options.localAgentToken } : {}),
-        },
-        body: JSON.stringify({
-          budget: {
-            maxChars: budget.maxChars,
-            maxSegments: budget.maxSegments,
-            splitOnContextChange: budget.splitOnContextChange === true,
-          },
-          segments: segments.map((segment) => ({
-            id: segment.id, text: segment.text, contextPath: segment.contextPath, page: segment.page,
-          })),
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json() as { batches?: Array<Array<{ id: string }>> };
-        const byId = new Map(segments.map((segment) => [segment.id, segment]));
-        const batches = Array.isArray(data.batches) ? data.batches.map((batch) =>
-          Array.isArray(batch) ? batch.flatMap((item) => {
-            const segment = typeof item?.id === 'string' ? byId.get(item.id) : undefined;
-            return segment ? [segment] : [];
-          }) : [],
-        ).filter((batch) => batch.length > 0) : [];
-        const plannedIds = batches.flat().map((segment) => segment.id);
-        if (plannedIds.length === segments.length && new Set(plannedIds).size === segments.length) return batches;
-      }
-    } catch {
-      // Fallback is only the same deterministic CPU calculation, not a remote translation.
-    }
-  }
+  // Batch planning is deterministic CPU work. Sending the entire document to localhost only to
+  // receive IDs adds serialization, an HTTP round trip and a second full-array allocation without
+  // changing the plan. Keep options in the signature for backwards-compatible callers.
+  void options;
   return buildSegmentBatches(segments, budget);
 }
 
@@ -823,6 +788,9 @@ export function useDocumentTranslation() {
 
     // 文学模式强制在章节/PDF 页边界拆批；普通文档继续使用原分批行为。
     const budget: Partial<BatchBudget> = {
+      // Local Agent calls have a higher fixed cost; use fewer, moderately larger batches by default.
+      // Caller-supplied budget values remain authoritative.
+      ...(options.useLocalAgent ? { maxChars: 5000, maxSegments: 32 } : {}),
       ...options.budget,
       ...(literaryEnabled ? { splitOnContextChange: true } : {}),
     };
@@ -969,6 +937,7 @@ export function useDocumentTranslation() {
       ? lastRunSegmentIds.map((id) => byId.get(id)).filter((segment): segment is DocumentSegment => !!segment)
       : [...segments];
     const batches = buildSegmentBatches(orderedSegments, {
+      ...(options.useLocalAgent ? { maxChars: 5000, maxSegments: 32 } : {}),
       ...options.budget,
       ...(options.literaryMode ? { splitOnContextChange: true } : {}),
     });
