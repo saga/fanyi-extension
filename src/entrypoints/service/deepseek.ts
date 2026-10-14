@@ -127,7 +127,13 @@ async function callApi(
   body: string,
   endpoint = DEFAULT_API_URL,
 ): Promise<string> {
+  const isLocalAgentEndpoint = endpoint !== DEFAULT_API_URL;
+  const serviceLabel = isLocalAgentEndpoint ? '本机 Agent 服务' : 'DeepSeek API';
   try {
+    logger.debug(
+      '[' + (isLocalAgentEndpoint ? 'LocalAgent' : 'DeepSeek') + '] request start',
+      { endpoint, requestChars: body.length },
+    );
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: buildHeaders(apiKey),
@@ -140,7 +146,15 @@ async function callApi(
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
-      
+
+      if (isLocalAgentEndpoint) {
+        logger.error('[LocalAgent] HTTP request failed', {
+          endpoint,
+          status: response.status,
+          responseBody: responseText.slice(0, 2000),
+        });
+      }
+
       try {
         const errorJson = JSON.parse(responseText);
         if (errorJson.error) {
@@ -151,6 +165,8 @@ async function callApi(
           if (errorJson.error.request_id) errorMessage += ` (local request: ${errorJson.error.request_id})`;
           if (errorJson.error.provider) errorMessage += ` (provider: ${errorJson.error.provider})`;
           if (Number.isFinite(errorJson.error.output_chars)) errorMessage += ` (model output: ${errorJson.error.output_chars} chars)`;
+          if (Number.isFinite(errorJson.error.duration_ms)) errorMessage += ` (duration: ${errorJson.error.duration_ms} ms)`;
+          if (errorJson.error.model) errorMessage += ` (model: ${errorJson.error.model})`;
         } else if (errorJson.message) {
           errorMessage += ` - ${errorJson.message}`;
         } else {
@@ -160,7 +176,13 @@ async function callApi(
         errorMessage += ` - ${responseText.substring(0, 200)}`;
       }
 
-      if (response.status === 401) {
+      if (isLocalAgentEndpoint) {
+        if (response.status === 401) {
+          errorMessage += '\n\n请检查扩展中的 Local service token 是否与 LOCAL_AGENT_TOKEN 一致。';
+        } else if (response.status === 502) {
+          errorMessage += '\n\n本机 Provider 未能完成请求；使用上方 local request ID 查询本机终端日志或 GET /api/history。';
+        }
+      } else if (response.status === 401) {
         errorMessage += '\n\n可能原因: API Key 无效或已过期';
       } else if (response.status === 403) {
         errorMessage += '\n\n可能原因: 账户余额不足或被封禁';
@@ -170,7 +192,7 @@ async function callApi(
         errorMessage += '\n\n可能原因: DeepSeek 服务暂时不可用';
       }
 
-      throw new Error(`DeepSeek API error: ${errorMessage}`);
+      throw new Error(`${serviceLabel} error: ${errorMessage}`);
     }
 
     const data = JSON.parse(responseText);
@@ -185,6 +207,15 @@ async function callApi(
     return content;
   } catch (error) {
     if (error instanceof TypeError && error.message.includes('fetch')) {
+      if (isLocalAgentEndpoint) {
+        logger.error('[LocalAgent] Local service connection failed', {
+          endpoint,
+          message: error.message,
+        });
+        throw new Error(
+          `本机 Agent 服务连接失败（${endpoint}）：${error.message}\n\n请确认本机服务已启动并监听该地址；当前为强制本机模式，不会回退到远程 API。`,
+        );
+      }
       logger.error('[DeepSeek] Fetch error - possible network/CORS issue:', error);
       throw new Error(`网络请求失败: ${error.message}\n\n可能原因:\n1. 网络连接问题\n2. Firefox 扩展权限不足\n3. 被防火墙/代理拦截`);
     }
