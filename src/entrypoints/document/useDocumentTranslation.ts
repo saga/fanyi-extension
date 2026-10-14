@@ -1025,14 +1025,19 @@ export function useDocumentTranslation() {
     // 文学模式保持原书顺序做分批（记忆按顺序累积），但每次推进的章节优先选
     // 当前阅读页所在章节：用户点"翻译"后当前页立刻有结果，而不是在后台默默
     // 翻译第一章、当前页永远显示"翻译中…"。当前页已翻完时回落到首个待翻章节。
-    const priorityIds = new Set(literaryProfileEnabled ? [] : (options.prioritySegmentIds ?? []));
+    const priorityIds = new Set(options.prioritySegmentIds ?? []);
     const orderedSegments = priorityIds.size
       ? [
           ...segments.filter((segment) => priorityIds.has(segment.id)),
           ...segments.filter((segment) => !priorityIds.has(segment.id)),
         ]
       : [...segments];
-    lastRunSegmentIds = orderedSegments.map((segment) => segment.id);
+    // The normal action translates only the currently displayed page. Full-document segments
+    // still feed language detection and book-level analysis, but unrelated pages stay queued.
+    const workInputSegments = options.onlyPrioritySegments && priorityIds.size
+      ? orderedSegments.filter((segment) => priorityIds.has(segment.id))
+      : orderedSegments;
+    lastRunSegmentIds = workInputSegments.map((segment) => segment.id);
 
     // 文学模式强制在章节/PDF 页边界拆批；普通文档继续使用原分批行为。
     const budget: Partial<BatchBudget> = {
@@ -1043,14 +1048,17 @@ export function useDocumentTranslation() {
       ...(literaryProfileEnabled ? { splitOnContextChange: true } : {}),
     };
     const allBatches = await planDocumentBatches(orderedSegments, budget, options);
+    const selectedBatches = workInputSegments === orderedSegments
+      ? allBatches
+      : await planDocumentBatches(workInputSegments, budget, options);
     state.value.total = allBatches.length;
     state.value.done = allBatches.filter((batch) =>
       batch.every((segment) => !!state.value.translations.get(segment.id)?.trim()),
     ).length;
-    const pendingBatches = allBatches
+    const pendingBatches = selectedBatches
       .map((batch, index) => ({
         index,
-        batch: batch.filter((segment) => !state.value.translations.get(segment.id)?.trim()),
+        batch: batch.filter((segment) => options.forceRefresh || !state.value.translations.get(segment.id)?.trim()),
       }))
       .filter((item) => item.batch.length > 0);
     state.value.running = pendingBatches.length > 0;
@@ -1108,7 +1116,8 @@ export function useDocumentTranslation() {
     // 优先推进当前阅读页所在章节（options.prioritySegmentIds 由调用方传入当前页），
     // 这样当前页立刻可见译文；当前页已完成时回落到首个待翻章节。
     let workBatches = pendingBatches;
-    if (literaryEnabled && pendingBatches.length > 0) {
+    let analysisChapterKey = '';
+    if (literaryEnabled && pendingBatches.length > 0 && !options.onlyPrioritySegments) {
       const chapterOf = (item: { batch: DocumentSegment[] }) =>
         literaryChapterKey(item.batch[0]!, true, options.documentFormat);
       let chapterKey = chapterOf(pendingBatches[0]!);
@@ -1126,10 +1135,19 @@ export function useDocumentTranslation() {
         }
       }
       workBatches = pendingBatches.filter((item) => chapterOf(item) === chapterKey);
+      analysisChapterKey = chapterKey;
       state.value.workChapter = chapterKey;
       literaryStatus.value.chapterTitle = chapterKey;
     } else {
-      state.value.workChapter = '';
+      if (literaryEnabled && pendingBatches.length > 0) {
+        analysisChapterKey = literaryChapterKey(pendingBatches[0]!.batch[0]!, true, options.documentFormat);
+        state.value.workChapter = options.onlyPrioritySegments
+          ? (options.currentPageTitle || analysisChapterKey) + '（当前页）'
+          : analysisChapterKey;
+        literaryStatus.value.chapterTitle = analysisChapterKey;
+      } else {
+        state.value.workChapter = '';
+      }
     }
     state.value.workTotal = workBatches.length;
     state.value.workDone = 0;
@@ -1137,10 +1155,10 @@ export function useDocumentTranslation() {
     // 同一次 run 只推进一章：章节实体分析提前做一次，worker 里不再逐批重复。
     if (literaryEnabled && workBatches.length > 0 && isCurrentRun(runId)) {
       const chapterSegments = segments.filter((segment) =>
-        literaryChapterKey(segment, true, options.documentFormat) === state.value.workChapter);
+        literaryChapterKey(segment, true, options.documentFormat) === analysisChapterKey);
       state.value.workStage = '实体分析中';
       if (!(await prepareLiteraryChapter(
-        state.value.workChapter, chapterSegments, effectiveOptions, runId,
+        analysisChapterKey, chapterSegments, effectiveOptions, runId,
       ))) {
         state.value.workStage = '';
         return state.value;
@@ -1221,7 +1239,9 @@ export function useDocumentTranslation() {
           [...state.value.activeSegmentIds].filter((id) => !batchIds.includes(id)),
         );
         if (ok) {
-          state.value.done++;
+          state.value.done = allBatches.filter((candidateBatch) =>
+            candidateBatch.every((segment) => !!state.value.translations.get(segment.id)?.trim()),
+          ).length;
           state.value.workDone++;
           if (literaryProfileEnabled) {
             literaryMemory.value = addLiteraryExamples(literaryMemory.value, batch.flatMap((segment) => {
