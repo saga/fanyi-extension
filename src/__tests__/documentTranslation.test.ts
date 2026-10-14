@@ -282,6 +282,298 @@ describe('文档翻译服务端模式', () => {
     expect(literaryStatus.value.reviewFindings[0]?.priority).toBe('optional');
   });
 
+  it('文学模式优先翻译当前页所在章节，而不是从头开始', async () => {
+    sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
+      const blocks = JSON.parse(message.jsonContent) as Array<{ id: string }>;
+      return {
+        success: true,
+        result: blocks.map((block) => [block.id, '初译-' + block.id]),
+      };
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (url.endsWith('/api/translate/document/literary/analyze')) {
+        return okJson({
+          analyzed: true,
+          memory: {
+            version: 1,
+            entities: body.memory?.entities ?? [],
+            relationships: body.memory?.relationships ?? [],
+            styleGuide: { narrativeVoice: '克制的第三人称' },
+            chapterSummaries: body.memory?.chapterSummaries ?? [],
+            recentExamples: body.memory?.recentExamples ?? [],
+          },
+        });
+      }
+      if (url.endsWith('/api/translate/document/literary/review')) {
+        const translations = Object.fromEntries(
+          body.segments.map((segment: { id: string }) => [segment.id, '审校-' + segment.id]),
+        );
+        return okJson({ translations, reviewedIds: Object.keys(translations), missingIds: [], findings: [] });
+      }
+      throw new Error('unexpected URL: ' + url);
+    });
+
+    const { run, state } = useDocumentTranslation();
+    const segments = [
+      {
+        id: 'chapter1-s0', index: 0, text: 'Alice enters the room.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One', path: 'Text/ch1.xhtml',
+      },
+      {
+        id: 'chapter2-s0', index: 1, text: 'She sees the lights of London.',
+        kind: 'paragraph' as const, contextPath: 'Chapter Two', path: 'Text/ch2.xhtml',
+      },
+    ];
+
+    // 用户停在第二章点开始：必须先翻 Chapter Two，而不是从 Chapter One 开始。
+    await run(segments, {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      useServerTranslation: false,
+      serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+      provider: 'deepseek',
+      apiKey: 'test-key',
+      documentFileName: 'book.epub',
+      documentTitle: 'Book',
+      documentFormat: 'epub',
+      literaryMode: true,
+      prioritySegmentIds: ['chapter2-s0'],
+      budget: { maxChars: 3000, maxSegments: 24 },
+    });
+
+    expect(state.value.total).toBe(2);
+    expect(state.value.done).toBe(1);
+    expect(state.value.workChapter).toBe('Chapter Two');
+    expect(state.value.translations.get('chapter2-s0')).toBe('审校-chapter2-s0');
+    expect(state.value.translations.has('chapter1-s0')).toBe(false);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('文学模式同章多批并行推进，而不是串行等待', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await gate;
+      inFlight--;
+      const blocks = JSON.parse(message.jsonContent) as Array<{ id: string }>;
+      return { success: true, result: blocks.map((block) => [block.id, '初译-' + block.id]) };
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (url.endsWith('/api/translate/document/literary/analyze')) {
+        return okJson({
+          analyzed: true,
+          memory: {
+            version: 1,
+            entities: body.memory?.entities ?? [],
+            relationships: body.memory?.relationships ?? [],
+            styleGuide: { narrativeVoice: '克制的第三人称' },
+            chapterSummaries: body.memory?.chapterSummaries ?? [],
+            recentExamples: body.memory?.recentExamples ?? [],
+          },
+        });
+      }
+      if (url.endsWith('/api/translate/document/literary/review')) {
+        const translations = Object.fromEntries(
+          body.segments.map((segment: { id: string }) => [segment.id, '审校-' + segment.id]),
+        );
+        return okJson({ translations, reviewedIds: Object.keys(translations), missingIds: [], findings: [] });
+      }
+      throw new Error('unexpected URL: ' + url);
+    });
+
+    const { run, state } = useDocumentTranslation();
+    // 同一章节两段、每批一段 → 同章 2 批，必须同时在途。
+    const segments = [
+      {
+        id: 'para-s0', index: 0, text: 'Alice enters the room and looks around quietly.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One', path: 'Text/ch1.xhtml',
+      },
+      {
+        id: 'para-s1', index: 1, text: 'She sees the lights of London through the small window.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One', path: 'Text/ch1.xhtml',
+      },
+    ];
+    const runPromise = run(segments, {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      useServerTranslation: false,
+      serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+      provider: 'deepseek',
+      apiKey: 'test-key',
+      documentFileName: 'book.epub',
+      documentTitle: 'Book',
+      documentFormat: 'epub',
+      literaryMode: true,
+      budget: { maxChars: 3000, maxSegments: 1 },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 两个 worker 同时卡在翻译调用上：在途数必须达到 2（串行的话恒为 1）。
+    expect(maxInFlight).toBe(2);
+    release();
+    await runPromise;
+
+    expect(state.value.done).toBe(2);
+    expect(state.value.translations.get('para-s0')).toBe('审校-para-s0');
+    expect(state.value.translations.get('para-s1')).toBe('审校-para-s1');
+  });
+
+  it('审校 detached：初译先提交计进度，审校落定后覆盖并刷新记忆例子', async () => {
+    sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
+      const blocks = JSON.parse(message.jsonContent) as Array<{ id: string }>;
+      return { success: true, result: blocks.map((block) => [block.id, '初译-' + block.id]) };
+    });
+    let releaseReview!: () => void;
+    const reviewGate = new Promise<void>((resolve) => { releaseReview = resolve; });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (url.endsWith('/api/translate/document/literary/analyze')) {
+        return okJson({
+          analyzed: true,
+          memory: {
+            version: 1,
+            entities: body.memory?.entities ?? [],
+            relationships: body.memory?.relationships ?? [],
+            styleGuide: { narrativeVoice: '克制的第三人称' },
+            chapterSummaries: body.memory?.chapterSummaries ?? [],
+            recentExamples: body.memory?.recentExamples ?? [],
+          },
+        });
+      }
+      if (url.endsWith('/api/translate/document/literary/review')) {
+        await reviewGate;
+        const translations = Object.fromEntries(
+          body.segments.map((segment: { id: string }) => [segment.id, '审校-' + segment.id]),
+        );
+        return okJson({ translations, reviewedIds: Object.keys(translations), missingIds: [], findings: [] });
+      }
+      throw new Error('unexpected URL: ' + url);
+    });
+
+    const { run, state, literaryMemory } = useDocumentTranslation();
+    const runPromise = run([{
+      id: 'book-s0', index: 0,
+      text: 'Alice opened the old door and walked into the silent hall.',
+      kind: 'paragraph' as const, path: 'Text/chapter1.xhtml', contextPath: 'Chapter One',
+    }], {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      useServerTranslation: false,
+      serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+      provider: 'deepseek',
+      apiKey: 'test-key',
+      documentFileName: 'book.epub',
+      documentTitle: 'Book',
+      documentFormat: 'epub',
+      literaryMode: true,
+      budget: { maxChars: 3000, maxSegments: 24 },
+    });
+
+    // 审校还卡着时，初译已经提交、进度已计，记忆例子记的是初译。
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(state.value.translations.get('book-s0')).toBe('初译-book-s0');
+    expect(state.value.done).toBe(1);
+    expect(state.value.running).toBe(true);
+    expect(literaryMemory.value.recentExamples.some((e) => e.target === '初译-book-s0')).toBe(true);
+
+    // 审校落定：覆盖译文、刷新例子，run 收敛后结束。
+    releaseReview();
+    await runPromise;
+    expect(state.value.translations.get('book-s0')).toBe('审校-book-s0');
+    expect(state.value.running).toBe(false);
+    expect(literaryMemory.value.recentExamples.some((e) => e.target === '审校-book-s0')).toBe(true);
+    expect(literaryMemory.value.recentExamples.some((e) => e.target === '初译-book-s0')).toBe(false);
+  });
+
+  it('skipReview 跳过每批审校调用、直接保留初译', async () => {
+    sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
+      const blocks = JSON.parse(message.jsonContent) as Array<{ id: string }>;
+      return { success: true, result: blocks.map((block) => [block.id, '初译-' + block.id]) };
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/translate/document/literary/analyze')) {
+        const body = JSON.parse(String(init?.body));
+        return okJson({
+          analyzed: true,
+          memory: {
+            version: 1,
+            entities: body.memory?.entities ?? [],
+            relationships: body.memory?.relationships ?? [],
+            styleGuide: { narrativeVoice: '克制的第三人称' },
+            chapterSummaries: body.memory?.chapterSummaries ?? [],
+            recentExamples: body.memory?.recentExamples ?? [],
+          },
+        });
+      }
+      throw new Error('审校应当被跳过，不应请求: ' + url);
+    });
+
+    const { run, state, literaryStatus } = useDocumentTranslation();
+    await run([{
+      id: 'book-s0', index: 0,
+      text: 'Alice opened the old door and walked into the silent hall.',
+      kind: 'paragraph' as const, path: 'Text/chapter1.xhtml', contextPath: 'Chapter One',
+    }], {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      useServerTranslation: false,
+      serverUrl: 'https://s.sunxiunan.com/fanyi/page',
+      provider: 'deepseek',
+      apiKey: 'test-key',
+      documentFileName: 'book.epub',
+      documentTitle: 'Book',
+      documentFormat: 'epub',
+      literaryMode: true,
+      skipReview: true,
+      budget: { maxChars: 3000, maxSegments: 24 },
+    });
+
+    // 只有全书预分析一次 fetch，没有审校请求；译文为初译。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(state.value.translations.get('book-s0')).toBe('初译-book-s0');
+    expect(literaryStatus.value.reviewedSegments).toBe(0);
+    expect(state.value.done).toBe(1);
+  });
+
+  it('模型整批原文返回时不入库、标失败并提示换模型', async () => {
+    // 模型空转：把原文照抄回来。必须当失败（缺失）处理，不能当"译文"存住。
+    sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
+      const blocks = JSON.parse(message.jsonContent) as Array<{ id: string; text: string }>;
+      return { success: true, result: blocks.map((block) => [block.id, block.text]) };
+    });
+
+    const { run, state } = useDocumentTranslation();
+    const segments = [
+      {
+        id: 'doc-s0', index: 0,
+        text: 'Lieutenant Grey was glad that at last he had spoken aloud what had been twisting his guts.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One',
+      },
+      {
+        id: 'doc-s1', index: 1,
+        text: 'Sergeant Masters had been thinking about a bottle of ice-cold Australian beer and his home.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One',
+      },
+    ];
+    await run(segments, {
+      sourceLang: 'en',
+      targetLang: 'zh',
+      retries: 0,
+      useServerTranslation: false,
+    });
+
+    // 空转条目全部被剔除：译文 Map 为空，批次标失败，报错说清对因。
+    expect(state.value.translations.size).toBe(0);
+    expect(state.value.failedBatches).toEqual([0]);
+    expect(state.value.error).toMatch(/原文返回/);
+  });
+
   it('本地翻译的 EPUB 也先分析书籍实体，再调用独立 reviewer', async () => {
     sendMessage.mockResolvedValueOnce({
       success: true,

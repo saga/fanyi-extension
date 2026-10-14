@@ -120,6 +120,69 @@ export function processTranslationResult(jsonResult: string): Map<string, string
 }
 
 /**
+ * 空转（no-op）判定：长文本在不同语言间不可能完全相同。
+ * 模型把原文照抄返回 = 拒绝 / 内容过滤 / 太弱没跟上指令，必须当失败处理，
+ * 绝不能当"译文"存住——否则英文冒充中文写入缓存，重试也命中脏数据。
+ *
+ * 短文本（术语、编号、纯数字）原文返回可能是合法的（如术语表要求保留原文），
+ * 所以只看长度 >= minChars 的段落；一批全是短段时无法判定，返回 false。
+ */
+export const NO_OP_MIN_CHARS = 20;
+
+type OriginalBlocks = ReadonlyMap<string, string> | Array<{ id: string; text?: string }>;
+
+function originalsById(originals: OriginalBlocks): ReadonlyMap<string, string> {
+  if (Array.isArray(originals)) {
+    return new Map(originals.map((block) => [block.id, block.text ?? ''] as [string, string]));
+  }
+  return originals;
+}
+
+export function isUnchangedTranslation(
+  translated: string,
+  original: string,
+  minChars = NO_OP_MIN_CHARS,
+): boolean {
+  return original.length >= minChars && translated.trim() === original.trim();
+}
+
+/** 返回译文 Map 中属于空转的 id（只看有原文对照且够长的段）。 */
+export function findNoOpBlockIds(
+  translations: ReadonlyMap<string, string>,
+  originals: OriginalBlocks,
+  minChars = NO_OP_MIN_CHARS,
+): string[] {
+  const byId = originalsById(originals);
+  const noOp: string[] = [];
+  for (const [id, translated] of translations) {
+    const original = byId.get(id);
+    if (original !== undefined && isUnchangedTranslation(translated, original, minChars)) {
+      noOp.push(id);
+    }
+  }
+  return noOp;
+}
+
+/**
+ * 整批空转：期望 id 里至少有一段长文本，且所有长文本段全部原文返回。
+ * 调用方应在 sourceLang !== targetLang 时才使用（同语言翻译原文返回是正确的）。
+ */
+export function isAllLongBlocksNoOp(
+  translations: ReadonlyMap<string, string>,
+  originals: OriginalBlocks,
+  expectedIds?: readonly string[],
+  minChars = NO_OP_MIN_CHARS,
+): boolean {
+  const byId = originalsById(originals);
+  const ids = expectedIds ?? Array.from(translations.keys());
+  const longIds = ids.filter((id) => (byId.get(id) ?? '').length >= minChars);
+  if (!longIds.length) return false;
+  return longIds.every((id) =>
+    isUnchangedTranslation(translations.get(id) ?? '', byId.get(id) ?? '', minChars),
+  );
+}
+
+/**
  * Compare a raw LLM translation response against the original blocks to flag
  * cases where the model silently returned the source text unchanged — a sign
  * that the model refused, hit a content filter, or ignored instructions.

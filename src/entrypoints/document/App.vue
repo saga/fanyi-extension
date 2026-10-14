@@ -28,7 +28,7 @@
       </div>
     </section>
 
-    <section v-if="persistenceMessage" class="panel persistence-notice">
+    <section v-if="persistenceMessage && !doc" class="panel persistence-notice">
       <span>{{ persistenceMessage }}</span>
     </section>
 
@@ -58,8 +58,121 @@
       <button class="btn" @click="resetAll">重新选择</button>
     </section>
 
-    <!-- 4. 已解析：控制条 + 正文 -->
+    <!-- 4. 已解析：Tab 导航 + 控制条 + 正文 -->
     <template v-if="doc">
+      <nav class="tabs" aria-label="文档功能分区">
+        <button class="tab" :class="{ active: activeTab === 'reading' }" @click="activeTab = 'reading'">阅读</button>
+        <button class="tab" :class="{ active: activeTab === 'memory' }" @click="activeTab = 'memory'">
+          设置与记忆
+          <span v-if="literaryMode" class="tab-badge">{{ literaryMemory.entities.length }}实体·{{ literaryStatus.reviewFindings.length }}审校</span>
+        </button>
+      </nav>
+
+      <!-- Tab 1 阅读：只留操作条 + 章节导航 + 正文。设置、记忆、词典都在第二个 Tab。 -->
+      <template v-if="activeTab === 'reading'">
+      <section class="panel action-bar">
+        <div class="action-title">
+          <strong>{{ doc.title }}</strong>
+          <span class="muted small">
+            本页 {{ currentPageTranslatedCount }}/{{ visibleSegments.length }} 段
+            · 全书 {{ translatedSegmentCount }}/{{ doc.meta.segmentCount }} 段
+            <template v-if="state.running && state.workChapter"> · 正在翻译「{{ state.workChapter }}」{{ state.workTotal > 0 ? `${state.workDone}/${state.workTotal} 批` : '' }}{{ state.workStage ? ` · ${state.workStage}` : '' }}</template>
+          </span>
+        </div>
+        <div class="action-controls">
+          <label class="field inline">
+            <span>显示</span>
+            <select v-model="viewMode">
+              <option value="bilingual">双语对照</option>
+              <option value="translation">仅译文</option>
+              <option value="original">仅原文</option>
+            </select>
+          </label>
+          <label v-if="literaryMode" class="field inline" title="关闭后每批省一次审校调用，速度翻倍；译文为初译水平">
+            <span>审校</span>
+            <input v-model="literaryReview" type="checkbox" />
+          </label>
+          <button
+            v-if="!state.running && (state.total === 0 || state.done < state.total)"
+            class="btn primary"
+            @click="startTranslate">
+            {{ startLabel }}
+          </button>
+          <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
+          <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
+            重试失败批次（{{ state.failedBatches.length }}）
+          </button>
+        </div>
+        <p v-if="state.error" class="err-text small">{{ state.error }}</p>
+      </section>
+
+      <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->
+      <section class="panel reader-navigation" aria-label="阅读位置">
+        <div class="reader-navigation-main">
+          <div class="reader-location">
+            <strong>{{ currentPage?.title || doc.title }}</strong>
+            <span class="muted small">
+              第 {{ currentPageIndex + 1 }} / {{ pages.length }} 页
+              · {{ (currentPage?.charCount ?? 0).toLocaleString() }} 字
+            </span>
+            <span class="muted small">
+              本页已译 {{ currentPageTranslatedCount }}/{{ visibleSegments.length }} 段
+              · 全文已译 {{ translatedSegmentCount }}/{{ doc.meta.segmentCount }} 段
+            </span>
+            <span v-if="state.running && state.workChapter && !isTranslatingCurrentChapter" class="muted small translating-hint">
+              正在翻译「{{ state.workChapter }}」，当前页不在该章节。
+              <button class="link-btn" @click="jumpToWorkChapter">跳到正在翻译的章节</button>
+            </span>
+          </div>
+          <div class="reader-navigation-controls">
+            <button class="btn" :disabled="currentPageIndex <= 0" @click="currentPageIndex--">上一页</button>
+            <select v-model.number="currentPageIndex" aria-label="跳转阅读页" class="page-select">
+              <option v-for="(page, index) in pages" :key="page.id" :value="index">
+                {{ index + 1 }}. {{ page.title }}
+              </option>
+            </select>
+            <button class="btn" :disabled="currentPageIndex >= pages.length - 1" @click="currentPageIndex++">下一页</button>
+          </div>
+        </div>
+        <div class="reader-progress" role="progressbar"
+          :aria-valuenow="currentPageIndex + 1" :aria-valuemin="1" :aria-valuemax="Math.max(pages.length, 1)">
+          <div class="reader-progress-bar" :style="{ width: (pages.length ? ((currentPageIndex + 1) / pages.length) * 100 : 0) + '%' }"></div>
+        </div>
+      </section>
+
+      <!-- 当前阅读页：译文逐批到达后即时显示，不必等待整本书结束。 -->
+      <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
+        <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
+          :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0)]">
+          <div v-if="viewMode !== 'translation'" class="or">{{ seg.text }}</div>
+          <div v-if="viewMode !== 'original'" class="tr">
+            <template v-if="state.translations.get(seg.id)">{{ state.translations.get(seg.id) }}</template>
+            <span v-else-if="state.running" class="tr-pending">翻译中…</span>
+            <span v-else-if="state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
+          </div>
+          <div v-if="seg.kind === 'caption' && (seg.start || seg.end)" class="timecode">
+            {{ seg.start }} → {{ seg.end }}
+          </div>
+        </div>
+      </article>
+
+      <!-- 导出 -->
+      <section class="panel export">
+        <span class="muted small">导出：</span>
+        <button class="btn ghost" @click="doExport('html')">HTML</button>
+        <button class="btn ghost" @click="doExport('md')">Markdown</button>
+        <button class="btn ghost" @click="doExport('txt')">TXT</button>
+        <button v-if="doc.format === 'srt'" class="btn ghost" @click="doExport('srt')">双语 SRT</button>
+        <button v-if="doc.format === 'vtt'" class="btn ghost" @click="doExport('vtt')">双语 VTT</button>
+        <button v-if="doc.format === 'json'" class="btn ghost" @click="doExport('json')">JSON</button>
+      </section>
+      </template>
+
+      <template v-else>
+      <section v-if="persistenceMessage" class="panel persistence-notice">
+        <span>{{ persistenceMessage }}</span>
+      </section>
+
       <section class="panel meta">
         <div class="meta-row">
           <strong class="doc-title">{{ doc.title }}</strong>
@@ -109,26 +222,15 @@
             实体一致性与文风审校
           </span>
         </label>
-
-        <div class="grow"></div>
-
-        <button
-          v-if="!state.running && (state.total === 0 || state.done < state.total)"
-          class="btn primary"
-          @click="startTranslate">
-          {{ literaryMode ? (state.total > 0 ? '继续翻译下一章' : '开始书籍翻译（按章节推进）') : (state.total > 0 ? '继续翻译剩余内容' : '翻译全文（先翻本页）') }}
-        </button>
-        <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
-        <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
-          重试失败批次（{{ state.failedBatches.length }}）
-        </button>
       </section>
 
       <section v-if="state.total > 0" class="panel progress-panel">
         <div class="progress"><div class="bar"
           :style="{ width: (state.done / state.total) * 100 + '%' }"></div></div>
         <span class="muted small">
-          {{ state.done }}/{{ state.total }} 批
+          <template v-if="literaryMode && state.workTotal > 0">本章 {{ state.workDone }}/{{ state.workTotal }} 批 · 全书 {{ state.done }}/{{ state.total }} 批</template>
+          <template v-else>{{ state.done }}/{{ state.total }} 批</template>
+          <template v-if="state.running && state.workChapter"> · 正在翻译：{{ state.workChapter }}</template>
           <template v-if="state.error"> · <span class="err-text">{{ state.error }}</span></template>
         </span>
       </section>
@@ -200,62 +302,10 @@
           <p v-if="finding.suggestion"><strong>建议：</strong>{{ finding.suggestion }}</p>
         </div>
       </section>
-
-      <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->
-      <section class="panel reader-navigation" aria-label="阅读位置">
-        <div class="reader-navigation-main">
-          <div class="reader-location">
-            <strong>{{ currentPage?.title || doc.title }}</strong>
-            <span class="muted small">
-              第 {{ currentPageIndex + 1 }} / {{ pages.length }} 页
-              · {{ (currentPage?.charCount ?? 0).toLocaleString() }} 字
-            </span>
-            <span class="muted small">
-              本页已译 {{ currentPageTranslatedCount }}/{{ visibleSegments.length }} 段
-              · 全文已译 {{ translatedSegmentCount }}/{{ doc.meta.segmentCount }} 段
-            </span>
-          </div>
-          <div class="reader-navigation-controls">
-            <button class="btn" :disabled="currentPageIndex <= 0" @click="currentPageIndex--">上一页</button>
-            <select v-model.number="currentPageIndex" aria-label="跳转阅读页" class="page-select">
-              <option v-for="(page, index) in pages" :key="page.id" :value="index">
-                {{ index + 1 }}. {{ page.title }}
-              </option>
-            </select>
-            <button class="btn" :disabled="currentPageIndex >= pages.length - 1" @click="currentPageIndex++">下一页</button>
-          </div>
-        </div>
-        <div class="reader-progress" role="progressbar"
-          :aria-valuenow="currentPageIndex + 1" :aria-valuemin="1" :aria-valuemax="Math.max(pages.length, 1)">
-          <div class="reader-progress-bar" :style="{ width: (pages.length ? ((currentPageIndex + 1) / pages.length) * 100 : 0) + '%' }"></div>
-        </div>
+      <section v-if="!literaryMode && !literaryStatus.enabled" class="panel">
+        <p class="muted small">当前文档未启用书籍翻译模式。EPUB / PDF 打开时默认启用；也可在本页上方勾选「实体一致性与文风审校」。</p>
       </section>
-
-      <!-- 当前阅读页：译文逐批到达后即时显示，不必等待整本书结束。 -->
-      <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
-        <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
-          :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0)]">
-          <div v-if="viewMode !== 'translation'" class="or">{{ seg.text }}</div>
-          <div v-if="viewMode !== 'original'" class="tr">
-            <template v-if="state.translations.get(seg.id)">{{ state.translations.get(seg.id) }}</template>
-            <span v-else-if="state.running || state.done > 0" class="tr-pending">翻译中…</span>
-          </div>
-          <div v-if="seg.kind === 'caption' && (seg.start || seg.end)" class="timecode">
-            {{ seg.start }} → {{ seg.end }}
-          </div>
-        </div>
-      </article>
-
-      <!-- 导出 -->
-      <section class="panel export">
-        <span class="muted small">导出：</span>
-        <button class="btn ghost" @click="doExport('html')">HTML</button>
-        <button class="btn ghost" @click="doExport('md')">Markdown</button>
-        <button class="btn ghost" @click="doExport('txt')">TXT</button>
-        <button v-if="doc.format === 'srt'" class="btn ghost" @click="doExport('srt')">双语 SRT</button>
-        <button v-if="doc.format === 'vtt'" class="btn ghost" @click="doExport('vtt')">双语 VTT</button>
-        <button v-if="doc.format === 'json'" class="btn ghost" @click="doExport('json')">JSON</button>
-      </section>
+      </template>
     </template>
   </div>
 </template>
@@ -309,6 +359,8 @@ const sourceLang = ref('auto');
 const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
 const literaryMode = ref(false);
+/** 文学审校开关：关闭=快速模式，每批省一次审校 LLM 调用。 */
+const literaryReview = ref(true);
 const currentPageIndex = ref(0);
 const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
 /** 当 IndexedDB 不可用时，仅凭 SQLite 的轻量摘要也要显示恢复入口。 */
@@ -353,6 +405,43 @@ const currentPageTranslatedCount = computed(() =>
 const translatedSegmentCount = computed(() =>
   doc.value?.segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length ?? 0,
 );
+/** 阅读 Tab 默认首屏；书籍记忆/审校移到第二个 Tab，避免挤占正文主屏。 */
+const activeTab = ref<'reading' | 'memory'>('reading');
+/** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
+const currentChapterPending = computed(() =>
+  visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()),
+);
+/** 开始按钮文案：书籍模式永远先翻当前页所在章节，不从头开始。 */
+const startLabel = computed(() =>
+  literaryMode.value
+    ? (state.value.total > 0 && !currentChapterPending.value ? '继续翻译下一章' : '翻译本章')
+    : (state.value.total > 0 ? '继续翻译剩余内容' : '翻译全文（先翻本页）'),
+);
+/** 正在翻译的章节是否就是当前页所在章节（用于提示/跳转）。 */
+const isTranslatingCurrentChapter = computed(() => {
+  const work = state.value.workChapter;
+  if (!work) return true;
+  return visibleSegments.value.some((segment) =>
+    (segment.contextPath?.trim() || '') === work,
+  ) || (currentPage.value?.title || '').includes(work) || (currentPage.value?.sectionTitle || '') === work;
+});
+
+function jumpToWorkChapter() {
+  const work = state.value.workChapter;
+  if (!work || !pages.value.length) return;
+  let target = pages.value.findIndex((page) =>
+    page.segments.some((segment) => (segment.contextPath?.trim() || '') === work),
+  );
+  if (target < 0) {
+    target = pages.value.findIndex((page) =>
+      page.title.includes(work) || page.sectionTitle === work,
+    );
+  }
+  if (target >= 0) {
+    activeTab.value = 'reading';
+    currentPageIndex.value = target;
+  }
+}
 
 watch(currentPageIndex, async () => {
   await nextTick();
@@ -822,6 +911,7 @@ async function loadFile(file: File) {
   persistenceMessage.value = '';
   resetTranslation();
   currentPageIndex.value = 0;
+  activeTab.value = 'reading';
   parseError.value = '';
   localSessionDocumentSaved = false;
   localSessionDisabled = false;
@@ -907,6 +997,7 @@ async function buildTranslationOptions() {
     localAgentModel: config.localAgentModel,
     localAgentToken: config.localAgentToken,
     literaryMode: literaryMode.value && (doc.value.format === 'epub' || doc.value.format === 'pdf'),
+    skipReview: !literaryReview.value,
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
     serverUrl: config.serverUrl,
@@ -963,6 +1054,7 @@ async function resetAll() {
   resetTranslation();
   doc.value = null;
   currentPageIndex.value = 0;
+  activeTab.value = 'reading';
   literaryMode.value = false;
   parseError.value = '';
   rawText = '';
@@ -989,6 +1081,68 @@ async function resetAll() {
   margin-bottom: 1rem;
 }
 .doc-header h1 { font-size: 1.25rem; margin: 0; }
+
+.tabs {
+  display: flex;
+  gap: .5rem;
+  margin-bottom: .75rem;
+}
+.tab {
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+  border-radius: 999px;
+  padding: .4rem 1rem;
+  cursor: pointer;
+  font-size: .85rem;
+  color: #57606a;
+}
+.tab.active {
+  background: #0969da;
+  border-color: #0969da;
+  color: #fff;
+}
+.tab-badge {
+  font-size: .72rem;
+  opacity: .85;
+  margin-left: .35rem;
+}
+.translating-hint { display: block; margin-top: .2rem; }
+.action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+.action-title {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 10rem;
+  flex: 1;
+}
+.action-title strong {
+  font-size: .95rem;
+  overflow-wrap: anywhere;
+}
+.action-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.field.inline { flex-direction: row; align-items: center; }
+.field.inline select { padding: .35rem .5rem; }
+.link-btn {
+  border: none;
+  background: none;
+  color: #0969da;
+  cursor: pointer;
+  font-size: .78rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.tr-idle { color: #8b949e; font-size: .8rem; }
 
 .saved-session {
   display: flex;

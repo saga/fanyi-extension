@@ -143,6 +143,14 @@ describe('DeepSeekTranslationService API methods', () => {
       expect(globalFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
     });
 
+    it('turns a stalled fetch into a loud timeout error instead of hanging forever', async () => {
+      globalFetch.mockRejectedValue(new DOMException('The operation timed out', 'TimeoutError'));
+
+      await expect(
+        service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined),
+      ).rejects.toThrow(/请求超时/);
+    });
+
     it('never rewrites a local-service connection failure as a remote API failure', async () => {
       const localService = new DeepSeekTranslationService('', undefined, {
         endpoint: 'http://127.0.0.1:8789/v1/chat/completions',

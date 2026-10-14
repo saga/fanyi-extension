@@ -2,11 +2,13 @@ import { ref } from 'vue';
 import browser from 'webextension-polyfill';
 import type { TranslateChunkResponse } from '../../types/messages';
 import type { Glossary } from '../service/_service';
+import { MODEL_FETCH_TIMEOUT_MS } from '../service/_service';
 import type { PromptStyle } from '../service/deepseek';
 import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
 import { buildSegmentBatches, type BatchBudget } from '../utils/document/batcher';
 import type { DocumentSegment } from '../utils/document/types';
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../utils/document/translationResult';
+import { findNoOpBlockIds } from '../utils/translateApi';
 import { TRANSLATIONS_OBJECT_SCHEMA } from '../utils/translateApi';
 import {
   addLiteraryExamples,
@@ -16,6 +18,7 @@ import {
   createEmptyLiteraryMemory,
   mergeLiteraryMemory,
   type LiteraryBookMemory,
+  refreshLiteraryExampleTargets,
   sanitizeLiteraryMemory,
   type LiteraryReviewFinding,
 } from '../utils/document/literary';
@@ -66,6 +69,8 @@ export interface TranslateOptions {
   prioritySegmentIds?: string[];
   /** 仅 EPUB/PDF 可开启：逐章实体分析、书籍记忆、文学译稿审校。 */
   literaryMode?: boolean;
+  /** 文学模式下跳过每批的独立审校调用（调用数减半，速度翻倍；译文质量回到初译水平）。 */
+  skipReview?: boolean;
   /** 每批结束、书籍记忆更新或审校结果返回时调用，供阅读器做增量持久化。 */
   onCheckpoint?: () => Promise<void> | void;
 }
@@ -126,8 +131,7 @@ export function shouldUseRemoteDocumentTranslation(
 
 function resolveLocalAgentEndpoint(localAgentUrl: string | undefined, endpointPath: string): string {
   const url = new URL(localAgentUrl?.trim() || 'http://127.0.0.1:8789');
-  url.pathname = endpointPath;
-  url.search = '';
+  url.pathname = endpointPath;  url.search = '';
   url.hash = '';
   return url.toString();
 }
@@ -139,6 +143,23 @@ function requestHeaders(options: TranslateOptions): Record<string, string> {
       ? { Authorization: 'Bearer ' + options.localAgentToken }
       : {}),
   };
+}
+
+// 直连 fetch 统一超时：无超时会无限"翻译中…"。stall 转中文超时错，
+// 调用方现有重试/警告链路不变。
+async function fetchJsonWithTimeout(
+  endpoint: string,
+  init: RequestInit,
+  label: string,
+): Promise<Response> {
+  try {
+    return await fetch(endpoint, { ...init, signal: AbortSignal.timeout(MODEL_FETCH_TIMEOUT_MS) });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error(label + '请求超时（180s）：网络或模型服务无响应');
+    }
+    throw error;
+  }
 }
 
 function resolveServerDocumentEndpoint(
@@ -188,7 +209,7 @@ async function translateSegmentsViaServer(
     promptStyle: options.promptStyle,
     ...(options.literaryMode && bookMemory ? {
       literaryContext: bookMemory,
-      literaryReview: true,
+      literaryReview: !options.skipReview,
       chapterTitle: segments[0]?.contextPath,
     } : {}),
     provider,
@@ -208,11 +229,11 @@ async function translateSegmentsViaServer(
     })),
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchJsonWithTimeout(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  });
+  }, '服务端文档翻译');
   let data: ServerDocumentTranslationResponse & { error?: string };
   try {
     data = await response.json() as ServerDocumentTranslationResponse & { error?: string };
@@ -340,7 +361,7 @@ async function analyzeLiteraryChapterViaServer(
   const provider = options.useLocalAgent
     ? (options.localAgentProvider || 'workbuddy')
     : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
-  const response = await fetch(endpoint, {
+  const response = await fetchJsonWithTimeout(endpoint, {
     method: 'POST',
     headers: requestHeaders(options),
     body: JSON.stringify({
@@ -358,7 +379,7 @@ async function analyzeLiteraryChapterViaServer(
       model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
-  });
+  }, '书籍实体分析');
   let data: { memory?: unknown; analyzed?: unknown; warning?: unknown; error?: string; requestId?: string };
   try { data = await response.json() as typeof data; }
   catch { throw new Error('书籍实体分析接口返回了无法解析的响应'); }
@@ -396,7 +417,7 @@ async function reviewLiteraryBatchViaServer(
   const provider = options.useLocalAgent
     ? (options.localAgentProvider || 'workbuddy')
     : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
-  const response = await fetch(endpoint, {
+  const response = await fetchJsonWithTimeout(endpoint, {
     method: 'POST',
     headers: requestHeaders(options),
     body: JSON.stringify({
@@ -412,7 +433,7 @@ async function reviewLiteraryBatchViaServer(
       model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
-  });
+  }, '文学审校');
   let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; findings?: unknown; reviewFindings?: unknown; error?: string; requestId?: string };
   try { data = await response.json() as typeof data; }
   catch { throw new Error('文学审校接口返回了无法解析的响应'); }
@@ -468,6 +489,13 @@ export interface DocumentTranslateState {
   failedBatches: number[];
   running: boolean;
   error: string;
+  /** 本次 run 实际推进的章节（文学模式每次只推进一章）；普通模式为空。 */
+  workChapter: string;
+  /** 本次 run 实际推进的批数（文学模式是单章批数，不是全书 total）。 */
+  workTotal: number;
+  workDone: number;
+  /** 当前阶段（实体分析中/翻译中/审校中），仅 running 时有意义，方便定位慢在哪一步。 */
+  workStage: string;
 }
 
 
@@ -496,6 +524,10 @@ export function useDocumentTranslation() {
     failedBatches: [],
     running: false,
     error: '',
+    workChapter: '',
+    workTotal: 0,
+    workDone: 0,
+    workStage: '',
   });
 
   // 文学记忆属于当前阅读会话，继续/重试保留；切换文档时重置。
@@ -574,6 +606,11 @@ export function useDocumentTranslation() {
         : [],
       running: false,
       error: typeof snapshot.error === 'string' ? snapshot.error : '',
+      // 章节进度是单次 run 的运行时状态，不随快照恢复，避免恢复后显示过期章节。
+      workChapter: '',
+      workTotal: 0,
+      workDone: 0,
+      workStage: '',
     };
   }
 
@@ -592,6 +629,10 @@ export function useDocumentTranslation() {
       failedBatches: [],
       running: false,
       error: '',
+      workChapter: '',
+      workTotal: 0,
+      workDone: 0,
+      workStage: '',
     };
   }
 
@@ -612,8 +653,15 @@ export function useDocumentTranslation() {
       const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun, bookMemory);
       if (!result || !isCurrentRun(runId)) return false;
       const expectedIds = batch.map((segment) => segment.id);
+      const batchTextById = new Map(batch.map((segment) => [segment.id, segment.text]));
       for (const [id, value] of Object.entries(result.translations ?? {})) {
         if (expectedIds.includes(id) && typeof value === 'string' && value.trim()) {
+          // 服务端空转（长段原文返回）同样不能入库，否则英文冒充译文、
+          // 缺失检查也发现不了；跳过后走下面的缺失报错与重试。
+          if (options.sourceLang !== options.targetLang &&
+            findNoOpBlockIds(new Map([[id, value]]), batchTextById).length > 0) {
+            continue;
+          }
           state.value.translations.set(id, value);
         }
       }
@@ -642,6 +690,23 @@ export function useDocumentTranslation() {
       return isCurrentRun(runId);
     }
 
+    const normalized = await translateBatchText(batch, options, runId, bookMemory);
+    await reviewBatchText(batch, normalized, options, bookMemory, runId);
+    await checkpoint(options);
+    return isCurrentRun(runId);
+  }
+
+  /**
+   * 本地初译阶段：只拿译文、提交入库，不等审校。
+   * run 的 worker 拿到初译就计进度；审校由 reviewBatchText detached 后台跑。
+   * 抛错表示本批失败（调用方走重试/标失败），成功则返回全批译文。
+   */
+  async function translateBatchText(
+    batch: DocumentSegment[],
+    options: TranslateOptions,
+    runId: number,
+    bookMemory?: LiteraryBookMemory,
+  ): Promise<Map<string, string>> {
     // 本地初译依旧走扩展现有 provider；仅在书籍模式追加受限的书籍记忆 prompt。
     // 模型偶发只回第一条就停（同样的整批重试经实测复现相同结果，只是白烧时间）：
     // 缺失则对半缩小重发——改变 prompt 本身才可能走出确定性失败，同时指数收敛；
@@ -649,6 +714,8 @@ export function useDocumentTranslation() {
     const normalized = new Map<string, string>();
     const expectedIds = batch.map((segment) => segment.id);
     const chapterTitle = batch[0]?.contextPath || options.documentTitle || '';
+    /** 本批是否出现过模型空转（长段原文返回），用于最终失败时给出对因的报错。 */
+    let sawNoOp = false;
     // 发一轮并存好拿到的条目，返回本轮仍缺的 id。
     const sendRound = async (
       segments: DocumentSegment[],
@@ -695,6 +762,23 @@ export function useDocumentTranslation() {
         normalized.set(id, text);
         state.value.translations.set(id, text);
       }
+      // 本轮空转条目（长段原文返回）必须剔除、不入库：否则英文冒充译文，
+      // 缺失检查发现不了，还会随 checkpoint 存住。剔除后它们回到缺失集合，
+      // 走对半缩小重发（短 prompt 弱模型也更容易跟上）。
+      if (options.sourceLang !== options.targetLang) {
+        const noOpIds = findNoOpBlockIds(normalized, segments);
+        if (noOpIds.length) {
+          sawNoOp = true;
+          for (const id of noOpIds) {
+            normalized.delete(id);
+            state.value.translations.delete(id);
+          }
+          console.warn(
+            '[document-reader] 模型本轮 ' + noOpIds.length + ' 段原文返回（未翻译），已剔除并缩小重试：' +
+            noOpIds.slice(0, 5).join(', ') + (noOpIds.length > 5 ? '…' : ''),
+          );
+        }
+      }
       return getMissingDocumentBatchIds(roundIds, normalized);
     };
     let pending = batch;
@@ -723,40 +807,68 @@ export function useDocumentTranslation() {
     if (missingIds.length) {
       throw new Error(
         '翻译结果不完整，缺少 ' + missingIds.length + '/' + expectedIds.length +
-        ' 个片段（' + missingIds.slice(0, 5).join(', ') + (missingIds.length > 5 ? '…' : '') + '）',
+        ' 个片段（' + missingIds.slice(0, 5).join(', ') + (missingIds.length > 5 ? '…' : '') + '）' +
+        (sawNoOp
+          ? '；模型多轮原文返回、未实际翻译（本机模型可能太弱或内容被过滤），请更换更大的本机模型后重试该批'
+          : ''),
       );
     }
 
-    // 本地初译也走一遍独立 reviewer。服务端不可用时保留初译，不因审校故障丢文本。
-    if (options.literaryMode && bookMemory) {
-      const drafts = new Map(normalized);
-      try {
-        const reviewed = await reviewLiteraryBatchViaServer(
-          batch, drafts, options, bookMemory, runId, isCurrentRun,
+    // 本地初译也走独立 reviewer，但 detached 后台跑（见 reviewBatchText），
+    // 这里只保证初译完整入库。skipReview（快速模式）连 detached 都省了。
+    await checkpoint(options);
+    return normalized;
+  }
+
+  /**
+   * 审校阶段：可 detached 后台跑，不占主翻译过程。
+   * 落定后覆盖初译、刷新记忆例子、增量持久化；自己吞掉失败（保留初译+警告），绝不抛错。
+   */
+  async function reviewBatchText(
+    batch: DocumentSegment[],
+    drafts: ReadonlyMap<string, string>,
+    options: TranslateOptions,
+    bookMemory: LiteraryBookMemory | undefined,
+    runId: number,
+  ): Promise<void> {
+    const expectedIds = batch.map((segment) => segment.id);
+    if (!options.literaryMode || !bookMemory || options.skipReview) return;
+    state.value.workStage = '审校中';
+    try {
+      const reviewed = await reviewLiteraryBatchViaServer(
+        batch, new Map(drafts), options, bookMemory, runId, isCurrentRun,
+      );
+      if (reviewed && isCurrentRun(runId)) {
+        for (const [id, text] of reviewed.translations) {
+          if (expectedIds.includes(id) && text.trim()) state.value.translations.set(id, text);
+        }
+        literaryStatus.value.reviewedSegments += reviewed.translations.size;
+        literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
+          reviewed.findings, literaryStatus.value.reviewFindings,
         );
-        if (reviewed && isCurrentRun(runId)) {
-          for (const [id, text] of reviewed.translations) {
-            if (expectedIds.includes(id) && text.trim()) state.value.translations.set(id, text);
-          }
-          literaryStatus.value.reviewedSegments += reviewed.translations.size;
-          literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
-            reviewed.findings, literaryStatus.value.reviewFindings,
-          );
-          const missingReview = expectedIds.filter((id) => !reviewed.translations.has(id));
-          if (missingReview.length) {
-            literaryStatus.value.warnings.push('本批审校未返回 ' + missingReview.length + ' 段，已保留初译');
-          }
+        const missingReview = expectedIds.filter((id) => !reviewed.translations.has(id));
+        if (missingReview.length) {
+          literaryStatus.value.warnings.push('本批审校未返回 ' + missingReview.length + ' 段，已保留初译');
         }
-      } catch (error) {
-        if (isCurrentRun(runId)) {
-          literaryStatus.value.warnings.push(
-            '文学审校不可用，已保留初译：' + (error instanceof Error ? error.message : String(error)),
-          );
-        }
+        // worker 计进度时例子记的是初译，审校落定后换成审校版，免得次优译文影响后续章节。
+        literaryMemory.value = refreshLiteraryExampleTargets(
+          literaryMemory.value,
+          batch.flatMap((segment) => {
+            const target = reviewed.translations.get(segment.id) ?? drafts.get(segment.id);
+            return target ? [{
+              source: segment.text, target, chapter: segment.contextPath || '',
+            }] : [];
+          }),
+        );
+      }
+    } catch (error) {
+      if (isCurrentRun(runId)) {
+        literaryStatus.value.warnings.push(
+          '文学审校不可用，已保留初译：' + (error instanceof Error ? error.message : String(error)),
+        );
       }
     }
     await checkpoint(options);
-    return isCurrentRun(runId);
   }
 
   async function prepareLiteraryChapter(
@@ -767,6 +879,7 @@ export function useDocumentTranslation() {
   ): Promise<boolean> {
     if (!options.literaryMode || analyzedChapterKeys.has(key)) return isCurrentRun(runId);
     literaryStatus.value.chapterTitle = key;
+    state.value.workStage = '实体分析中';
     try {
       const result = await analyzeLiteraryChapterViaServer(
         key, segments, options, literaryMemory.value, runId, isCurrentRun,
@@ -803,6 +916,9 @@ export function useDocumentTranslation() {
       state.value.failedBatches = [];
       state.value.error = '';
       state.value.running = false;
+      state.value.workChapter = '';
+      state.value.workTotal = 0;
+      state.value.workDone = 0;
     } else {
       reset();
       if (preseededMemory) literaryMemory.value = preseededMemory;
@@ -815,7 +931,9 @@ export function useDocumentTranslation() {
       analyzedChapterKeys = new Set<string>();
     }
 
-    // 文学模式必须按原书顺序累积上下文；只有普通文档才把当前页提前。
+    // 文学模式保持原书顺序做分批（记忆按顺序累积），但每次推进的章节优先选
+    // 当前阅读页所在章节：用户点"翻译"后当前页立刻有结果，而不是在后台默默
+    // 翻译第一章、当前页永远显示"翻译中…"。当前页已翻完时回落到首个待翻章节。
     const priorityIds = new Set(literaryEnabled ? [] : (options.prioritySegmentIds ?? []));
     const orderedSegments = priorityIds.size
       ? [
@@ -894,37 +1012,100 @@ export function useDocumentTranslation() {
 
     // 文学模式每次只推进一个尚未完成的章节/PDF 上下文单元.
     // 上一单元的初译、reviewer 与译例更新完成后，再由用户继续下一章。
+    // 优先推进当前阅读页所在章节（options.prioritySegmentIds 由调用方传入当前页），
+    // 这样当前页立刻可见译文；当前页已完成时回落到首个待翻章节。
     let workBatches = pendingBatches;
     if (literaryEnabled && pendingBatches.length > 0) {
-      const firstPending = pendingBatches[0]!;
-      const chapterKey = literaryChapterKey(firstPending.batch[0]!, true, options.documentFormat);
-      workBatches = pendingBatches.filter((item) =>
-        literaryChapterKey(item.batch[0]!, true, options.documentFormat) === chapterKey,
-      );
+      const chapterOf = (item: { batch: DocumentSegment[] }) =>
+        literaryChapterKey(item.batch[0]!, true, options.documentFormat);
+      let chapterKey = chapterOf(pendingBatches[0]!);
+      const priorityList = options.prioritySegmentIds ?? [];
+      if (priorityList.length) {
+        const byId = new Map(segments.map((segment) => [segment.id, segment]));
+        for (const id of priorityList) {
+          const segment = byId.get(id);
+          if (!segment) continue;
+          const candidate = literaryChapterKey(segment, true, options.documentFormat);
+          if (pendingBatches.some((item) => chapterOf(item) === candidate)) {
+            chapterKey = candidate;
+            break;
+          }
+        }
+      }
+      workBatches = pendingBatches.filter((item) => chapterOf(item) === chapterKey);
+      state.value.workChapter = chapterKey;
+      literaryStatus.value.chapterTitle = chapterKey;
+    } else {
+      state.value.workChapter = '';
+    }
+    state.value.workTotal = workBatches.length;
+    state.value.workDone = 0;
+
+    // 同一次 run 只推进一章：章节实体分析提前做一次，worker 里不再逐批重复。
+    if (literaryEnabled && workBatches.length > 0 && isCurrentRun(runId)) {
+      const chapterSegments = segments.filter((segment) =>
+        literaryChapterKey(segment, true, options.documentFormat) === state.value.workChapter);
+      state.value.workStage = '实体分析中';
+      if (!(await prepareLiteraryChapter(
+        state.value.workChapter, chapterSegments, effectiveOptions, runId,
+      ))) {
+        state.value.workStage = '';
+        return state.value;
+      }
     }
 
     const retries = shouldUseRemoteDocumentTranslation(effectiveOptions) ? 0 : (options.retries ?? 1);
-    // 文学模式按章节串行推进，使先完成的章节记忆能稳定影响后续章节。
-    const concurrency = literaryEnabled ? 1 : Math.max(1, options.concurrency ?? 3);
+    // 章记忆只在章边界累积；同章内的批互相独立（译文按 id 回填），可以并行。
+    // 本机服务是每请求独立进程 + SQLite WAL，background 的本机队列并发为 4，
+    // 这里取 3：5 批的章节约 3 倍提速，又不会打爆本机服务。
+    const concurrency = Math.max(1, options.concurrency ?? 3);
     let cursor = 0;
+    // detached 审校跟踪：初译提交后审校后台跑，不占翻译 worker；
+    // run 尾部统一收敛（全部落定才算本次完成）。停止/新 run 会使旧审校失效丢弃。
+    const pendingReviews: Array<Promise<void>> = [];
+    let pendingReviewCount = 0;
+    const updateTailStage = () => {
+      if (isCurrentRun(runId)) {
+        state.value.workStage = pendingReviewCount > 0
+          ? '审校收尾中（剩余 ' + pendingReviewCount + ' 批）'
+          : '审校收尾中';
+      }
+    };
+    // 服务端初译+审校一体，无法拆分，只能同步等。
+    const remoteMode = shouldUseRemoteDocumentTranslation(effectiveOptions);
 
     const worker = async () => {
       while (cursor < workBatches.length && isCurrentRun(runId)) {
         const item = workBatches[cursor++];
         if (!item) continue;
         const { index, batch } = item;
-        if (literaryEnabled) {
-          const key = literaryChapterKey(batch[0]!, literaryEnabled, options.documentFormat);
-          const chapterSegments = segments.filter((segment) =>
-            literaryChapterKey(segment, literaryEnabled, options.documentFormat) === key);
-          if (!(await prepareLiteraryChapter(key, chapterSegments, effectiveOptions, runId))) return;
-        }
         let ok = false;
         for (let attempt = 0; attempt <= retries && isCurrentRun(runId); attempt++) {
           try {
-            ok = await translateBatch(
-              batch, effectiveOptions, runId, literaryEnabled ? literaryMemory.value : undefined,
-            );
+            state.value.workStage = '翻译中';
+            if (remoteMode) {
+              ok = await translateBatch(
+                batch, effectiveOptions, runId, literaryEnabled ? literaryMemory.value : undefined,
+              );
+            } else {
+              // 本地：初译一到就提交计进度，审校 detached，不阻塞下一批。
+              const normalized = await translateBatchText(
+                batch, effectiveOptions, runId, literaryEnabled ? literaryMemory.value : undefined,
+              );
+              ok = isCurrentRun(runId);
+              if (ok && literaryEnabled && !effectiveOptions.skipReview) {
+                const drafts = new Map(normalized);
+                pendingReviewCount++;
+                pendingReviews.push(
+                  reviewBatchText(batch, drafts, effectiveOptions, literaryMemory.value, runId)
+                    .catch(() => undefined)
+                    .finally(() => {
+                      pendingReviewCount--;
+                      if (isCurrentRun(runId)) updateTailStage();
+                    }),
+                );
+              }
+            }
             if (ok) break;
           } catch (err) {
             if (!isCurrentRun(runId)) return;
@@ -939,6 +1120,7 @@ export function useDocumentTranslation() {
         if (!isCurrentRun(runId)) return;
         if (ok) {
           state.value.done++;
+          state.value.workDone++;
           if (literaryEnabled) {
             literaryMemory.value = addLiteraryExamples(literaryMemory.value, batch.flatMap((segment) => {
               const translated = state.value.translations.get(segment.id);
@@ -956,9 +1138,17 @@ export function useDocumentTranslation() {
       Array.from({ length: Math.min(concurrency, workBatches.length) }, () => worker()),
     );
 
+    // 初译全部落定后，统一收敛 detached 审校：译文早已可见，
+    // 这里只等审校覆盖+记忆刷新+持久化，尾部最多多等一批审校的时间。
+    if (pendingReviews.length > 0 && isCurrentRun(runId)) {
+      updateTailStage();
+      await Promise.allSettled(pendingReviews);
+    }
+
     if (isCurrentRun(runId)) {
       state.value.failedBatches.sort((a, b) => a - b);
       state.value.running = false;
+      state.value.workStage = '';
       await checkpoint(effectiveOptions);
     }
     return state.value;

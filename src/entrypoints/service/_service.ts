@@ -4,6 +4,12 @@ export interface Glossary {
 }
 
 /**
+ * 模型/API 请求超时（毫秒）：fetch 无超时会无限"翻译中…"——网络层 stall 时
+ * 转大声失败，走现有重试/警告链路。对齐本机服务 REQUEST_TIMEOUT。
+ */
+export const MODEL_FETCH_TIMEOUT_MS = 180_000;
+
+/**
  * 严格 JSON Schema 响应格式（OpenAI json_schema 形状）。
  * 只用于本机 Agent 重试升级轮：--json-schema 约束解码，逼模型吐完整结构。
  * 远端 DeepSeek 不保证支持该形状，调用方只在本机路径传入。

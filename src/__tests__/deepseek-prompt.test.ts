@@ -57,6 +57,16 @@ describe('DeepSeekTranslationService.translate prompt', () => {
     expect(system).toContain('不得添加、删除、总结、臆测、解释或重新编造原文没有的信息');
   });
 
+  it('forbids ASCII quotes inside translations (breaks JSON structure)', async () => {
+    globalFetch.mockResolvedValue(
+      createJsonResponse({ translations: [{ id: 'b1', translated_text: '你好' }] })
+    );
+    await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined);
+    const body = await captureRequestBody();
+    const system = body.messages[0].content as string;
+    expect(system).toContain('不得出现 ASCII 双引号');
+  });
+
 
 
 });

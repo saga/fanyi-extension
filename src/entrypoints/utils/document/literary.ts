@@ -226,6 +226,30 @@ export function addLiteraryExamples(memoryInput: unknown, examples: LiteraryExam
 }
 
 /**
+ * 审校 detached 落定后调用：把记忆例子里的初译 target 换成审校版。
+ * 按 source + chapter 匹配（同一原文在同章只记一条）；找不到或审校没回就原样保留。
+ * detach 场景专用——worker 计进度时例子记的是初译，不能让次优译文污染后续章节。
+ */
+export function refreshLiteraryExampleTargets(
+  memoryInput: unknown,
+  examples: LiteraryExample[],
+): LiteraryBookMemory {
+  const memory = sanitizeLiteraryMemory(memoryInput);
+  const byKey = new Map<string, string>();
+  for (const item of examples) {
+    const source = safeText(item.source, 240);
+    const target = safeText(item.target, 320);
+    if (source && target) byKey.set(source + '\n' + safeText(item.chapter, 120), target);
+  }
+  if (!byKey.size) return memory;
+  const recentExamples = memory.recentExamples.map((example) => {
+    const replacement = byKey.get(example.source + '\n' + (example.chapter ?? ''));
+    return replacement ? { ...example, target: replacement } : example;
+  });
+  return sanitizeLiteraryMemory({ ...memory, recentExamples });
+}
+
+/**
  * 新分析入库时的自动确认：有原文依据（evidence）的规范项直接标 confirmed，
  * 免去逐条点击；无依据的仍待人工过目（面板可一键确认剩余）。
  * 有依据≠人工审过：confirmed 在此表示"模型已给出处、可直接当规范用"，

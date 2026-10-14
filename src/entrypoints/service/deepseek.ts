@@ -1,4 +1,5 @@
 import type { TranslationService, Glossary, JsonSchemaResponseFormat } from './_service';
+import { MODEL_FETCH_TIMEOUT_MS } from './_service';
 import { parseSSEStream } from './streamParser';
 import { logUnchangedBlocks } from '../utils/translateApi';
 import { buildStyledSystemContent, type PromptStyle } from './prompt-style';
@@ -139,6 +140,8 @@ async function callApi(
       method: 'POST',
       headers: buildHeaders(apiKey),
       body,
+      // 无超时会无限"翻译中…"：stall 转 TimeoutError，下方 catch 转中文错。
+      signal: AbortSignal.timeout(MODEL_FETCH_TIMEOUT_MS),
     });
 
     logger.debug('[' + (isLocalAgentEndpoint ? 'LocalAgent' : 'DeepSeek') + '] Response status:', response.status);
@@ -214,6 +217,13 @@ async function callApi(
 
     return content;
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      const hint = isLocalAgentEndpoint
+        ? '本机服务 180s 无响应；若服务终端有 local request ID 可对照日志定位卡在哪一段'
+        : 'DeepSeek 长时间无响应，请稍后重试';
+      logger.error('[' + (isLocalAgentEndpoint ? 'LocalAgent' : 'DeepSeek') + '] Request timed out', { endpoint });
+      throw new Error(`${serviceLabel}请求超时（180s）：${hint}`);
+    }
     if (error instanceof TypeError && error.message.includes('fetch')) {
       if (isLocalAgentEndpoint) {
         logger.error('[LocalAgent] Local service connection failed', {

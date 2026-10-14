@@ -6,6 +6,7 @@ import {
   cacheTranslation,
   processTranslationResult,
   hasCompleteTranslationSet,
+  isAllLongBlocksNoOp,
   clearAllCache,
 } from './utils/translateApi';
 import { translationCache } from './utils/cacheManager';
@@ -429,9 +430,14 @@ export default defineBackground({
 
         // Check the extension cache first: an in-memory hit avoids even a loopback HTTP hop.
         // In local-agent mode, check SQLite only after an extension-cache miss.
+        // 空转脏缓存（模型曾把原文照抄返回并入库）必须自愈：命中即驱逐，继续走 fresh 翻译，
+        // 否则旧的英文"译文"永远冒充中文返回。
+        const isNoOpCacheEntry = (entry: Map<string, string>): boolean =>
+          validInputIds && sourceLang !== targetLang &&
+          isAllLongBlocksNoOp(entry, inputBlocks, inputIds);
         const cached = await getCachedTranslation(cacheKey);
         if (cached?.size) {
-          if (validInputIds && hasCompleteTranslationSet(cached, inputIds)) {
+          if (validInputIds && hasCompleteTranslationSet(cached, inputIds) && !isNoOpCacheEntry(cached)) {
             // Keep the shared SQLite cache warm, but don't make a good cached translation wait on I/O.
             if (config.useLocalAgent) {
               void setLocalSqliteCache(config, cacheKey, cached);
@@ -439,21 +445,21 @@ export default defineBackground({
             sendResponse({ success: true, result: inputIds.map((id) => [id, cached.get(id)!]) });
             return;
           }
-          logger.warn('[Background] Ignoring incomplete/invalid extension translation cache entry:', cacheKey);
+          logger.warn('[Background] Ignoring incomplete/no-op/invalid extension translation cache entry:', cacheKey);
           await translationCache.remove(cacheKey);
           if (config.useLocalAgent) await deleteLocalSqliteCache(config, cacheKey);
         }
         if (config.useLocalAgent) {
           const localCached = await getLocalSqliteCache(config, cacheKey);
           if (localCached?.size) {
-            if (validInputIds && hasCompleteTranslationSet(localCached, inputIds)) {
+            if (validInputIds && hasCompleteTranslationSet(localCached, inputIds) && !isNoOpCacheEntry(localCached)) {
               void cacheTranslation(cacheKey, localCached).catch((error) => {
                 logger.debug('[Background] Failed to warm extension cache from SQLite:', error);
               });
               sendResponse({ success: true, result: inputIds.map((id) => [id, localCached.get(id)!]) });
               return;
             }
-            logger.warn('[Background] Ignoring incomplete/invalid SQLite translation cache entry:', cacheKey);
+            logger.warn('[Background] Ignoring incomplete/no-op/invalid SQLite translation cache entry:', cacheKey);
             await deleteLocalSqliteCache(config, cacheKey);
           }
         }
@@ -558,6 +564,23 @@ export default defineBackground({
         }
 
         const result = processTranslationResult(jsonResult);
+        // 整批空转（长段全部原文返回）= 模型没翻译：当失败、不入库、不返回，
+        // 让调用方走现有重试/缩小重发链路。否则英文会冒充译文存住并 poison 缓存。
+        if (validInputIds && sourceLang !== targetLang &&
+          isAllLongBlocksNoOp(result, inputBlocks, inputIds)) {
+          const noOpError =
+            '模型本批 ' + inputIds.length + ' 段全部原文返回（未实际翻译）：' +
+            '本机模型可能太弱、指令没跟上或内容被过滤。已跳过缓存并标记失败，可重试；' +
+            '若反复出现请更换更大的本机模型后重试。';
+          logger.error('[Background] Translation result is all no-op (untranslated):', {
+            cacheKey,
+            inputCount: inputIds.length,
+          });
+          await translationCache.remove(cacheKey);
+          await deleteLocalSqliteCache(config, cacheKey);
+          sendResponse({ success: false, error: noOpError });
+          return;
+        }
         if (validInputIds && hasCompleteTranslationSet(result, inputIds)) {
           await Promise.all([
             cacheTranslation(cacheKey, result),
