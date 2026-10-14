@@ -447,6 +447,59 @@ export interface DocumentTranslateState {
   error: string;
 }
 
+
+/**
+ * Prefer local-service batch planning in local mode. The extension fallback is deliberately
+ * local CPU-only logic (never a remote request) so a temporary cache/service issue cannot
+ * make a document unreadable.
+ */
+async function planDocumentBatches(
+  segments: DocumentSegment[],
+  budget: Partial<BatchBudget>,
+  options: TranslateOptions,
+): Promise<DocumentSegment[][]> {
+  if (options.useLocalAgent) {
+    try {
+      const base = new URL(options.localAgentUrl?.trim() || 'http://127.0.0.1:8789');
+      base.pathname = '/api/documents/batches';
+      base.search = '';
+      base.hash = '';
+      const response = await fetch(base.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.localAgentToken ? { Authorization: 'Bearer ' + options.localAgentToken } : {}),
+        },
+        body: JSON.stringify({
+          budget: {
+            maxChars: budget.maxChars,
+            maxSegments: budget.maxSegments,
+            splitOnContextChange: budget.splitOnContextChange === true,
+          },
+          segments: segments.map((segment) => ({
+            id: segment.id, text: segment.text, contextPath: segment.contextPath, page: segment.page,
+          })),
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json() as { batches?: Array<Array<{ id: string }>> };
+        const byId = new Map(segments.map((segment) => [segment.id, segment]));
+        const batches = Array.isArray(data.batches) ? data.batches.map((batch) =>
+          Array.isArray(batch) ? batch.flatMap((item) => {
+            const segment = typeof item?.id === 'string' ? byId.get(item.id) : undefined;
+            return segment ? [segment] : [];
+          }) : [],
+        ).filter((batch) => batch.length > 0) : [];
+        const plannedIds = batches.flat().map((segment) => segment.id);
+        if (plannedIds.length === segments.length && new Set(plannedIds).size === segments.length) return batches;
+      }
+    } catch {
+      // Fallback is only the same deterministic CPU calculation, not a remote translation.
+    }
+  }
+  return buildSegmentBatches(segments, budget);
+}
+
 export function useDocumentTranslation() {
   const state = ref<DocumentTranslateState>({
     translations: new Map(),
@@ -752,7 +805,7 @@ export function useDocumentTranslation() {
       ...options.budget,
       ...(literaryEnabled ? { splitOnContextChange: true } : {}),
     };
-    const allBatches = buildSegmentBatches(orderedSegments, budget);
+    const allBatches = await planDocumentBatches(orderedSegments, budget, options);
     state.value.total = allBatches.length;
     state.value.done = allBatches.filter((batch) =>
       batch.every((segment) => !!state.value.translations.get(segment.id)?.trim()),
