@@ -352,18 +352,60 @@
         <p class="muted small dictionary-footnote">状态含义：已纳入规范＝已有原文依据的自动纳入结果或用户确认的译名；待核对＝AI 建议或被编辑过的映射。变更会保存在本机阅读会话中，并供后续章节参考。</p>
       </section>
 
-      <section v-if="literaryStatus.reviewFindings.length" class="panel literary-review-findings">
-        <strong>Reviewer 审校记录</strong>
-        <p class="muted small">审校只报明确的事实/术语错误，命中即自动修正译文；文风偏好不在审校范围内。</p>
-        <div v-for="(finding, index) in literaryStatus.reviewFindings" :key="'finding-' + index" class="literary-review-finding">
+      <section class="panel literary-review-findings">
+        <div class="review-workspace-heading">
           <div>
-            <span class="chip">{{ finding.priority === 'optional' ? '仅提示（未覆盖译文）' : '必须修正（已应用）' }}</span>
-            <span class="muted small">{{ finding.id }} · {{ finding.category }}</span>
+            <h3>审校工作区</h3>
+            <p class="muted small">这里只列出 Reviewer 发现的问题，不是待办通知。事实/实体译名错误会自动修正；纯文风建议保留为候选稿，需你比较后决定是否替换正文。</p>
           </div>
-          <p v-if="finding.sourceExcerpt"><strong>原文：</strong>{{ finding.sourceExcerpt }}</p>
-          <p v-if="finding.draftExcerpt"><strong>初译：</strong>{{ finding.draftExcerpt }}</p>
-          <p v-if="finding.reason"><strong>原因：</strong>{{ finding.reason }}</p>
-          <p v-if="finding.suggestion"><strong>建议：</strong>{{ finding.suggestion }}</p>
+          <span class="chip">{{ literaryStatus.reviewFindings.length }} 条记录</span>
+        </div>
+        <div v-if="!literaryStatus.reviewFindings.length" class="review-empty">
+          <strong>还没有审校记录</strong>
+          <p class="muted small">完成当前页翻译并开启“审校”后，记录会出现在这里。文学审校关闭时只做初译，不会生成审校建议。</p>
+        </div>
+        <div v-for="(finding, index) in [...literaryStatus.reviewFindings].reverse()" :key="'finding-' + index" class="literary-review-card">
+          <div class="review-card-heading">
+            <span class="review-category" :class="'category-' + finding.category">
+              {{ finding.category === 'accuracy' ? '意义 / 事实' : finding.category === 'terminology' ? '实体译名' : '文风建议' }}
+            </span>
+            <span class="muted small">片段 {{ finding.id }}</span>
+            <span class="review-status" :class="'status-' + (finding.applicationStatus || (finding.priority === 'must_fix' ? 'applied' : 'pending'))">
+              {{ finding.applicationStatus === 'applied' || finding.priority === 'must_fix'
+                ? '已应用'
+                : finding.applicationStatus === 'dismissed'
+                  ? '已保留当前译文'
+                  : finding.proposedTranslation
+                    ? '等待你选择'
+                    : '参考记录' }}
+            </span>
+          </div>
+          <p v-if="finding.sourceExcerpt"><strong>原文摘录：</strong>{{ finding.sourceExcerpt }}</p>
+          <p v-if="finding.draftExcerpt"><strong>初译摘录：</strong>{{ finding.draftExcerpt }}</p>
+          <p v-if="finding.reason"><strong>问题：</strong>{{ finding.reason }}</p>
+          <p v-if="finding.suggestion"><strong>审校意见：</strong>{{ finding.suggestion }}</p>
+
+          <div v-if="finding.category === 'style' && finding.proposedTranslation" class="review-proposal">
+            <strong>完整候选译文</strong>
+            <p>{{ finding.proposedTranslation }}</p>
+            <div class="review-proposal-actions">
+              <button class="btn primary" :disabled="finding.applicationStatus === 'applied'"
+                @click="applyReviewProposal(finding)">
+                {{ finding.applicationStatus === 'applied' ? '已采用此译文' : '采用候选译文并保存' }}
+              </button>
+              <button class="btn" :disabled="finding.applicationStatus === 'dismissed' || finding.applicationStatus === 'applied'"
+                @click="dismissReviewProposal(finding)">保留当前译文</button>
+              <button class="btn ghost" @click="showReviewSegment(finding.id)">定位到正文</button>
+            </div>
+          </div>
+          <div v-else-if="finding.category === 'style'" class="review-legacy-note muted small">
+            这条是旧版审校记录，没有保存完整候选译文，因此无法一键应用。重新审校对应片段后，可在这里比较候选稿并决定是否采用。
+            <button class="link-btn" @click="showReviewSegment(finding.id)">定位到正文</button>
+          </div>
+          <div v-else class="review-auto-note muted small">
+            事实/实体类问题按高优先级处理，当前运行中的自动修正已体现在正文译文中。
+            <button class="link-btn" @click="showReviewSegment(finding.id)">查看正文</button>
+          </div>
         </div>
       </section>
       <section v-if="!literaryMode && !literaryStatus.enabled" class="panel">
