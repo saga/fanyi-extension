@@ -103,7 +103,9 @@ export interface ChunkCallContext {
 
 /**
  * 批量发送 chunk 到 background，采用 warmup-then-parallel 策略：
- * 前 2 个串行（帮助 KV cache 构建），后续并行（桌面 4 / 移动 2）。
+ * 前 2 个串行（帮助远程 KV cache 构建），后续并行（桌面 4 / 移动 2）。
+ * 本机 Agent 没有 KV cache 收益，调用方传 skipWarmup=true 直接全并行，
+ * 省掉 2 个串行预热（本机每单约 10s，预热即 20s）。
  */
 export async function translateChunksViaBackground(
   chunks: Chunk[],
@@ -115,7 +117,9 @@ export async function translateChunksViaBackground(
   isMobile: boolean = false,
   state?: TranslationState,
   promptStyle?: PromptStyle,
+  skipWarmup: boolean = false,
 ): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
+  const runStartedAt = Date.now();
   logger.debug('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
 
   const maxConcurrency = isMobile ? 2 : 4;
@@ -190,7 +194,13 @@ export async function translateChunksViaBackground(
     },
   );
 
-  await pool.addAllWithWarmup(tasks, 2, maxConcurrency);
+  if (skipWarmup) {
+    // 本机模式：无 KV cache 可建，直接全并行。
+    pool.setConcurrency(maxConcurrency);
+    await Promise.all(tasks.map((task) => pool.add(task)));
+  } else {
+    await pool.addAllWithWarmup(tasks, 2, maxConcurrency);
+  }
   await Promise.all(applyPromises);
 
   if (segmentBlockById.size > 0) {
@@ -210,12 +220,15 @@ export async function translateChunksViaBackground(
         .map(([k, v]) => `${k}=${v}`)
         .join(',')
     : '';
-  logger.debug(
+  // 整轮摘要常开（info）：排查"慢"时只看这一行就能拿到总数、成功率与耗时，
+  // 不用开 fanyi-debug。明细（每 chunk 的 ids/trace）仍在 debug 里。
+  logger.info(
     `[ContentScript][SessionSummary] total=${chunks.length} ` +
     `fullyOk=${stats.fullyOk} ` +
     `neededRetry=${stats.neededRetry}(recovered=${stats.neededRetryRecovered},stillMissing=${stats.neededRetryStillMissing}) ` +
     `hardFailed=${stats.hardFailed}${errorCatStr}` +
-    (stats.firstErrorMsg ? ` firstError="${stats.firstErrorMsg.substring(0, 100)}"` : ''),
+    (stats.firstErrorMsg ? ` firstError="${stats.firstErrorMsg.substring(0, 100)}"` : '') +
+    ` wallMs=${Date.now() - runStartedAt} warmupSkipped=${skipWarmup}`,
   );
   return { allSucceeded: !hasFailure, translatedIds };
 }

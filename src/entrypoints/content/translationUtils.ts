@@ -23,7 +23,7 @@ export async function retryGlobalMissing(
   blocks: TextBlock[],
   nodeMap: Map<string, Node>,
   translatedIds: Set<string>,
-  config: { sourceLang: string; targetLang: string },
+  config: { sourceLang: string; targetLang: string; useLocalAgent?: boolean },
   isMobile: boolean,
   promptStyle?: PromptStyle,
 ): Promise<void> {
@@ -53,6 +53,7 @@ export async function retryGlobalMissing(
     isMobile,
     undefined,
     promptStyle,
+    config.useLocalAgent === true,
   );
 
   let recoveredCount = 0;

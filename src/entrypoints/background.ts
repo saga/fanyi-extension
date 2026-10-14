@@ -124,8 +124,10 @@ export default defineBackground({
     // Keep local-Agent concurrency independent from the remote DeepSeek queue. DeepSeek's
     // serial queue is deliberately tied to its prompt/KV-cache behavior; applying it to a local
     // Agent causes every local chunk to wait even when the page-level pool runs in parallel.
-    // Start at 2 to improve overlap without launching too many CLI/SDK jobs at once.
-    const localAgentQueue = new TranslationQueue(2, 0, 0);
+    // Local service handles parallel requests (separate CLI process per request, SQLite WAL),
+    // so match the content-side fan-out (desktop 4). Each local request still costs ~10s,
+    // queue depth stays bounded by the page pool.
+    const localAgentQueue = new TranslationQueue(4, 0, 0);
 
     // 远程 Provider 继续走原有 API；本机模式把相同翻译 prompt 发给本机 OpenAI-compatible 入口。
     function getService(config: Awaited<ReturnType<typeof getConfig>>, style?: PromptStyle): DeepSeekTranslationService {
@@ -486,12 +488,16 @@ export default defineBackground({
               queueRunning: queue.runningCount,
               inputChars: jsonContent.length,
             });
+            let outputChars = 0;
             try {
-              return await service.translate(jsonContent, sourceLang, targetLang, glossary, effectivePrompt);
+              const translated = await service.translate(jsonContent, sourceLang, targetLang, glossary, effectivePrompt);
+              outputChars = translated.length;
+              return translated;
             } finally {
               logger.debug('[Background][Perf] Translation provider returned', {
                 localAgent: config.useLocalAgent,
                 providerDurationMs: Math.round(performance.now() - providerStartedAt),
+                outputChars,
               });
             }
           })

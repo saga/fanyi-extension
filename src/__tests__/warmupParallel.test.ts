@@ -79,4 +79,24 @@ describe('warmup-then-parallel integration', () => {
     expect(order).toEqual([0, 1]);
   });
 
+  it('skip-warmup pattern starts all tasks in parallel', async () => {
+    // 本机模式跳过串行预热：先 setConcurrency 再全部 add，必须重叠执行。
+    const q = new TranslationQueue(1, 0, 0);
+    q.setConcurrency(3);
+    let running = 0;
+    let maxRunning = 0;
+    const tasks = Array.from({ length: 4 }, (_, i) =>
+      q.add(async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await new Promise((r) => setTimeout(r, 20));
+        running--;
+        return i;
+      })
+    );
+    const results = await Promise.all(tasks);
+    expect(results).toEqual([0, 1, 2, 3]);
+    expect(maxRunning).toBeGreaterThan(1);
+  });
+
 });
