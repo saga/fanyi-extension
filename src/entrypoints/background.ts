@@ -152,6 +152,40 @@ export default defineBackground({
       };
     }
 
+
+    /** SQLite cache lives beside the local model runtime, so webpage and document translations share it. */
+    async function getLocalSqliteCache(config: Awaited<ReturnType<typeof getConfig>>, cacheKey: string): Promise<Map<string, string> | null> {
+      if (!config.useLocalAgent) return null;
+      try {
+        const response = await fetch(new URL('/api/cache/translation/get', getLocalAgentBaseUrl(config)).toString(), {
+          method: 'POST', headers: getLocalAgentHeaders(config), body: JSON.stringify({ cacheKey }),
+        });
+        if (!response.ok) return null;
+        const result = await response.json() as { hit?: boolean; value?: unknown };
+        if (!result.hit || !result.value || typeof result.value !== 'object' || Array.isArray(result.value)) return null;
+        const entries = Object.entries(result.value as Record<string, unknown>)
+          .filter((item): item is [string, string] => typeof item[1] === 'string');
+        return entries.length ? new Map(entries) : null;
+      } catch (error) {
+        // Cache is an optimization. Service/cache failure must never block local translation.
+        logger.debug('[Background] SQLite translation-cache read failed; continuing:', error);
+        return null;
+      }
+    }
+
+    async function setLocalSqliteCache(config: Awaited<ReturnType<typeof getConfig>>, cacheKey: string, translations: Map<string, string>): Promise<void> {
+      if (!config.useLocalAgent || !translations.size) return;
+      try {
+        const value = Object.fromEntries(translations.entries());
+        await fetch(new URL('/api/cache/translation/set', getLocalAgentBaseUrl(config)).toString(), {
+          method: 'POST', headers: getLocalAgentHeaders(config),
+          body: JSON.stringify({ cacheKey, value, ttlMs: 7 * 24 * 60 * 60 * 1000 }),
+        });
+      } catch (error) {
+        logger.debug('[Background] SQLite translation-cache write failed; continuing:', error);
+      }
+    }
+
     function getEffectiveProviderKey(config: Awaited<ReturnType<typeof getConfig>>): string {
       return config.useLocalAgent
         ? ['local-agent', config.localAgentProvider, config.localAgentModel || 'auto', config.localAgentUrl || ''].join(':')
@@ -348,10 +382,18 @@ export default defineBackground({
             effectivePrompt,
           );
 
+        // Local mode checks the shared SQLite cache first, then the existing extension cache.
+        // The remote-service path is intentionally unchanged.
+        const localCached = await getLocalSqliteCache(config, cacheKey);
+        if (localCached?.size) {
+          sendResponse({ success: true, result: Array.from(localCached.entries()) });
+          return;
+        }
         const cached = await getCachedTranslation(cacheKey);
         const hasValidCache = cached && cached.size > 0;
 
         if (hasValidCache) {
+          if (config.useLocalAgent && cached) await setLocalSqliteCache(config, cacheKey, cached);
           sendResponse({ success: true, result: Array.from(cached.entries()) });
           return;
         }
@@ -440,6 +482,7 @@ export default defineBackground({
 
         const result = processTranslationResult(jsonResult);
         await cacheTranslation(cacheKey, result);
+        await setLocalSqliteCache(config, cacheKey, result);
 
         // 传给 content 端的诊断包：把上面 [ChunkTrace] 的关键字段集中
         // 起来，content 收到 missing 时直接 console.log 出来，定位根因
@@ -615,6 +658,16 @@ export default defineBackground({
     async function handleClearCache(sendResponse: (response: ClearCacheResponse) => void) {
       try {
         await clearAllCache();
+        const config = await getConfig();
+        if (config.useLocalAgent) {
+          try {
+            await fetch(new URL('/api/cache/translation', getLocalAgentBaseUrl(config)).toString(), {
+              method: 'DELETE', headers: getLocalAgentHeaders(config),
+            });
+          } catch (error) {
+            logger.debug('[Background] SQLite cache clear failed:', error);
+          }
+        }
         sendResponse({ success: true });
       } catch (error) {
         sendResponse({
