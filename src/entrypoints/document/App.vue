@@ -422,10 +422,11 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { getConfig, type Config } from '@/entrypoints/utils/config';
+import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
+import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
 import {
   DOCUMENT_ACCEPT_ATTR,
   exportDocument,
@@ -473,6 +474,20 @@ const literaryMode = ref(false);
 /** 文学审校开关：关闭=快速模式，每批省一次审校 LLM 调用。 */
 const literaryReview = ref(true);
 const currentPageIndex = ref(0);
+const readerConfig = ref<Config | null>(null);
+const englishFontFamily = ref('Georgia');
+const chineseFontFamily = ref('Noto Serif CJK SC');
+const englishFontSize = ref(17);
+const chineseFontSize = ref(18);
+const documentSystemPromptOverride = ref('');
+const documentSystemPromptEditor = ref('');
+const documentUserPromptTemplate = ref('');
+const documentUserPromptEditor = ref('');
+const BUILT_IN_USER_PROMPT_TEMPLATE = [
+  '请翻译以下 JSON 数组中的每个对象。只翻译 text 字段，必须保留 id、顺序、段落边界和结构信息。',
+  'contextPath、kind、level、marker 等字段是只读元数据，不能写入译文。只返回与输入 ID 一一对应的 JSON 译文，不要增加解释或额外字段。',
+  '', 'JSON:', '', '{{CONTENT}}',
+].join('\\n');
 const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
 /** 当 IndexedDB 不可用时，仅凭 SQLite 的轻量摘要也要显示恢复入口。 */
 const localSessionSummary = ref<{ title: string; format: string; updatedAt: string } | null>(null);
@@ -510,6 +525,20 @@ const {
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
+const currentPagePending = computed(() => visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()));
+const builtInDocumentSystemPrompt = computed(() => buildStyledSystemContent(
+  sourceLang.value,
+  targetLang.value,
+  literaryMode.value ? undefined : glossary.value,
+  readerConfig.value?.promptStyle || 'default',
+  literaryMode.value ? 'literary' : (readerConfig.value?.translationMode || 'technical'),
+));
+const documentStyleVars = computed(() => ({
+  '--document-font-en': englishFontFamily.value,
+  '--document-font-zh': chineseFontFamily.value,
+  '--document-size-en': englishFontSize.value + 'px',
+  '--document-size-zh': chineseFontSize.value + 'px',
+}));
 const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
 const pendingEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus !== 'confirmed').length);
@@ -543,15 +572,7 @@ const translatedSegmentCount = computed(() =>
 /** 阅读 Tab 默认首屏；书籍记忆/审校移到第二个 Tab，避免挤占正文主屏。 */
 const activeTab = ref<'reading' | 'memory'>('reading');
 /** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
-const currentChapterPending = computed(() =>
-  visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()),
-);
-/** 开始按钮文案：书籍模式永远先翻当前页所在章节，不从头开始。 */
-const startLabel = computed(() =>
-  literaryMode.value
-    ? (state.value.total > 0 && !currentChapterPending.value ? '继续翻译下一章' : '翻译本章')
-    : (state.value.total > 0 ? '继续翻译剩余内容' : '翻译全文（先翻本页）'),
-);
+const startLabel = computed(() => currentPagePending.value ? '翻译当前页' : '当前页已翻译');
 /** 正在翻译的章节是否就是当前页所在章节（用于提示/跳转）。 */
 const isTranslatingCurrentChapter = computed(() => {
   const work = state.value.workChapter;
