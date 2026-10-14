@@ -22,6 +22,24 @@ export async function cacheTranslation(cacheKey: string, data: Map<string, strin
   await translationCache.set(cacheKey, obj, 7 * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * 缓存只有在包含本批每个输入 ID 的非空译文、且没有额外 ID 时才可复用。
+ * LLM 可能返回合法 JSON 但只翻译了部分 block；这类结果不能当成完整缓存。
+ */
+export function hasCompleteTranslationSet(
+  translations: Map<string, string>,
+  expectedIds: string[],
+): boolean {
+  if (!expectedIds.length) return false;
+  const expected = new Set(expectedIds);
+  if (expected.size !== expectedIds.length || translations.size !== expected.size) return false;
+  for (const id of expected) {
+    const value = translations.get(id);
+    if (typeof value !== 'string' || !value.trim()) return false;
+  }
+  return true;
+}
+
 export function processTranslationResult(jsonResult: string): Map<string, string> {
   const parsed = JSON.parse(jsonResult);
   const translations = parsed.translations || parsed;
