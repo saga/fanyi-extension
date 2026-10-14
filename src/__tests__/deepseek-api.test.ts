@@ -88,7 +88,9 @@ describe('DeepSeekTranslationService API methods', () => {
       const body = JSON.parse(fetchCall[1].body);
       expect(body.messages[0].content).toContain('React');
       expect(body.messages[0].content).toContain('<术语表>');
-      expect(body.messages[0].content).toContain('以下专有名词需要保留原文，不要翻译：');
+      expect(body.messages[0].content).toContain('此列表不是“必须保留英文”的命令');
+      expect(body.messages[0].content).toContain('候选列表（仅辅助识别上下文）');
+      expect(body.messages[0].content).toContain('国籍、族群、语言名称、形容词和普通词语始终翻译为目标语言');
     });
 
     it('omits Named entities section when glossary is empty', async () => {
