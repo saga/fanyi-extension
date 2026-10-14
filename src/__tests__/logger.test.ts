@@ -4,6 +4,7 @@
  * 测什么：
  *   - 前缀拼接：首参是字符串 → 拼到字符串里；首参不是字符串 → 作为独立参数前置
  *   - debug/warn/error/info 都正确路由到底层 console 方法
+ *   - Error 与普通对象被序列化，避免日志内容退化为 [object Object]
  *
  * 不测什么：
  *   - localStorage / window.__fanyiDebug 运行时切换（属于集成层，jsdom 模拟成本高）
@@ -38,8 +39,9 @@ describe('logger', () => {
       logger.error('Translation failed:', errorObj);
       expect(err).toHaveBeenCalledOnce();
       expect(err.mock.calls[0][0]).toBe('[fanyi:error] Translation failed:');
-      // 后续参数透传
-      expect(err.mock.calls[0][1]).toBe(errorObj);
+      // Error 的 message/stack 显式序列化，避免浏览器日志管道丢失非枚举字段。
+      expect(String(err.mock.calls[0][1])).toContain('"message": "boom"');
+      expect(String(err.mock.calls[0][1])).toContain('"stack"');
     });
 
     it('logger.debug prepends [fanyi:debug] to first string argument (DEV mode)', () => {
@@ -72,8 +74,20 @@ describe('logger', () => {
       logger.error('Chunk failed', extra1, extra2);
       expect(err).toHaveBeenCalledOnce();
       expect(err.mock.calls[0][0]).toBe('[fanyi:error] Chunk failed');
-      expect(err.mock.calls[0][1]).toBe(extra1);
+      expect(String(err.mock.calls[0][1])).toContain('"id": "b1"');
       expect(err.mock.calls[0][2]).toBe(extra2);
+    });
+  });
+
+  describe('readable structured diagnostics', () => {
+    it('serializes nested objects as JSON text', () => {
+      logger.error('local request failed', {
+        requestId: 'req-502',
+        response: { status: 502, error: { type: 'local_agent_error' } },
+      });
+      expect(String(err.mock.calls[0][1])).toContain('"requestId": "req-502"');
+      expect(String(err.mock.calls[0][1])).toContain('"status": 502');
+      expect(String(err.mock.calls[0][1])).not.toContain('[object Object]');
     });
   });
 
