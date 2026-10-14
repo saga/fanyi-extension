@@ -5,6 +5,7 @@ import {
   getCachedTranslation,
   cacheTranslation,
   processTranslationResult,
+  hasCompleteTranslationSet,
   clearAllCache,
 } from './utils/translateApi';
 import { translationCache } from './utils/cacheManager';
@@ -186,6 +187,22 @@ export default defineBackground({
       }
     }
 
+    async function deleteLocalSqliteCache(
+      config: Awaited<ReturnType<typeof getConfig>>,
+      cacheKey: string,
+    ): Promise<void> {
+      if (!config.useLocalAgent) return;
+      try {
+        await fetch(new URL('/api/cache/translation/delete', getLocalAgentBaseUrl(config)).toString(), {
+          method: 'POST',
+          headers: getLocalAgentHeaders(config),
+          body: JSON.stringify({ cacheKey }),
+        });
+      } catch (error) {
+        logger.debug('[Background] SQLite translation-cache delete failed; continuing:', error);
+      }
+    }
+
     function getEffectiveProviderKey(config: Awaited<ReturnType<typeof getConfig>>): string {
       return config.useLocalAgent
         ? ['local-agent', config.localAgentProvider, config.localAgentModel || 'auto', config.localAgentUrl || ''].join(':')
@@ -354,6 +371,26 @@ export default defineBackground({
 
         const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext } = message;
 
+        // Cache is keyed per request, but older entries may contain a syntactically valid partial LLM response.
+        // Parse IDs before cache lookup so such entries can never masquerade as a full translation.
+        let inputBlocks: Array<{ id: string; text?: string }> = [];
+        let inputIds: string[] = [];
+        let validInputIds = false;
+        try {
+          const parsedInput: unknown = JSON.parse(jsonContent);
+          if (Array.isArray(parsedInput)) {
+            inputBlocks = parsedInput.filter((block): block is { id: string; text?: string } =>
+              !!block && typeof block === 'object' && typeof block.id === 'string' && !!block.id,
+            );
+            inputIds = inputBlocks.map((block) => block.id);
+            validInputIds = inputBlocks.length === parsedInput.length &&
+              inputIds.length > 0 &&
+              new Set(inputIds).size === inputIds.length;
+          }
+        } catch {
+          // Preserve the normal translation error path for invalid JSON; cache reuse is disabled.
+        }
+
         const matchedRule = pageUrl ? matchSiteRule(pageUrl) : null;
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
         // 仅书籍文档请求会传 literaryContext。合并到 service prompt 与 cache fingerprint，
@@ -386,29 +423,29 @@ export default defineBackground({
         // The remote-service path is intentionally unchanged.
         const localCached = await getLocalSqliteCache(config, cacheKey);
         if (localCached?.size) {
-          sendResponse({ success: true, result: Array.from(localCached.entries()) });
-          return;
+          if (validInputIds && hasCompleteTranslationSet(localCached, inputIds)) {
+            sendResponse({ success: true, result: inputIds.map((id) => [id, localCached.get(id)!]) });
+            return;
+          }
+          logger.warn('[Background] Ignoring incomplete/invalid SQLite translation cache entry:', cacheKey);
+          await deleteLocalSqliteCache(config, cacheKey);
         }
         const cached = await getCachedTranslation(cacheKey);
-        const hasValidCache = cached && cached.size > 0;
-
-        if (hasValidCache) {
-          if (config.useLocalAgent && cached) await setLocalSqliteCache(config, cacheKey, cached);
-          sendResponse({ success: true, result: Array.from(cached.entries()) });
-          return;
+        if (cached?.size) {
+          if (validInputIds && hasCompleteTranslationSet(cached, inputIds)) {
+            if (config.useLocalAgent) await setLocalSqliteCache(config, cacheKey, cached);
+            sendResponse({ success: true, result: inputIds.map((id) => [id, cached.get(id)!]) });
+            return;
+          }
+          logger.warn('[Background] Ignoring incomplete/invalid extension translation cache entry:', cacheKey);
+          await translationCache.remove(cacheKey);
+          await deleteLocalSqliteCache(config, cacheKey);
         }
 
         const service = getService(config, promptStyle);
 
         // [ChunkTrace] 入参快照：记录每个 chunk 的输入 ids、估算 token、
         // max_tokens 预算。出现 missing 时直接定位是哪个 chunk / 哪几个 id。
-        let inputBlocks: Array<{ id: string }> = [];
-        try {
-          inputBlocks = JSON.parse(jsonContent);
-        } catch {
-          /* jsonContent 异常时 processTranslationResult 会抛错 */
-        }
-        const inputIds = inputBlocks.map((b) => b.id);
         const inputBytes = jsonContent.length;
         const estInputTokens = Math.ceil(inputBytes / 4);
         const reservedMaxTokens = Math.max(256, Math.ceil(estInputTokens * 2 * 1.2));
@@ -481,8 +518,20 @@ export default defineBackground({
         }
 
         const result = processTranslationResult(jsonResult);
-        await cacheTranslation(cacheKey, result);
-        await setLocalSqliteCache(config, cacheKey, result);
+        if (validInputIds && hasCompleteTranslationSet(result, inputIds)) {
+          await cacheTranslation(cacheKey, result);
+          await setLocalSqliteCache(config, cacheKey, result);
+        } else {
+          // 不缓存部分结果，否则下一次同一请求会永久命中缺译文的旧缓存。
+          logger.warn('[Background] Translation result is incomplete; skipping cache write:', {
+            cacheKey,
+            inputCount: inputIds.length,
+            outputCount: result.size,
+            missingIds: inputIds.filter((id) => !result.has(id)).slice(0, 20),
+          });
+          await translationCache.remove(cacheKey);
+          await deleteLocalSqliteCache(config, cacheKey);
+        }
 
         // 传给 content 端的诊断包：把上面 [ChunkTrace] 的关键字段集中
         // 起来，content 收到 missing 时直接 console.log 出来，定位根因
