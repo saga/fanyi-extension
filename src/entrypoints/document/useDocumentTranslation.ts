@@ -354,7 +354,7 @@ async function analyzeLiteraryChapterViaServer(
   chapterTitle: string,
   segments: DocumentSegment[],
   options: TranslateOptions,
-  memory: LiteraryBookMemory,
+  memory: LiteraryBookMemory | undefined,
   runId: number,
   isCurrentRun: (runId: number) => boolean,
 ): Promise<{ memory: LiteraryBookMemory; analyzed: boolean; warning?: string } | null> {
