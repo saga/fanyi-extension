@@ -12,7 +12,7 @@ import { showStatus, hideStatus } from './statusOverlay';
 import { translateChunksViaBackground } from './chunkTranslation';
 import type { TranslationState } from './translationTypes';
 import type { TranslateChunkResponse } from '../../types/messages';
-import type { PromptStyle } from '../service/deepseek';
+import type { PromptStyle, TranslationMode } from '../service/deepseek';
 
 import { logger } from '../../utils/logger';
 // ============================================================
@@ -23,7 +23,7 @@ export async function retryGlobalMissing(
   blocks: TextBlock[],
   nodeMap: Map<string, Node>,
   translatedIds: Set<string>,
-  config: { sourceLang: string; targetLang: string; useLocalAgent?: boolean },
+  config: { sourceLang: string; targetLang: string; useLocalAgent?: boolean; translationMode?: TranslationMode },
   isMobile: boolean,
   promptStyle?: PromptStyle,
 ): Promise<void> {
