@@ -80,6 +80,8 @@ export interface TranslateChunkMessage {
   literaryContext?: string;
   /** 稳定的文档指纹；仅传给本机 Agent，用于隔离不同文档的 SDK Session。 */
   documentSessionId?: string;
+  /** 文档翻译的并行通道；文学书籍固定使用 book，技术文档使用有限的 lane-*。 */
+  documentSessionLane?: string;
   /** Optional task-specific instruction, used by the literary post-edit pass. */
   taskInstructions?: string;
   /**
