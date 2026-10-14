@@ -379,7 +379,7 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate } = message;
         // A document may explicitly enter literary mode even when the global profile is technical.
         const translationMode: TranslationMode = message.translationMode === 'literary' || !!literaryContext
           ? 'literary'
@@ -412,7 +412,7 @@ export default defineBackground({
         const sitePrompt = matchedRule ? buildSitePrompt(matchedRule.siteRule) : '';
         // 仅书籍文档请求会传 literaryContext。合并到 service prompt 与 cache fingerprint，
         // 普通网页不传该字段，因此网页翻译行为和既有缓存 key 保持不变。
-        const effectivePrompt = [sitePrompt, literaryContext?.trim(), taskInstructions?.trim()]
+        const effectivePrompt = [sitePrompt, literaryContext?.trim(), taskInstructions?.trim(), documentSystemPromptOverride?.trim(), documentUserPromptTemplate?.trim()]
           .filter((value): value is string => !!value)
           .join('\n\n');
 
@@ -444,6 +444,8 @@ export default defineBackground({
         const isNoOpCacheEntry = (entry: Map<string, string>): boolean =>
           validInputIds && sourceLang !== targetLang &&
           isAllLongBlocksNoOp(entry, inputBlocks, inputIds);
+        // 强制重译只跳过读取；新结果仍写回同一 key，后续普通翻译可重新命中。
+        if (!forceRefresh) {
         const cached = await getCachedTranslation(cacheKey);
         if (cached?.size) {
           if (validInputIds && hasCompleteTranslationSet(cached, inputIds) && !isNoOpCacheEntry(cached)) {
@@ -471,6 +473,7 @@ export default defineBackground({
             logger.warn('[Background] Ignoring incomplete/no-op/invalid SQLite translation cache entry:', cacheKey);
             await deleteLocalSqliteCache(config, cacheKey);
           }
+        }
         }
 
         const service = getService(config, promptStyle, translationMode);
@@ -508,7 +511,7 @@ export default defineBackground({
               const translated = await service.translate(
                 jsonContent, sourceLang, targetLang, effectiveGlossary, effectivePrompt,
                 message.responseFormat,
-                config.useLocalAgent && message.documentSessionId
+                message.documentSessionId
                   ? {
                       documentSessionId: message.documentSessionId,
                       sessionLane: message.documentSessionLane,
@@ -517,7 +520,9 @@ export default defineBackground({
                       targetLang,
                       promptStyle,
                       translationMode,
-                      contextVersion: 'book-session-v2',
+                      contextVersion: 'book-session-v3',
+                      systemPromptOverride: documentSystemPromptOverride,
+                      userPromptTemplate: documentUserPromptTemplate,
                     }
                   : undefined,
               );
