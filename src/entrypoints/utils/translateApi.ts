@@ -54,9 +54,17 @@ export function processTranslationResult(jsonResult: string): Map<string, string
     parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>).translations ?? parsed
       : parsed;
-  // 模型偶发返回裸对象（如 {"answer": "..."} 或 {"translations": {...}}）：
-  // 直接 for...of 会抛没头没尾的 "translations is not iterable"，定位不到是形状问题。
-  if (!Array.isArray(translations)) {
+  // 单块 chunk 时模型经常返回裸对象 {"id":"b1","translated_text":"..."} 而不是单元素数组：
+  // 形状合法，包一层继续走正常流程（缺的块仍由 missing 重试处理）。
+  const list = Array.isArray(translations)
+    ? translations
+    : translations !== null && typeof translations === 'object' &&
+      typeof (translations as Record<string, unknown>).id === 'string'
+      ? [translations]
+      : null;
+  // 其他裸对象（如 {"answer": "..."} 或 {"translations": {...}}）仍然是形状错误，
+  // 抛带形状信息的错误，不再是没头没尾的 "translations is not iterable"。
+  if (!list) {
     const shape =
       parsed !== null && typeof parsed === 'object'
         ? '顶层 keys：' + Object.keys(parsed).join(',')
@@ -67,7 +75,7 @@ export function processTranslationResult(jsonResult: string): Map<string, string
     );
   }
   const result = new Map<string, string>();
-  for (const item of translations) {
+  for (const item of list) {
     if (typeof item?.id !== 'string') continue;
     // 模型可能用 `text` / `translated_text` / `translation` 中的任意一个——
     // 都接受。prompt 里说的是 `translated_text`，但实际跑下来模型经常

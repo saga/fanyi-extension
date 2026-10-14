@@ -90,6 +90,13 @@ describe('processTranslationResult', () => {
     expect(() => processTranslationResult('"just a string"')).toThrow(/不是翻译数组/);
     expect(() => processTranslationResult('42')).toThrow(/不是翻译数组/);
   });
+
+  // 单块 chunk 时模型经常返回裸对象而非单元素数组：形状合法，接受。
+  it('accepts a bare single-entry object', () => {
+    const result = processTranslationResult('{"id":"b1","translated_text":"AWS 新闻博客"}');
+    expect(result.size).toBe(1);
+    expect(result.get('b1')).toBe('AWS 新闻博客');
+  });
 });
 
 describe('logUnchangedBlocks', () => {
