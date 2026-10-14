@@ -15,7 +15,7 @@ export interface Config {
   sourceLang: string;
   targetLang: string;
   deepseekApiKey: string;
-  /** 服务端翻译使用的 LLM Provider（仅对"通过远程服务器翻译"生效，本地翻译固定 DeepSeek） */
+  /** 远程服务翻译使用的 LLM Provider；本机 Agent 模式改用 localAgentProvider。 */
   provider: Provider;
   /**
    * 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描,
