@@ -143,7 +143,8 @@ async function loadConfigIntoPanel(panel: HTMLElement, isMobile: boolean): Promi
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
   const serverGroup = panel.querySelector('.fanyi-server-group') as HTMLElement | null;
   if (useServerCheckbox) {
-    useServerCheckbox.checked = config.useServerTranslation || false;
+    useServerCheckbox.checked = !config.useLocalAgent && (config.useServerTranslation || false);
+    useServerCheckbox.disabled = config.useLocalAgent;
     const display = useServerCheckbox.checked ? '' : 'none';
     if (serverGroup) serverGroup.style.display = display;
   }
@@ -195,13 +196,15 @@ function wirePanelEvents(
 async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promise<void> {
   const apiKey = (panel.querySelector('.fanyi-api-input') as HTMLInputElement).value.trim();
   const useServerCheckbox = panel.querySelector('.fanyi-use-server') as HTMLInputElement | null;
-  const useServer = useServerCheckbox?.checked ?? false;
+  const existingConfig = await getConfig();
+  // 本机 Provider 是强制优先级；页面内旧设置面板不能把流量重新切回远程服务。
+  const useServer = !existingConfig.useLocalAgent && (useServerCheckbox?.checked ?? false);
   const providerSelect = panel.querySelector('.fanyi-provider') as HTMLSelectElement | null;
   const provider = (providerSelect?.value || 'deepseek') as Config['provider'];
 
   // 使用服务端翻译且 provider 不是 deepseek 时，才不需要本地 API Key；
   // 其他情况（本地翻译、或服务端翻译但 provider=deepseek）都需要 API Key。
-  const needApiKey = !useServer || provider === 'deepseek';
+  const needApiKey = !existingConfig.useLocalAgent && (!useServer || provider === 'deepseek');
   if (needApiKey && !apiKey) {
     showStatus('API Key 不能为空', 'error');
     setTimeout(hideStatus, 2000);
@@ -234,16 +237,14 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
   }
 
   // 验证通过或不需要验证：写入 storage
-  const config = await getConfig();
+  const config = existingConfig;
   config.deepseekApiKey = apiKey;
   config.provider = (panel.querySelector('.fanyi-provider') as HTMLSelectElement).value as Config['provider'];
   config.sourceLang = (panel.querySelector('.fanyi-source-lang') as HTMLSelectElement).value;
   config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
   config.promptStyle = (panel.querySelector('.fanyi-prompt-style') as HTMLSelectElement).value as Config['promptStyle'];
 
-  if (useServerCheckbox) {
-    config.useServerTranslation = useServerCheckbox.checked;
-  }
+  config.useServerTranslation = useServer;
   const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
   if (serverUrlInput) {
     const url = serverUrlInput.value.trim();
