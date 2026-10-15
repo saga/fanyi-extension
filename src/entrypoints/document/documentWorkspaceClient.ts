@@ -60,7 +60,7 @@ export function workspaceDocumentKey(input: Pick<WorkspaceProjectMappingInput, '
 
 /** 内容指纹会变化；逻辑身份用于提示用户：这是同一个文件名，但内容已更新。 */
 export function workspaceSourceIdentityKey(input: Pick<WorkspaceProjectMappingInput, 'title' | 'format' | 'sourceFileName'>): string {
-  return [input.format.toLowerCase(), input.sourceFileName.toLocaleLowerCase(), input.title.toLocaleLowerCase()].join('::');
+  return [input.format.toLowerCase(), input.sourceFileName.toLocaleLowerCase()].join('::');
 }
 
 export async function lookupWorkspaceProject(input: WorkspaceProjectMappingInput): Promise<{
