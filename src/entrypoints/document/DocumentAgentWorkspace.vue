@@ -58,6 +58,7 @@
       <div class="agent-actions">
         <button class="btn primary" :disabled="busy || isRunning || sourceChanged" @click="startRun('stale')">翻译过期 / 未完成内容</button>
         <button class="btn" :disabled="busy || isRunning || sourceChanged" @click="startRun('failed')">重试失败片段</button>
+        <button class="btn" :disabled="busy || isRunning || sourceChanged || !visibleSegments.length" @click="startRun('visible')">重译当前阅读页</button>
         <button class="btn" :disabled="busy || isRunning || sourceChanged" @click="startRun('all')">生成全书新候选</button>
         <button v-if="isRunning" class="btn warn" :disabled="busy" @click="cancelRun">停止运行</button>
         <button v-else-if="activeRun?.status === 'paused' || activeRun?.status === 'failed' || activeRun?.status === 'partial'" class="btn" :disabled="busy" @click="resumeRun">恢复 / 继续失败项</button>
@@ -92,8 +93,8 @@
             <strong>候选译文已保存</strong>
             <p class="muted small">先检查候选结果。点击采纳后才会更新项目的当前采用版本；原来的人工修订和历史运行仍然保留。</p>
           </div>
-          <button class="btn primary" :disabled="busy || !(activeRun.counts?.candidate || 0)" @click="acceptCandidates">
-            采纳本次候选（{{ activeRun.counts?.candidate || 0 }}）
+          <button class="btn primary" :disabled="busy || !(activeRun.counts?.candidate || 0)" @click="acceptCandidates()">
+            采纳本次全部候选（{{ activeRun.counts?.candidate || 0 }}）
           </button>
         </div>
         <div v-if="candidatePreview.length" class="candidate-preview">
@@ -106,6 +107,7 @@
             <p><span class="preview-label">原文</span>{{ item.source }}</p>
             <p><span class="preview-label">当前采用</span>{{ item.accepted || '（暂无已采用译文）' }}</p>
             <p class="new-candidate"><span class="preview-label">新候选</span>{{ item.candidate }}</p>
+            <button class="btn" :disabled="busy" @click="acceptCandidates([item.id])">只采纳此条</button>
           </article>
           <p class="muted small">只预览前 8 条；其余候选可通过运行详情 API 分页查看。采纳会应用本次所有候选。</p>
         </div>
@@ -437,15 +439,18 @@ async function createSeparateProject() {
   await createProject();
 }
 
-async function startRun(scope: 'stale' | 'all' | 'failed') {
+async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
   if (sourceChanged.value) { error.value = '请先确认是否导入新的来源版本。'; return; }
   busy.value = true; error.value = ''; message.value = '';
   try {
     if (!project.value) await createProject();
     if (!project.value) return;
+    const runScope = scope === 'visible'
+      ? { type: 'ids', ids: props.visibleSegments.map((segment) => segment.id) }
+      : { type: scope };
     const response = await api('/api/documents/projects/' + project.value.projectId + '/runs', {
       method: 'POST',
-      body: JSON.stringify({ scope: { type: scope }, prompt: promptInput() }),
+      body: JSON.stringify({ scope: runScope, prompt: promptInput() }),
     });
     activeRun.value = response.run;
     message.value = response.started ? '翻译 Agent 已启动；进度和模型调用结果会持久化到项目数据库。' : '当前范围没有需要处理的片段。';
@@ -538,26 +543,26 @@ async function cancelRun() {
   finally { busy.value = false; }
 }
 
-async function acceptCandidates() {
+async function acceptCandidates(segmentIds?: string[]) {
   if (!activeRun.value || !project.value) return;
+  const runId = activeRun.value.runId as string;
+  // Snapshot candidates before the response changes their run-segment status.
+  const candidates = (activeRun.value.segments || [])
+    .filter((segment: any) => segment.status === 'candidate' && typeof segment.candidateTranslation === 'string')
+    .map((segment: any) => ({ id: segment.id as string, text: segment.candidateTranslation as string }));
+  const requested = segmentIds?.length ? new Set(segmentIds) : new Set(candidates.map((item) => item.id));
+  if (!requested.size) return;
   busy.value = true; error.value = '';
   try {
-    const response = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + activeRun.value.runId + '/accept', {
-      method: 'POST', body: JSON.stringify({}),
+    const response = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + runId + '/accept', {
+      method: 'POST', body: JSON.stringify({ segmentIds: Array.from(requested) }),
     });
     activeRun.value = response.run;
-    const items: Array<{ id: string; text: string }> = [];
-    const total = project.value.segmentCount || props.segments.length;
-    for (let offset = 0; offset < total; offset += 1000) {
-      const page = await api('/api/documents/projects/' + project.value.projectId + '/segments?limit=1000&offset=' + offset + '&runId=' + encodeURIComponent(activeRun.value.runId));
-      for (const segment of page.segments || []) {
-        if (typeof segment.acceptedTranslation === 'string' && segment.acceptedTranslation.trim()) {
-          items.push({ id: segment.id, text: segment.acceptedTranslation });
-        }
-      }
-    }
+    const items = candidates.filter((item) => requested.has(item.id));
     emit('acceptedTranslations', items);
-    message.value = '已采纳本次候选并同步到阅读器；历史运行仍可查看。';
+    message.value = segmentIds?.length
+      ? '已采纳所选片段并同步到阅读器；其他候选仍可单独选择。'
+      : '已采纳本次候选并同步到阅读器；历史运行仍可查看。';
     await refreshProjectWithoutRun();
   } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
   finally { busy.value = false; }
