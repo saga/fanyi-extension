@@ -1705,6 +1705,112 @@ async function resetAll() {
 .literary-status-title strong { font-size: .9rem; }
 .literary-status .warn { overflow-wrap: anywhere; }
 
+.reader-font-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .7rem;
+  margin-top: .8rem;
+}
+.reader-appearance-settings .settings-heading h3,
+.prompt-editor-panel .settings-heading h3,
+.review-workspace-heading h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.reader-appearance-settings .settings-heading p,
+.prompt-editor-panel .settings-heading p,
+.review-workspace-heading p {
+  margin: .3rem 0 0;
+  line-height: 1.55;
+}
+.settings-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .55rem;
+  margin-top: .75rem;
+}
+.prompt-editor-panel { display: grid; gap: .85rem; }
+.prompt-editor-label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  min-width: 0;
+  color: #24292f;
+}
+.prompt-editor-label textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: .7rem;
+  border: 1px solid #c8d1dc;
+  border-radius: 8px;
+  background: #fbfcfe;
+  color: #1f2328;
+  font: .82rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  tab-size: 2;
+}
+.prompt-editor-label textarea:focus {
+  outline: 2px solid rgba(9, 105, 218, .22);
+  border-color: #0969da;
+}
+.built-in-prompt-preview {
+  border: 1px solid #e1e6ec;
+  border-radius: 7px;
+  padding: .55rem .7rem;
+  background: #f8fafc;
+}
+.built-in-prompt-preview summary { cursor: pointer; color: #57606a; font-size: .82rem; }
+.built-in-prompt-preview pre {
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: .65rem 0 0;
+  color: #24292f;
+  font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.review-workspace-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .7rem;
+}
+.review-empty {
+  margin-top: .8rem;
+  padding: 1rem;
+  border: 1px dashed #cbd4df;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.review-empty p { margin: .3rem 0 0; }
+.review-proposal {
+  margin-top: .75rem;
+  padding: .8rem;
+  border: 1px solid #b6d6fb;
+  border-radius: 8px;
+  background: #f5f9ff;
+}
+.review-proposal > p { margin: .45rem 0 .7rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-proposal-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-top: .55rem;
+}
+.review-legacy-note, .review-auto-note { line-height: 1.55; }
+.review-category { display: inline-flex; border-radius: 999px; padding: .2rem .55rem; font-size: .74rem; font-weight: 650; }
+.category-style { color: #6e40c9; background: #fbefff; }
+.category-accuracy { color: #9a3412; background: #fff1e5; }
+.category-terminology { color: #0550ae; background: #ddf4ff; }
+.review-status { margin-left: auto; border-radius: 999px; padding: .2rem .5rem; font-size: .72rem; background: #f0f3f6; color: #57606a; }
+.status-pending { color: #7d4e00; background: #fff1c2; }
+.status-applied { color: #1a7f37; background: #dafbe1; }
+.status-dismissed { color: #57606a; background: #f0f3f6; }
+
 .reader-navigation {
   position: sticky;
   top: .5rem;
@@ -1946,6 +2052,8 @@ async function resetAll() {
 .danger-text { color: #a40e26; }
 
 @media (max-width: 640px) {
+  .reader-font-grid { grid-template-columns: 1fr 1fr; }
+  .prompt-editor-label textarea { font-size: .76rem; }
   .doc-page { padding: 1rem .75rem 3rem; }
   .reader-navigation { position: static; }
   .reader-navigation-controls { width: 100%; justify-content: space-between; }
