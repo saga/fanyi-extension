@@ -11,7 +11,7 @@ import { parseEpubDocument } from '../entrypoints/utils/document/parsers/office'
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
-import { autoConfirmLiteraryMemory, buildLiteraryContextForBatch, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, buildLiteraryContextForBatch, buildLiteraryTranslationContextPrompt, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
 
 // ============================================================
 // detect
@@ -235,6 +235,28 @@ describe('文学书籍记忆', () => {
     expect(merged.styleGuide.dialogue).toBe('角色声线有区别');
     expect(merged.relationships).toHaveLength(2);
     expect(merged.chapterSummaries).toHaveLength(2);
+  });
+
+  it('同一人物的全名与别名跨章节合并为一个规范译名', () => {
+    const first = sanitizeLiteraryMemory({
+      entities: [{ source: 'Kiri', target: '吉莉', kind: 'person', aliases: ['Kiri'], reviewStatus: 'confirmed' }],
+    });
+    const next = sanitizeLiteraryMemory({
+      entities: [{ source: 'Kiritsubo', target: '吉罗', kind: 'person', aliases: ['Kiri'], reviewStatus: 'suggested' }],
+    });
+    const merged = mergeLiteraryMemory(first, next);
+    expect(merged.entities).toHaveLength(1);
+    expect(merged.entities[0]?.source).toBe('Kiri');
+    expect(merged.entities[0]?.target).toBe('吉莉');
+    expect(merged.entities[0]?.aliases).toContain('Kiritsubo');
+
+    const context = buildLiteraryContextForBatch({
+      memory: merged,
+      segments: [{ id: 'kiri-1', text: 'Kiritsubo-san asked where Kiri was.' }],
+    });
+    expect(context.entities).toHaveLength(1);
+    expect(context.entities[0]?.target).toBe('吉莉');
+    expect(buildLiteraryTranslationContextPrompt()).toContain('不得默认译成“大人”');
   });
 
   it('不把不可信的实体文本作为 prompt 标签，并限制记忆大小', () => {
