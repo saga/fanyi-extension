@@ -536,6 +536,8 @@
               <textarea v-model="anchor.target" rows="2" @change="editVoiceAnchor(anchor)"></textarea>
             </label>
             <p class="muted small">来源片段 {{ anchor.segmentId }} · {{ anchor.tags.join('、') }}</p>
+            <p v-if="anchor.attributionEvidence"><strong>说话人归属证据：</strong>{{ anchor.attributionEvidence }}（置信度 {{ Math.round((anchor.attributionConfidence || 0) * 100) }}%）</p>
+            <p v-else class="warn small">缺少可核验的说话人归属证据；这个锚点只能保留为候选。</p>
             <div class="voice-profile-actions">
               <button class="btn primary" :disabled="anchor.status === 'approved'" @click="setVoiceAnchorStatus(anchor, 'approved')">批准并作为声音示例</button>
               <button class="btn" :disabled="anchor.status === 'rejected'" @click="setVoiceAnchorStatus(anchor, 'rejected')">拒绝</button>
@@ -1575,6 +1577,11 @@ async function editVoiceAnchor(anchor: LiteraryBookMemory['voiceAnchors'][number
 
 async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'candidate' | 'approved' | 'rejected') {
   const sourceSegment = doc.value?.segments.find((segment) => segment.id === anchor.segmentId);
+  if (status === 'approved' && (!anchor.attributionEvidence || (anchor.attributionConfidence ?? 0) < 0.7 ||
+    !sourceSegment || !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.attributionEvidence)))) {
+    persistenceMessage.value = '缺少与当前原文匹配的说话人归属证据（置信度至少 70%），不能批准声音锚点。';
+    return;
+  }
   if (status === 'approved' && (!sourceSegment ||
     !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.source)))) {
     persistenceMessage.value = '锚点原文片段与当前文档不一致，不能批准。';
