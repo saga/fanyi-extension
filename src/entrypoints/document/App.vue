@@ -517,6 +517,7 @@
           :title="doc.title"
           :format="doc.format"
           :source-file-name="documentFileName"
+          :source-file="loadedSourceFile"
           :segments="doc.segments"
           :visible-segments="visibleSegments"
           :translations="state.translations"
@@ -618,6 +619,8 @@ let activeSessionIndexedDbWritable = false;
 const persistedTranslations = ref(new Map<string, string>());
 let persistenceQueue: Promise<void> = Promise.resolve();
 const readerRef = ref<HTMLElement | null>(null);
+/** 当前加载的原始 File：仅用于把原始 EPUB/PDF 备份进本机文档项目，不持久化到扩展配置。 */
+const loadedSourceFile = ref<File | null>(null);
 /** 原始文本，json 导出回填时用。 */
 let rawText = '';
 /**
@@ -1158,6 +1161,7 @@ async function persistCurrentSession() {
 }
 
 async function restoreLastSession() {
+  loadedSourceFile.value = null;
   parsing.value = true;
   parseError.value = '';
   persistenceMessage.value = '';
@@ -1372,6 +1376,7 @@ function onDrop(event: DragEvent) {
 }
 
 async function loadFile(file: File) {
+  loadedSourceFile.value = file;
   // 先落盘上一册的最新状态，再开始解析新文件。
   await persistCurrentSession();
   stopTranslation();
@@ -1633,6 +1638,7 @@ function doExport(format: ExportFormat) {
 }
 
 async function resetAll() {
+  loadedSourceFile.value = null;
   // 先等待最后一笔 checkpoint 落盘；换文件不会删除上一本书的恢复快照。
   await persistCurrentSession();
   activeSessionReady.value = false;
