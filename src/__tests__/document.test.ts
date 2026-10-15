@@ -11,7 +11,7 @@ import { parseEpubDocument } from '../entrypoints/utils/document/parsers/office'
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
-import { autoConfirmLiteraryMemory, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, buildLiteraryContextForBatch, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
 
 // ============================================================
 // detect
@@ -260,6 +260,124 @@ describe('文学书籍记忆', () => {
     expect(memory.entities.find((entity) => entity.source === 'Bob')?.reviewStatus).toBe('suggested');
     expect(memory.relationships.find((rel) => rel.predicate === 'sister of')?.reviewStatus).toBe('confirmed');
     expect(memory.relationships.find((rel) => rel.predicate === 'likes')?.reviewStatus).toBe('suggested');
+  });
+
+  it('v1 文学记忆升级到 v2，角色声音候选需要有证据才能被确认', () => {
+    const migrated = sanitizeLiteraryMemory({
+      version: 1,
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person' }],
+      relationships: [],
+      styleGuide: { dialogue: '克制' },
+      chapterSummaries: [{ chapter: 'Chapter 1', summary: 'Alice speaks.' }],
+      recentExamples: [{ source: 'Hello.', target: '你好。' }],
+    });
+    expect(migrated.version).toBe(2);
+    expect(migrated.entities[0]?.target).toBe('艾丽丝');
+    expect(migrated.chapterSummaries).toHaveLength(1);
+    expect(migrated.recentExamples).toHaveLength(1);
+    expect(migrated.characterVoices).toEqual([]);
+
+    const voice = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'char-alice',
+        canonicalSourceName: 'Alice',
+        status: 'confirmed',
+        confidence: 0.9,
+        voiceCore: { syntaxRhythm: ['常用短反问后补充证据'] },
+        evidence: [{
+          segmentId: 'ch1-p2', sourceQuote: 'You really think so?', dimension: 'syntax_rhythm',
+          observation: '遇到质疑时先用短反问', confidence: 0.9,
+        }],
+      }],
+    });
+    expect(voice.characterVoices[0]?.status).toBe('confirmed');
+    expect(voice.characterVoices[0]?.characterId).toBe('char-alice');
+    const withoutEvidence = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'char-bob', canonicalSourceName: 'Bob', status: 'confirmed',
+        voiceCore: { register: '正式' }, evidence: [],
+      }],
+    });
+    expect(withoutEvidence.characterVoices).toEqual([]);
+  });
+
+  it('声音上下文仅包含已确认相关画像与批准锚点，并保持合法完整 JSON', () => {
+    const memory = sanitizeLiteraryMemory({
+      styleGuide: { narrativeVoice: '克制的第三人称' },
+      entities: [
+        { source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'confirmed' },
+        { source: 'Bob', target: '鲍勃', kind: 'person', reviewStatus: 'confirmed' },
+      ],
+      characterVoices: [
+        {
+          characterId: 'char-alice', canonicalSourceName: 'Alice', status: 'confirmed', confidence: 0.9,
+          voiceCore: { syntaxRhythm: ['常用短反问'], discourseHabits: ['先质疑前提'] },
+          evidence: [{ segmentId: 'a1', sourceQuote: 'You really think so?', dimension: 'discourse', observation: '先质疑', confidence: 0.9 }],
+          contrastRules: [{ otherCharacterId: 'char-bob', difference: 'Alice 先提问，Bob 先给结论', evidenceSegmentIds: ['a1', 'b2'] }],
+        },
+        {
+          characterId: 'char-bob', canonicalSourceName: 'Bob', status: 'confirmed', confidence: 0.8,
+          voiceCore: { register: '完整论证、少用反问' },
+          evidence: [{ segmentId: 'b2', sourceQuote: 'The evidence is clear.', dimension: 'register', observation: '完整论证', confidence: 0.8 }],
+        },
+        {
+          characterId: 'char-candidate', canonicalSourceName: 'Unknown', status: 'candidate', confidence: 0.4,
+          voiceCore: { register: '猜测性的语域' },
+          evidence: [{ segmentId: 'u1', sourceQuote: 'Maybe.', dimension: 'stance', observation: '证据不足', confidence: 0.4 }],
+        },
+      ],
+      relationshipVoiceRules: [{
+        speakerId: 'char-alice', addresseeId: 'char-bob', status: 'confirmed',
+        baselineRegister: '直接但不亲昵', addressTerms: ['Bob'], evidenceSegmentIds: ['a1'],
+      }],
+      voiceAnchors: [
+        { anchorId: 'v1', speakerId: 'char-alice', addresseeId: 'char-bob', source: 'You really think so?', target: '你真这么认为？', segmentId: 'a1', status: 'approved', approvedBy: 'user', tags: ['short-question'] },
+        { anchorId: 'v2', speakerId: 'char-alice', source: 'Maybe.', target: '也许吧。', segmentId: 'a2', status: 'candidate', approvedBy: 'reviewer', tags: [] },
+      ],
+    });
+    const context = buildLiteraryContextForBatch({
+      memory,
+      segments: [{ id: 'a1', text: 'Alice looked at Bob. “You really think so?”', contextPath: 'Chapter 1' }],
+      chapterTitle: 'Chapter 1',
+    });
+    const serialized = JSON.stringify(context);
+    const parsed = JSON.parse(serialized);
+    expect(parsed.characterVoices.map((profile: any) => profile.characterId)).toContain('char-alice');
+    expect(parsed.characterVoices.map((profile: any) => profile.characterId)).not.toContain('char-candidate');
+    expect(parsed.relationshipVoiceRules).toHaveLength(1);
+    expect(parsed.voiceAnchors.map((item: any) => item.anchorId)).toEqual(['v1']);
+    expect(serialized.length).toBeLessThan(10000);
+    expect(parsed.constraints.join(' ')).toContain('不确定说话人');
+  });
+
+  it('合并章节分析时保留用户确认的画像与锚点状态', () => {
+    const first = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'char-alice', canonicalSourceName: 'Alice', status: 'confirmed', confidence: 0.9,
+        voiceCore: { syntaxRhythm: ['短反问'] },
+        evidence: [{ segmentId: 'ch1-p1', sourceQuote: 'Really?', dimension: 'syntax_rhythm', observation: '短反问', confidence: 0.9 }],
+      }],
+      voiceAnchors: [{
+        anchorId: 'anchor-1', speakerId: 'char-alice', source: 'Really?', target: '当真？',
+        segmentId: 'ch1-p1', status: 'approved', approvedBy: 'user',
+      }],
+    });
+    const incoming = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'char-alice', canonicalSourceName: 'Alice', status: 'candidate', confidence: 0.6,
+        voiceCore: { syntaxRhythm: ['每句都使用感叹句'] },
+        evidence: [{ segmentId: 'ch2-p2', sourceQuote: 'I see.', dimension: 'syntax_rhythm', observation: '模型猜测语气', confidence: 0.6 }],
+      }],
+      voiceAnchors: [{
+        anchorId: 'anchor-1', speakerId: 'char-alice', source: 'Really?', target: '真的吗？',
+        segmentId: 'ch1-p1', status: 'candidate', approvedBy: 'reviewer',
+      }],
+    });
+    const merged = mergeLiteraryMemory(first, incoming);
+    expect(merged.characterVoices[0]?.status).toBe('confirmed');
+    expect(merged.characterVoices[0]?.voiceCore.syntaxRhythm).toEqual(['短反问']);
+    expect(merged.voiceAnchors[0]?.status).toBe('approved');
+    expect(merged.voiceAnchors[0]?.approvedBy).toBe('user');
   });
 
   it('跨章节印证同一译名时自动转正确认，译名冲突时沿用旧目标', () => {
