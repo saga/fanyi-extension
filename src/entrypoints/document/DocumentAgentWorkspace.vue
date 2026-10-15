@@ -640,8 +640,9 @@ async function acceptCandidates(segmentIds?: string[], automatic = false) {
       method: 'POST', body: JSON.stringify({ segmentIds: Array.from(requested) }),
     });
     activeRun.value = response.run;
-    const items = candidates.filter((item) => requested.has(item.id));
-    emit('acceptedTranslations', items);
+    // Only sync the authoritative accepted versions from SQLite. The store may have preserved
+    // a human edit instead of accepting a model candidate for one or more segments.
+    await emitWorkspaceSnapshot();
     message.value = automatic
       ? '翻译结果已自动保存，并同步到阅读器。'
       : segmentIds?.length
