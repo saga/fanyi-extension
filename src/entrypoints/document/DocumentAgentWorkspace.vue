@@ -199,6 +199,7 @@ interface PromptInput {
   translationMode: 'technical' | 'literary';
   literaryReview: boolean;
   literaryMemory: unknown;
+  glossary: unknown;
 }
 const props = defineProps<{
   title: string;
@@ -282,6 +283,7 @@ function promptInput(): PromptInput {
     translationMode: props.translationMode,
     literaryReview: props.translationMode === 'literary' && props.literaryReview,
     literaryMemory: props.literaryMemory,
+    glossary: props.glossary,
   };
 }
 
