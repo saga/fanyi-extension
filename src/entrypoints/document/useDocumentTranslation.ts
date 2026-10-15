@@ -959,6 +959,76 @@ export function useDocumentTranslation() {
     await checkpoint(options);
   }
 
+  /**
+   * Re-run only the Reviewer for selected, already translated segments.
+   * This repairs legacy "hint only" records without re-translating a whole page or book.
+   */
+  async function reviewExistingSegments(
+    segments: DocumentSegment[],
+    options: TranslateOptions,
+  ): Promise<void> {
+    if (state.value.running) return;
+    const candidates = segments.filter((segment) =>
+      typeof state.value.translations.get(segment.id) === 'string' &&
+      !!state.value.translations.get(segment.id)?.trim(),
+    );
+    if (!candidates.length) {
+      state.value.error = '这些片段还没有译文，请先翻译当前页。';
+      return;
+    }
+    generation++;
+    const runId = generation;
+    state.value.running = true;
+    state.value.error = '';
+    state.value.workStage = '重新审校中';
+    state.value.activeSegmentIds = new Set(candidates.map((segment) => segment.id));
+    try {
+      const drafts = new Map(candidates.map((segment) => [
+        segment.id,
+        state.value.translations.get(segment.id)!,
+      ]));
+      const reviewed = await reviewLiteraryBatchViaServer(
+        candidates, drafts, options, literaryMemory.value, runId, isCurrentRun,
+      );
+      if (!reviewed || !isCurrentRun(runId)) return;
+      const mustFixIds = new Set(
+        reviewed.findings.filter((finding) => finding.priority === 'must_fix').map((finding) => finding.id),
+      );
+      const pendingStyleIds = new Set(
+        reviewed.findings
+          .filter((finding) => finding.category === 'style' && finding.applicationStatus === 'pending' && !mustFixIds.has(finding.id))
+          .map((finding) => finding.id),
+      );
+      for (const [id, text] of reviewed.translations) {
+        if (text.trim() && !pendingStyleIds.has(id)) state.value.translations.set(id, text);
+      }
+      literaryStatus.value.reviewedSegments += reviewed.translations.size;
+      literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
+        reviewed.findings, literaryStatus.value.reviewFindings,
+      );
+      literaryMemory.value = refreshLiteraryExampleTargets(
+        literaryMemory.value,
+        candidates.flatMap((segment) => {
+          const draft = drafts.get(segment.id);
+          const result = reviewed.translations.get(segment.id);
+          const target = pendingStyleIds.has(segment.id) ? draft : (result || draft);
+          return target ? [{ source: segment.text, target, chapter: segment.contextPath || '' }] : [];
+        }),
+      );
+      await checkpoint(options);
+    } catch (error) {
+      if (isCurrentRun(runId)) {
+        state.value.error = '重新审校失败：' + (error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (isCurrentRun(runId)) {
+        state.value.running = false;
+        state.value.workStage = '';
+        state.value.activeSegmentIds = new Set();
+      }
+    }
+  }
+
   async function prepareLiteraryChapter(
     key: string,
     segments: DocumentSegment[],
@@ -1344,7 +1414,7 @@ export function useDocumentTranslation() {
   }
 
   return {
-    state, run, retryFailed, stop, reset, literaryMemory, literaryStatus,
+    state, run, retryFailed, reviewExistingSegments, stop, reset, literaryMemory, literaryStatus,
     getSnapshot, restoreSnapshot,
   };
 }
