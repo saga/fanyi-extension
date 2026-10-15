@@ -628,10 +628,14 @@ describe('文档翻译服务端模式', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const firstMessage = sendMessage.mock.calls[0]?.[0] as {
       literaryContext?: string;
+      voiceContext?: unknown;
       jsonContent: string;
     };
     expect(firstMessage.literaryContext).toContain('自然的文学表达');
-    expect(JSON.parse(firstMessage.jsonContent)[0].contextPath).toContain('艾丽丝');
+    // 章节路径只能表达原文结构；实体和人物声音必须走独立 voiceContext。
+    expect(JSON.parse(firstMessage.jsonContent)[0].contextPath).toBe('Chapter One');
+    expect(JSON.parse(firstMessage.jsonContent)[0].contextPath).not.toContain('艾丽丝');
+    expect(JSON.stringify(firstMessage.voiceContext)).toContain('艾丽丝');
     expect(state.value.translations.get('book-s0')).toBe('她轻轻推开那扇旧门。');
     expect(literaryMemory.value.entities[0]?.target).toBe('艾丽丝');
     expect(literaryStatus.value.analyzedChapters).toBe(1);
