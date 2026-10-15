@@ -154,6 +154,7 @@
               </button>
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="startRun('all')">重新翻译全文</button>
+              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="resumeRun">恢复中断任务</button>
               <button class="agent-button agent-button-tertiary" :disabled="busy || isRunning" @click="refreshProject">刷新状态</button>
             </div>
             <p class="agent-footnote">重新翻译会生成新结果。相同原文版本下已有的人工修订会优先保留。</p>
@@ -303,33 +304,32 @@ const selectedSegmentId = ref('');
 const manualText = ref('');
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
+const autoAcceptingRunId = ref('');
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
-const candidatePreview = computed(() => {
-  const rows = Array.isArray(activeRun.value?.segments) ? activeRun.value.segments : [];
-  const sourceById = new Map(props.segments.map((segment) => [segment.id, segment]));
-  return rows
-    .filter((row: any) => row.status === 'candidate' && typeof row.candidateTranslation === 'string' && row.candidateTranslation.trim())
-    .slice(0, 8)
-    .map((row: any) => {
-      const source = sourceById.get(row.id);
-      return {
-        id: row.id,
-        source: source?.text || '',
-        contextPath: source?.contextPath || '',
-        accepted: props.translations.get(row.id) || '',
-        candidate: row.candidateTranslation as string,
-      };
-    });
+const totalSegmentCount = computed(() =>
+  Number(verification.value?.totalSegments ?? project.value?.segmentCount ?? props.segments.length),
+);
+const acceptedSegmentCount = computed(() => Number(verification.value?.acceptedSegments ?? 0));
+const pendingSegmentCount = computed(() => {
+  const current = verification.value;
+  if (!current) return props.segments.length;
+  const ids = [
+    ...(Array.isArray(current.missingSegmentIds) ? current.missingSegmentIds : []),
+    ...(Array.isArray(current.staleSourceIds) ? current.staleSourceIds : []),
+    ...(Array.isArray(current.stalePromptIds) ? current.stalePromptIds : []),
+  ];
+  return new Set(ids).size;
 });
-const progressItems = [
-  { key: 'total', label: '计划' },
-  { key: 'pending', label: '等待' },
-  { key: 'running', label: '执行中' },
-  { key: 'candidate', label: '候选' },
-  { key: 'accepted', label: '已采纳' },
-  { key: 'failed', label: '失败' },
-];
+const documentProgressPercent = computed(() => totalSegmentCount.value
+  ? Math.round(Math.min(100, acceptedSegmentCount.value / totalSegmentCount.value * 100))
+  : 100);
+const runProgressPercent = computed(() => {
+  const counts = activeRun.value?.counts;
+  if (!counts || !Number(counts.total)) return documentProgressPercent.value;
+  const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0) + Number(counts.failed || 0);
+  return Math.round(Math.min(100, resolved / Number(counts.total) * 100));
+});
 const runLabels: Record<string, string> = {
   queued: '排队中', running: '运行中', paused: '已暂停', awaiting_acceptance: '待采纳',
   partial: '部分完成', completed: '已完成', failed: '失败', cancelled: '已停止',
@@ -418,6 +418,9 @@ async function loadExistingProject() {
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
     const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status)) || runs.value[0];
     if (active) await selectRun(active.runId);
+    // A previous session may have ended after candidates were saved but before they were applied.
+    // Complete that final step automatically when restoring the project.
+    await autoAcceptReadyCandidates();
     await emitWorkspaceSnapshot();
     loadSelectedTranslation();
   } catch (e) {
@@ -560,7 +563,10 @@ function schedulePoll(runId: string) {
     try {
       await refreshRun(runId);
       if (isRunning.value) schedulePoll(runId);
-      else await refreshProjectWithoutRun();
+      else {
+        await refreshProjectWithoutRun();
+        await autoAcceptReadyCandidates();
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     }
@@ -577,18 +583,6 @@ async function refreshProjectWithoutRun() {
     const eventResult = await api('/api/documents/projects/' + project.value.projectId + '/events?runId=' + encodeURIComponent(activeRun.value.runId) + '&limit=100');
     events.value = eventResult.events || [];
   }
-}
-
-async function savePromptRevision() {
-  busy.value = true; error.value = '';
-  try {
-    const response = await api('/api/documents/projects/' + project.value.projectId + '/prompts', {
-      method: 'POST', body: JSON.stringify(promptInput()),
-    });
-    message.value = 'Prompt 版本已保存：' + response.prompt.promptRevisionId.slice(0, 8);
-    await refreshProject();
-  } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
-  finally { busy.value = false; }
 }
 
 async function resumeRun() {
@@ -618,7 +612,20 @@ async function cancelRun() {
   finally { busy.value = false; }
 }
 
-async function acceptCandidates(segmentIds?: string[]) {
+async function autoAcceptReadyCandidates() {
+  const run = activeRun.value;
+  if (!run || !project.value || isRunning.value || Number(run.counts?.candidate || 0) <= 0) return;
+  if (autoAcceptingRunId.value === run.runId || busy.value) return;
+
+  autoAcceptingRunId.value = run.runId;
+  try {
+    await acceptCandidates(undefined, true);
+  } finally {
+    if (autoAcceptingRunId.value === run.runId) autoAcceptingRunId.value = '';
+  }
+}
+
+async function acceptCandidates(segmentIds?: string[], automatic = false) {
   if (!activeRun.value || !project.value) return;
   const runId = activeRun.value.runId as string;
   // Snapshot candidates before the response changes their run-segment status.
@@ -635,9 +642,11 @@ async function acceptCandidates(segmentIds?: string[]) {
     activeRun.value = response.run;
     const items = candidates.filter((item) => requested.has(item.id));
     emit('acceptedTranslations', items);
-    message.value = segmentIds?.length
-      ? '已采纳所选片段并同步到阅读器；其他候选仍可单独选择。'
-      : '已采纳本次候选并同步到阅读器；历史运行仍可查看。';
+    message.value = automatic
+      ? '翻译结果已自动保存，并同步到阅读器。'
+      : segmentIds?.length
+        ? '已采纳所选片段并同步到阅读器；其他候选仍可单独选择。'
+        : '已采纳本次候选并同步到阅读器；历史运行仍可查看。';
     await refreshProjectWithoutRun();
   } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
   finally { busy.value = false; }
