@@ -11,6 +11,16 @@
     <div v-if="!useLocalAgent" class="notice">
       请先在“设置与记忆”中启用本机 Workbuddy / OpenCode，文档 Agent 才能通过本机服务保存项目并执行任务。
     </div>
+    <div v-else-if="restoringProject && !project" class="notice">
+      正在恢复这份文档已有的本机项目关联…
+    </div>
+    <div v-else-if="restorationError && !project" class="notice">
+      <p>{{ restorationError }}</p>
+      <div class="agent-actions">
+        <button class="btn" :disabled="restoringProject || busy" @click="loadExistingProject">重试恢复关联</button>
+        <button v-if="restorationProjectMissing" class="btn primary" :disabled="restoringProject || busy" @click="createProject">重建项目关联</button>
+      </div>
+    </div>
     <div v-else-if="!project" class="project-create">
       <div class="project-description">
         <strong>{{ title }}</strong>
@@ -202,6 +212,8 @@ interface PromptInput {
   glossary: unknown;
 }
 const props = defineProps<{
+  /** 父级 Agent Tab 当前是否可见；用于显示时恢复关联，但不因切换 Tab 销毁本组件。 */
+  active: boolean;
   title: string;
   format: string;
   sourceFileName: string;
@@ -229,6 +241,9 @@ const emit = defineEmits<{
 }>();
 
 const project = ref<any>(null);
+const restoringProject = ref(false);
+const restorationError = ref('');
+const restorationProjectMissing = ref(false);
 const verification = ref<any>(null);
 const activeRun = ref<any>(null);
 const runs = ref<any[]>([]);
@@ -297,6 +312,8 @@ async function createProject() {
   if (!props.useLocalAgent) { error.value = '请先启用本机 Agent。'; return; }
   if (!props.segments.length) return;
   busy.value = true; error.value = ''; message.value = '';
+  restorationError.value = '';
+  restorationProjectMissing.value = false;
   try {
     const response = await api('/api/documents/projects', {
       method: 'POST',
@@ -331,11 +348,16 @@ async function createProject() {
 }
 
 async function loadExistingProject() {
-  if (!props.useLocalAgent || !props.segments.length) return;
+  if (!props.useLocalAgent || !props.segments.length || project.value || restoringProject.value) return;
+  restoringProject.value = true;
+  restorationError.value = '';
+  restorationProjectMissing.value = false;
   try {
     const mapping = await lookupWorkspaceProject(projectInput());
     if (!mapping.projectId) return;
+
     const result = await api('/api/documents/projects/' + encodeURIComponent(mapping.projectId));
+    // 一旦服务确认项目存在，就立即保留项目句柄。后续 Prompt/译文同步失败不能把项目误判为不存在。
     project.value = result.project;
     sourceChanged.value = mapping.sourceChanged;
     verification.value = result.verification;
@@ -350,9 +372,19 @@ async function loadExistingProject() {
     if (active) await selectRun(active.runId);
     await emitWorkspaceSnapshot();
     loadSelectedTranslation();
-  } catch {
-    // 旧映射可能指向已归档项目；此时允许显式创建新项目。
-    project.value = null;
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    if (!project.value && /HTTP 404/.test(detail)) {
+      restorationProjectMissing.value = true;
+      restorationError.value = '找到本机项目关联记录，但本机 Agent 服务中已不存在该项目。确认旧项目无法恢复后，可以重建关联。';
+    } else if (project.value) {
+      error.value = '文档项目已找到，但恢复部分状态失败：' + detail + '。项目关联已保留，可点击“刷新状态”或重试。';
+    } else {
+      // 网络错误、鉴权错误等不能等同于“项目不存在”，否则会误导用户新建重复项目。
+      restorationError.value = '恢复本机文档项目失败：' + detail + '。系统不会自动新建项目，请检查本机 Agent 服务后重试。';
+    }
+  } finally {
+    restoringProject.value = false;
   }
 }
 
@@ -590,8 +622,16 @@ watch(() => props.visibleSegments.map((segment) => segment.id).join('|'), () => 
 watch(() => [props.systemPrompt, props.userPromptTemplate, props.sourceLang, props.targetLang, props.translationMode],
   () => { /* Prompt is snapshotted only when the user starts/saves a run. */ });
 
-onMounted(async () => {
-  await loadExistingProject();
+// 只在 Agent Tab 激活且本机 Agent 可用时查找关联。切回 Tab 时仅在当前组件尚无项目状态时恢复。
+watch(
+  () => [props.active, props.useLocalAgent] as const,
+  ([active, enabled]) => {
+    if (active && enabled && !project.value && !restoringProject.value) void loadExistingProject();
+  },
+  { immediate: true },
+);
+
+onMounted(() => {
   if (!selectedSegmentId.value) selectedSegmentId.value = props.visibleSegments[0]?.id || '';
   loadSelectedTranslation();
 });
