@@ -131,35 +131,35 @@ const documentConfigFallbacks = {
   documentLocalAgentToken: 'localAgentToken',
 } as const;
 
-/** Read settings and lazily inherit legacy global values until document settings are edited. */
+/**
+ * Migrate legacy installs exactly once: copy the current global translation profile into
+ * document-specific keys before either profile can be edited independently.
+ */
 export async function getConfig(): Promise<Config> {
   const stored = (await storage.getItem<Partial<Config>>('local:config')) || {};
   const merged: Config = { ...defaultConfig, ...stored };
+  const migrated: Partial<Config> = {};
   for (const [documentKey, globalKey] of Object.entries(documentConfigFallbacks) as Array<[keyof typeof documentConfigFallbacks, (typeof documentConfigFallbacks)[keyof typeof documentConfigFallbacks]]>) {
     if (!Object.prototype.hasOwnProperty.call(stored, documentKey)) {
-      (merged as any)[documentKey] = (stored as any)[globalKey] ?? (defaultConfig as any)[globalKey];
+      const value = (stored as any)[globalKey] ?? (defaultConfig as any)[globalKey];
+      (merged as any)[documentKey] = value;
+      (migrated as any)[documentKey] = value;
     }
+  }
+  if (Object.keys(migrated).length) {
+    // Write directly to storage; do not call setConfig() here and recurse back into getConfig().
+    await storage.setItem('local:config', JSON.parse(JSON.stringify({ ...stored, ...migrated })));
   }
   merged.translationMode = merged.translationMode === 'literary' ? 'literary' : 'technical';
   merged.documentTranslationMode = merged.documentTranslationMode === 'literary' ? 'literary' : 'technical';
   return merged;
 }
 
-/**
- * Keep unedited document fields absent from storage. Saving a page-translation setting must not
- * snapshot inherited document defaults and accidentally couple the two configuration groups.
- */
+/** Save a patch on top of the current profile after the one-time document-profile migration. */
 export async function setConfig(config: Partial<Config>): Promise<void> {
-  const stored = (await storage.getItem<Partial<Config>>('local:config')) || {};
-  const merged: Record<string, unknown> = { ...defaultConfig, ...stored, ...config };
-  for (const documentKey of Object.keys(documentConfigFallbacks)) {
-    if (!Object.prototype.hasOwnProperty.call(stored, documentKey) &&
-        !Object.prototype.hasOwnProperty.call(config, documentKey)) {
-      delete merged[documentKey];
-    }
-  }
+  const currentConfig = await getConfig();
   // Use JSON serialization to strip Proxy/reactive wrappers from Vue refs.
-  const cleanConfig = JSON.parse(JSON.stringify(merged));
+  const cleanConfig = JSON.parse(JSON.stringify({ ...currentConfig, ...config }));
   await storage.setItem('local:config', cleanConfig);
 }
 
