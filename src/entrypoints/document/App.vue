@@ -160,8 +160,8 @@
         <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
           :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0), { 'is-active': state.activeSegmentIds?.has(seg.id) }]">
           <div v-if="viewMode !== 'translation'" class="or" :class="languageFontClass(sourceLang, seg.text)">{{ seg.text }}</div>
-          <div v-if="viewMode !== 'original'" class="tr" :class="languageFontClass(targetLang, state.translations.get(seg.id) || '')">
-            <template v-if="state.translations.get(seg.id)">{{ state.translations.get(seg.id) }}</template>
+          <div v-if="viewMode !== 'original'" class="tr" :class="languageFontClass(targetLang, displayTranslation(seg.id))">
+            <template v-if="displayTranslation(seg.id)">{{ displayTranslation(seg.id) }}</template>
             <span v-else-if="state.running && state.activeSegmentIds?.has(seg.id)" class="tr-pending">翻译中…</span>
             <span v-else-if="!state.running && state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
           </div>
@@ -807,6 +807,7 @@ async function applyAgentTranslations(items: Array<{ id: string; text: string }>
   for (const item of items) {
     if (doc.value.segments.some((segment) => segment.id === item.id) && item.text.trim()) {
       state.value.translations.set(item.id, item.text);
+      workspaceCandidateTranslations.value.delete(item.id);
     }
   }
   persistedTranslations.value = new Map(state.value.translations);
@@ -1838,6 +1839,17 @@ function displayTranslation(segmentId: string): string {
 
 async function startTranslate() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (config.useLocalAgent) {
+    try {
+      await ensureDocumentWorkspace();
+      if (workspaceSourceChanged.value) return;
+    } catch (error) {
+      state.value.error = '无法准备文档 workspace：' + (error instanceof Error ? error.message : String(error));
+      return;
+    }
+  }
   // 当前页已完成但文档尚未完成时，继续按钮自动跳到后面最近的待译页；走到末尾后再回绕查找。
   if (!currentPagePending.value) {
     const pageCount = pages.value.length;
@@ -1853,8 +1865,15 @@ async function startTranslate() {
     await nextTick();
   }
   if (!currentPage.value || !visibleSegments.value.length) return;
+  if (config.useLocalAgent) {
+    const ids = visibleSegments.value
+      .filter((segment) => !state.value.translations.get(segment.id)?.trim())
+      .map((segment) => segment.id);
+    await runWorkspaceTranslation({ ids });
+    return;
+  }
   const options = await buildTranslationOptions();
-  // 每次只翻译当前显示页；文学模式可用整章做记忆分析，但不会顺手覆盖整章其他页。
+  // 非本机模式仍走原来的扩展翻译器；启用本机服务后，阅读页与 Agent 统一走 workspace pipeline。
   await run(doc.value.segments, {
     ...options,
     onlyPrioritySegments: true,
@@ -1865,6 +1884,12 @@ async function startTranslate() {
 
 async function forceTranslateCurrentPage() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (config.useLocalAgent) {
+    await runWorkspaceTranslation({ ids: visibleSegments.value.map((segment) => segment.id), forceRefresh: true });
+    return;
+  }
   const options = await buildTranslationOptions();
   await run(doc.value.segments, {
     ...options,
@@ -1877,7 +1902,13 @@ async function forceTranslateCurrentPage() {
 
 async function retry() {
   if (!doc.value) return;
-  // 重试复用同一份 provider / 文风 / glossary，并且服务端模式只重传缺失片段。
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (config.useLocalAgent) {
+    await runWorkspaceTranslation({ scope: { type: 'failed' } });
+    return;
+  }
+  // 非本机模式重试复用同一份 provider / 文风 / glossary。
   const options = await buildTranslationOptions();
   await retryFailed(doc.value.segments, options);
 }
