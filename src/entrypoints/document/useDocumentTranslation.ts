@@ -80,7 +80,7 @@ export interface TranslateOptions {
   prioritySegmentIds?: string[];
   /** 仅 EPUB/PDF 可开启：逐章实体分析、书籍记忆、文学译稿审校。 */
   literaryMode?: boolean;
-  /** 文学模式下跳过每批的独立审校调用（调用数减半，速度翻倍；译文质量回到初译水平）。 */
+  /** 文学模式下跳过每批的独立审校调用，减少模型请求；译文质量回到初译水平，实际耗时取决于模型与文档。 */
   skipReview?: boolean;
   /** 每批结束、书籍记忆更新或审校结果返回时调用，供阅读器做增量持久化。 */
   onCheckpoint?: () => Promise<void> | void;
