@@ -133,7 +133,8 @@ fanyi-extension/
 │  │  - 缓存查询/写入                                │   │
 │  │  - DeepSeekTranslationService                  │   │
 │  │  - 站点规则匹配                                 │   │
-│  │  - 全局翻译队列 (串行, concurrency=1)           │   │
+│  │  - 远程 globalQueue (concurrency=1)             │   │
+│  │  - Local Agent 独立队列 (concurrency=4)          │   │
 │  └──────────────────┬──────────────────────────────┘   │
 │                     │                                  │
 └─────────────────────┼─────────────────────────────────┘
@@ -294,8 +295,9 @@ toggleTranslation → ctrl.toggle()
 3. generateTranslationCacheKey() → 缓存键
 4. getCachedTranslation() → 缓存查询
    └── 命中 → 直接返回
-5. globalQueue.add(() => service.translate(...))
-   └── 串行执行 (concurrency=1, 利用 DeepSeek prompt cache)
+5. 根据 Provider 选择对应队列
+   ├── 远程 Provider: `globalQueue` (默认 concurrency=1)
+   └── Local Agent: `localAgentQueue` (concurrency=4)，不等待远程队列
 6. processTranslationResult() → 解析 JSON，提取 translations
    └── 宽松字段匹配: translated_text / text / translation
 7. cacheTranslation() → 缓存写入 (TTL=7天)
@@ -303,9 +305,9 @@ toggleTranslation → ctrl.toggle()
 9. sendResponse({ result, trace })
 ```
 
-**全局队列**: `globalQueue = new TranslationQueue(1, 2, 1000)`
-- 并发 = 1（串行），让每个 chunk 享受前一个的 KV cache
-- 最多重试 2 次，重试间隔指数退避
+`globalQueue = new TranslationQueue(1, 2, 1000)` 只用于远程/DeepSeek Provider；background.ts 为 Local Agent 建立独立的 `TranslationQueue(4, 0, 0)`，避免本机请求被远程队列串行化。
+- 远程 globalQueue：默认并发 1，最多重试 2 次，重试间隔 1 秒；
+- Local Agent 网页翻译队列：并发 4，不复用上述重试策略。EPUB/PDF project Agent 则在本机服务端独立调度默认 3 个翻译 worker + 1 个审校 worker，受 Session pool 大小约束。
 
 ### 4.3 核心工具模块
 
@@ -444,12 +446,12 @@ extractBlocks(rootNode)
 
 #### 4.3.7 翻译队列 (`translationQueue.ts`)
 
-**`addAllWithWarmup(tasks, warmupCount, maxConcurrency)`**:
-1. 前 `warmupCount` 个任务串行执行 (await 每个)
-2. 剩余任务并行执行 (concurrency = maxConcurrency)
-3. 失败自动重试 (maxRetries=2, 指数退避)
+**`addAllWithWarmup(tasks, warmupCount, maxConcurrency)`** 只在调用方明确采用预热策略时使用：
+1. 前 `warmupCount` 个任务串行执行；
+2. 后续任务切换到给定并发度；
+3. 队列重试策略由该实例的 `maxRetries` / `retryDelay` 决定。
 
-**全局队列**: `concurrency=1` (串行)，利用 DeepSeek prompt cache (KV cache)
+这不是所有 Provider 的全局策略：远程请求当前通过 `globalQueue`（并发 1）调度，本机网页翻译通过独立 4 并发队列调度；EPUB/PDF project Agent 有自己的批次和审校调度器。
 
 ### 4.4 LLM 服务层
 
@@ -741,12 +743,12 @@ handleFullTranslation()
 - 同类翻译扩展 (XTranslate, Read Frog) 都用 block-walking 方案
 - Readability 作为 fallback 使用，处理评分算法选不出可靠根节点的场景
 
-### 9.2 为什么 chunk 串行执行
+### 9.2 为什么不同 Provider 使用不同的调度策略
 
-- DeepSeek 的 prompt cache (KV cache) 在第二个起飞的请求上才能命中
-- 并行 4 个请求同 prefix 同时打过去会全 miss
-- 串行则让每个请求都吃前一个的 cache，省钱 + 快
-- warmup-then-parallel: 前 2 个串行 (构建 cache)，后续并行 (利用 cache)
+- 远程 `globalQueue` 当前默认并发 1，是一项实现策略；是否能减少 Prompt Cache 成本取决于供应商的缓存定义、请求前缀、缓存 TTL 与服务端实现，不应把“并行请求一定 miss、串行一定命中”写成普遍事实。
+- 网页翻译主流程的 `warmup-then-parallel` 会先串行发出少量 chunk，再将后续任务以桌面 4 / 移动 2 的并发度执行；这是减少首批冷启动成本与提高吞吐的折衷，不意味着后续所有 chunk 都串行。
+- Local Agent 网页翻译不使用远程 `globalQueue`，使用独立并发 4 的队列；本机 EPUB/PDF project Agent 在服务端以默认 3 个翻译 worker + 1 个 Reviewer worker 调度，并受本机 Session pool 大小约束。
+- 调整并发前应在目标模型、真实设备和代表性章节上测量完成时间、请求失败率、成本及译文重跑噪声；不能仅凭缓存假设推导性能结论。
 
 ### 9.3 为什么不 monkey patch history
 
