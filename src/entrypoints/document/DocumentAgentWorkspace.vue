@@ -56,9 +56,9 @@
       </div>
 
       <div class="agent-actions">
-        <button class="btn primary" :disabled="busy || isRunning" @click="startRun('stale')" :disabled="busy || isRunning || sourceChanged">翻译过期 / 未完成内容</button>
-        <button class="btn" :disabled="busy || isRunning" @click="startRun('failed')" :disabled="busy || isRunning || sourceChanged">重试失败片段</button>
-        <button class="btn" :disabled="busy || isRunning" @click="startRun('all')" :disabled="busy || isRunning || sourceChanged">生成全书新候选</button>
+        <button class="btn primary" :disabled="busy || isRunning || sourceChanged" @click="startRun('stale')">翻译过期 / 未完成内容</button>
+        <button class="btn" :disabled="busy || isRunning || sourceChanged" @click="startRun('failed')">重试失败片段</button>
+        <button class="btn" :disabled="busy || isRunning || sourceChanged" @click="startRun('all')">生成全书新候选</button>
         <button v-if="isRunning" class="btn warn" :disabled="busy" @click="cancelRun">停止运行</button>
         <button v-else-if="activeRun?.status === 'paused' || activeRun?.status === 'failed' || activeRun?.status === 'partial'" class="btn" :disabled="busy" @click="resumeRun">恢复 / 继续失败项</button>
         <button class="btn ghost" :disabled="busy" @click="refreshProject">刷新状态</button>
@@ -264,7 +264,10 @@ function documentKey(): string {
   };
   add(props.format.toLowerCase() + '\u0000' + props.title + '\u0000');
   for (const segment of props.segments) {
-    add(segment.id); add('\u0000'); add(segment.text); add('\u0000'); add(segment.contextPath || ''); add('\u0001');
+    add(segment.id); add('\u0000'); add(segment.text); add('\u0000'); add(segment.kind || 'paragraph'); add('\u0000');
+    add(segment.contextPath || ''); add('\u0000'); add(String(segment.page ?? '')); add('\u0000');
+    add(String(segment.level ?? '')); add('\u0000'); add(segment.marker || ''); add('\u0000');
+    add(segment.path || ''); add('\u0000'); add(segment.start || ''); add('\u0000'); add(segment.end || ''); add('\u0001');
   }
   return props.format.toLowerCase() + ':' + props.segments.length + ':' + (hash >>> 0).toString(16);
 }
