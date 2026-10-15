@@ -488,12 +488,18 @@
             </div>
           </div>
           <div v-else-if="finding.category === 'style'" class="review-legacy-note muted small">
-            这条是旧版审校记录，没有保存完整候选译文，因此无法一键应用。重新审校对应片段后，可在这里比较候选稿并决定是否采用。
-            <button class="link-btn" @click="showReviewSegment(finding.id)">定位到正文</button>
+            这条是旧版记录，只保存了建议，没有保存 Reviewer 的完整候选稿。点击“重新审校此段”会以当前译文为底稿再审一次，返回完整候选稿后你再决定是否替换。
+            <div class="review-proposal-actions">
+              <button class="btn primary" :disabled="state.running" @click="rereviewSegment(finding.id)">重新审校此段</button>
+              <button class="btn ghost" @click="showReviewSegment(finding.id)">定位到正文</button>
+            </div>
           </div>
           <div v-else class="review-auto-note muted small">
-            事实/实体类问题按高优先级处理，当前运行中的自动修正已体现在正文译文中。
-            <button class="link-btn" @click="showReviewSegment(finding.id)">查看正文</button>
+            事实/实体类问题已按高优先级处理。查看正文可核对当前结果；若你手动改过译文，可重新审校确认是否仍有问题。
+            <div class="review-proposal-actions">
+              <button class="btn" :disabled="state.running" @click="rereviewSegment(finding.id)">重新审校此段</button>
+              <button class="btn ghost" @click="showReviewSegment(finding.id)">查看正文</button>
+            </div>
           </div>
         </div>
       </section>
