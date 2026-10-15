@@ -538,7 +538,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
+import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -740,6 +740,14 @@ async function applyReviewProposal(finding: LiteraryReviewFinding) {
     return;
   }
   state.value.translations.set(finding.id, finding.proposedTranslation);
+  const sourceSegment = doc.value.segments.find((segment) => segment.id === finding.id);
+  if (sourceSegment) {
+    literaryMemory.value = refreshLiteraryExampleTargets(literaryMemory.value, [{
+      source: sourceSegment.text,
+      target: finding.proposedTranslation,
+      chapter: sourceSegment.contextPath || currentPage.value?.title || '',
+    }]);
+  }
   for (const item of literaryStatus.value.reviewFindings) {
     if (item.id === finding.id && item.category === 'style' &&
         item.proposedTranslation === finding.proposedTranslation) {
