@@ -330,7 +330,10 @@ flowchart TD
     K --> M
     L --> N{Translation and review work settled?}
     M --> N
-    N --> O[Finalize run and refresh reader from durable state]
+    N --> O[Service finalizes run and persists candidates/events]
+    O --> Q{Extension UI caller?}
+    Q -- Yes --> R[Extension calls accept and syncs accepted text to reader]
+    Q -- API/CLI --> S[Candidates stay pending until /accept]
     D -. Pause/cancel blocks new batch allocation .-> P[Discard in-flight results after cancellation]
     I -. Cancellation .-> P
 ```
