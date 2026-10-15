@@ -851,6 +851,11 @@ export function useDocumentTranslation() {
         action: 'translateChunk',
         jsonContent,
         ...(voiceContext ? { voiceContext } : {}),
+        ...(literaryMode && precedingSegments.length ? {
+          precedingSegments: precedingSegments.slice(-4).map((segment) => ({
+            id: segment.id, text: segment.text.slice(0, 900), contextPath: segment.contextPath,
+          })),
+        } : {}),
         sourceLang: options.sourceLang,
         targetLang: options.targetLang,
         pageUrl: 'fanyi://document',
