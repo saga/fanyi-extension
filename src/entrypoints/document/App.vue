@@ -1356,8 +1356,51 @@ async function loadFile(file: File) {
     }
     glossary.value = extractGlossaryLocal(glossarySample);
     const config = await getConfig();
+    readerConfig.value = config;
     sourceLang.value = config.sourceLang || 'auto';
     targetLang.value = config.targetLang || 'zh';
+
+    // Re-selecting the same file restores the active IndexedDB reading session before a new
+    // empty session replaces it. Translation cache remains a fallback for documents without a
+    // matching saved reader session.
+    let previousSession: LoadedActiveDocumentSession | null = null;
+    try { previousSession = await loadActiveDocumentSession(); } catch { /* cache still supports reuse */ }
+    if (previousSession &&
+        previousSession.fileName === documentFileName &&
+        buildDocumentAgentSessionId(previousSession.document, previousSession.fileName) ===
+          buildDocumentAgentSessionId(doc.value, documentFileName)) {
+      doc.value = previousSession.document;
+      rawText = previousSession.rawText;
+      glossary.value = previousSession.glossary;
+      sourceLang.value = previousSession.sourceLang;
+      targetLang.value = previousSession.targetLang;
+      viewMode.value = previousSession.viewMode;
+      literaryMode.value = previousSession.literaryMode;
+      currentPageIndex.value = Math.min(
+        Math.max(0, previousSession.currentPageIndex),
+        Math.max(0, buildDocumentPages(previousSession.document).length - 1),
+      );
+      persistedTranslations.value = new Map(previousSession.translations);
+      localPersistedTranslations = new Map<string, string>();
+      localSessionDocumentSaved = false;
+      localSessionDisabled = false;
+      restoreSnapshot({
+        translations: previousSession.translations,
+        total: previousSession.total,
+        done: previousSession.done,
+        failedBatches: previousSession.failedBatches,
+        error: previousSession.error,
+        literaryMemory: previousSession.literaryMemory,
+        literaryStatus: previousSession.literaryStatus,
+        analyzedChapterKeys: previousSession.analyzedChapterKeys,
+        lastRunSegmentIds: previousSession.lastRunSegmentIds,
+      });
+      activeSessionIndexedDbWritable = true;
+      activeSessionReady.value = true;
+      savedSessionSummary.value = await getActiveDocumentSessionSummary();
+      persistenceMessage.value = '已恢复这份文档上次的阅读位置、译文和书籍记忆。需要重新生成译文时，点击“强制重译当前页”。';
+      return;
+    }
 
     // 保存已解析的结构化文档一次；后续翻译过程只增量写译文与小型状态。
     // IndexedDB 配额/权限异常不会阻止正常翻译。
