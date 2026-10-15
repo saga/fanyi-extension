@@ -536,6 +536,14 @@ function normalizeLiteraryReviewFindings(input: unknown): LiteraryReviewFinding[
       ...(item.applicationStatus === 'pending' || item.applicationStatus === 'applied' || item.applicationStatus === 'dismissed'
         ? { applicationStatus: item.applicationStatus }
         : {}),
+      ...(item.dimension === 'character_voice' || item.dimension === 'register' || item.dimension === 'narrative_style' || item.dimension === 'pacing'
+        ? { dimension: item.dimension }
+        : {}),
+      ...(typeof item.characterId === 'string' ? { characterId: item.characterId.slice(0, 100) } : {}),
+      ...(typeof item.relatedCharacterId === 'string' ? { relatedCharacterId: item.relatedCharacterId.slice(0, 100) } : {}),
+      ...(Array.isArray(item.evidenceSegmentIds)
+        ? { evidenceSegmentIds: item.evidenceSegmentIds.filter((id): id is string => typeof id === 'string').slice(0, 8).map((id) => id.slice(0, 160)) }
+        : {}),
     };
     return finding.reason || finding.suggestion ? [finding] : [];
   });
