@@ -191,7 +191,7 @@ src/
 │       ├── domObserver.ts                  # 增量 DOM 观察
 │       ├── glossaryExtractor.ts            # 术语表抽取 (compromise NLP)
 │       ├── translateApi.ts                 # 缓存 + 翻译结果处理
-│       ├── translationQueue.ts             # 全局串行队列
+│       ├── translationQueue.ts             # 有界队列；并发度由 Provider 路径决定
 │       ├── cacheKey.ts                     # 简单 hash cache key
 │       ├── cacheManager.ts                 # @wxt-dev/storage 缓存实例
 │       ├── contentHelper.ts                # DOM 准备
