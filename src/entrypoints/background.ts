@@ -538,7 +538,7 @@ export default defineBackground({
               const translated = await service.translate(
                 jsonContent, sourceLang, targetLang, effectiveGlossary, effectivePrompt,
                 message.responseFormat,
-                message.documentSessionId || voiceContext !== undefined
+                message.documentSessionId || voiceContext !== undefined || !!documentSystemPromptOverride?.trim() || !!documentUserPromptTemplate?.trim() || !!taskInstructions?.trim()
                   ? {
                       ...(message.documentSessionId ? { documentSessionId: message.documentSessionId } : {}),
                       sessionLane: message.documentSessionLane,
