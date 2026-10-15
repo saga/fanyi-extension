@@ -608,6 +608,7 @@ const currentPageIndex = ref(0);
 const readerConfig = ref<Config | null>(null);
 /** 当前文档对应的本机 workspace；阅读页与 Agent Tab 都从这里读写同一份 SQLite。 */
 const workspaceProject = ref<any>(null);
+const workspaceActiveRun = ref<any>(null);
 const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
@@ -1674,10 +1675,11 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
   let project: any = null;
   if (mapping.projectId) {
     try {
-      const current = await workspaceApi<{ project: any }>(
+      const current = await workspaceApi<{ project: any; runs?: any[] }>(
         base, token, '/api/documents/projects/' + encodeURIComponent(mapping.projectId),
       );
       project = current.project;
+      workspaceActiveRun.value = (current.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
     } catch (error) {
       // 映射可能指向已归档/清理的项目，只有确认服务真的返回 404 才创建新项目。
       if (!(error instanceof Error) || !/HTTP 404/.test(error.message)) throw error;
@@ -1715,10 +1717,11 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
       persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' + (error instanceof Error ? error.message : String(error));
     }
   }
-  const refreshed = await workspaceApi<{ project: any }>(
+  const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
   );
   workspaceProject.value = refreshed.project;
+  workspaceActiveRun.value = (refreshed.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
   const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length);
   await replaceCurrentTranslations(accepted);
   return refreshed.project;
