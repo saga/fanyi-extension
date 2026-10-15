@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { buildSystemContent, type PromptStyle, type TranslationMode } from '../entrypoints/service/deepseek';
 import type { Glossary } from '../entrypoints/service/_service';
 import { buildLiteraryPageReviewInstructions } from '../entrypoints/service/prompt-style';
+    expect(buildLiterarySystemContent('en', 'zh')).toContain('不得默认译成“大人”');
 
 const sourceLang = 'en';
 const targetLang = 'zh';
