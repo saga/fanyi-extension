@@ -704,9 +704,6 @@ watch(() => props.visibleSegments.map((segment) => segment.id).join('|'), () => 
   }
   loadSelectedTranslation();
 });
-watch(() => [props.systemPrompt, props.userPromptTemplate, props.sourceLang, props.targetLang, props.translationMode],
-  () => { /* Prompt is snapshotted only when the user starts/saves a run. */ });
-
 // If automatic acceptance met another foreground operation, retry exactly once when that operation
 // finishes. Failed API calls are not retried in a loop; their actual error is shown to the user.
 watch(busy, (isBusy) => {
