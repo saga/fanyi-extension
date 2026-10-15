@@ -241,6 +241,7 @@ const emit = defineEmits<{
 }>();
 
 const project = ref<any>(null);
+const sourceChanged = ref(false);
 const restoringProject = ref(false);
 const restorationError = ref('');
 const restorationProjectMissing = ref(false);
