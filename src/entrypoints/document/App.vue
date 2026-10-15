@@ -625,7 +625,7 @@ const documentStyleVars = computed(() => ({
   '--document-size-zh': chineseFontSize.value + 'px',
 }));
 const userPromptPreview = computed(() => documentUserPromptEditor.value
-  .split('{' + '{CONTENT}' + '}')
+  .split('{'.repeat(2) + 'CONTENT' + '}'.repeat(2))
   .join('[当前页片段 JSON 在发送时插入]'));
 const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
@@ -1747,6 +1747,10 @@ async function resetAll() {
 }
 .seg .or { color: #1f2328; white-space: pre-wrap; }
 .seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .2em; }
+.seg .font-en { font-family: var(--document-font-en, Georgia), serif; font-size: var(--document-size-en, 17px); }
+.seg .font-zh { font-family: var(--document-font-zh, 'Noto Serif CJK SC'), serif; font-size: var(--document-size-zh, 18px); }
+.seg.kind-heading.level-1 .font-en, .seg.kind-heading.level-1 .font-zh { font-size: 1.7em; }
+.seg.kind-heading.level-2 .font-en, .seg.kind-heading.level-2 .font-zh { font-size: 1.4em; }
 .tr-pending { color: #b0b8c0; font-size: .92rem; }
 .seg.kind-heading .or, .seg.kind-heading .tr { font-weight: 650; }
 .seg.kind-heading { border-bottom: 0; padding-top: 1.35rem; }
