@@ -443,15 +443,15 @@ export default defineBackground({
         const literaryContextHash = voiceContext === undefined && !precedingSegments?.length
           ? ''
           : String(simpleHash(JSON.stringify({
-              policyVersion: 'character-voice-v2',
+              policyVersion: 'character-voice-v3',
               voiceContext: voiceContext ?? null,
               precedingSegments: (precedingSegments || []).slice(-4),
             })));
         const cachePromptFingerprint = literaryContextHash
-          ? effectivePrompt + '|literary-context-v2:' + literaryContextHash
+          ? effectivePrompt + '|literary-context-v3:' + literaryContextHash
           : effectivePrompt;
         const cacheKey = providedCacheKey
-          ? providedCacheKey + '|mode:' + translationMode + (literaryContextHash ? '|literary-context-v2:' + literaryContextHash : '')
+          ? providedCacheKey + '|mode:' + translationMode + (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : '')
           : generateTranslationCacheKey(
             jsonContent,
             sourceLang,
@@ -548,7 +548,7 @@ export default defineBackground({
                       promptStyle,
                       translationMode,
                       contextVersion: getDocumentPromptVersion(documentSystemPromptOverride, documentUserPromptTemplate) +
-                        (literaryContextHash ? '|literary-context-v2:' + literaryContextHash : ''),
+                        (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : ''),
                       systemPromptOverride: documentSystemPromptOverride,
                       userPromptTemplate: documentUserPromptTemplate,
                       ...(voiceContext !== undefined ? { voiceContext } : {}),
