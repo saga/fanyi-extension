@@ -147,7 +147,7 @@ export async function loadWorkspaceAcceptedTranslations(
 }
 
 /**
- * 将所选 EPUB/PDF 原件存入 workspace。二进制传输不经过 JSON 编码；文件名只作为元数据。
+ * 将所选文档原件存入 workspace。二进制传输不经过 JSON 编码；文件名只作为元数据。
  */
 export async function backupWorkspaceSourceFile(
   baseUrl: string,
