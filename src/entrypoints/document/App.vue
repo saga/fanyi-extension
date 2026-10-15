@@ -538,7 +538,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { createEmptyLiteraryMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
+import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -618,13 +618,17 @@ const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
 const currentPagePending = computed(() => visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()));
-const builtInDocumentSystemPrompt = computed(() => buildStyledSystemContent(
-  sourceLang.value,
-  targetLang.value,
-  literaryMode.value ? undefined : glossary.value,
-  readerConfig.value?.promptStyle || 'default',
-  literaryMode.value ? 'literary' : (readerConfig.value?.translationMode || 'technical'),
-));
+const builtInDocumentSystemPrompt = computed(() => {
+  const base = buildStyledSystemContent(
+    sourceLang.value,
+    targetLang.value,
+    literaryMode.value ? undefined : glossary.value,
+    readerConfig.value?.promptStyle || 'default',
+    literaryMode.value ? 'literary' : (readerConfig.value?.translationMode || 'technical'),
+  );
+  // Include the static book workflow instructions shown to the model, not just the generic profile.
+  return literaryMode.value ? base + '\n\n' + buildLiteraryTranslationContextPrompt() : base;
+});
 const documentStyleVars = computed(() => ({
   '--document-font-en': englishFontFamily.value,
   '--document-font-zh': chineseFontFamily.value,
