@@ -821,7 +821,21 @@ async function applyReviewProposal(finding: LiteraryReviewFinding) {
     persistenceMessage.value = '无法定位片段 ' + finding.id + '，当前文档可能已更换。';
     return;
   }
+  // 文风候选一旦被用户采用，要同时成为 workspace 的人工版本，不能只留在阅读器缓存。
+  if (readerConfig.value?.useLocalAgent) {
+    try {
+      const project = await ensureDocumentWorkspace();
+      if (!project) return;
+      await workspaceApi(readerConfig.value.localAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.localAgentToken || '',
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/segments/' + encodeURIComponent(finding.id) + '/translation',
+        { method: 'PUT', body: JSON.stringify({ text: finding.proposedTranslation }) });
+    } catch (error) {
+      persistenceMessage.value = '采用候选前保存 workspace 失败：' + (error instanceof Error ? error.message : String(error));
+      return;
+    }
+  }
   state.value.translations.set(finding.id, finding.proposedTranslation);
+  workspaceCandidateTranslations.value.delete(finding.id);
   const sourceSegment = doc.value.segments.find((segment) => segment.id === finding.id);
   if (sourceSegment) {
     literaryMemory.value = refreshLiteraryExampleTargets(literaryMemory.value, [{
@@ -1398,7 +1412,7 @@ async function loadFile(file: File) {
   loadedSourceFile.value = file;
   // 先落盘上一册的最新状态，再开始解析新文件。
   await persistCurrentSession();
-  stopTranslation();
+  await stopCurrentTranslation();
   documentFileName = file.name;
   activeSessionReady.value = false;
   persistedTranslations.value = new Map();
