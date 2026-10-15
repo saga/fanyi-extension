@@ -26,7 +26,7 @@ export interface GlossaryEntry {
 
 /** Optional metadata used only by the local-agent adapter to isolate a document's SDK Session. */
 export interface TranslationSessionContext {
-  documentSessionId: string;
+  documentSessionId?: string;
   /** Stable parallel lane for technical document batches; literary books use one serial lane. */
   sessionLane?: string;
   role: 'translation';
@@ -39,6 +39,8 @@ export interface TranslationSessionContext {
   systemPromptOverride?: string;
   /** Optional user-message template; {{CONTENT}} is replaced with the current batch JSON. */
   userPromptTemplate?: string;
+  /** 独立只读的角色声音上下文，放入 user message 而非 system prompt。 */
+  voiceContext?: unknown;
 }
 
 export interface TranslationService {
