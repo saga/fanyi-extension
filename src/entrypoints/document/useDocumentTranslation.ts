@@ -1241,7 +1241,9 @@ export function useDocumentTranslation() {
     // 章记忆只在章边界累积；同章内的批互相独立（译文按 id 回填），可以并行。
     // 本机服务是每请求独立进程 + SQLite WAL，background 的本机队列并发为 4，
     // 这里取 3：5 批的章节约 3 倍提速，又不会打爆本机服务。
-    const concurrency = literaryProfileEnabled ? 1 : Math.max(1, options.concurrency ?? 3);
+    const concurrency = literaryProfileEnabled
+      ? Math.max(1, Math.min(4, options.concurrency ?? 2))
+      : Math.max(1, options.concurrency ?? 3);
     let cursor = 0;
     // detached 审校跟踪：初译提交后审校后台跑，不占翻译 worker；
     // run 尾部统一收敛（全部落定才算本次完成）。停止/新 run 会使旧审校失效丢弃。
