@@ -331,7 +331,7 @@ describe('文学书籍记忆', () => {
         baselineRegister: '直接但不亲昵', addressTerms: ['Bob'], evidenceSegmentIds: ['a1'],
       }],
       voiceAnchors: [
-        { anchorId: 'v1', speakerId: 'char-alice', addresseeId: 'char-bob', source: 'You really think so?', target: '你真这么认为？', segmentId: 'a1', status: 'approved', approvedBy: 'user', tags: ['short-question'] },
+        { anchorId: 'v1', speakerId: 'char-alice', addresseeId: 'char-bob', source: 'You really think so?', target: '你真这么认为？', segmentId: 'a1', status: 'approved', approvedBy: 'user', attributionEvidence: 'Alice asked Bob', attributionConfidence: 0.95, tags: ['short-question'] },
         { anchorId: 'v2', speakerId: 'char-alice', source: 'Maybe.', target: '也许吧。', segmentId: 'a2', status: 'candidate', approvedBy: 'reviewer', tags: [] },
       ],
     });
@@ -359,7 +359,7 @@ describe('文学书籍记忆', () => {
       }],
       voiceAnchors: [{
         anchorId: 'anchor-1', speakerId: 'char-alice', source: 'Really?', target: '当真？',
-        segmentId: 'ch1-p1', status: 'approved', approvedBy: 'user',
+        segmentId: 'ch1-p1', status: 'approved', approvedBy: 'user', attributionEvidence: 'Alice asked', attributionConfidence: 0.9,
       }],
     });
     const incoming = sanitizeLiteraryMemory({
