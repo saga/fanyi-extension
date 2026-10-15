@@ -179,6 +179,7 @@ const props = defineProps<{
   title: string;
   format: string;
   sourceFileName: string;
+  sourceFile: File | null;
   segments: Segment[];
   visibleSegments: Segment[];
   translations: Map<string, string>;
@@ -255,6 +256,24 @@ function documentKey(): string {
   return props.format.toLowerCase() + ':' + props.segments.length + ':' + (hash >>> 0).toString(16);
 }
 
+// Stable logical identity is separate from the full content fingerprint. Re-importing a changed
+// file with the same name offers an explicit new source revision rather than silently replacing it.
+function sourceIdentityKey(): string {
+  return [props.format.toLowerCase(), props.sourceFileName.toLocaleLowerCase(), props.title.toLocaleLowerCase()].join('::');
+}
+type ProjectIdentityMap = Record<string, { projectId: string; documentKey: string }>;
+
+async function saveProjectMapping() {
+  if (!project.value) return;
+  const exact = (await storage.getItem<Record<string, string>>('local:documentAgentProjectMap')) || {};
+  exact[documentKey()] = project.value.projectId;
+  await storage.setItem('local:documentAgentProjectMap', exact);
+  const identities = (await storage.getItem<ProjectIdentityMap>('local:documentAgentProjectIdentityMap')) || {};
+  identities[sourceIdentityKey()] = { projectId: project.value.projectId, documentKey: documentKey() };
+  await storage.setItem('local:documentAgentProjectIdentityMap', identities);
+  sourceChanged.value = false;
+}
+
 function promptInput(): PromptInput {
   return {
     systemPrompt: props.systemPrompt,
@@ -273,7 +292,7 @@ async function api(path: string, init: RequestInit = {}): Promise<any> {
   const base = (props.localAgentUrl || 'http://127.0.0.1:8789').trim().replace(/\/+$/, '');
   const url = new URL(path, base + '/');
   const headers = new Headers(init.headers || {});
-  headers.set('Content-Type', 'application/json');
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (props.localAgentToken) headers.set('Authorization', 'Bearer ' + props.localAgentToken);
   const response = await fetch(url.toString(), { ...init, headers });
   const payload = await response.json().catch(() => ({}));
