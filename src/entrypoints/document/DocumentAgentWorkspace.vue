@@ -185,6 +185,9 @@ interface Segment {
   page?: number | null;
   level?: number;
   marker?: string;
+  path?: string;
+  start?: string;
+  end?: string;
 }
 interface PromptInput {
   systemPrompt: string;
@@ -240,7 +243,7 @@ const candidatePreview = computed(() => {
   const rows = Array.isArray(activeRun.value?.segments) ? activeRun.value.segments : [];
   const sourceById = new Map(props.segments.map((segment) => [segment.id, segment]));
   return rows
-    .filter((row: any) => typeof row.candidateTranslation === 'string' && row.candidateTranslation.trim())
+    .filter((row: any) => row.status === 'candidate' && typeof row.candidateTranslation === 'string' && row.candidateTranslation.trim())
     .slice(0, 8)
     .map((row: any) => {
       const source = sourceById.get(row.id);
@@ -334,7 +337,7 @@ async function loadExistingProject() {
       method: 'POST', body: JSON.stringify(promptInput()),
     });
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
-    const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status));
+    const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status)) || runs.value[0];
     if (active) await selectRun(active.runId);
     await emitWorkspaceSnapshot();
     loadSelectedTranslation();
