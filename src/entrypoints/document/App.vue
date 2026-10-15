@@ -623,7 +623,7 @@ function languageFontClass(language: string, text: string): 'font-en' | 'font-zh
   const normalized = (language || 'auto').toLowerCase();
   if (normalized.startsWith('zh')) return 'font-zh';
   if (normalized.startsWith('en')) return 'font-en';
-  if (normalized === 'auto') return /[\\u3400-\\u9fff]/.test(text) ? 'font-zh' : 'font-en';
+  if (normalized === 'auto') return /[\u3400-\u9fff]/.test(text) ? 'font-zh' : 'font-en';
   // This reader exposes separate English/Chinese typography; other scripts use the English fallback.
   return 'font-en';
 }
