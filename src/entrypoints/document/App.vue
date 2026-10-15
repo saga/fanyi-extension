@@ -1478,14 +1478,17 @@ function buildDocumentAgentSessionId(document: ParsedDocument, fileName: string)
 async function buildTranslationOptions() {
   if (!doc.value) throw new Error('尚未打开文档');
   const config = await getConfig();
+  readerConfig.value = config;
   return {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
     glossary: glossary.value,
     promptStyle: config.promptStyle,
     translationMode: config.translationMode || 'technical',
-    documentSystemPromptOverride: config.documentSystemPromptOverride || undefined,
-    documentUserPromptTemplate: config.documentUserPromptTemplate || undefined,
+    // Send exactly the prompt shown in this editor even when the user is using built-in defaults.
+    // This keeps local Agent and direct server/provider request formats consistent and editable.
+    documentSystemPromptOverride: config.documentSystemPromptOverride?.trim() || builtInDocumentSystemPrompt.value,
+    documentUserPromptTemplate: config.documentUserPromptTemplate?.trim() || BUILT_IN_USER_PROMPT_TEMPLATE,
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
     useServerTranslation: config.useServerTranslation && !config.useLocalAgent,
     useLocalAgent: config.useLocalAgent,
