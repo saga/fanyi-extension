@@ -116,7 +116,7 @@ export async function importWorkspaceTranslations(
   const rows = translations instanceof Map
     ? Array.from(translations, ([id, text]) => ({ id, text }))
     : translations;
-  // 分块发送，避免一整本书的正文让 JSON 请求超过本机服务 6 MiB 上限。
+  // 分批导入已采纳译文，避免一次请求复制整本书的译文数组；/api/documents/* 的 JSON 上限为 100 MiB。
   for (let offset = 0; offset < rows.length; offset += 200) {
     await workspaceApi(baseUrl, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/translations/import', {
       method: 'POST',
