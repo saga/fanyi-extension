@@ -156,8 +156,8 @@
       <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
         <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
           :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0), { 'is-active': state.activeSegmentIds?.has(seg.id) }]">
-          <div v-if="viewMode !== 'translation'" class="or">{{ seg.text }}</div>
-          <div v-if="viewMode !== 'original'" class="tr">
+          <div v-if="viewMode !== 'translation'" class="or font-en">{{ seg.text }}</div>
+          <div v-if="viewMode !== 'original'" class="tr font-zh">
             <template v-if="state.translations.get(seg.id)">{{ state.translations.get(seg.id) }}</template>
             <span v-else-if="state.running && state.activeSegmentIds?.has(seg.id)" class="tr-pending">翻译中…</span>
             <span v-else-if="!state.running && state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
@@ -290,12 +290,12 @@
           <span><strong>User Prompt</strong> · 用户消息模板</span>
           <textarea v-model="documentUserPromptEditor" rows="7" spellcheck="false"
             aria-label="文档 User Prompt 模板"></textarea>
-          <small class="muted">使用 <code>{{ '{{CONTENT}}' }}</code> 作为本批内容占位符。内容是包含片段 ID、原文和结构元数据的 JSON；不要删除占位符，否则系统会自动在末尾追加 JSON。</small>
+          <small class="muted">在模板中使用双大括号包住 CONTENT 作为本批内容占位符。内容是包含片段 ID、原文和结构元数据的 JSON；不要删除占位符，否则系统会自动在末尾追加 JSON。</small>
         </label>
         <details class="built-in-prompt-preview">
           <summary>查看完整模板会怎样替换本批内容</summary>
-          <p class="muted small">实际请求会将模板中的 <code>{{ '{{CONTENT}}' }}</code> 替换为当前页的段落 JSON，不会把整本书一次塞进单条请求。</p>
-          <pre>{{ documentUserPromptEditor.replace('{{ '{{CONTENT}}', '[当前页片段 JSON 在发送时插入]').replace('}}', '') }}</pre>
+          <p class="muted small">预览展示占位符替换后的效果；实际发送时只注入本批片段，不会把整本书塞进单条请求。</p>
+          <pre>{{ userPromptPreview }}</pre>
         </details>
         <div class="settings-actions">
           <button class="btn primary" @click="saveDocumentPromptSettings">保存 Prompt</button>
@@ -572,7 +572,7 @@ const BUILT_IN_USER_PROMPT_TEMPLATE = [
   '请翻译以下 JSON 数组中的每个对象。只翻译 text 字段，必须保留 id、顺序、段落边界和结构信息。',
   'contextPath、kind、level、marker 等字段是只读元数据，不能写入译文。只返回与输入 ID 一一对应的 JSON 译文，不要增加解释或额外字段。',
   '', 'JSON:', '', '{{CONTENT}}',
-].join('\\n');
+].join(String.fromCharCode(10));
 const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
 /** 当 IndexedDB 不可用时，仅凭 SQLite 的轻量摘要也要显示恢复入口。 */
 const localSessionSummary = ref<{ title: string; format: string; updatedAt: string } | null>(null);
@@ -624,6 +624,9 @@ const documentStyleVars = computed(() => ({
   '--document-size-en': englishFontSize.value + 'px',
   '--document-size-zh': chineseFontSize.value + 'px',
 }));
+const userPromptPreview = computed(() => documentUserPromptEditor.value
+  .split('{' + '{CONTENT}' + '}')
+  .join('[当前页片段 JSON 在发送时插入]'));
 const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
 const pendingEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus !== 'confirmed').length);
@@ -1424,10 +1427,27 @@ async function buildTranslationOptions() {
 }
 
 async function startTranslate() {
-  if (!doc.value) return;
+  if (!doc.value || !visibleSegments.value.length || !currentPagePending.value) return;
   const options = await buildTranslationOptions();
-  // 停止、网络中断或部分失败后继续执行；保留已有译文并只发送缺失片段。
-  await run(doc.value.segments, options, state.value.total > 0);
+  // 普通按钮只翻译当前显示页。文学模式仍用整章建立实体记忆，但不会顺手翻译整章。
+  await run(doc.value.segments, {
+    ...options,
+    onlyPrioritySegments: true,
+    prioritySegmentIds: visibleSegments.value.map((segment) => segment.id),
+    currentPageTitle: currentPage.value?.title || doc.value.title,
+  }, true);
+}
+
+async function forceTranslateCurrentPage() {
+  if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  const options = await buildTranslationOptions();
+  await run(doc.value.segments, {
+    ...options,
+    forceRefresh: true,
+    onlyPrioritySegments: true,
+    prioritySegmentIds: visibleSegments.value.map((segment) => segment.id),
+    currentPageTitle: currentPage.value?.title || doc.value.title,
+  }, true);
 }
 
 async function retry() {
