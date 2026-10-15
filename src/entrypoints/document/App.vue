@@ -623,7 +623,13 @@ function languageFontClass(language: string, text: string): 'font-en' | 'font-zh
   const normalized = (language || 'auto').toLowerCase();
   if (normalized.startsWith('zh')) return 'font-zh';
   if (normalized.startsWith('en')) return 'font-en';
-  if (normalized === 'auto') return /[\u3400-\u9fff]/.test(text) ? 'font-zh' : 'font-en';
+  if (normalized === 'auto') {
+    // Use the Chinese font when CJK is a meaningful part of the segment, not for a lone
+    // Chinese name embedded in an otherwise English paragraph.
+    const cjk = (text.match(/[\u3400-\u9fff]/g) || []).length;
+    const latin = (text.match(/[A-Za-z]/g) || []).length;
+    return cjk > 0 && cjk >= latin * 0.25 ? 'font-zh' : 'font-en';
+  }
   // This reader exposes separate English/Chinese typography; other scripts use the English fallback.
   return 'font-en';
 }
