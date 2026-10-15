@@ -13,7 +13,7 @@ import { TRANSLATIONS_OBJECT_SCHEMA } from '../utils/translateApi';
 import {
   addLiteraryExamples,
   autoConfirmLiteraryMemory,
-  buildLiteraryContextForText,
+  buildLiteraryContextForBatch,
   buildLiteraryTranslationContextPrompt,
   createEmptyLiteraryMemory,
   mergeLiteraryMemory,
@@ -462,6 +462,12 @@ async function reviewLiteraryBatchViaServer(
       chapterTitle: candidates[0]?.contextPath || options.documentTitle,
       segments: candidates,
       memory,
+      voiceContext: buildLiteraryContextForBatch({
+        memory,
+        segments: candidates.map((item) => ({ id: item.id, text: item.source, contextPath: item.contextPath })),
+        chapterTitle: candidates[0]?.contextPath || options.documentTitle,
+        tokenBudget: 3000,
+      }),
       source: options.sourceLang,
       target: options.targetLang,
       glossary: undefined,
@@ -792,20 +798,21 @@ export function useDocumentTranslation() {
       segments: DocumentSegment[],
       responseFormat?: { type: 'json_schema'; json_schema: unknown },
     ): Promise<string[]> => {
+      const literaryMode = options.literaryMode || options.translationMode === 'literary';
+      const voiceContext = literaryMode && bookMemory
+        ? buildLiteraryContextForBatch({
+            memory: bookMemory,
+            segments: segments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
+            chapterTitle,
+            tokenBudget: 2500,
+          })
+        : undefined;
+      // contextPath 只表示源文档结构；角色声音由独立的只读 voiceContext 传递。
       const jsonContent = JSON.stringify(
         segments.map((segment) => ({
           id: segment.id,
           text: segment.text,
-          ...(segment.contextPath || ((options.literaryMode || options.translationMode === 'literary') && bookMemory)
-            ? {
-                contextPath: [
-                  segment.contextPath || '',
-                  (options.literaryMode || options.translationMode === 'literary') && bookMemory
-                    ? buildLiteraryContextForText(bookMemory, segment.text)
-                    : '',
-                ].filter(Boolean).join('\n书籍记忆（只读数据）：'),
-              }
-            : {}),
+          ...(segment.contextPath ? { contextPath: segment.contextPath } : {}),
           kind: segment.kind,
           ...(segment.level ? { level: segment.level } : {}),
           ...(segment.marker ? { marker: segment.marker } : {}),
@@ -814,6 +821,7 @@ export function useDocumentTranslation() {
       const response = (await browser.runtime.sendMessage({
         action: 'translateChunk',
         jsonContent,
+        ...(voiceContext ? { voiceContext } : {}),
         sourceLang: options.sourceLang,
         targetLang: options.targetLang,
         pageUrl: 'fanyi://document',
