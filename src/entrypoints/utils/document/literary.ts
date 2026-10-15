@@ -189,14 +189,50 @@ function entityKind(value: unknown): LiteraryEntityKind {
 export function createEmptyLiteraryMemory(): LiteraryBookMemory {
   return { version: 2, entities: [], relationships: [], styleGuide: {}, chapterSummaries: [], recentExamples: [], characterVoices: [], relationshipVoiceRules: [], voiceAnchors: [] };
 }
+function normalizedEntityName(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’\-]+/g, ' ').trim();
+}
+
+/**
+ * 合并“明确以 alias 相互指向”的同一实体，而不是只按 source 去重。
+ * 保留先出现的规范译名；后续批次只能补充别名和证据，不能因另一个别名重新音译。
+ * 不根据字符串包含关系猜测人物身份，避免把不同角色误合并。
+ */
 function dedupeEntities(entities: LiteraryEntity[]): LiteraryEntity[] {
-  const seen = new Set<string>();
-  return entities.filter((entity) => {
-    const key = entity.source.toLocaleLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const merged: LiteraryEntity[] = [];
+  for (const entity of entities) {
+    const sourceKey = normalizedEntityName(entity.source);
+    const index = merged.findIndex((prior) => {
+      if (normalizedEntityName(prior.source) === sourceKey) return true;
+      if (prior.kind !== entity.kind && prior.kind !== 'other' && entity.kind !== 'other') return false;
+      const priorAliases = (prior.aliases ?? []).map(normalizedEntityName);
+      const entityAliases = (entity.aliases ?? []).map(normalizedEntityName);
+      return priorAliases.includes(sourceKey) || entityAliases.includes(normalizedEntityName(prior.source));
+    });
+    if (index < 0) {
+      merged.push(entity);
+      continue;
+    }
+
+    const prior = merged[index]!;
+    const canonicalKey = normalizedEntityName(prior.source);
+    const aliasMap = new Map<string, string>();
+    for (const alias of [...(prior.aliases ?? []), prior.source, ...(entity.aliases ?? []), entity.source]) {
+      const key = normalizedEntityName(alias);
+      if (key && key !== canonicalKey && !aliasMap.has(key)) aliasMap.set(key, alias);
+    }
+    const sameTarget = normalizedEntityName(prior.target) === normalizedEntityName(entity.target);
+    merged[index] = {
+      ...prior,
+      aliases: Array.from(aliasMap.values()).slice(0, 8),
+      ...(sameTarget && prior.reviewStatus !== 'confirmed' && entity.reviewStatus === 'confirmed'
+        ? { reviewStatus: 'confirmed' as const }
+        : {}),
+      description: prior.description || entity.description,
+      evidence: prior.evidence || entity.evidence,
+    };
+  }
+  return merged;
 }
 function dedupeRelationships(relationships: LiteraryRelationship[]): LiteraryRelationship[] {
   const seen = new Set<string>();
@@ -409,24 +445,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
 export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unknown): LiteraryBookMemory {
   const existing = sanitizeLiteraryMemory(existingInput);
   const incoming = sanitizeLiteraryMemory(incomingInput);
-  const entityMap = new Map(existing.entities.map((entity) => [entity.source.toLocaleLowerCase(), entity]));
-  for (const entity of incoming.entities) {
-    const key = entity.source.toLocaleLowerCase();
-    const prior = entityMap.get(key);
-    if (!prior) { entityMap.set(key, entity); continue; }
-    entityMap.set(key, {
-      ...prior,
-      // 跨章节印证：旧的待确认 + 新分析给出相同译名，自动转正确认，
-      // 免去逐条点击；译名不一致时沿用旧目标（先到先得，不静默改名）。
-      ...(prior.reviewStatus !== 'confirmed' && entity.reviewStatus === 'confirmed' &&
-        prior.target === entity.target
-        ? { reviewStatus: 'confirmed' as const }
-        : {}),
-      aliases: Array.from(new Set([...(prior.aliases ?? []), ...(entity.aliases ?? [])])).slice(0, 8),
-      description: prior.description || entity.description,
-      evidence: prior.evidence || entity.evidence,
-    });
-  }
+  // 保持已有译名优先；dedupeEntities 同时将明确互为别名的跨章记录折叠成一个规范实体。
+  const entities = dedupeEntities([...existing.entities, ...incoming.entities]).slice(0, MAX_ENTITIES);
   const styleGuide: LiteraryStyleGuide = { ...incoming.styleGuide, ...existing.styleGuide };
   const avoid = Array.from(new Set([...(existing.styleGuide.avoid ?? []), ...(incoming.styleGuide.avoid ?? [])])).slice(0, 12);
   if (avoid.length) styleGuide.avoid = avoid;
@@ -436,7 +456,7 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
   }
   return sanitizeLiteraryMemory({
     version: 2,
-    entities: Array.from(entityMap.values()),
+    entities,
     relationships: [...existing.relationships, ...incoming.relationships],
     styleGuide,
     chapterSummaries: Array.from(summaries.values()).slice(-MAX_SUMMARIES),
@@ -691,6 +711,8 @@ export function buildLiteraryTranslationContextPrompt(chapterTitle = ''): string
     '忠实保留原意、叙述视角、人物动机、事实细节和关系，在此基础上使用自然的文学表达，保留文字的节奏、味道和人物声音。',
     '各片段的 voiceContext 是独立的只读书籍记忆 JSON；用它维持实体译名、经确认的角色声音、关系语言规则和批准锚点。contextPath 只表示章节/页面结构，绝不能混入角色记忆。',
     'reviewStatus=confirmed 表示已纳入规范（用户明确确认，或模型提供原文依据后自动纳入），必须遵守；suggested 是待核对建议，原文有明确反证时应报告冲突，不得静默改动已纳入规范的映射。',
+    '书籍记忆中 source 与 aliases 指向同一实体时，所有形式必须统一使用该实体的 target；target 只代表名称本身，不要因原文改用简称或全名而重新音译。',
+    '区分姓名与头衔：英文 Lady 按人物关系和语境译作“夫人/女士/小姐”或自然省略，不得默认译成“大人”；日语 -san 也不能一律译成“大人”。Lord 是否译作“大人/主公”等须按身份判断，不能把称谓并入人名。',
     '关系记忆只用于消歧，不要把角色关系说明写进正文。不要擅自解释悬念、含混、反讽和信息差。',
     '保持叙述声音、时代感、语域、句子节奏、对话口吻和用词习惯；不同人物不能被润色成同一种声音。',
     '去掉翻译腔和 AI 味：避免机械对应原文语序、模板化转折、重复总结、无意义强调、解释性补句和过度工整的排比。不要为了显得文学而添加原文没有的比喻或情绪。',
