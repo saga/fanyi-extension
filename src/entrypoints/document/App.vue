@@ -604,6 +604,7 @@ const {
   state,
   run,
   retryFailed,
+  reviewExistingSegments,
   stop: stopTranslation,
   reset: resetTranslation,
   literaryMemory,
@@ -754,6 +755,21 @@ async function dismissReviewProposal(finding: LiteraryReviewFinding) {
   }
   persistenceMessage.value = '已保留当前译文：' + finding.id;
   await persistCurrentSession();
+}
+
+async function rereviewSegment(id: string) {
+  if (!doc.value || state.value.running) return;
+  const segment = doc.value.segments.find((item) => item.id === id);
+  if (!segment || !state.value.translations.get(id)?.trim()) {
+    persistenceMessage.value = '没有找到这段现有译文。请先翻译对应页面，再重新审校。';
+    return;
+  }
+  const options = await buildTranslationOptions();
+  activeTab.value = 'memory';
+  await reviewExistingSegments([segment], options);
+  if (!state.value.error) {
+    persistenceMessage.value = '片段 ' + id + ' 已重新审校。纯文风候选不会自动覆盖正文，可在审校工作区中采用或保留。';
+  }
 }
 
 function showReviewSegment(id: string) {
