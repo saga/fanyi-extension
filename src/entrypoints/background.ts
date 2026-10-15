@@ -393,7 +393,7 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate, voiceContext } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate, voiceContext, precedingSegments } = message;
         // A document may explicitly enter literary mode even when the global profile is technical.
         const translationMode: TranslationMode = message.translationMode === 'literary' || !!literaryContext
           ? 'literary'
@@ -440,12 +440,18 @@ export default defineBackground({
         // glossary/sitePrompt 为空时 key 与改动前一致，旧缓存不无谓失效。
         // 声音画像/关系规则/锚点发生变化时必须失效旧文学译文缓存。这个 hash 只进入缓存身份，
         // 不进入 system prompt；普通网页请求没有 voiceContext，缓存身份和行为保持不变。
-        const voiceContextHash = voiceContext === undefined ? '' : String(simpleHash(JSON.stringify(voiceContext)));
-        const cachePromptFingerprint = voiceContextHash
-          ? effectivePrompt + '|voice-context-v1:' + voiceContextHash
+        const literaryContextHash = voiceContext === undefined && !precedingSegments?.length
+          ? ''
+          : String(simpleHash(JSON.stringify({
+              policyVersion: 'character-voice-v2',
+              voiceContext: voiceContext ?? null,
+              precedingSegments: (precedingSegments || []).slice(-4),
+            })));
+        const cachePromptFingerprint = literaryContextHash
+          ? effectivePrompt + '|literary-context-v2:' + literaryContextHash
           : effectivePrompt;
         const cacheKey = providedCacheKey
-          ? providedCacheKey + '|mode:' + translationMode + (voiceContextHash ? '|voice-v1:' + voiceContextHash : '')
+          ? providedCacheKey + '|mode:' + translationMode + (literaryContextHash ? '|literary-context-v2:' + literaryContextHash : '')
           : generateTranslationCacheKey(
             jsonContent,
             sourceLang,
@@ -542,10 +548,11 @@ export default defineBackground({
                       promptStyle,
                       translationMode,
                       contextVersion: getDocumentPromptVersion(documentSystemPromptOverride, documentUserPromptTemplate) +
-                        (voiceContextHash ? '|voice-v1:' + voiceContextHash : ''),
+                        (literaryContextHash ? '|literary-context-v2:' + literaryContextHash : ''),
                       systemPromptOverride: documentSystemPromptOverride,
                       userPromptTemplate: documentUserPromptTemplate,
                       ...(voiceContext !== undefined ? { voiceContext } : {}),
+                      ...(precedingSegments?.length ? { precedingSegments: precedingSegments.slice(-4) } : {}),
                     }
                   : undefined,
               );
