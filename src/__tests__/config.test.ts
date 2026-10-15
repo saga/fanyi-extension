@@ -42,6 +42,19 @@ const defaultConfig: Config = {
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
+  documentSourceLang: 'auto',
+  documentTargetLang: 'zh',
+  documentDeepseekApiKey: '',
+  documentProvider: 'deepseek',
+  documentPromptStyle: 'default',
+  documentTranslationMode: 'technical',
+  documentUseServerTranslation: false,
+  documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
+  documentUseLocalAgent: false,
+  documentLocalAgentProvider: 'workbuddy',
+  documentLocalAgentUrl: 'http://127.0.0.1:8789',
+  documentLocalAgentModel: 'auto',
+  documentLocalAgentToken: '',
 };
 
 describe('config', () => {
@@ -58,6 +71,59 @@ describe('config', () => {
 
   });
 
+
+  describe('document-specific translation config', () => {
+    it('inherits legacy global provider values until document settings are explicitly saved', async () => {
+      store['local:config'] = {
+        provider: 'openrouter',
+        deepseekApiKey: 'page-key',
+        useLocalAgent: true,
+        localAgentProvider: 'opencode',
+        localAgentUrl: 'http://127.0.0.1:9999',
+        translationMode: 'literary',
+      };
+      const config = await getConfig();
+      expect(config.documentProvider).toBe('openrouter');
+      expect(config.documentDeepseekApiKey).toBe('page-key');
+      expect(config.documentUseLocalAgent).toBe(true);
+      expect(config.documentLocalAgentProvider).toBe('opencode');
+      expect(config.documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
+      expect(config.documentTranslationMode).toBe('literary');
+    });
+
+    it('does not freeze inherited document settings when saving a global page provider change', async () => {
+      store['local:config'] = { provider: 'deepseek', localAgentModel: 'global-model' };
+      await setConfig({ provider: 'gemini' });
+      expect(store['local:config'].provider).toBe('gemini');
+      expect(Object.hasOwn(store['local:config'], 'documentProvider')).toBe(false);
+      expect(Object.hasOwn(store['local:config'], 'documentLocalAgentModel')).toBe(false);
+      expect((await getConfig()).documentProvider).toBe('gemini');
+    });
+
+    it('keeps document provider independent once a document profile is saved', async () => {
+      store['local:config'] = { provider: 'deepseek' };
+      const inherited = await getConfig();
+      await setConfig({
+        documentProvider: 'openrouter',
+        documentDeepseekApiKey: inherited.documentDeepseekApiKey,
+        documentSourceLang: inherited.documentSourceLang,
+        documentTargetLang: inherited.documentTargetLang,
+        documentPromptStyle: inherited.documentPromptStyle,
+        documentTranslationMode: inherited.documentTranslationMode,
+        documentUseServerTranslation: inherited.documentUseServerTranslation,
+        documentServerUrl: inherited.documentServerUrl,
+        documentUseLocalAgent: inherited.documentUseLocalAgent,
+        documentLocalAgentProvider: inherited.documentLocalAgentProvider,
+        documentLocalAgentUrl: inherited.documentLocalAgentUrl,
+        documentLocalAgentModel: inherited.documentLocalAgentModel,
+        documentLocalAgentToken: inherited.documentLocalAgentToken,
+      });
+      await setConfig({ provider: 'gemini' });
+      const config = await getConfig();
+      expect(config.provider).toBe('gemini');
+      expect(config.documentProvider).toBe('openrouter');
+    });
+  });
 
   describe('resetConfig', () => {
 
