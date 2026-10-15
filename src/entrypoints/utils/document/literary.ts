@@ -94,6 +94,8 @@ export interface LiteraryVoiceContext {
   version: 1;
   policyVersion: 'character-voice-v1';
   styleGuide: LiteraryStyleGuide;
+  /** 当前批所在章节与片段位置；这里只传可验证的结构信息，不推测人物情绪或说话人。 */
+  scene: { chapterTitle?: string; contextPaths: string[]; segmentIds: string[] };
   /** 与当前批有关的确认实体译名和剧情关系，不能被角色声线替代。 */
   entities: Array<Pick<LiteraryEntity, 'source' | 'target' | 'kind' | 'aliases' | 'reviewStatus'>>;
   relationships: LiteraryRelationship[];
@@ -622,6 +624,11 @@ export function buildLiteraryContextForBatch(input: {
   const result: LiteraryVoiceContext = {
     version: 1, policyVersion: 'character-voice-v1',
     styleGuide: memory.styleGuide,
+    scene: {
+      ...(input.chapterTitle ? { chapterTitle: input.chapterTitle.slice(0, 160) } : {}),
+      contextPaths: Array.from(new Set(input.segments.map((segment) => segment.contextPath?.trim()).filter((value): value is string => !!value))).slice(0, 6),
+      segmentIds: input.segments.map((segment) => segment.id).slice(0, 24),
+    },
     entities,
     relationships,
     recentExamples: memory.recentExamples.slice(-2),
