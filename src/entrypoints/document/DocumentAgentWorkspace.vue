@@ -23,6 +23,19 @@
     </div>
 
     <template v-if="project">
+      <div v-if="sourceChanged" class="source-change-notice">
+        <strong>检测到同名文档的来源内容已经变化</strong>
+        <p>系统不会自动覆盖旧来源。确认后可以在同一项目中登记新的来源版本；旧运行和人工修订仍会保留。未确认前禁止启动翻译，避免把旧译文映射到新原文。</p>
+        <div class="agent-actions">
+          <button class="btn primary" :disabled="busy || isRunning || !segments.length" @click="updateSourceRevision">导入为新来源版本</button>
+          <button class="btn" :disabled="busy || isRunning" @click="createSeparateProject">另建独立项目</button>
+        </div>
+      </div>
+      <div v-else-if="!project.sourceFileSaved && sourceFile" class="source-change-notice">
+        <strong>尚未备份原始文件</strong>
+        <p>当前项目已保存解析后的源文本与片段。上传原始文件到本机项目目录，便于后续恢复、核对和导出。</p>
+        <button class="btn" :disabled="busy" @click="uploadCurrentSourceFile">备份原始文件</button>
+      </div>
       <div class="project-overview">
         <div class="overview-item">
           <span class="muted small">来源版本</span>
@@ -43,9 +56,9 @@
       </div>
 
       <div class="agent-actions">
-        <button class="btn primary" :disabled="busy || isRunning" @click="startRun('stale')">翻译过期 / 未完成内容</button>
-        <button class="btn" :disabled="busy || isRunning" @click="startRun('failed')">重试失败片段</button>
-        <button class="btn" :disabled="busy || isRunning" @click="startRun('all')">生成全书新候选</button>
+        <button class="btn primary" :disabled="busy || isRunning" @click="startRun('stale')" :disabled="busy || isRunning || sourceChanged">翻译过期 / 未完成内容</button>
+        <button class="btn" :disabled="busy || isRunning" @click="startRun('failed')" :disabled="busy || isRunning || sourceChanged">重试失败片段</button>
+        <button class="btn" :disabled="busy || isRunning" @click="startRun('all')" :disabled="busy || isRunning || sourceChanged">生成全书新候选</button>
         <button v-if="isRunning" class="btn warn" :disabled="busy" @click="cancelRun">停止运行</button>
         <button v-else-if="activeRun?.status === 'paused' || activeRun?.status === 'failed' || activeRun?.status === 'partial'" class="btn" :disabled="busy" @click="resumeRun">恢复 / 继续失败项</button>
         <button class="btn ghost" :disabled="busy" @click="refreshProject">刷新状态</button>
@@ -314,10 +327,17 @@ async function createProject() {
       }),
     });
     project.value = response.project;
-    const mapping = (await storage.getItem<Record<string, string>>('local:documentAgentProjectMap')) || {};
-    mapping[documentKey()] = project.value.projectId;
-    await storage.setItem('local:documentAgentProjectMap', mapping);
-    message.value = '文档项目已创建；原始片段、Prompt 版本和后续运行会独立保存。';
+    await saveProjectMapping();
+    message.value = '文档项目已创建，来源片段和翻译运行会独立保存。';
+    if (props.sourceFile) {
+      try {
+        await uploadCurrentSourceFile();
+      } catch (uploadError) {
+        message.value = '项目已创建，但原始文件备份失败：' + (uploadError instanceof Error ? uploadError.message : String(uploadError)) + '。可点击“备份原始文件”重试。';
+      }
+    } else {
+      message.value += ' 当前没有原始文件对象，项目暂时只保存解析后的片段。';
+    }
     await refreshProject();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -328,10 +348,14 @@ async function loadExistingProject() {
   if (!props.useLocalAgent || !props.segments.length) return;
   try {
     const mapping = (await storage.getItem<Record<string, string>>('local:documentAgentProjectMap')) || {};
-    const projectId = mapping[documentKey()];
+    const identities = (await storage.getItem<ProjectIdentityMap>('local:documentAgentProjectIdentityMap')) || {};
+    const identity = identities[sourceIdentityKey()];
+    const exactProjectId = mapping[documentKey()];
+    const projectId = exactProjectId || identity?.projectId;
     if (!projectId) return;
     const result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
     project.value = result.project;
+    sourceChanged.value = !exactProjectId && !!identity && identity.documentKey !== documentKey();
     verification.value = result.verification;
     runs.value = result.runs || [];
     const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status));
