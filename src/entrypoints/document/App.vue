@@ -769,6 +769,23 @@ function jumpToWorkChapter() {
   }
 }
 
+watch(activeTab, async (nextTab, previousTab) => {
+  if (nextTab !== 'reading' || previousTab !== 'agent' || !doc.value) return;
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (!config.useLocalAgent) return;
+  try {
+    const project = await ensureDocumentWorkspace();
+    if (!project) return;
+    const active = workspaceActiveRun.value;
+    if (active && ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(active.status)) {
+      await followWorkspaceRun(project, active);
+    }
+  } catch (error) {
+    state.value.error = '同步 workspace 状态失败：' + (error instanceof Error ? error.message : String(error));
+  }
+});
+
 watch(currentPageIndex, async () => {
   await nextTick();
   readerRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
