@@ -1928,6 +1928,11 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
   }
   // 首次切换时迁移 IndexedDB 已有译文；只填数据库中没有当前来源版本的片段。
   await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
+  // 初始化项目时可能先于导入旧译文保存了 Voice Bible；导入后重新核验锚点的原文与已采纳译文。
+  await workspaceApi(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory', {
+    method: 'POST',
+    body: JSON.stringify({ memory: literaryMemory.value }),
+  });
   if (!project.sourceFileSaved && loadedSourceFile.value) {
     try {
       await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
