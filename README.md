@@ -63,7 +63,7 @@ npm run local-agent:start
 
 本机服务使用 SQLite 保存请求历史、翻译缓存和文档恢复副本，默认数据库位于 `~/.vocal-saga-local-agent/local-agent.sqlite`。请求正文是否记录由 `LOCAL_AGENT_STORE_CONTENT` 控制；翻译缓存和文档检查点是独立业务数据，不受该选项关闭影响。更多配置、数据上限和清理方法见 [本机服务说明](https://github.com/devweekly/vocal-saga/blob/main/local-agent-service/README.md)。
 
-EPUB/PDF 文件选择和容器解析仍由扩展在浏览器中处理；本机服务负责本机模型调用、文学分析/审校、SQLite 翻译缓存以及文档检查点。阅读器优先使用 IndexedDB，SQLite 作为附加恢复副本。 当开启“本机 Agent”时，EPUB/PDF 阅读页和“翻译 Agent”共用一个 workspace：workspace 项目 SQLite 保存来源版本、Prompt 版本、运行/批次状态、候选译文、采纳译文、人工修订与完整事件记录；原始文件按来源版本存放在项目目录。阅读页和 Agent Tab 都通过同一 Translation Agent 运行；任务完成后会自动把有效候选写入当前译文，并同步回阅读器，不需要用户逐条采纳或预先填写译文。重新翻译时，同一原文版本已有的人工修订优先保留；用户仍可在“更多选项”中按需手工纠正、查看运行历史或重试失败项。两个入口使用同一份 system/user Prompt、语言方向、模型、术语表和书籍记忆。旧阅读器已有译文会在创建/关联 workspace 时导入，后续以 workspace 中当前来源版本的已采纳译文为准。注意：扩展可打开不超过 20 MiB 的文件，但 SQLite 单个文档检查点的 JSON 上限是 5 MiB（HTTP 请求体上限 6 MiB）；大文档仍可使用 IndexedDB，但 SQLite 可能无法备份完整快照。如果 IndexedDB 也不可用，该文档刷新后可能无法恢复。清空翻译缓存不等于删除文档检查点或请求历史；要清除所有 SQLite 中的本机内容，可在服务停止后删除整个数据库文件。
+EPUB/PDF 文件选择和容器解析仍由扩展在浏览器中处理；本机服务负责本机模型调用、文学分析/审校、SQLite 翻译缓存以及文档检查点。阅读器优先使用 IndexedDB，SQLite 作为附加恢复副本。当开启“本机 Agent”时，EPUB/PDF 阅读页和“翻译 Agent”共用一个 workspace：workspace 项目 SQLite 保存来源版本、Prompt 版本、运行/批次状态、候选译文、采纳译文、人工修订与完整事件记录；原始文件按来源版本存放在项目目录。阅读页和 Agent Tab 都通过同一 Translation Agent 运行；任务完成后会自动把有效候选写入当前译文，并同步回阅读器，不需要用户逐条采纳或预先填写译文。重新翻译时，同一原文版本已有的人工修订优先保留；用户仍可在“更多选项”中按需手工纠正、查看运行历史或重试失败项。两个入口使用同一份 system/user Prompt、语言方向、模型、术语表和书籍记忆。旧阅读器已有译文会在创建/关联 workspace 时导入，后续以 workspace 中当前来源版本的已采纳译文为准。注意：扩展可打开不超过 20 MiB 的文件。SQLite 单个文档检查点的 JSON 上限为 5 MiB，这是额外恢复副本的存储限制，不是 project API 的 HTTP 限制；`/api/documents/*` JSON 请求体上限为 100 MiB，其他本机服务 JSON API 为 24 MiB，原始源文件上传上限为 20 MiB。大文档仍可使用 IndexedDB，但 SQLite 可能无法备份完整快照。如果 IndexedDB 也不可用，该文档刷新后可能无法恢复。清空翻译缓存不等于删除文档检查点或请求历史；要清除所有 SQLite 中的本机内容，可在服务停止后删除整个数据库文件。
 
 ## 🎮 快捷键
 
@@ -317,7 +317,7 @@ flowchart TD
     A[Open EPUB/PDF/Office] --> B[Browser parser emits stable segments]
     B --> C[Create/select Local Agent project and start run]
     C --> D[Service persists run plan and allocates bounded workers]
-    D --> E[Translate batch: up to 2 workers while review runs, independent scopes]
+    D --> E[Pool 4: review on = 2 translators + 2 reviewers; off = up to 4 translators]
     E --> F[Persist first-pass candidate + emit batch.translation.completed]
     F --> G{Literary review enabled?}
     G -- No --> H[Emit batch.completed]
@@ -335,7 +335,7 @@ flowchart TD
     I -. Cancellation .-> P
 ```
 
-> Local Agent mode is an explicit routing choice. Local model failures do not trigger automatic fallback to the cloud/DeepSeek provider.
+> Local Agent mode is an explicit routing choice. Local model failures do not trigger automatic fallback to the cloud/DeepSeek provider. Both worker caps are upper bounds constrained by `LOCAL_AGENT_POOL_SIZE`; each batch uses an independent Session scope.
 
 ## 📝 开发
 
