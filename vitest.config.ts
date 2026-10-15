@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    exclude: ['other-ref/**', 'node_modules', 'dist'],
+    exclude: ['other-ref/**', '.cross-sync/**', 'node_modules', 'dist'],
   },
 });
