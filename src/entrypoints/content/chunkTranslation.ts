@@ -266,15 +266,19 @@ export async function translateChunksViaBackground(
   promptStyle?: PromptStyle,
   skipWarmup: boolean = false,
   translationMode: TranslationMode = 'technical',
-): Promise<{ allSucceeded: boolean; translatedIds: Set<string> }> {
+  /** Pass null to deliberately skip preflight on retries when the original analysis had no result. */
+  voiceContextOverride?: unknown,
+): Promise<{ allSucceeded: boolean; translatedIds: Set<string>; voiceContext: unknown }> {
   const runStartedAt = Date.now();
   logger.debug('[ContentScript] translateChunksViaBackground called, chunks:', chunks.length);
 
   const maxConcurrency = isMobile ? 2 : 4;
 
-  const voiceContext = translationMode === 'literary'
-    ? await extractPageLiteraryEntityContext(chunks, sourceLang, targetLang, promptStyle)
-    : undefined;
+  const voiceContext = voiceContextOverride !== undefined
+    ? (voiceContextOverride ?? undefined)
+    : translationMode === 'literary'
+      ? await extractPageLiteraryEntityContext(chunks, sourceLang, targetLang, promptStyle)
+      : undefined;
   if (voiceContext) logger.debug('[ContentScript] Page literary entity context ready:',
     (voiceContext as { entities?: unknown[] }).entities?.length ?? 0, 'entities');
   logger.debug(
@@ -386,7 +390,7 @@ export async function translateChunksViaBackground(
     (stats.firstErrorMsg ? ` firstError="${stats.firstErrorMsg.substring(0, 100)}"` : '') +
     ` wallMs=${Date.now() - runStartedAt} warmupSkipped=${skipWarmup}`,
   );
-  return { allSucceeded: !hasFailure, translatedIds };
+  return { allSucceeded: !hasFailure, translatedIds, voiceContext: voiceContext ?? null };
 }
 
 // ============================================================
