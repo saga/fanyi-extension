@@ -103,7 +103,7 @@
           <button
             v-if="!state.running"
             class="btn primary"
-            :disabled="!currentPagePending"
+            :disabled="!hasPendingDocument"
             @click="startTranslate">
             {{ startLabel }}
           </button>
@@ -618,6 +618,9 @@ const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
 const currentPagePending = computed(() => visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()));
+const hasPendingDocument = computed(() =>
+  doc.value?.segments.some((segment) => !state.value.translations.get(segment.id)?.trim()) ?? false,
+);
 
 function languageFontClass(language: string, text: string): 'font-en' | 'font-zh' {
   const normalized = (language || 'auto').toLowerCase();
@@ -686,7 +689,9 @@ const translatedSegmentCount = computed(() =>
 /** 阅读 Tab 默认首屏；书籍记忆/审校移到第二个 Tab，避免挤占正文主屏。 */
 const activeTab = ref<'reading' | 'memory'>('reading');
 /** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
-const startLabel = computed(() => currentPagePending.value ? '翻译当前页' : '当前页已翻译');
+const startLabel = computed(() => currentPagePending.value
+  ? '翻译当前页'
+  : hasPendingDocument.value ? '继续翻译下一待译页' : '全文已翻译');
 /** 正在翻译的章节是否就是当前页所在章节（用于提示/跳转）。 */
 const isTranslatingCurrentChapter = computed(() => {
   const work = state.value.workChapter;
@@ -1522,14 +1527,29 @@ async function buildTranslationOptions() {
 }
 
 async function startTranslate() {
-  if (!doc.value || !visibleSegments.value.length || !currentPagePending.value) return;
+  if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  // 当前页已完成但文档尚未完成时，继续按钮自动跳到后面最近的待译页；走到末尾后再回绕查找。
+  if (!currentPagePending.value) {
+    const pageCount = pages.value.length;
+    const hasPendingPage = (index: number) =>
+      pages.value[index]?.segments.some((segment) => !state.value.translations.get(segment.id)?.trim()) ?? false;
+    let nextIndex = -1;
+    for (let offset = 1; offset < pageCount; offset++) {
+      const candidate = (currentPageIndex.value + offset) % pageCount;
+      if (hasPendingPage(candidate)) { nextIndex = candidate; break; }
+    }
+    if (nextIndex < 0) return;
+    currentPageIndex.value = nextIndex;
+    await nextTick();
+  }
+  if (!currentPage.value || !visibleSegments.value.length) return;
   const options = await buildTranslationOptions();
-  // 普通按钮只翻译当前显示页。文学模式仍用整章建立实体记忆，但不会顺手翻译整章。
+  // 每次只翻译当前显示页；文学模式可用整章做记忆分析，但不会顺手覆盖整章其他页。
   await run(doc.value.segments, {
     ...options,
     onlyPrioritySegments: true,
     prioritySegmentIds: visibleSegments.value.map((segment) => segment.id),
-    currentPageTitle: currentPage.value?.title || doc.value.title,
+    currentPageTitle: currentPage.value.title || doc.value.title,
   }, true);
 }
 
