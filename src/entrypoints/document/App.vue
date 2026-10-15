@@ -2094,10 +2094,11 @@ async function runWorkspaceTranslation(options: {
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(activeRun.runId),
       );
       await autoAcceptWorkspaceRunCandidates(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', project.projectId, fullRun.run);
-      const refreshed = await workspaceApi<{ project: any }>(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
+      const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
       const accepted = await loadWorkspaceAcceptedTranslations(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0);
       workspaceProject.value = refreshed.project;
-      workspaceActiveRun.value = null;
+      // Keep interrupted/failed remainder visible; only clear a fully resolved legacy run.
+      workspaceActiveRun.value = (refreshed.runs || []).find((run) => run.runId === activeRun.runId && ['paused', 'partial', 'failed'].includes(run.status)) || null;
       workspaceCandidateTranslations.value = new Map();
       await replaceCurrentTranslations(accepted);
     } catch (error) {
@@ -2247,7 +2248,7 @@ async function startTranslate() {
           workspaceProject.value?.projectId || '',
           fullRun.run,
         );
-        const refreshed = await workspaceApi<{ project: any }>(
+        const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
           readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
           readerConfig.value?.localAgentToken || '',
           '/api/documents/projects/' + encodeURIComponent(workspaceProject.value?.projectId || ''),
@@ -2259,7 +2260,7 @@ async function startTranslate() {
           refreshed.project.segmentCount || doc.value.segments.length,
         );
         workspaceProject.value = refreshed.project;
-        workspaceActiveRun.value = null;
+        workspaceActiveRun.value = (refreshed.runs || []).find((run) => run.runId === workspaceActiveRun.value?.runId && ['paused', 'partial', 'failed'].includes(run.status)) || null;
         workspaceCandidateTranslations.value = new Map();
         await replaceCurrentTranslations(accepted);
       }
