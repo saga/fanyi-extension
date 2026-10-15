@@ -770,7 +770,7 @@ handleFullTranslation()
 
 | 优化 | 说明 |
 |------|------|
-| DeepSeek KV cache | 串行执行 chunk，让后续请求命中前缀缓存 |
+| DeepSeek KV cache | 远程队列默认串行，尝试保持 prompt 前缀稳定；是否命中取决于供应商缓存策略 |
 | 双层缓存 | 内存缓存 L1 即查即用，storage L2 持久化 |
 | WeakSet rejectedCache | walker 拒绝的元素 O(1) 查表，不回溯父链 |
 | rAF 批量应用 | 译文写回 DOM 用 requestAnimationFrame 避免阻塞 |
