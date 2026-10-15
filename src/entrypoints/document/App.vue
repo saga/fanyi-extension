@@ -676,7 +676,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
+import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -813,6 +813,10 @@ const confirmableEntityCount = computed(() => literaryMemory.value.entities.filt
   entity.reviewStatus !== 'confirmed' && !!entity.source.trim() && !!entity.target.trim(),
 ).length);
 const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
+const pendingCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'candidate').length +
+  literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'candidate').length);
+const confirmedCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'confirmed').length +
+  literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'confirmed').length);
 const confirmableRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) =>
   relation.reviewStatus !== 'confirmed' && !!relation.subject.trim() && !!relation.predicate.trim() && !!relation.object.trim(),
 ).length);
@@ -1501,6 +1505,65 @@ function confirmAllRelationships() {
   }
   persistenceMessage.value = count > 0 ? '已确认剩余关系 ' + count + ' 项' : '没有待确认的关系';
 }
+function characterName(characterId: string): string {
+  const profile = literaryMemory.value.characterVoices.find((item) => item.characterId === characterId);
+  return profile?.targetName || profile?.canonicalSourceName || characterId;
+}
+
+/** 人物画像/人物对规则/锚点的状态变化是记忆数据，不是 Prompt 文本修改。 */
+async function persistVoiceMemoryChange(message: string) {
+  persistenceMessage.value = message;
+  await persistCurrentSession();
+  // Local Agent 模式下同步到这个文档的项目记忆 revision；不会创建新 Prompt revision。
+  if (readerConfig.value?.useLocalAgent && doc.value) {
+    try {
+      await ensureDocumentWorkspace();
+    } catch (error) {
+      persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
+async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'candidate' | 'confirmed' | 'rejected') {
+  if (status === 'confirmed' && !profile.evidence.length) {
+    persistenceMessage.value = '没有可定位的原文证据，不能确认这份人物声音画像。';
+    return;
+  }
+  profile.status = status;
+  await persistVoiceMemoryChange(
+    status === 'confirmed' ? '已确认人物声音：' + profile.canonicalSourceName + '。后续相关对白会参考这份画像。'
+      : status === 'rejected' ? '已拒绝人物声音画像：' + profile.canonicalSourceName + '。'
+        : '已将人物声音画像移回候选：' + profile.canonicalSourceName + '。',
+  );
+}
+async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationshipVoiceRules'][number], status: 'candidate' | 'confirmed' | 'rejected') {
+  if (status === 'confirmed' && !rule.evidenceSegmentIds.length) {
+    persistenceMessage.value = '没有原文证据片段，不能确认人物对的说话规则。';
+    return;
+  }
+  rule.status = status;
+  await persistVoiceMemoryChange(
+    status === 'confirmed' ? '已确认有方向的人物对话规则：' + characterName(rule.speakerId) + ' → ' + characterName(rule.addresseeId) + '。'
+      : status === 'rejected' ? '已拒绝该人物对话规则。' : '已将该人物对话规则移回候选。',
+  );
+}
+async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'candidate' | 'approved' | 'rejected') {
+  const sourceSegment = doc.value?.segments.find((segment) => segment.id === anchor.segmentId);
+  if (status === 'approved' && (!sourceSegment || sourceSegment.text.trim() !== anchor.source.trim())) {
+    persistenceMessage.value = '锚点原文与当前文档片段不一致，不能批准。';
+    return;
+  }
+  if (status === 'approved' && !literaryMemory.value.characterVoices.some((profile) => profile.characterId === anchor.speakerId && profile.status === 'confirmed')) {
+    persistenceMessage.value = '请先确认该说话人的声音画像，再批准此声音锚点。';
+    return;
+  }
+  anchor.status = status;
+  await persistVoiceMemoryChange(
+    status === 'approved' ? '已批准声音锚点；后续相关场景可复用这组原文—译文示例。'
+      : status === 'rejected' ? '已拒绝该声音锚点。' : '已将声音锚点移回候选。',
+  );
+}
+
 function addRelationship() {
   literaryMemory.value.relationships.push({ subject: '', predicate: '', object: '', reviewStatus: 'suggested' });
 }
