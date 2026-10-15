@@ -232,7 +232,7 @@ toggleTranslation → ctrl.toggle()
 #### 4.1.3 分块翻译调度 (`chunkTranslation.ts`)
 
 **warmup-then-parallel 策略**:
-- 前 2 个 chunk 串行执行（帮助 DeepSeek KV cache 构建公共前缀）
+- 远程 Provider：前 2 个 chunk 串行执行，尝试预热 DeepSeek Prompt Cache；本机 Agent 通过 `skipWarmup=true` 跳过预热，直接并行（桌面 4 / 移动 2）
 - 后续 chunk 并行执行（桌面 4 并发，移动 2 并发）
 - `TranslationQueue` 支持动态调整并发度
 
