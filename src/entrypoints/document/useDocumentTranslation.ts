@@ -337,12 +337,7 @@ function selectLiteraryChapterSample(segments: DocumentSegment[]): DocumentSegme
 }
 
 /**
- * 全书预分析采用跨章节均匀抽样，不把全文送进一个请求。
- * 先保证目录中不同章节都有代表，再填充额外段落；后续每章仍会按需增补新实体。
- */
-/**
- * 章节/上下文单元的稳定键。放在模块级是因为全书预分析的抽样器也要用它；
- * EPUB 以章节路径为主，缺少章节标题的 PDF 每 8 页合成一个分析窗口。
+ * 章节/上下文单元的稳定键。EPUB 以章节路径为主，缺少章节标题的 PDF 每 8 页合成一个分析窗口。
  */
 function literaryChapterKey(segment: DocumentSegment, enabled: boolean, format?: string): string {
   if (!enabled) return '';
@@ -355,7 +350,11 @@ function literaryChapterKey(segment: DocumentSegment, enabled: boolean, format?:
   return segment.page ? 'PDF 第 ' + segment.page + ' 页' : '正文';
 }
 
-function selectLiteraryBookSample(segments: DocumentSegment[], format?: string): DocumentSegment[] {
+/**
+ * 全书预分析采用跨章节均匀抽样，不把全文送进一个请求。
+ * 先保证目录中不同章节都有代表，再填充额外段落；后续每章仍会按需增补新实体。
+ */
+function selectLiteraryBookSample(segments: DocumentSegment[], format?: string) {
   const valid = segments.filter((segment) => segment.text.trim());
   const groups = new Map<string, Array<{ segment: DocumentSegment; index: number }>>();
   valid.forEach((segment, index) => {
