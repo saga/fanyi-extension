@@ -59,6 +59,19 @@ describe('文档翻译服务端模式', () => {
     documentWarnings: ['第 3 页文字较少'],
   };
 
+  it('云端模式拒绝文学书籍工作流，不请求云端文档端点', async () => {
+    const { run, state } = useDocumentTranslation();
+    await run(sampleSegments, {
+      ...options,
+      literaryMode: true,
+      useLocalAgent: false,
+    });
+    expect(state.value.running).toBe(false);
+    expect(state.value.error).toContain('启用本机 Local Agent');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('发送结构化 PDF 片段和章节上下文，而不是上传 PDF 二进制', async () => {
     fetchMock.mockResolvedValueOnce(okJson({
       translations: { 'pdf-s0': '引言', 'pdf-s1': '该模型提高了翻译质量。' },
@@ -258,6 +271,8 @@ describe('文档翻译服务端模式', () => {
       documentTitle: 'Book',
       documentFormat: 'epub',
       literaryMode: true,
+      useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789',
       budget: { maxChars: 3000, maxSegments: 24 },
     };
 
@@ -338,6 +353,8 @@ describe('文档翻译服务端模式', () => {
       documentTitle: 'Book',
       documentFormat: 'epub',
       literaryMode: true,
+      useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789',
       prioritySegmentIds: ['chapter2-s0'],
       budget: { maxChars: 3000, maxSegments: 24 },
     });
@@ -410,6 +427,8 @@ describe('文档翻译服务端模式', () => {
       documentTitle: 'Book',
       documentFormat: 'epub',
       literaryMode: true,
+      useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789',
       budget: { maxChars: 3000, maxSegments: 1 },
     });
 
@@ -472,6 +491,8 @@ describe('文档翻译服务端模式', () => {
       documentTitle: 'Book',
       documentFormat: 'epub',
       literaryMode: true,
+      useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789',
       budget: { maxChars: 3000, maxSegments: 24 },
     });
 
@@ -530,6 +551,8 @@ describe('文档翻译服务端模式', () => {
       documentTitle: 'Book',
       documentFormat: 'epub',
       literaryMode: true,
+      useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789',
       skipReview: true,
       budget: { maxChars: 3000, maxSegments: 24 },
     });
@@ -622,6 +645,8 @@ describe('文档翻译服务端模式', () => {
       documentTitle: 'Book',
       documentFormat: 'epub',
       literaryMode: true,
+      useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789',
       budget: { maxChars: 3000, maxSegments: 24 },
     });
 

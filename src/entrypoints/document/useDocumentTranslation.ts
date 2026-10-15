@@ -139,10 +139,6 @@ interface ServerDocumentTranslationResponse {
   errors?: unknown;
   complete?: unknown;
   missingSegmentIds?: unknown;
-  reviewedSegmentCount?: unknown;
-  reviewerErrors?: unknown;
-  reviewFindings?: unknown;
-  findings?: unknown;
 }
 
 /**
@@ -216,8 +212,6 @@ async function translateSegmentsViaServer(
   options: TranslateOptions,
   runId: number,
   isCurrentRun: (runId: number) => boolean,
-  bookMemory?: LiteraryBookMemory,
-  precedingSegments: DocumentSegment[] = [],
 ): Promise<ServerDocumentTranslationResponse | null> {
   if (options.useLocalAgent) {
     throw new Error('本机 Provider 已启用，拒绝调用远程文档翻译端点');
@@ -236,31 +230,12 @@ async function translateSegmentsViaServer(
     warnings: options.documentWarnings ?? [],
     source: options.sourceLang,
     target: options.targetLang,
-    glossary: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? undefined : options.glossary,
+    glossary: options.translationMode === 'literary' ? undefined : options.glossary,
     promptStyle: options.promptStyle,
     forceRefresh: options.forceRefresh,
     documentSystemPromptOverride: options.documentSystemPromptOverride,
     documentUserPromptTemplate: options.documentUserPromptTemplate,
-    translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
-    ...(options.translationMode === 'literary' || (options.literaryMode && bookMemory)
-      ? {
-          ...(bookMemory ? { literaryContext: bookMemory } : {}),
-          ...(bookMemory ? {
-            voiceContext: buildLiteraryContextForBatch({
-              memory: bookMemory,
-              segments: segments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
-              precedingSegments: precedingSegments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
-              chapterTitle: segments[0]?.contextPath || options.documentTitle,
-              tokenBudget: 2500,
-            }),
-          } : {}),
-          precedingSegments: precedingSegments.slice(-4).map((segment) => ({
-            id: segment.id, text: segment.text.slice(0, 900), contextPath: segment.contextPath,
-          })),
-          literaryReview: !options.skipReview,
-          chapterTitle: segments[0]?.contextPath,
-        }
-      : {}),
+    translationMode: options.translationMode === 'literary' ? 'literary' : 'technical',
     provider,
     model: options.model,
     ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
@@ -393,7 +368,7 @@ function selectLiteraryBookSample(segments: DocumentSegment[], format?: string) 
     .map(([, segment]) => ({ ...segment, text: segment.text.slice(0, 900) }));
 }
 
-async function analyzeLiteraryChapterViaServer(
+async function analyzeLiteraryChapterViaLocalAgent(
   chapterTitle: string,
   segments: DocumentSegment[],
   options: TranslateOptions,
@@ -403,12 +378,11 @@ async function analyzeLiteraryChapterViaServer(
 ): Promise<{ memory: LiteraryBookMemory; analyzed: boolean; warning?: string } | null> {
   const sampled = selectLiteraryChapterSample(segments);
   if (!sampled.length) return { memory, analyzed: false, warning: '当前内容没有足够的正文片段供实体分析' };
-  const endpoint = options.useLocalAgent
-    ? resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/analyze')
-    : resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/analyze');
-  const provider = options.useLocalAgent
-    ? (options.localAgentProvider || 'workbuddy')
-    : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
+  if (!options.useLocalAgent) {
+    throw new Error('文学书籍模式需要启用本机 Local Agent；云端只支持单次片段翻译，不提供全书记忆或独立审校。');
+  }
+  const endpoint = resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/analyze');
+  const provider = options.localAgentProvider || 'workbuddy';
   const response = await fetchJsonWithTimeout(endpoint, {
     method: 'POST',
     headers: requestHeaders(options),
@@ -446,7 +420,7 @@ async function analyzeLiteraryChapterViaServer(
   };
 }
 
-async function reviewLiteraryBatchViaServer(
+async function reviewLiteraryBatchViaLocalAgent(
   segments: DocumentSegment[],
   drafts: Map<string, string>,
   options: TranslateOptions,
@@ -462,12 +436,11 @@ async function reviewLiteraryBatchViaServer(
     }] : [];
   });
   if (!candidates.length) return { translations: new Map(), findings: [] };
-  const endpoint = options.useLocalAgent
-    ? resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/review')
-    : resolveServerDocumentEndpoint(options.serverUrl, '/api/translate/document/literary/review');
-  const provider = options.useLocalAgent
-    ? (options.localAgentProvider || 'workbuddy')
-    : options.useServerTranslation ? (options.provider || 'deepseek') : 'deepseek';
+  if (!options.useLocalAgent) {
+    throw new Error('文学书籍模式需要启用本机 Local Agent；云端只支持单次片段翻译，不提供全书记忆或独立审校。');
+  }
+  const endpoint = resolveLocalAgentEndpoint(options.localAgentUrl, '/api/translate/document/literary/review');
+  const provider = options.localAgentProvider || 'workbuddy';
   const response = await fetchJsonWithTimeout(endpoint, {
     method: 'POST',
     headers: requestHeaders(options),
@@ -753,7 +726,7 @@ export function useDocumentTranslation() {
   ): Promise<boolean> {
     if (shouldUseRemoteDocumentTranslation(options)) {
       // 服务端路径对文学模式执行初译 + 独立 reviewer；普通文档仍走原管线。
-      const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun, bookMemory, precedingSegments);
+      const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun);
       if (!result || !isCurrentRun(runId)) return false;
       const expectedIds = batch.map((segment) => segment.id);
       const batchTextById = new Map(batch.map((segment) => [segment.id, segment.text]));
@@ -777,18 +750,6 @@ export function useDocumentTranslation() {
           serverErrors.join('；') ||
           ('服务端翻译结果不完整，缺少 ' + missingIds.length + '/' + expectedIds.length + ' 个片段'),
         );
-      }
-      const reviewedCount = typeof result.reviewedSegmentCount === 'number' ? result.reviewedSegmentCount : 0;
-      if (reviewedCount > 0) literaryStatus.value.reviewedSegments += reviewedCount;
-      if (options.literaryMode || options.translationMode === 'literary') {
-        literaryStatus.value.reviewFindings = appendLiteraryReviewFindings(
-          result.reviewFindings ?? result.findings, literaryStatus.value.reviewFindings,
-        );
-      }
-      if (Array.isArray(result.reviewerErrors)) {
-        for (const warning of result.reviewerErrors) {
-          if (typeof warning === 'string' && warning) literaryStatus.value.warnings.push(warning);
-        }
       }
       return isCurrentRun(runId);
     }
@@ -956,7 +917,7 @@ export function useDocumentTranslation() {
     if ((!options.literaryMode && options.translationMode !== 'literary') || options.skipReview) return;
     state.value.workStage = '审校中';
     try {
-      const reviewed = await reviewLiteraryBatchViaServer(
+      const reviewed = await reviewLiteraryBatchViaLocalAgent(
         batch, new Map(drafts), options, bookMemory, runId, isCurrentRun, precedingSegments,
       );
       if (reviewed && isCurrentRun(runId)) {
@@ -1031,7 +992,7 @@ export function useDocumentTranslation() {
         segment.id,
         state.value.translations.get(segment.id)!,
       ]));
-      const reviewed = await reviewLiteraryBatchViaServer(
+      const reviewed = await reviewLiteraryBatchViaLocalAgent(
         candidates, drafts, options, literaryMemory.value, runId, isCurrentRun,
       );
       if (!reviewed || !isCurrentRun(runId)) return;
@@ -1083,7 +1044,7 @@ export function useDocumentTranslation() {
     literaryStatus.value.chapterTitle = key;
     state.value.workStage = '实体分析中';
     try {
-      const result = await analyzeLiteraryChapterViaServer(
+      const result = await analyzeLiteraryChapterViaLocalAgent(
         key, segments, options, literaryMemory.value, runId, isCurrentRun,
       );
       if (!result || !isCurrentRun(runId)) return false;
@@ -1108,6 +1069,15 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     preserveExisting = false,
   ) {
+    // Worker 不承担跨章节记忆与多阶段审校；没有启用本机 Agent 时明确拒绝。
+    if (options.literaryMode && !options.useLocalAgent) {
+      generation++;
+      state.value.running = false;
+      state.value.workStage = '';
+      state.value.activeSegmentIds = new Set();
+      state.value.error = '文学书籍模式需要启用本机 Local Agent；云端只支持单次片段翻译，不提供全书记忆、章节分析或独立审校。';
+      return state.value;
+    }
     // Literary mode keeps entity/style memory for every structured document, not only EPUB/PDF.
     // The global translation profile enables this automatically; the reader checkbox can opt in
     // to the same workflow for EPUB/PDF while the global profile remains technical.
@@ -1191,7 +1161,7 @@ export function useDocumentTranslation() {
     if (literaryEnabled && !literaryStatus.value.bookProfileReady && isCurrentRun(runId)) {
       literaryStatus.value.chapterTitle = '全书预分析';
       try {
-        const profile = await analyzeLiteraryChapterViaServer(
+        const profile = await analyzeLiteraryChapterViaLocalAgent(
           '全书预分析',
           selectLiteraryBookSample(segments, options.documentFormat),
           effectiveOptions,
