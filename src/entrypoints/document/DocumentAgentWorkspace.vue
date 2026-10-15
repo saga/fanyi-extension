@@ -83,6 +83,19 @@
             采纳本次候选（{{ activeRun.counts?.candidate || 0 }}）
           </button>
         </div>
+        <div v-if="candidatePreview.length" class="candidate-preview">
+          <strong>候选译文预览（{{ candidatePreview.length }} 条）</strong>
+          <article v-for="item in candidatePreview" :key="item.id" class="candidate-preview-item">
+            <div class="candidate-preview-title">
+              <strong>{{ item.id }}</strong>
+              <span class="muted small">{{ item.contextPath || '' }}</span>
+            </div>
+            <p><span class="preview-label">原文</span>{{ item.source }}</p>
+            <p><span class="preview-label">当前采用</span>{{ item.accepted || '（暂无已采用译文）' }}</p>
+            <p class="new-candidate"><span class="preview-label">新候选</span>{{ item.candidate }}</p>
+          </article>
+          <p class="muted small">只预览前 8 条；其余候选可通过运行详情 API 分页查看。采纳会应用本次所有候选。</p>
+        </div>
         <div v-if="activeRun.findings?.length" class="finding-list">
           <strong>审校发现 {{ activeRun.findings.length }} 条</strong>
           <div v-for="finding in activeRun.findings.slice(0, 12)" :key="finding.findingId" class="finding-row">
@@ -160,6 +173,7 @@ interface PromptInput {
   model: string;
   translationMode: 'technical' | 'literary';
   literaryReview: boolean;
+  literaryMemory: unknown;
 }
 const props = defineProps<{
   title: string;
@@ -198,6 +212,23 @@ let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
+const candidatePreview = computed(() => {
+  const rows = Array.isArray(activeRun.value?.segments) ? activeRun.value.segments : [];
+  const sourceById = new Map(props.segments.map((segment) => [segment.id, segment]));
+  return rows
+    .filter((row: any) => typeof row.candidateTranslation === 'string' && row.candidateTranslation.trim())
+    .slice(0, 8)
+    .map((row: any) => {
+      const source = sourceById.get(row.id);
+      return {
+        id: row.id,
+        source: source?.text || '',
+        contextPath: source?.contextPath || '',
+        accepted: props.translations.get(row.id) || '',
+        candidate: row.candidateTranslation as string,
+      };
+    });
+});
 const progressItems = [
   { key: 'total', label: '计划' },
   { key: 'pending', label: '等待' },
@@ -234,6 +265,7 @@ function promptInput(): PromptInput {
     model: props.localAgentModel || 'auto',
     translationMode: props.translationMode,
     literaryReview: props.translationMode === 'literary' && props.literaryReview,
+    literaryMemory: props.literaryMemory,
   };
 }
 
