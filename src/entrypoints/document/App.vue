@@ -723,7 +723,7 @@ const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
 const workspaceRunGeneration = ref(0);
-/** 尚未被用户/阅读页运行采纳的 workspace 候选只用于预览，不混进当前正式译文 Map。 */
+/** Agent 候选在运行结束时自动采纳；此 Map 仅用于运行中的临时预览或保存失败时提示。 */
 const workspaceCandidateTranslations = ref(new Map<string, string>());
 const englishFontFamily = ref('Georgia');
 const chineseFontFamily = ref('Noto Serif CJK SC');
@@ -1960,8 +1960,31 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
 }
 
 /**
+ * 运行结束后统一采纳已生成的译文。服务端负责保护同一原文版本的人工修订；
+ * 同一个 run 被阅读页和 Agent 面板同时观察时，重复调用也是幂等的。
+ */
+async function autoAcceptWorkspaceRunCandidates(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  run: any,
+): Promise<any> {
+  if (!run || run.status === 'cancelled') return run;
+  const candidateIds = (Array.isArray(run.segments) ? run.segments : [])
+    .filter((row: any) => row.status === 'candidate' && typeof row.candidateTranslation === 'string' && row.candidateTranslation.trim())
+    .map((row: any) => row.id as string);
+  if (!candidateIds.length) return run;
+  const response = await workspaceApi<{ run: any }>(
+    baseUrl, token,
+    '/api/documents/projects/' + encodeURIComponent(projectId) + '/runs/' + encodeURIComponent(run.runId) + '/accept',
+    { method: 'POST', body: JSON.stringify({ segmentIds: candidateIds }) },
+  );
+  return response.run;
+}
+
+/**
  * 当用户从 Agent Tab 回到阅读页时，接管同一条已经存在的运行记录。
- * 这里不自动采纳 Agent Tab 的候选；只有从阅读页主动发起的普通翻译才自动采纳。
+ * 两个界面遵守相同规则：后台运行完成后自动保存译文，不再要求用户逐条采纳。
  */
 async function followWorkspaceRun(project: any, initialRun: any) {
   if (!doc.value || !project?.projectId || !initialRun?.runId) return;
@@ -2003,6 +2026,15 @@ async function followWorkspaceRun(project: any, initialRun: any) {
       await new Promise((resolve) => setTimeout(resolve, 900));
     }
     if (workspaceRunGeneration.value !== generation || workspaceRunId.value !== runId) return;
+    if (run.status !== 'cancelled') {
+      run = await autoAcceptWorkspaceRunCandidates(
+        readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
+        readerConfig.value?.localAgentToken || '',
+        project.projectId,
+        run,
+      );
+      workspaceActiveRun.value = run;
+    }
     const latest = await workspaceApi<{ project: any; runs?: any[] }>(
       readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
       readerConfig.value?.localAgentToken || '',
@@ -2016,15 +2048,10 @@ async function followWorkspaceRun(project: any, initialRun: any) {
       project.projectId,
       latest.project.segmentCount || doc.value.segments.length,
     );
-    const pendingCandidates = workspaceCandidateTranslations.value;
     await replaceCurrentTranslations(accepted);
-    if (['awaiting_acceptance', 'partial', 'paused'].includes(run.status) && pendingCandidates.size) {
-      workspaceCandidateTranslations.value = pendingCandidates;
-      persistenceMessage.value = 'workspace 中有尚未采纳的候选译文；前往“翻译 Agent”比较并决定是否采用。';
-    } else {
-      workspaceCandidateTranslations.value = new Map();
-      if (run.status === 'completed') workspaceActiveRun.value = null;
-    }
+    // 成功采纳后不再把候选叠加显示成正文；只有运行失败/暂停时才保留诊断状态。
+    workspaceCandidateTranslations.value = new Map();
+    if (run.status === 'completed') workspaceActiveRun.value = null;
     if (run.counts?.failed || ['partial', 'failed', 'paused'].includes(run.status)) {
       state.value.error = run.error || 'workspace 运行尚未全部完成，可到“翻译 Agent”继续或重试。';
     }
@@ -2059,9 +2086,25 @@ async function runWorkspaceTranslation(options: {
     return;
   }
   if (activeRun && ['awaiting_acceptance', 'partial'].includes(activeRun.status) && (activeRun.counts?.candidate || 0) > 0) {
-    activeTab.value = 'agent';
-    persistenceMessage.value = '当前文档已有待采纳的 Agent 候选，请先在“翻译 Agent”中比较结果。';
-    return;
+    // 兼容升级前留下的待采纳结果，先自动写入当前版本，再继续用户请求。
+    try {
+      const fullRun = await workspaceApi<{ run: any }>(
+        config.localAgentUrl || 'http://127.0.0.1:8789',
+        config.localAgentToken || '',
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(activeRun.runId),
+      );
+      await autoAcceptWorkspaceRunCandidates(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', project.projectId, fullRun.run);
+      const refreshed = await workspaceApi<{ project: any }>(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
+      const accepted = await loadWorkspaceAcceptedTranslations(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0);
+      workspaceProject.value = refreshed.project;
+      workspaceActiveRun.value = null;
+      workspaceCandidateTranslations.value = new Map();
+      await replaceCurrentTranslations(accepted);
+    } catch (error) {
+      activeTab.value = 'agent';
+      persistenceMessage.value = '译文已经生成，但自动保存失败：' + (error instanceof Error ? error.message : String(error)) + '。请在 Agent 面板重试保存。';
+      return;
+    }
   }
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
@@ -2118,15 +2161,8 @@ async function runWorkspaceTranslation(options: {
     }
     if (workspaceRunGeneration.value !== generation || workspaceRunId.value !== runId) return;
     if (terminalRun.status !== 'cancelled') {
-      const candidateIds = (terminalRun.segments || [])
-        .filter((row: any) => row.status === 'candidate' && typeof row.candidateTranslation === 'string')
-        .map((row: any) => row.id as string);
-      if (candidateIds.length) {
-        const acceptedRun = await workspaceApi<{ run: any }>(base, token,
-          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId) + '/accept',
-          { method: 'POST', body: JSON.stringify({ segmentIds: candidateIds }) });
-        workspaceActiveRun.value = acceptedRun.run;
-      }
+      terminalRun = await autoAcceptWorkspaceRunCandidates(base, token, project.projectId, terminalRun);
+      workspaceActiveRun.value = terminalRun;
       const finalProject = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId));
       workspaceProject.value = finalProject.project;
       const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, finalProject.project.segmentCount || doc.value.segments.length);
@@ -2199,9 +2235,33 @@ async function startTranslate() {
       if (workspaceActiveRun.value &&
           ['awaiting_acceptance', 'partial'].includes(workspaceActiveRun.value.status) &&
           (workspaceActiveRun.value.counts?.candidate || 0) > 0) {
-        activeTab.value = 'agent';
-        persistenceMessage.value = '当前文档已有待采纳的 Agent 候选，请先在“翻译 Agent”中比较结果。';
-        return;
+        // 兼容旧会话：先自动完成最后的保存步骤，不再强迫用户切换页面手工采纳。
+        const fullRun = await workspaceApi<{ run: any }>(
+          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.localAgentToken || '',
+          '/api/documents/projects/' + encodeURIComponent(workspaceProject.value?.projectId || '') + '/runs/' + encodeURIComponent(workspaceActiveRun.value.runId),
+        );
+        await autoAcceptWorkspaceRunCandidates(
+          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.localAgentToken || '',
+          workspaceProject.value?.projectId || '',
+          fullRun.run,
+        );
+        const refreshed = await workspaceApi<{ project: any }>(
+          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.localAgentToken || '',
+          '/api/documents/projects/' + encodeURIComponent(workspaceProject.value?.projectId || ''),
+        );
+        const accepted = await loadWorkspaceAcceptedTranslations(
+          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.localAgentToken || '',
+          refreshed.project.projectId,
+          refreshed.project.segmentCount || doc.value.segments.length,
+        );
+        workspaceProject.value = refreshed.project;
+        workspaceActiveRun.value = null;
+        workspaceCandidateTranslations.value = new Map();
+        await replaceCurrentTranslations(accepted);
       }
     } catch (error) {
       state.value.error = '无法准备文档 workspace：' + (error instanceof Error ? error.message : String(error));
