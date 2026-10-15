@@ -168,7 +168,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { storage } from '@wxt-dev/storage';
+import {
+  backupWorkspaceSourceFile,
+  importWorkspaceTranslations,
+  loadWorkspaceAcceptedTranslations,
+  lookupWorkspaceProject,
+  rememberWorkspaceProject,
+  workspaceApi,
+} from './documentWorkspaceClient';
 
 interface Segment {
   id: string;
@@ -212,6 +219,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   acceptedTranslations: [items: Array<{ id: string; text: string }>];
+  workspaceSync: [items: Array<{ id: string; text: string }>];
 }>();
 
 const project = ref<any>(null);
@@ -259,38 +267,6 @@ const runLabels: Record<string, string> = {
 };
 function runStatusLabel(status: string): string { return runLabels[status] || status; }
 
-function documentKey(): string {
-  let hash = 0x811c9dc5;
-  const add = (value: string) => {
-    for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 0x01000193);
-  };
-  add(props.format.toLowerCase() + '\u0000' + props.title + '\u0000');
-  for (const segment of props.segments) {
-    add(segment.id); add('\u0000'); add(segment.text); add('\u0000'); add(segment.kind || 'paragraph'); add('\u0000');
-    add(segment.contextPath || ''); add('\u0000'); add(String(segment.page ?? '')); add('\u0000');
-    add(String(segment.level ?? '')); add('\u0000'); add(segment.marker || ''); add('\u0000');
-    add(segment.path || ''); add('\u0000'); add(segment.start || ''); add('\u0000'); add(segment.end || ''); add('\u0001');
-  }
-  return props.format.toLowerCase() + ':' + props.segments.length + ':' + (hash >>> 0).toString(16);
-}
-
-// Stable logical identity is separate from the full content fingerprint. Re-importing a changed
-// file with the same name offers an explicit new source revision rather than silently replacing it.
-function sourceIdentityKey(): string {
-  return [props.format.toLowerCase(), props.sourceFileName.toLocaleLowerCase(), props.title.toLocaleLowerCase()].join('::');
-}
-type ProjectIdentityMap = Record<string, { projectId: string; documentKey: string }>;
-
-async function saveProjectMapping() {
-  if (!project.value) return;
-  const exact = (await storage.getItem<Record<string, string>>('local:documentAgentProjectMap')) || {};
-  exact[documentKey()] = project.value.projectId;
-  await storage.setItem('local:documentAgentProjectMap', exact);
-  const identities = (await storage.getItem<ProjectIdentityMap>('local:documentAgentProjectIdentityMap')) || {};
-  identities[sourceIdentityKey()] = { projectId: project.value.projectId, documentKey: documentKey() };
-  await storage.setItem('local:documentAgentProjectIdentityMap', identities);
-  sourceChanged.value = false;
-}
 
 function promptInput(): PromptInput {
   return {
@@ -307,15 +283,7 @@ function promptInput(): PromptInput {
 }
 
 async function api(path: string, init: RequestInit = {}): Promise<any> {
-  const base = (props.localAgentUrl || 'http://127.0.0.1:8789').trim().replace(/\/+$/, '');
-  const url = new URL(path, base + '/');
-  const headers = new Headers(init.headers || {});
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (props.localAgentToken) headers.set('Authorization', 'Bearer ' + props.localAgentToken);
-  const response = await fetch(url.toString(), { ...init, headers });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || ('本机服务返回 HTTP ' + response.status));
-  return payload;
+  return workspaceApi(props.localAgentUrl, props.localAgentToken, path, init);
 }
 
 async function createProject() {
@@ -332,18 +300,19 @@ async function createProject() {
       }),
     });
     project.value = response.project;
-    await saveProjectMapping();
-    message.value = '文档项目已创建，来源片段和翻译运行会独立保存。';
+    await rememberWorkspaceProject(projectInput(), project.value.projectId);
+    // 先迁移普通阅读页中已有的译文，再开始新的 Agent 运行。
+    await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
     if (props.sourceFile) {
       try {
         await uploadCurrentSourceFile();
       } catch (uploadError) {
         message.value = '项目已创建，但原始文件备份失败：' + (uploadError instanceof Error ? uploadError.message : String(uploadError)) + '。可点击“备份原始文件”重试。';
       }
-    } else {
-      message.value += ' 当前没有原始文件对象，项目暂时只保存解析后的片段。';
     }
     await refreshProject();
+    await emitWorkspaceSnapshot();
+    message.value = '文档 workspace 已创建；原始文件、SQLite、译文版本、Prompt 和运行记录共用同一份项目状态。';
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally { busy.value = false; }
@@ -352,22 +321,25 @@ async function createProject() {
 async function loadExistingProject() {
   if (!props.useLocalAgent || !props.segments.length) return;
   try {
-    const mapping = (await storage.getItem<Record<string, string>>('local:documentAgentProjectMap')) || {};
-    const identities = (await storage.getItem<ProjectIdentityMap>('local:documentAgentProjectIdentityMap')) || {};
-    const identity = identities[sourceIdentityKey()];
-    const exactProjectId = mapping[documentKey()];
-    const projectId = exactProjectId || identity?.projectId;
-    if (!projectId) return;
-    const result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+    const mapping = await lookupWorkspaceProject(projectInput());
+    if (!mapping.projectId) return;
+    const result = await api('/api/documents/projects/' + encodeURIComponent(mapping.projectId));
     project.value = result.project;
-    sourceChanged.value = !exactProjectId && !!identity && identity.documentKey !== documentKey();
+    sourceChanged.value = mapping.sourceChanged;
     verification.value = result.verification;
     runs.value = result.runs || [];
+    // 内容改变时必须由用户明确登记新来源版本，不能让旧译文映射到新原文。
+    if (sourceChanged.value) return;
+    await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/prompts', {
+      method: 'POST', body: JSON.stringify(promptInput()),
+    });
+    await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
     const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status));
     if (active) await selectRun(active.runId);
+    await emitWorkspaceSnapshot();
     loadSelectedTranslation();
   } catch {
-    // An old mapping may point to an archived project; the user can create a new project explicitly.
+    // 旧映射可能指向已归档项目；此时允许显式创建新项目。
     project.value = null;
   }
 }
@@ -381,18 +353,27 @@ async function refreshProject() {
   if (activeRun.value) await refreshRun(activeRun.value.runId);
 }
 
+function projectInput() {
+  return {
+    title: props.title,
+    format: props.format,
+    sourceFileName: props.sourceFileName,
+    segments: props.segments,
+  };
+}
+
+async function emitWorkspaceSnapshot() {
+  if (!project.value) return;
+  const accepted = await loadWorkspaceAcceptedTranslations(
+    props.localAgentUrl, props.localAgentToken, project.value.projectId, project.value.segmentCount || props.segments.length,
+  );
+  emit('workspaceSync', accepted);
+}
+
 async function uploadCurrentSourceFile() {
   if (!project.value || !props.sourceFile) throw new Error('当前没有可上传的原始文件');
-  const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/source-file', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'X-Source-File-Name': encodeURIComponent(props.sourceFile.name),
-    },
-    body: props.sourceFile,
-  });
-  project.value = { ...project.value, sourceFileSaved: true, sourceFileSize: result.size };
-  message.value = '原始文件已备份到本机文档项目目录（' + (result.size / 1024 / 1024).toFixed(2) + ' MiB）。';
+  await backupWorkspaceSourceFile(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.sourceFile);
+  project.value = { ...project.value, sourceFileSaved: true, sourceFileSize: props.sourceFile.size };
   await refreshProject();
 }
 
@@ -419,9 +400,11 @@ async function updateSourceRevision() {
         message.value = '新来源片段已保存，但原始文件备份失败：' + (uploadError instanceof Error ? uploadError.message : String(uploadError));
       }
     }
-    await saveProjectMapping();
+    await rememberWorkspaceProject(projectInput(), project.value.projectId);
+    sourceChanged.value = false;
     await refreshProject();
-    message.value = (message.value ? message.value + ' ' : '') + '新来源版本已保存；原有运行与人工修订保留，变更片段会在下次运行中重新翻译。';
+    await emitWorkspaceSnapshot();
+    message.value = (message.value ? message.value + ' ' : '') + '新来源版本已保存；未变化片段保留有效译文，变化片段等待重译。';
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
