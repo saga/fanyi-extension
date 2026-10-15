@@ -1,6 +1,7 @@
 <template>
   <div class="popup-container">
     <h2>简简单单翻译</h2>
+    <p class="hint-text">这里配置网页与选中文本翻译。EPUB/PDF 等文档翻译使用文档页里的独立配置。</p>
     <div class="settings">
       <div v-if="!config.useLocalAgent" class="input-item">
         <label>DeepSeek API Key</label>
@@ -106,7 +107,7 @@
         <input type="checkbox" v-model="config.useServerTranslation" :disabled="config.useLocalAgent" @change="saveConfig" />
         <span>通过远程服务翻译当前页面</span>
       </label>
-      <span v-if="config.useLocalAgent" class="hint-text">本机 Provider 已启用，网页/文档翻译、对话及 EPUB/PDF 文学分析/审校均走本机。</span>
+      <span v-if="config.useLocalAgent" class="hint-text">本机 Provider 已启用，用于网页与选中文本翻译；EPUB/PDF 文档翻译在文档页单独配置。</span>
 
       <div v-if="config.useServerTranslation" class="server-section">
         <button
@@ -217,7 +218,12 @@ onUnmounted(() => {
 });
 
 async function saveConfig() {
-  await setConfig(config.value);
+  // Popup settings are for webpage/selection translation only. Never write the resolved
+  // document-prefixed values returned by getConfig(), as they may be inherited legacy defaults.
+  const pageTranslationConfig = Object.fromEntries(
+    Object.entries(config.value).filter(([key]) => !key.startsWith('document')),
+  ) as Partial<Config>;
+  await setConfig(pageTranslationConfig);
 }
 
 async function refreshLocalAgentAvailability() {
