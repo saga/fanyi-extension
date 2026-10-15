@@ -95,7 +95,7 @@ export interface CharacterVoiceAnchor {
 }
 export interface LiteraryVoiceContext {
   version: 1;
-  policyVersion: 'character-voice-v1';
+  policyVersion: 'character-voice-v2';
   styleGuide: LiteraryStyleGuide;
   /** 当前批所在章节与片段位置；这里只传可验证的结构信息，不推测人物情绪或说话人。 */
   scene: { chapterTitle?: string; contextPaths: string[]; segmentIds: string[] };
@@ -641,7 +641,7 @@ export function buildLiteraryContextForBatch(input: {
     '原意、叙事事实与当前场景优先于声音画像；不要为了区分角色添加口头禅、方言、情绪或原文不存在的修辞。',
   ];
   const result: LiteraryVoiceContext = {
-    version: 1, policyVersion: 'character-voice-v1',
+    version: 1, policyVersion: 'character-voice-v2',
     styleGuide: memory.styleGuide,
     scene: {
       ...(input.chapterTitle ? { chapterTitle: input.chapterTitle.slice(0, 160) } : {}),
