@@ -1296,12 +1296,26 @@ export function useDocumentTranslation() {
     };
     // 服务端初译+审校一体，无法拆分，只能同步等。
     const remoteMode = shouldUseRemoteDocumentTranslation(effectiveOptions);
+    const segmentIndexById = new Map(segments.map((segment, index) => [segment.id, index]));
+    const precedingForBatch = (batch: DocumentSegment[]): DocumentSegment[] => {
+      const first = batch[0];
+      const index = first ? segmentIndexById.get(first.id) : undefined;
+      if (index === undefined || index <= 0 || !first) return [];
+      const previous = segments.slice(Math.max(0, index - 4), index);
+      const chapterKey = literaryChapterKey(first, literaryProfileEnabled, options.documentFormat);
+      const sameChapter = previous.filter((segment) =>
+        literaryChapterKey(segment, literaryProfileEnabled, options.documentFormat) === chapterKey,
+      );
+      // 同章前文优先；若当前单元刚开始，则仅带最近两段作为过渡线索。
+      return (sameChapter.length ? sameChapter : previous.slice(-2)).slice(-4);
+    };
 
     const worker = async () => {
       while (cursor < workBatches.length && isCurrentRun(runId)) {
         const item = workBatches[cursor++];
         if (!item) continue;
         const { index, batch } = item;
+        const precedingSegments = literaryProfileEnabled ? precedingForBatch(batch) : [];
         const batchIds = batch.map((segment) => segment.id);
         // 每批进场登记、退场注销：阅读页只给这些段显示「翻译中…」。
         if (isCurrentRun(runId)) {
@@ -1313,19 +1327,19 @@ export function useDocumentTranslation() {
             state.value.workStage = '翻译中';
             if (remoteMode) {
               ok = await translateBatch(
-                batch, effectiveOptions, runId, literaryProfileEnabled ? literaryMemory.value : undefined,
+                batch, effectiveOptions, runId, literaryProfileEnabled ? literaryMemory.value : undefined, precedingSegments,
               );
             } else {
               // 本地：初译一到就提交计进度，审校 detached，不阻塞下一批。
               const normalized = await translateBatchText(
-                batch, effectiveOptions, runId, literaryProfileEnabled ? literaryMemory.value : undefined,
+                batch, effectiveOptions, runId, literaryProfileEnabled ? literaryMemory.value : undefined, precedingSegments,
               );
               ok = isCurrentRun(runId);
               if (ok && literaryProfileEnabled && !effectiveOptions.skipReview) {
                 const drafts = new Map(normalized);
                 pendingReviewCount++;
                 pendingReviews.push(
-                  reviewBatchText(batch, drafts, effectiveOptions, literaryProfileEnabled ? literaryMemory.value : undefined, runId)
+                  reviewBatchText(batch, drafts, effectiveOptions, literaryProfileEnabled ? literaryMemory.value : undefined, runId, precedingSegments)
                     .catch(() => undefined)
                     .finally(() => {
                       pendingReviewCount--;
