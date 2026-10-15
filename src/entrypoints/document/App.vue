@@ -113,7 +113,7 @@
           <button v-if="!state.running && visibleSegments.length" class="btn warn" @click="forceTranslateCurrentPage">
             强制重译当前页
           </button>
-          <button v-if="state.running" class="btn" @click="stopTranslation">停止</button>
+          <button v-if="state.running" class="btn" @click="stopCurrentTranslation">停止</button>
           <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
             重试失败批次（{{ state.failedBatches.length }}）
           </button>
@@ -534,6 +534,7 @@
           :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
           :literary-memory="literaryMemory"
           @accepted-translations="applyAgentTranslations"
+          @workspace-sync="syncWorkspaceTranslations"
         />
       </template>
     </template>
@@ -545,6 +546,14 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
+import {
+  backupWorkspaceSourceFile,
+  importWorkspaceTranslations,
+  loadWorkspaceAcceptedTranslations,
+  lookupWorkspaceProject,
+  rememberWorkspaceProject,
+  workspaceApi,
+} from './documentWorkspaceClient';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
@@ -596,6 +605,12 @@ const literaryMode = ref(false);
 const literaryReview = ref(true);
 const currentPageIndex = ref(0);
 const readerConfig = ref<Config | null>(null);
+/** 当前文档对应的本机 workspace；阅读页与 Agent Tab 都从这里读写同一份 SQLite。 */
+const workspaceProject = ref<any>(null);
+const workspaceRunId = ref('');
+const workspaceSourceChanged = ref(false);
+const workspaceTranslationActive = ref(false);
+const workspaceRunGeneration = ref(0);
 const englishFontFamily = ref('Georgia');
 const chineseFontFamily = ref('Noto Serif CJK SC');
 const englishFontSize = ref(17);
