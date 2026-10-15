@@ -329,21 +329,25 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[Open EPUB/PDF/Office file] --> B[Browser parser creates stable segments and metadata]
-    B --> C[Create or select local Agent project]
-    C --> D[Start run: all / stale / failed / selected / chapter scope]
-    D --> E[Service plans work and persists run state]
-    E --> F[Up to 3 translation workers; isolated batch scopes]
-    F --> G[Persist first-pass candidate and emit batch.translation.completed]
-    G --> H{Literary review enabled?}
-    H -- No --> L[Finalize after all translations settle]
-    H -- Yes --> I[Queue Reviewer worker; default concurrency 1]
+    A[Open EPUB/PDF/Office] --> B[Browser parser emits stable segments]
+    B --> C[Create/select Local Agent project and start run]
+    C --> D[Service persists run plan and allocates bounded workers]
+    D --> E[Translate batch: up to 3 workers, independent scopes]
+    E --> F[Persist first-pass candidate + emit batch.translation.completed]
+    F --> G{Literary review enabled?}
+    G -- No --> H[Emit batch.completed]
+    G -- Yes --> I[Enqueue detached Reviewer: default concurrency 1]
     I --> J[Persist findings and actual revised candidates]
     J --> K[Emit batch.completed after review settles]
-    K --> L
-    L --> M[Reader refreshes segments/events and applies valid results]
-    F -. Pause/cancel stops new batch allocation .-> N[Ignore late results after cancellation]
-    I -. Cancellation .-> N
+    F -. Free worker and continue queued translation .-> E
+    D --> L[All translation workers settled]
+    H --> M[Drain outstanding review jobs]
+    K --> M
+    L --> N{Translation and review work settled?}
+    M --> N
+    N --> O[Finalize run and refresh reader from durable state]
+    D -. Pause/cancel blocks new batch allocation .-> P[Discard in-flight results after cancellation]
+    I -. Cancellation .-> P
 ```
 
 > Local Agent mode is an explicit routing choice. Local model failures do not trigger automatic fallback to the cloud/DeepSeek provider.
