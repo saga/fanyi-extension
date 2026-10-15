@@ -2079,6 +2079,8 @@ async function runWorkspaceTranslation(options: {
   ids?: string[];
   scope?: { type: 'failed' } | { type: 'stale' } | { type: 'all' };
   forceRefresh?: boolean;
+  /** Display label for background work; it must never change the reader's current page. */
+  chapterTitle?: string;
 }) {
   if (!doc.value || state.value.running) return;
   const config = readerConfig.value || await getConfig();
@@ -2134,8 +2136,8 @@ async function runWorkspaceTranslation(options: {
   state.value.activeSegmentIds = new Set(
     scope.type === 'ids' ? (scope.ids || []) : doc.value.segments.filter((segment) => !state.value.translations.get(segment.id)?.trim()).map((segment) => segment.id),
   );
-  state.value.workChapter = currentPage.value?.title || doc.value.title || 'document';
-  state.value.workStage = 'workspace Agent 正在翻译';
+  state.value.workChapter = options.chapterTitle || currentPage.value?.title || doc.value.title || 'document';
+  state.value.workStage = options.chapterTitle ? '后台预翻译' : 'workspace Agent 正在翻译';
   state.value.workDone = 0;
   state.value.workTotal = response.run.counts?.total || 0;
   if (!response.started) {
@@ -2227,41 +2229,39 @@ function displayTranslation(segmentId: string): string {
   return workspaceCandidateTranslations.value.get(segmentId) || state.value.translations.get(segmentId) || '';
 }
 
-/** 连续翻译后续 N 页；每页仍复用正常翻译入口和持久化逻辑。 */
+/**
+ * 预翻译当前阅读位置之后的 N 页。直接按目标页的片段 ID 发任务，不修改 currentPageIndex，
+ * 因而读者可以继续看当前页；翻译结果到达后只更新译文 Map 和持久化记录。
+ */
 async function translatePages(pageCount: number) {
   if (!doc.value || state.value.running || pageCount < 1) return;
-  const startIndex = currentPageIndex.value;
-  const lastIndex = Math.min(pages.value.length - 1, startIndex + pageCount);
-  for (let targetIndex = startIndex + 1; targetIndex <= lastIndex; targetIndex++) {
-    if (!doc.value || state.value.running) break;
-    currentPageIndex.value = targetIndex;
-    await nextTick();
-    // startTranslate 在当前页有内容时执行该页；整页已翻译时会跳到下一待译页，
-    // 因此这里直接调用页面级执行逻辑，避免误跳过用户指定的页范围。
-    await translateCurrentVisiblePage();
-    if (state.value.error || state.value.running) break;
-  }
-}
 
-async function translateCurrentVisiblePage() {
-  if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  const firstTargetIndex = currentPageIndex.value + 1;
+  const targetPages = pages.value.slice(firstTargetIndex, firstTargetIndex + pageCount);
+  if (!targetPages.length) return;
+
+  const pendingSegments = targetPages
+    .flatMap((page) => page.segments)
+    .filter((segment) => !state.value.translations.get(segment.id)?.trim());
+  if (!pendingSegments.length) return;
+
+  const ids = pendingSegments.map((segment) => segment.id);
+  const chapterTitle = '后台预翻译：' + targetPages.map((page) => page.title).join('、');
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
+
   if (config.documentUseLocalAgent) {
-    const project = await ensureDocumentWorkspace();
-    if (!project || workspaceSourceChanged.value) return;
-    const ids = visibleSegments.value
-      .filter((segment) => !state.value.translations.get(segment.id)?.trim())
-      .map((segment) => segment.id);
-    if (ids.length) await runWorkspaceTranslation({ ids });
+    // Workspace 的任务范围是 segment IDs，与用户当前显示哪一页无关。
+    await runWorkspaceTranslation({ ids, chapterTitle });
     return;
   }
+
   const options = await buildTranslationOptions();
   await run(doc.value.segments, {
     ...options,
     onlyPrioritySegments: true,
-    prioritySegmentIds: visibleSegments.value.map((segment) => segment.id),
-    currentPageTitle: currentPage.value?.title || doc.value.title,
+    prioritySegmentIds: ids,
+    currentPageTitle: chapterTitle,
   }, true);
 }
 
