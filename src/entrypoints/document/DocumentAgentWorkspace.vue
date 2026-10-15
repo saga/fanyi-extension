@@ -298,7 +298,6 @@ const restorationProjectMissing = ref(false);
 const verification = ref<any>(null);
 const activeRun = ref<any>(null);
 const runs = ref<any[]>([]);
-const events = ref<any[]>([]);
 const busy = ref(false);
 const error = ref('');
 const message = ref('');
@@ -546,8 +545,6 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
 async function selectRun(runId: string) {
   try {
     await refreshRun(runId);
-    const result = await api('/api/documents/projects/' + project.value.projectId + '/events?runId=' + encodeURIComponent(runId) + '&limit=100');
-    events.value = result.events || [];
     if (isRunning.value) schedulePoll(runId);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -583,10 +580,6 @@ async function refreshProjectWithoutRun() {
   project.value = result.project;
   verification.value = result.verification;
   runs.value = result.runs || [];
-  if (activeRun.value) {
-    const eventResult = await api('/api/documents/projects/' + project.value.projectId + '/events?runId=' + encodeURIComponent(activeRun.value.runId) + '&limit=100');
-    events.value = eventResult.events || [];
-  }
 }
 
 async function resumeRun() {
