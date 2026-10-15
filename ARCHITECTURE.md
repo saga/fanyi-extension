@@ -307,7 +307,7 @@ toggleTranslation → ctrl.toggle()
 
 `globalQueue = new TranslationQueue(1, 2, 1000)` 只用于远程/DeepSeek Provider；background.ts 为 Local Agent 建立独立的 `TranslationQueue(4, 0, 0)`，避免本机请求被远程队列串行化。
 - 远程 globalQueue：默认并发 1，最多重试 2 次，重试间隔 1 秒；
-- Local Agent 网页翻译队列：并发 4，不复用上述重试策略。EPUB/PDF project Agent 则在本机服务端独立调度默认 3 个翻译 worker + 1 个审校 worker，受 Session pool 大小约束。
+- Local Agent 网页翻译队列：并发 4，不复用上述重试策略。EPUB/PDF project Agent 则在本机服务端独立调度：四槽位且启用审校时默认 2 个翻译 worker + 2 个审校 worker；关闭审校时翻译最多可用 4 个槽位，所有并发按 Session pool 大小约束。
 
 ### 4.3 核心工具模块
 
@@ -747,7 +747,7 @@ handleFullTranslation()
 
 - 远程 `globalQueue` 当前默认并发 1，是一项实现策略；是否能减少 Prompt Cache 成本取决于供应商的缓存定义、请求前缀、缓存 TTL 与服务端实现，不应把“并行请求一定 miss、串行一定命中”写成普遍事实。
 - 网页翻译主流程的 `warmup-then-parallel` 会先串行发出少量 chunk，再将后续任务以桌面 4 / 移动 2 的并发度执行；这是减少首批冷启动成本与提高吞吐的折衷，不意味着后续所有 chunk 都串行。
-- Local Agent 网页翻译不使用远程 `globalQueue`，使用独立并发 4 的队列；本机 EPUB/PDF project Agent 在服务端以默认 3 个翻译 worker + 1 个 Reviewer worker 调度，并受本机 Session pool 大小约束。
+- Local Agent 网页翻译不使用远程 `globalQueue`，使用独立并发 4 的队列；本机 EPUB/PDF project Agent 在四槽位且启用审校时以默认 2 个翻译 worker + 2 个 Reviewer worker 调度；关闭审校时翻译最多可用 4 个槽位。
 - 调整并发前应在目标模型、真实设备和代表性章节上测量完成时间、请求失败率、成本及译文重跑噪声；不能仅凭缓存假设推导性能结论。
 
 ### 9.3 为什么不 monkey patch history
