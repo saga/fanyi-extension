@@ -382,6 +382,6 @@ pnpm zip:firefox     # 打包 Firefox 为 .zip
 
 ### 添加新站点规则
 
-1. 在 [`src/rules/`](file:///Users/saga/code-repos/fanyi-extension/src/rules/) 下新建 `xxx-rules.ts`，导出 `SiteRule`。
-2. 在 [`src/rules/index.ts`](file:///Users/saga/code-repos/fanyi-extension/src/rules/index.ts) 的 `RULES` 数组中注册。
+1. 在 [`src/rules/`](src/rules/) 下新建 `xxx-rules.ts`，导出 `SiteRule`。
+2. 在 [`src/rules/index.ts`](src/rules/index.ts) 的 `RULES` 数组中注册。
 3. 运行 `pnpm compile` 验证类型，`pnpm test` 验证现有测试仍通过。
