@@ -213,6 +213,20 @@ export default defineBackground({
       }
     }
 
+    /**
+     * A document SDK Session remembers the first system prompt. Changing the editor contents must
+     * therefore create a fresh scoped Session, not merely a new translation-cache key.
+     * Use a small deterministic fingerprint (not the prompt text itself) in the Session version.
+     */
+    function getDocumentPromptVersion(systemPrompt: string | undefined, userTemplate: string | undefined): string {
+      const value = (systemPrompt || '') + '\\u0000' + (userTemplate || '');
+      let hash = 0x811c9dc5;
+      for (let index = 0; index < value.length; index++) {
+        hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193);
+      }
+      return 'book-session-v4-' + (hash >>> 0).toString(16);
+    }
+
     function getEffectiveProviderKey(config: Awaited<ReturnType<typeof getConfig>>): string {
       return config.useLocalAgent
         ? ['local-agent', config.localAgentProvider, config.localAgentModel || 'auto', config.localAgentUrl || ''].join(':')
@@ -521,7 +535,7 @@ export default defineBackground({
                       targetLang,
                       promptStyle,
                       translationMode,
-                      contextVersion: 'book-session-v3',
+                      contextVersion: getDocumentPromptVersion(documentSystemPromptOverride, documentUserPromptTemplate),
                       systemPromptOverride: documentSystemPromptOverride,
                       userPromptTemplate: documentUserPromptTemplate,
                     }
