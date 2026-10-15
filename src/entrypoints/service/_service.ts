@@ -27,7 +27,7 @@ export interface GlossaryEntry {
 /** Optional metadata used only by the local-agent adapter to isolate a document's SDK Session. */
 export interface TranslationSessionContext {
   documentSessionId?: string;
-  /** Stable parallel lane for technical document batches; literary books use one serial lane. */
+  /** Optional scope lane for the legacy /v1/chat/completions adapter; project-based document runs use their own run/role/batch scopes in translationAgent.ts. */
   sessionLane?: string;
   role: 'translation';
   sourceLang: string;
