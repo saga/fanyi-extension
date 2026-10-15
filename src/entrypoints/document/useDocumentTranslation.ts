@@ -496,9 +496,11 @@ async function reviewLiteraryBatchViaServer(
   // Accuracy/terminology fixes still auto-apply, because the Reviewer classified those as must-fix.
   const actionableFindings = findings.map((finding) => {
     if (finding.category === 'style' && !mustFixIds.has(finding.id)) {
-      const proposedTranslation = reviewed.get(finding.id);
-      return proposedTranslation
-        ? { ...finding, proposedTranslation, applicationStatus: 'pending' as const }
+      // The review endpoint deliberately returns the unchanged draft in translations when
+      // a finding is style-only. The complete alternative lives on the finding itself;
+      // never infer a proposal from translations[id], or the UI would offer the old draft.
+      return finding.proposedTranslation
+        ? { ...finding, applicationStatus: finding.applicationStatus || ('pending' as const) }
         : finding;
     }
     return mustFixIds.has(finding.id)
