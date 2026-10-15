@@ -446,6 +446,102 @@
         <p class="muted small dictionary-footnote">状态含义：已纳入规范＝已有原文依据的自动纳入结果或用户确认的译名；待核对＝AI 建议或被编辑过的映射。变更会保存在本机阅读会话中，并供后续章节参考。</p>
       </section>
 
+      <section v-if="literaryMode" class="panel character-voice-bible">
+        <div class="dictionary-heading">
+          <div>
+            <h3>人物声音档案</h3>
+            <p class="muted small">只记录有原文证据、能落实到措辞与句式的声音特征。候选画像不会强制套用到译文；确认后才进入常规翻译上下文。</p>
+          </div>
+          <div class="voice-counts">
+            <span class="chip">人物 {{ literaryMemory.characterVoices.length }}</span>
+            <span class="chip">已确认 {{ confirmedCharacterVoiceCount }}</span>
+            <span class="chip">待核对 {{ pendingCharacterVoiceCount }}</span>
+          </div>
+        </div>
+        <div v-if="!literaryMemory.characterVoices.length" class="review-empty">
+          <strong>尚未建立人物声音档案</strong>
+          <p class="muted small">翻译流程分析到足够的对白证据后，会生成候选画像。系统不会为了填满档案而猜测人物口头禅、方言或性格。</p>
+        </div>
+        <article v-for="profile in literaryMemory.characterVoices" :key="profile.characterId" class="voice-profile-card">
+          <div class="voice-profile-heading">
+            <div>
+              <strong>{{ profile.canonicalSourceName }}<template v-if="profile.targetName"> → {{ profile.targetName }}</template></strong>
+              <p class="muted small">{{ profile.characterId }} · 置信度 {{ Math.round(profile.confidence * 100) }}% · {{ profile.aliases.join('、') || '暂无别名' }}</p>
+            </div>
+            <span class="entity-status" :class="profile.status === 'confirmed' ? 'is-confirmed' : profile.status === 'rejected' ? 'is-rejected' : 'is-pending'">
+              {{ profile.status === 'confirmed' ? '已确认' : profile.status === 'rejected' ? '已拒绝' : '候选' }}
+            </span>
+          </div>
+          <div class="voice-profile-fields">
+            <p v-if="profile.voiceCore.register"><strong>语域：</strong>{{ profile.voiceCore.register }}</p>
+            <p v-if="profile.voiceCore.syntaxRhythm?.length"><strong>句法 / 节奏：</strong>{{ profile.voiceCore.syntaxRhythm.join('；') }}</p>
+            <p v-if="profile.voiceCore.lexicalPreferences?.length"><strong>词汇：</strong>{{ profile.voiceCore.lexicalPreferences.join('；') }}</p>
+            <p v-if="profile.voiceCore.discourseHabits?.length"><strong>对话策略：</strong>{{ profile.voiceCore.discourseHabits.join('；') }}</p>
+            <p v-if="profile.voiceCore.stanceModality?.length"><strong>立场 / 情态：</strong>{{ profile.voiceCore.stanceModality.join('；') }}</p>
+            <p v-if="profile.voiceCore.humorIrony"><strong>幽默 / 反讽：</strong>{{ profile.voiceCore.humorIrony }}</p>
+            <p v-if="profile.voiceCore.disfluency"><strong>口语特征：</strong>{{ profile.voiceCore.disfluency }}</p>
+            <p v-if="profile.voiceCore.avoid?.length"><strong>避免：</strong>{{ profile.voiceCore.avoid.join('；') }}</p>
+          </div>
+          <details>
+            <summary>原文证据（{{ profile.evidence.length }}）与人物对比（{{ profile.contrastRules.length }}）</summary>
+            <div v-for="(evidence, index) in profile.evidence" :key="profile.characterId + '-ev-' + index" class="voice-evidence">
+              <p><strong>{{ evidence.dimension }} · {{ Math.round(evidence.confidence * 100) }}%</strong> · {{ evidence.observation }}</p>
+              <blockquote>{{ evidence.sourceQuote }}</blockquote>
+              <button class="btn ghost" @click="showReviewSegment(evidence.segmentId)">定位证据片段 {{ evidence.segmentId }}</button>
+            </div>
+            <p v-for="(rule, index) in profile.contrastRules" :key="profile.characterId + '-contrast-' + index" class="muted small">
+              与 {{ characterName(rule.otherCharacterId) }} 的差异：{{ rule.difference }}（证据：{{ rule.evidenceSegmentIds.join('、') }}）
+            </p>
+            <p v-for="(question, index) in profile.openQuestions" :key="profile.characterId + '-q-' + index" class="warn small">待确认：{{ question }}</p>
+          </details>
+          <div class="voice-profile-actions">
+            <button class="btn primary" :disabled="profile.status === 'confirmed' || !profile.evidence.length" @click="setCharacterVoiceStatus(profile, 'confirmed')">确认并用于翻译</button>
+            <button class="btn" :disabled="profile.status === 'rejected'" @click="setCharacterVoiceStatus(profile, 'rejected')">拒绝此画像</button>
+            <button class="btn ghost" :disabled="profile.status === 'candidate'" @click="setCharacterVoiceStatus(profile, 'candidate')">恢复为候选</button>
+          </div>
+        </article>
+
+        <details v-if="literaryMemory.relationshipVoiceRules.length" class="relationship-section">
+          <summary><strong>人物对的说话规则</strong>（{{ literaryMemory.relationshipVoiceRules.length }} 项）</summary>
+          <p class="muted small">方向不可互换：A 对 B 的称谓和语域，不代表 B 对 A 的说话方式。</p>
+          <article v-for="(rule, index) in literaryMemory.relationshipVoiceRules" :key="'voice-rule-' + index" class="voice-profile-card">
+            <div class="voice-profile-heading">
+              <strong>{{ characterName(rule.speakerId) }} → {{ characterName(rule.addresseeId) }}</strong>
+              <span class="entity-status" :class="rule.status === 'confirmed' ? 'is-confirmed' : rule.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ rule.status === 'confirmed' ? '已确认' : rule.status === 'rejected' ? '已拒绝' : '候选' }}</span>
+            </div>
+            <p v-if="rule.baselineRegister"><strong>语域：</strong>{{ rule.baselineRegister }}</p>
+            <p v-if="rule.addressTerms.length"><strong>称呼：</strong>{{ rule.addressTerms.join('、') }}</p>
+            <p v-if="rule.directness"><strong>直接程度：</strong>{{ rule.directness }}</p>
+            <p v-if="rule.emotionalDistance"><strong>情感距离：</strong>{{ rule.emotionalDistance }}</p>
+            <p v-if="rule.sceneDependentShift"><strong>场景变化：</strong>{{ rule.sceneDependentShift }}</p>
+            <p class="muted small">证据片段：{{ rule.evidenceSegmentIds.join('、') }}</p>
+            <div class="voice-profile-actions">
+              <button class="btn primary" :disabled="rule.status === 'confirmed' || !rule.evidenceSegmentIds.length" @click="setRelationshipVoiceStatus(rule, 'confirmed')">确认规则</button>
+              <button class="btn" :disabled="rule.status === 'rejected'" @click="setRelationshipVoiceStatus(rule, 'rejected')">拒绝</button>
+              <button class="btn ghost" :disabled="rule.status === 'candidate'" @click="setRelationshipVoiceStatus(rule, 'candidate')">恢复候选</button>
+            </div>
+          </article>
+        </details>
+        <details v-if="literaryMemory.voiceAnchors.length" class="relationship-section">
+          <summary><strong>原文—译文声音锚点</strong>（{{ literaryMemory.voiceAnchors.length }} 项）</summary>
+          <p class="muted small">仅批准的锚点会用于常规翻译。来源对不上、说话人不可靠或译文还未确定时，不应批准。</p>
+          <article v-for="anchor in literaryMemory.voiceAnchors" :key="anchor.anchorId" class="voice-profile-card">
+            <div class="voice-profile-heading">
+              <strong>{{ characterName(anchor.speakerId) }} · {{ anchor.chapter || '未标章节' }}</strong>
+              <span class="entity-status" :class="anchor.status === 'approved' ? 'is-confirmed' : anchor.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ anchor.status === 'approved' ? '已批准' : anchor.status === 'rejected' ? '已拒绝' : '候选' }}</span>
+            </div>
+            <p><strong>原文：</strong>{{ anchor.source }}</p>
+            <p><strong>译文：</strong>{{ anchor.target }}</p>
+            <p class="muted small">来源片段 {{ anchor.segmentId }} · {{ anchor.tags.join('、') }}</p>
+            <div class="voice-profile-actions">
+              <button class="btn primary" :disabled="anchor.status === 'approved'" @click="setVoiceAnchorStatus(anchor, 'approved')">批准并作为声音示例</button>
+              <button class="btn" :disabled="anchor.status === 'rejected'" @click="setVoiceAnchorStatus(anchor, 'rejected')">拒绝</button>
+              <button class="btn ghost" :disabled="anchor.status === 'candidate'" @click="setVoiceAnchorStatus(anchor, 'candidate')">恢复候选</button>
+            </div>
+          </article>
+        </details>
+      </section>
+
       <section class="panel literary-review-findings">
         <div class="review-workspace-heading">
           <div>
@@ -2485,6 +2581,17 @@ async function resetAll() {
 
 .export { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 
+.character-voice-bible { display: flex; flex-direction: column; gap: .9rem; }
+.voice-counts { display: flex; flex-wrap: wrap; gap: .35rem; }
+.voice-profile-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: .85rem; display: flex; flex-direction: column; gap: .55rem; }
+.voice-profile-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
+.voice-profile-heading p { margin: .2rem 0 0; }
+.voice-profile-fields p, .voice-profile-card > p { margin: .25rem 0; line-height: 1.55; }
+.voice-evidence { border-top: 1px solid #f0f0f0; padding: .5rem 0; }
+.voice-evidence p { margin: 0 0 .35rem; }
+.voice-evidence blockquote { margin: .3rem 0; padding: .4rem .7rem; border-left: 2px solid #d0d7de; background: #f6f8fa; white-space: pre-wrap; }
+.voice-profile-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.entity-status.is-rejected { background: #fff1f0; color: #a8071a; }
 .literary-dictionary details + details { margin-top: .65rem; }
 .literary-dictionary summary { cursor: pointer; padding: .35rem 0; }
 .literary-editor-list { display: grid; gap: .55rem; margin-top: .6rem; }
