@@ -41,6 +41,8 @@ export interface TranslationSessionContext {
   userPromptTemplate?: string;
   /** 独立只读的角色声音上下文，放入 user message 而非 system prompt。 */
   voiceContext?: unknown;
+  /** 前文文本单独传递，避免把结构化的 contextPath/voiceContext 混成原文。 */
+  precedingSegments?: Array<{ id: string; text: string; contextPath?: string }>;
 }
 
 export interface TranslationService {
