@@ -350,6 +350,47 @@ describe('文学书籍记忆', () => {
     expect(parsed.constraints.join(' ')).toContain('不确定说话人');
   });
 
+  it('以前文消歧命中人物时，跨章节声音锚点无需原句重复也能检索', () => {
+    const memory = sanitizeLiteraryMemory({
+      styleGuide: { narrativeVoice: '克制的第三人称' },
+      entities: [
+        { source: 'Alice', target: '艾丽丝', kind: 'person', aliases: [], reviewStatus: 'confirmed' },
+        { source: 'Bob', target: '鲍勃', kind: 'person', aliases: [], reviewStatus: 'confirmed' },
+      ],
+      characterVoices: [
+        {
+          characterId: 'char-alice', canonicalSourceName: 'Alice', aliases: [], status: 'confirmed', confidence: 0.9,
+          voiceCore: { syntaxRhythm: ['短反问'] }, contrastRules: [],
+          evidence: [{ segmentId: 'ch1-a1', sourceQuote: 'Alice said', dimension: 'discourse', observation: '有明确的说话标记', confidence: 0.9 }],
+        },
+        {
+          characterId: 'char-bob', canonicalSourceName: 'Bob', aliases: [], status: 'confirmed', confidence: 0.8,
+          voiceCore: { register: '短句回应' }, contrastRules: [],
+          evidence: [{ segmentId: 'ch1-b1', sourceQuote: 'Bob answered', dimension: 'register', observation: '简短回答', confidence: 0.8 }],
+        },
+      ],
+      relationshipVoiceRules: [{
+        speakerId: 'char-alice', addresseeId: 'char-bob', status: 'confirmed',
+        baselineRegister: '直接但克制', addressTerms: ['Bob'], evidenceSegmentIds: ['ch1-a1'],
+      }],
+      voiceAnchors: [{
+        anchorId: 'alice-cross-chapter', speakerId: 'char-alice', addresseeId: 'char-bob',
+        source: 'You never listen to me.', target: '你从来不听我说话。',
+        chapter: 'Chapter 1', segmentId: 'ch1-a1', status: 'approved', approvedBy: 'user',
+        attributionEvidence: 'Alice said', attributionConfidence: 0.95, tags: ['reproach'],
+      }],
+    });
+    const context = buildLiteraryContextForBatch({
+      memory,
+      segments: [{ id: 'ch4-p10', text: 'He looked away.', contextPath: 'Chapter 4' }],
+      precedingSegments: [{ id: 'ch4-p9', text: 'Alice said, “You always do this, Bob.”', contextPath: 'Chapter 4' }],
+      chapterTitle: 'Chapter 4',
+    });
+    expect(context.characterVoices.map((profile) => profile.characterId)).toEqual(['char-alice', 'char-bob']);
+    expect(context.voiceAnchors.map((anchor) => anchor.anchorId)).toEqual(['alice-cross-chapter']);
+    expect(context.scene.segmentIds).toEqual(['ch4-p10']);
+  });
+
   it('合并章节分析时保留用户确认的画像与锚点状态', () => {
     const first = sanitizeLiteraryMemory({
       characterVoices: [{
