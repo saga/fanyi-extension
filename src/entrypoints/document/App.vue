@@ -99,7 +99,7 @@
               <option value="original">仅原文</option>
             </select>
           </label>
-          <label v-if="literaryMode" class="field inline" title="关闭后每批省一次审校调用，速度翻倍；译文为初译水平">
+          <label v-if="literaryMode" class="field inline" title="关闭后每批减少一次审校调用；译文为初译水平，实际耗时取决于模型与文档">
             <span>审校</span>
             <input v-model="literaryReview" type="checkbox" />
           </label>
