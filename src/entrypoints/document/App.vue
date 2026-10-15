@@ -159,7 +159,8 @@
       <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
         <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
           :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0), { 'is-active': state.activeSegmentIds?.has(seg.id) }]">
-          <div v-if="viewMode !== 'translation'" class="or" :class="languageFontClass(sourceLang, seg.text)">{{ seg.text }}</div>
+          <div v-if="viewMode !== 'translation'" class="or"
+            :class="[languageFontClass(sourceLang, seg.text), { 'is-translated': !!state.translations.get(seg.id)?.trim() }]">{{ seg.text }}</div>
           <div v-if="viewMode !== 'original'" class="tr"
             :class="[languageFontClass(targetLang, displayTranslation(seg.id)), { 'is-workspace-candidate': workspaceCandidateTranslations.has(seg.id) }]">
             <span v-if="workspaceCandidateTranslations.has(seg.id)" class="workspace-candidate-label">Agent 候选 · 尚未采纳</span>
@@ -172,6 +173,13 @@
           </div>
         </div>
       </article>
+
+      <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
+      <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
+        <button class="quick-action" :disabled="state.running || currentPageIndex >= pages.length - 1" @click="translatePages(1)">翻译下一页</button>
+        <button class="quick-action" :disabled="state.running || currentPageIndex >= pages.length - 1" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
+      </div>
 
       <!-- 导出 -->
       <section class="panel export">
@@ -2221,6 +2229,44 @@ function displayTranslation(segmentId: string): string {
   return workspaceCandidateTranslations.value.get(segmentId) || state.value.translations.get(segmentId) || '';
 }
 
+/** 连续翻译后续 N 页；每页仍复用正常翻译入口和持久化逻辑。 */
+async function translatePages(pageCount: number) {
+  if (!doc.value || state.value.running || pageCount < 1) return;
+  const startIndex = currentPageIndex.value;
+  const lastIndex = Math.min(pages.value.length - 1, startIndex + pageCount);
+  for (let targetIndex = startIndex + 1; targetIndex <= lastIndex; targetIndex++) {
+    if (!doc.value || state.value.running) break;
+    currentPageIndex.value = targetIndex;
+    await nextTick();
+    // startTranslate 在当前页有内容时执行该页；整页已翻译时会跳到下一待译页，
+    // 因此这里直接调用页面级执行逻辑，避免误跳过用户指定的页范围。
+    await translateCurrentVisiblePage();
+    if (state.value.error || state.value.running) break;
+  }
+}
+
+async function translateCurrentVisiblePage() {
+  if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (config.useLocalAgent) {
+    const project = await ensureDocumentWorkspace();
+    if (!project || workspaceSourceChanged.value) return;
+    const ids = visibleSegments.value
+      .filter((segment) => !state.value.translations.get(segment.id)?.trim())
+      .map((segment) => segment.id);
+    if (ids.length) await runWorkspaceTranslation({ ids });
+    return;
+  }
+  const options = await buildTranslationOptions();
+  await run(doc.value.segments, {
+    ...options,
+    onlyPrioritySegments: true,
+    prioritySegmentIds: visibleSegments.value.map((segment) => segment.id),
+    currentPageTitle: currentPage.value?.title || doc.value.title,
+  }, true);
+}
+
 async function startTranslate() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
   const config = readerConfig.value || await getConfig();
@@ -2702,6 +2748,40 @@ async function resetAll() {
   background: #0969da;
   transition: width .2s ease;
 }
+.reader-quick-actions {
+  position: fixed;
+  z-index: 30;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .4rem;
+  border: 1px solid rgba(208, 215, 222, .72);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .78);
+  box-shadow: 0 5px 22px rgba(31, 35, 40, .12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.quick-action {
+  border: 0;
+  border-radius: 8px;
+  padding: .52rem .65rem;
+  background: transparent;
+  color: #24292f;
+  font: inherit;
+  font-size: .78rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.quick-action:hover:not(:disabled) { background: rgba(9, 105, 218, .09); }
+.quick-action:disabled { opacity: .42; cursor: not-allowed; }
+.quick-action-stop { color: #b42318; }
+@media (max-width: 520px) {
+  .reader-quick-actions { right: .55rem; bottom: .55rem; gap: .15rem; padding: .28rem; }
+  .quick-action { padding: .48rem .42rem; font-size: .7rem; }
+}
 .reader {
   max-width: 56rem;
   min-height: 55vh;
@@ -2714,7 +2794,7 @@ async function resetAll() {
 }
 .seg {
   padding: .8rem .25rem;
-  border-bottom: 1px solid #f0f2f4;
+  border-bottom: 0;
   content-visibility: auto;
   contain-intrinsic-size: auto 5rem;
   /* 正文基准字号：PDF 解析出的段落默认偏小，0.98rem 太小、1.06rem 接近书页阅读密度。 */
@@ -2727,7 +2807,8 @@ async function resetAll() {
   background: linear-gradient(90deg, rgba(9, 105, 218, .045), transparent 40%);
   padding-left: .85rem;
 }
-.seg .or { color: #1f2328; white-space: pre-wrap; }
+.seg .or { color: #1f2328; white-space: pre-wrap; transition: color .18s ease, font-size .18s ease; }
+.seg .or.is-translated { color: #8b9098; font-size: calc(1em - 1px); }
 .seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .2em; }
 .workspace-candidate-label {
   display: block;
