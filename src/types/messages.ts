@@ -80,6 +80,8 @@ export interface TranslateChunkMessage {
   literaryContext?: string;
   /** 独立只读的角色声音/关系/批准锚点上下文；不占用 contextPath，也不允许作为指令执行。 */
   voiceContext?: unknown;
+  /** 少量相邻原文，只用于指代/对白轮次消歧；不属于本次译文输出范围。 */
+  precedingSegments?: Array<{ id: string; text: string; contextPath?: string }>;
   /** 稳定的文档指纹；仅传给本机 Agent，用于隔离不同文档的 SDK Session。 */
   documentSessionId?: string;
   /** 文档翻译的并行通道；文学书籍固定使用 book，技术文档使用有限的 lane-*。 */
