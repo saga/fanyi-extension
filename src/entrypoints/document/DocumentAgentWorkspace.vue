@@ -119,10 +119,12 @@
         </div>
         <div v-else-if="activeRun && !isRunning && (activeRun.counts?.candidate || 0) > 0" class="agent-pending-output">
           <div>
-            <strong>译文已生成，正在等待写入</strong>
-            <p>系统暂时没能自动保存这次结果。重试保存即可，不需要重新翻译。</p>
+            <strong>{{ autoAcceptError ? '自动保存失败' : '译文已生成，正在保存' }}</strong>
+            <p>{{ autoAcceptError || '正在把已生成的译文写入项目并同步到阅读页；不需要重新翻译。' }}</p>
           </div>
-          <button class="agent-button agent-button-secondary" :disabled="busy" @click="autoAcceptReadyCandidates">重试保存</button>
+          <button class="agent-button agent-button-secondary" :disabled="busy || !!autoAcceptingRunId" @click="autoAcceptReadyCandidates">
+            {{ autoAcceptError ? '重试保存' : '立即保存' }}
+          </button>
         </div>
 
         <div v-if="activeRun" class="agent-run-summary">
@@ -305,6 +307,8 @@ const manualText = ref('');
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
 const autoAcceptingRunId = ref('');
+const queuedAutoAcceptRunId = ref('');
+const autoAcceptError = ref('');
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
 const totalSegmentCount = computed(() =>
@@ -615,31 +619,53 @@ async function cancelRun() {
 async function autoAcceptReadyCandidates() {
   const run = activeRun.value;
   if (!run || !project.value || isRunning.value || Number(run.counts?.candidate || 0) <= 0) return;
-  if (autoAcceptingRunId.value === run.runId || busy.value) return;
+  if (autoAcceptingRunId.value === run.runId) return;
+  if (busy.value) {
+    // Do not silently drop the only automatic save attempt. A busy manual refresh/edit can
+    // overlap the terminal poll; queue one retry and run it as soon as that operation finishes.
+    queuedAutoAcceptRunId.value = run.runId;
+    return;
+  }
 
-  autoAcceptingRunId.value = run.runId;
+  const runId = run.runId as string;
+  autoAcceptingRunId.value = runId;
+  autoAcceptError.value = '';
   try {
-    await acceptCandidates(undefined, true);
+    const succeeded = await acceptCandidates(undefined, true);
+    if (!succeeded && activeRun.value?.runId === runId && Number(activeRun.value.counts?.candidate || 0) > 0) {
+      autoAcceptError.value = error.value || '保存接口未能确认候选已写入。请重试保存；原始模型结果仍保存在运行记录中。';
+    }
   } finally {
-    if (autoAcceptingRunId.value === run.runId) autoAcceptingRunId.value = '';
+    if (autoAcceptingRunId.value === runId) autoAcceptingRunId.value = '';
   }
 }
 
-async function acceptCandidates(segmentIds?: string[], automatic = false) {
-  if (!activeRun.value || !project.value) return;
+async function acceptCandidates(segmentIds?: string[], automatic = false): Promise<boolean> {
+  if (!activeRun.value || !project.value) return false;
   const runId = activeRun.value.runId as string;
   // Snapshot candidates before the response changes their run-segment status.
   const candidates = (activeRun.value.segments || [])
     .filter((segment: any) => segment.status === 'candidate' && typeof segment.candidateTranslation === 'string')
     .map((segment: any) => ({ id: segment.id as string, text: segment.candidateTranslation as string }));
   const requested = segmentIds?.length ? new Set(segmentIds) : new Set(candidates.map((item) => item.id));
-  if (!requested.size) return;
+  if (!requested.size) {
+    error.value = '运行记录显示有候选数量，但没有读取到对应的候选片段。正在重新读取运行详情，请稍后重试。';
+    if (automatic) {
+      try {
+        const latest = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/runs/' + encodeURIComponent(runId));
+        if (activeRun.value?.runId === runId) activeRun.value = latest.run;
+      } catch (e) {
+        error.value += '读取运行详情失败：' + (e instanceof Error ? e.message : String(e));
+      }
+    }
+    return false;
+  }
   busy.value = true; error.value = '';
   try {
-    const response = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + runId + '/accept', {
+    const response = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/runs/' + encodeURIComponent(runId) + '/accept', {
       method: 'POST', body: JSON.stringify({ segmentIds: Array.from(requested) }),
     });
-    activeRun.value = response.run;
+    if (activeRun.value?.runId === runId) activeRun.value = response.run;
     // Only sync the authoritative accepted versions from SQLite. The store may have preserved
     // a human edit instead of accepting a model candidate for one or more segments.
     await emitWorkspaceSnapshot();
@@ -648,9 +674,17 @@ async function acceptCandidates(segmentIds?: string[], automatic = false) {
       : segmentIds?.length
         ? '已采纳所选片段并同步到阅读器；其他候选仍可单独选择。'
         : '已采纳本次候选并同步到阅读器；历史运行仍可查看。';
+    autoAcceptError.value = '';
     await refreshProjectWithoutRun();
-  } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
-  finally { busy.value = false; }
+    return true;
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    error.value = detail;
+    if (automatic) autoAcceptError.value = '自动保存失败：' + detail;
+    return false;
+  } finally {
+    busy.value = false;
+  }
 }
 
 function loadSelectedTranslation() {
@@ -679,6 +713,17 @@ watch(() => props.visibleSegments.map((segment) => segment.id).join('|'), () => 
 });
 watch(() => [props.systemPrompt, props.userPromptTemplate, props.sourceLang, props.targetLang, props.translationMode],
   () => { /* Prompt is snapshotted only when the user starts/saves a run. */ });
+
+// If automatic acceptance met another foreground operation, retry exactly once when that operation
+// finishes. Failed API calls are not retried in a loop; their actual error is shown to the user.
+watch(busy, (isBusy) => {
+  if (isBusy || !queuedAutoAcceptRunId.value || disposed) return;
+  const queuedRunId = queuedAutoAcceptRunId.value;
+  queuedAutoAcceptRunId.value = '';
+  if (activeRun.value?.runId === queuedRunId && Number(activeRun.value.counts?.candidate || 0) > 0) {
+    void autoAcceptReadyCandidates();
+  }
+});
 
 // 只在 Agent Tab 激活且本机 Agent 可用时查找关联。切回 Tab 时仅在当前组件尚无项目状态时恢复。
 watch(
