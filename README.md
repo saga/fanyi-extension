@@ -165,53 +165,38 @@ flowchart TD
 远程 DeepSeek 的单并发队列与本机队列分开。本机 Provider 失败时直接报错，不会自动切换到远程翻译服务。
 ### 目录结构
 
-```
+```text
 src/
-│
-├── components/                 # Vue 3 组件
-│   ├── FloatingBall.vue              # 悬浮操作球
-│   ├── SelectionTranslator.vue       # 选区翻译浮窗
-│   └── TranslationStatus.vue         # 翻译状态指示
-│
-├── entrypoints/                # WXT 入口 (打包根目录)
-│   ├── background.ts                 # 后台：消息路由、缓存、API 调度
-│   ├── content.ts                    # 内容脚本：DOM 提取、应用翻译
-│   ├── popup/                        # 配置 UI
-│   │   ├── App.vue
-│   │   ├── index.html
-│   │   └── main.ts
-│   ├── service/                      # DeepSeek 客户端
-│   │   ├── deepseek.ts                     # DeepSeekTranslationService
-│   │   ├── streamParser.ts                 # SSE 解析 (parseSSELine / parseSSEStream)
-│   │   └── _service.ts                     # 类型定义
-│   └── utils/                        # 工具层
-│       ├── blockExtractor.ts               # TreeWalker 提取 TextBlock
-│       ├── chunkBuilder.ts                 # 分块策略
-│       ├── translationDisplay.ts           # DOM 包装/还原 (保留链接/格式)
-│       ├── domObserver.ts                  # 增量 DOM 观察
-│       ├── glossaryExtractor.ts            # 术语表抽取 (compromise NLP)
-│       ├── translateApi.ts                 # 缓存 + 翻译结果处理
-│       ├── translationQueue.ts             # 有界队列；并发度由 Provider 路径决定
-│       ├── cacheKey.ts                     # 简单 hash cache key
-│       ├── cacheManager.ts                 # @wxt-dev/storage 缓存实例
-│       ├── contentHelper.ts                # DOM 准备
-│       ├── config.ts                       # @wxt-dev/storage 配置
-│       ├── common.ts                       # 通用工具
-│       ├── constant.ts
-│       └── constants.ts                    # GESTURES 等常量
-│
+├── components/                 # 页面内 Vue 控件
+├── entrypoints/
+│   ├── background.ts           # 后台消息路由、缓存与 Provider 调度
+│   ├── content.ts              # 内容脚本入口
+│   ├── content/                # 页面翻译控制器、分块调度、服务端模式
+│   ├── document/               # EPUB/PDF 阅读器与 Document Agent workspace
+│   ├── popup/                  # 配置界面
+│   ├── service/                # DeepSeek / 对话客户端与响应解析
+│   └── utils/
+│       ├── blockExtractor/     # TreeWalker、过滤规则、块类型与统计
+│       ├── document/           # 文档分块、解析器、导出与阅读状态
+│       ├── cacheKey.ts
+│       ├── cacheManager.ts
+│       ├── chunkBuilder.ts
+│       ├── contentHelper.ts
+│       ├── domObserver.ts
+│       ├── glossaryExtractor.ts
+│       ├── localAgentHealth.ts
+│       ├── offlineQueue.ts
+│       ├── shardedStorage.ts
+│       ├── singleflight.ts
+│       ├── translateApi.ts
+│       ├── translationDisplay.ts
+│       └── translationQueue.ts
 ├── rules/                      # 站点定制规则
-│   ├── types.ts
-│   ├── index.ts
-│   ├── github-rules.ts
-│   ├── reddit-rules.ts
-│   ├── hackernews-rules.ts
-│   └── fortune-rules.ts
-│
-├── public/                     # 静态资源 (图标等)
-└── styles/
-    └── theme.css
+├── styles/                     # 扩展 UI 样式
+└── __tests__/                  # Vitest 测试位于 src/__tests__
 ```
+
+实际解析器、缓存与队列实现以这些目录中的源码为准；README 只列出主要结构，不要求逐文件罗列。
 
 ### 关键模块说明
 
