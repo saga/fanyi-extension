@@ -204,8 +204,8 @@ function resolveServerDocumentEndpoint(
 
 /**
  * 上传已在浏览器端提取好的结构化片段。
- * 响应只接纳当前请求中存在的 ID；服务端返回部分结果时保留有效译文，
- * 再由调用方根据实际缺失片段重试，避免把 HTTP 200 当成完整成功。
+ * 响应只接纳当前请求中存在的 ID；服务端返回部分结果时保留有效译文并记录缺失 ID，
+ * 用户重试时只提交未完成片段，避免把 HTTP 200 当成完整成功。
  */
 async function translateSegmentsViaServer(
   segments: DocumentSegment[],
@@ -397,10 +397,10 @@ async function analyzeLiteraryChapterViaLocalAgent(
       glossary: undefined,
       promptStyle: options.promptStyle,
       translationMode: 'literary',
-      documentSessionId: options.useLocalAgent ? options.documentSessionId : undefined,
+      documentSessionId: options.documentSessionId,
       provider,
-      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'workbuddy' } : {}),
-      model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
+      runtime: options.localAgentProvider || 'workbuddy',
+      model: options.localAgentModel || 'auto',
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   }, '书籍实体分析');
@@ -410,7 +410,7 @@ async function analyzeLiteraryChapterViaLocalAgent(
   if (!isCurrentRun(runId)) return null;
   if (!response.ok) {
     const message = data.error || ('书籍实体分析失败：HTTP ' + response.status);
-    const requestId = options.useLocalAgent && data.requestId ? ' (本机 request ID: ' + data.requestId + ')' : '';
+    const requestId = data.requestId ? ' (本机 request ID: ' + data.requestId + ')' : '';
     throw new Error(message + requestId);
   }
   return {
@@ -463,10 +463,10 @@ async function reviewLiteraryBatchViaLocalAgent(
       glossary: undefined,
       promptStyle: options.promptStyle,
       translationMode: 'literary',
-      documentSessionId: options.useLocalAgent ? options.documentSessionId : undefined,
+      documentSessionId: options.documentSessionId,
       provider,
-      ...(options.useLocalAgent ? { runtime: options.localAgentProvider || 'workbuddy' } : {}),
-      model: options.useLocalAgent ? (options.localAgentModel || 'auto') : options.model,
+      runtime: options.localAgentProvider || 'workbuddy',
+      model: options.localAgentModel || 'auto',
       ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   }, '文学审校');
@@ -476,7 +476,7 @@ async function reviewLiteraryBatchViaLocalAgent(
   if (!isCurrentRun(runId)) return null;
   if (!response.ok) {
     const message = data.error || ('文学审校失败：HTTP ' + response.status);
-    const requestId = options.useLocalAgent && data.requestId ? ' (本机 request ID: ' + data.requestId + ')' : '';
+    const requestId = data.requestId ? ' (本机 request ID: ' + data.requestId + ')' : '';
     throw new Error(message + requestId);
   }
   const allowed = new Set(candidates.map((segment) => segment.id));
@@ -725,7 +725,7 @@ export function useDocumentTranslation() {
     precedingSegments: DocumentSegment[] = [],
   ): Promise<boolean> {
     if (shouldUseRemoteDocumentTranslation(options)) {
-      // 服务端路径对文学模式执行初译 + 独立 reviewer；普通文档仍走原管线。
+      // Worker 只做本批片段的一次无状态翻译；文学书籍分析和 Reviewer 仅走本机 Agent。
       const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun);
       if (!result || !isCurrentRun(runId)) return false;
       const expectedIds = batch.map((segment) => segment.id);
@@ -1249,6 +1249,7 @@ export function useDocumentTranslation() {
       }
     }
 
+    // Worker 内部会为 chunk/缺失 ID 执行有界重试；客户端不重复重跑整批，避免重复模型调用。
     const retries = shouldUseRemoteDocumentTranslation(effectiveOptions) ? 0 : (options.retries ?? 1);
     // 章记忆只在章边界累积；同章内的批互相独立（译文按 id 回填），可以并行。
     // 本机服务是每请求独立进程 + SQLite WAL，background 的本机队列并发为 4，
@@ -1268,7 +1269,7 @@ export function useDocumentTranslation() {
           : '审校收尾中';
       }
     };
-    // 服务端初译+审校一体，无法拆分，只能同步等。
+    // Worker 只做单次片段翻译；远程模式不额外启动文学 Reviewer。
     const remoteMode = shouldUseRemoteDocumentTranslation(effectiveOptions);
     const segmentIndexById = new Map(segments.map((segment, index) => [segment.id, index]));
     const precedingForBatch = (batch: DocumentSegment[]): DocumentSegment[] => {
