@@ -376,7 +376,66 @@ async function refreshProject() {
   if (activeRun.value) await refreshRun(activeRun.value.runId);
 }
 
+async function uploadCurrentSourceFile() {
+  if (!project.value || !props.sourceFile) throw new Error('当前没有可上传的原始文件');
+  const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/source-file', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Source-File-Name': encodeURIComponent(props.sourceFile.name),
+    },
+    body: props.sourceFile,
+  });
+  project.value = { ...project.value, sourceFileSaved: true, sourceFileSize: result.size };
+  message.value = '原始文件已备份到本机文档项目目录（' + (result.size / 1024 / 1024).toFixed(2) + ' MiB）。';
+  await refreshProject();
+}
+
+async function updateSourceRevision() {
+  if (!project.value || !sourceChanged.value) return;
+  busy.value = true;
+  error.value = '';
+  message.value = '';
+  try {
+    const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/source', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: props.title,
+        sourceFileName: props.sourceFileName,
+        format: props.format,
+        segments: props.segments,
+      }),
+    });
+    project.value = result.project;
+    if (props.sourceFile) {
+      try {
+        await uploadCurrentSourceFile();
+      } catch (uploadError) {
+        message.value = '新来源片段已保存，但原始文件备份失败：' + (uploadError instanceof Error ? uploadError.message : String(uploadError));
+      }
+    }
+    await saveProjectMapping();
+    await refreshProject();
+    message.value = (message.value ? message.value + ' ' : '') + '新来源版本已保存；原有运行与人工修订保留，变更片段会在下次运行中重新翻译。';
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function createSeparateProject() {
+  if (busy.value || isRunning.value) return;
+  project.value = null;
+  activeRun.value = null;
+  verification.value = null;
+  runs.value = [];
+  sourceChanged.value = false;
+  await createProject();
+}
+
 async function startRun(scope: 'stale' | 'all' | 'failed') {
+  if (sourceChanged.value) { error.value = '请先确认是否导入新的来源版本。'; return; }
   busy.value = true; error.value = ''; message.value = '';
   try {
     if (!project.value) await createProject();
