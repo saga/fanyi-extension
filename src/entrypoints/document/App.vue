@@ -513,7 +513,7 @@
       <template v-else>
         <DocumentAgentWorkspace
           v-if="doc"
-          :key="doc.meta.fileName + ':' + doc.format"
+          :key="documentFileName + ':' + doc.format"
           :title="doc.title"
           :format="doc.format"
           :source-file-name="documentFileName"
