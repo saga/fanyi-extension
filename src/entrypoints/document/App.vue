@@ -1946,9 +1946,10 @@ async function stopCurrentTranslation() {
     workspaceRunGeneration.value++;
     workspaceRunId.value = '';
     try {
-      await workspaceApi(readerConfig.value.localAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.localAgentToken || '',
+      const response = await workspaceApi<{ run: any }>(readerConfig.value.localAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.localAgentToken || '',
         '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/runs/' + encodeURIComponent(runId) + '/cancel',
         { method: 'POST', body: '{}' });
+      workspaceActiveRun.value = response.run;
     } catch (error) {
       state.value.error = '停止 workspace 运行失败：' + (error instanceof Error ? error.message : String(error));
     }
@@ -1974,8 +1975,19 @@ async function startTranslate() {
   readerConfig.value = config;
   if (config.useLocalAgent) {
     try {
-      await ensureDocumentWorkspace();
+      const project = await ensureDocumentWorkspace();
       if (workspaceSourceChanged.value) return;
+      if (project && workspaceActiveRun.value && ['queued', 'running'].includes(workspaceActiveRun.value.status)) {
+        await followWorkspaceRun(project, workspaceActiveRun.value);
+        return;
+      }
+      if (workspaceActiveRun.value &&
+          ['awaiting_acceptance', 'partial'].includes(workspaceActiveRun.value.status) &&
+          (workspaceActiveRun.value.counts?.candidate || 0) > 0) {
+        activeTab.value = 'agent';
+        persistenceMessage.value = '当前文档已有待采纳的 Agent 候选，请先在“翻译 Agent”中比较结果。';
+        return;
+      }
     } catch (error) {
       state.value.error = '无法准备文档 workspace：' + (error instanceof Error ? error.message : String(error));
       return;
