@@ -48,8 +48,8 @@
     <!-- 选择文件前也可先配置源/目标语言、翻译类型、文风与运行服务。 -->
     <DocumentTranslationSettings
       v-if="!doc && !parsing"
-      :active-source-lang="sourceLang"
-      :active-target-lang="targetLang"
+      :active-source-lang="doc ? sourceLang : undefined"
+      :active-target-lang="doc ? targetLang : undefined"
       @updated="onTranslationSettingsUpdated"
     />
 
@@ -642,13 +642,13 @@
         :translations="state.translations"
         :source-lang="sourceLang"
         :target-lang="targetLang"
-        :translation-mode="literaryMode ? 'literary' : (readerConfig?.translationMode || 'technical')"
+        :translation-mode="literaryMode ? 'literary' : (readerConfig?.documentTranslationMode || 'technical')"
         :literary-review="literaryReview"
-        :use-local-agent="readerConfig?.useLocalAgent === true"
-        :local-agent-provider="readerConfig?.localAgentProvider || 'workbuddy'"
-        :local-agent-url="readerConfig?.localAgentUrl || 'http://127.0.0.1:8789'"
-        :local-agent-model="readerConfig?.localAgentModel || 'auto'"
-        :local-agent-token="readerConfig?.localAgentToken || ''"
+        :use-local-agent="readerConfig?.documentUseLocalAgent === true"
+        :local-agent-provider="readerConfig?.documentLocalAgentProvider || 'workbuddy'"
+        :local-agent-url="readerConfig?.documentLocalAgentUrl || 'http://127.0.0.1:8789'"
+        :local-agent-model="readerConfig?.documentLocalAgentModel || 'auto'"
+        :local-agent-token="readerConfig?.documentLocalAgentToken || ''"
         :system-prompt="documentSystemPromptEditor || builtInDocumentSystemPrompt"
         :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
         :literary-memory="literaryMemory"
@@ -817,8 +817,8 @@ const builtInDocumentSystemPrompt = computed(() => {
     sourceLang.value,
     targetLang.value,
     literaryMode.value ? undefined : glossary.value,
-    readerConfig.value?.promptStyle || 'default',
-    literaryMode.value ? 'literary' : (readerConfig.value?.translationMode || 'technical'),
+    readerConfig.value?.documentPromptStyle || 'default',
+    literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
   );
   // Include the static book workflow instructions shown to the model, not just the generic profile.
   return literaryMode.value ? base + '\n\n' + buildLiteraryTranslationContextPrompt() : base;
@@ -902,7 +902,7 @@ watch(activeTab, async (nextTab, previousTab) => {
   if (nextTab !== 'reading' || previousTab !== 'agent' || !doc.value) return;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (!config.useLocalAgent) return;
+  if (!config.documentUseLocalAgent) return;
   try {
     const project = await ensureDocumentWorkspace();
     if (!project) return;
@@ -933,8 +933,8 @@ onMounted(async () => {
   // 文档翻译默认沿用 popup 的全局配置；恢复旧会话时，保存的语言选择仍由恢复逻辑覆盖。
   const config = await getConfig();
   readerConfig.value = config;
-  sourceLang.value = config.sourceLang || 'auto';
-  targetLang.value = config.targetLang || 'zh';
+  sourceLang.value = config.documentSourceLang || 'auto';
+  targetLang.value = config.documentTargetLang || 'zh';
   englishFontFamily.value = config.documentEnglishFontFamily || 'Georgia';
   chineseFontFamily.value = config.documentChineseFontFamily || 'Noto Serif CJK SC';
   englishFontSize.value = Number.isFinite(config.documentEnglishFontSize) ? config.documentEnglishFontSize : 17;
@@ -943,7 +943,7 @@ onMounted(async () => {
   documentSystemPromptEditor.value = documentSystemPromptOverride.value || builtInDocumentSystemPrompt.value;
   documentUserPromptTemplate.value = config.documentUserPromptTemplate || '';
   documentUserPromptEditor.value = documentUserPromptTemplate.value || BUILT_IN_USER_PROMPT_TEMPLATE;
-  if (config.translationMode === 'literary') literaryMode.value = true;
+  if (config.documentTranslationMode === 'literary') literaryMode.value = true;
   await refreshSavedSessionSummary();
 });
 
@@ -969,11 +969,11 @@ async function applyReviewProposal(finding: LiteraryReviewFinding) {
     return;
   }
   // 文风候选一旦被用户采用，要同时成为 workspace 的人工版本，不能只留在阅读器缓存。
-  if (readerConfig.value?.useLocalAgent) {
+  if (readerConfig.value?.documentUseLocalAgent) {
     try {
       const project = await ensureDocumentWorkspace();
       if (!project) return;
-      await workspaceApi(readerConfig.value.localAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.localAgentToken || '',
+      await workspaceApi(readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.documentLocalAgentToken || '',
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/segments/' + encodeURIComponent(finding.id) + '/translation',
         { method: 'PUT', body: JSON.stringify({ text: finding.proposedTranslation }) });
     } catch (error) {
@@ -1037,15 +1037,13 @@ function showReviewSegment(id: string) {
   activeTab.value = 'reading';
 }
 
-/** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
+/** 文档设置只更新文档专用配置，不写回网页/选中文本翻译配置。 */
 function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Config)[]) {
   readerConfig.value = config;
-  if (changedFields.includes('sourceLang')) sourceLang.value = config.sourceLang;
-  if (changedFields.includes('targetLang')) targetLang.value = config.targetLang;
-  if (changedFields.includes('translationMode')) {
-    // 全局翻译类型变化时同步整本书记忆开关，避免界面显示“科技翻译”但后台仍跑文学流程。
-    // EPUB/PDF 用户仍可在确认选择科技模式后，手动再次启用“整本书记忆”覆盖项。
-    literaryMode.value = config.translationMode === 'literary';
+  if (changedFields.includes('documentSourceLang')) sourceLang.value = config.documentSourceLang;
+  if (changedFields.includes('documentTargetLang')) targetLang.value = config.documentTargetLang;
+  if (changedFields.includes('documentTranslationMode')) {
+    literaryMode.value = config.documentTranslationMode === 'literary';
   }
   if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
   if (!documentUserPromptTemplate.value) documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
@@ -1122,7 +1120,7 @@ async function refreshLocalSessionSummary() {
   try {
     const config = await getConfig();
     // SQLite 中只读摘要，不会调用模型。即使当前切回远程翻译模式，也允许找回之前保存的本机阅读会话。
-    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/summary';
     base.search = '';
     base.hash = '';
@@ -1130,7 +1128,7 @@ async function refreshLocalSessionSummary() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+        ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
       body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
     });
@@ -1157,9 +1155,9 @@ async function persistDocumentCheckpointToLocalService(input: {
   translationDelta: Array<[string, string]>; translatedSegmentCount: number;
 }): Promise<boolean> {
   const config = await getConfig();
-  if (!config.useLocalAgent || !doc.value || localSessionDisabled) return false;
+  if (!config.documentUseLocalAgent || !doc.value || localSessionDisabled) return false;
   try {
-    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/save';
     base.search = '';
     base.hash = '';
@@ -1183,7 +1181,7 @@ async function persistDocumentCheckpointToLocalService(input: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+        ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
       body: JSON.stringify({
         sessionId: LOCAL_DOCUMENT_SESSION_ID,
@@ -1218,7 +1216,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
   const config = await getConfig();
   try {
     // 仅恢复此前的本机快照，不调用本机模型；恢复不应依赖当前翻译 Provider 开关。
-    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/get';
     base.search = '';
     base.hash = '';
@@ -1226,7 +1224,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+        ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
       body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
     });
@@ -1441,14 +1439,14 @@ async function clearSavedSession() {
   // 即使当前已切回远程翻译模式，也不能留下用户通过“清除记录”明确要求删除的 SQLite 副本。
   try {
     const config = await getConfig();
-    const base = new URL(config.localAgentUrl || 'http://127.0.0.1:8789');
+    const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/' + encodeURIComponent(LOCAL_DOCUMENT_SESSION_ID);
     base.search = '';
     base.hash = '';
     const response = await fetch(base.toString(), {
       method: 'DELETE',
       headers: {
-        ...(config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {}),
+        ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
     });
     if (!response.ok) throw new Error('本机 SQLite 返回 HTTP ' + response.status);
@@ -1542,7 +1540,7 @@ async function persistVoiceMemoryChange(message: string) {
   persistenceMessage.value = message;
   await persistCurrentSession();
   // Local Agent 模式下同步到这个文档的项目记忆 revision；不会创建新 Prompt revision。
-  if (readerConfig.value?.useLocalAgent && doc.value) {
+  if (readerConfig.value?.documentUseLocalAgent && doc.value) {
     try {
       await ensureDocumentWorkspace();
     } catch (error) {
@@ -1688,8 +1686,8 @@ async function loadFile(file: File) {
     glossary.value = extractGlossaryLocal(glossarySample);
     const config = await getConfig();
     readerConfig.value = config;
-    sourceLang.value = config.sourceLang || 'auto';
-    targetLang.value = config.targetLang || 'zh';
+    sourceLang.value = config.documentSourceLang || 'auto';
+    targetLang.value = config.documentTargetLang || 'zh';
 
     // Re-selecting the same file restores the active IndexedDB reading session before a new
     // empty session replaces it. Translation cache remains a fallback for documents without a
@@ -1808,29 +1806,29 @@ async function buildTranslationOptions() {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
     glossary: glossary.value,
-    promptStyle: config.promptStyle,
-    translationMode: config.translationMode || 'technical',
+    promptStyle: config.documentPromptStyle,
+    translationMode: config.documentTranslationMode || 'technical',
     // Send exactly the prompt shown in this editor even when the user is using built-in defaults.
     // This keeps local Agent and direct server/provider request formats consistent and editable.
     documentSystemPromptOverride: config.documentSystemPromptOverride?.trim() || builtInDocumentSystemPrompt.value,
     documentUserPromptTemplate: config.documentUserPromptTemplate?.trim() || BUILT_IN_USER_PROMPT_TEMPLATE,
     // 文档本身始终先在本机解析。useServerTranslation 只决定规整后的片段在哪里翻译。
-    useServerTranslation: config.useServerTranslation && !config.useLocalAgent,
-    useLocalAgent: config.useLocalAgent,
-    localAgentProvider: config.localAgentProvider,
-    localAgentUrl: config.localAgentUrl,
-    localAgentModel: config.localAgentModel,
-    localAgentToken: config.localAgentToken,
+    useServerTranslation: config.documentUseServerTranslation && !config.documentUseLocalAgent,
+    useLocalAgent: config.documentUseLocalAgent,
+    localAgentProvider: config.documentLocalAgentProvider,
+    localAgentUrl: config.documentLocalAgentUrl,
+    localAgentModel: config.documentLocalAgentModel,
+    localAgentToken: config.documentLocalAgentToken,
     // Global literary profile enables entity/style memory for any structured document;
     // the EPUB/PDF checkbox remains an opt-in for users on the technical profile.
     literaryMode: literaryMode.value &&
-      (config.translationMode === 'literary' || doc.value.format === 'epub' || doc.value.format === 'pdf'),
+      (config.documentTranslationMode === 'literary' || doc.value.format === 'epub' || doc.value.format === 'pdf'),
     skipReview: !literaryReview.value,
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
-    serverUrl: config.serverUrl,
-    provider: config.provider,
-    apiKey: config.deepseekApiKey,
+    serverUrl: config.documentServerUrl,
+    provider: config.documentProvider,
+    apiKey: config.documentDeepseekApiKey,
     documentFileName,
     documentSessionId: buildDocumentAgentSessionId(doc.value, documentFileName),
     documentTitle: doc.value.title,
@@ -1868,10 +1866,10 @@ function workspacePromptInput() {
     userPromptTemplate: documentUserPromptEditor.value || BUILT_IN_USER_PROMPT_TEMPLATE,
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
-    provider: config?.localAgentProvider || 'workbuddy',
-    model: config?.localAgentModel || 'auto',
-    translationMode: (literaryMode.value ? 'literary' : (config?.translationMode || 'technical')) as 'technical' | 'literary',
-    literaryReview: (literaryMode.value || config?.translationMode === 'literary') && literaryReview.value,
+    provider: config?.documentLocalAgentProvider || 'workbuddy',
+    model: config?.documentLocalAgentModel || 'auto',
+    translationMode: (literaryMode.value ? 'literary' : (config?.documentTranslationMode || 'technical')) as 'technical' | 'literary',
+    literaryReview: (literaryMode.value || config?.documentTranslationMode === 'literary') && literaryReview.value,
     glossary: glossary.value,
     literaryMemory: literaryMemory.value,
   };
@@ -1901,9 +1899,9 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
   if (!doc.value) return null;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (!config.useLocalAgent) return null;
-  const base = config.localAgentUrl || 'http://127.0.0.1:8789';
-  const token = config.localAgentToken || '';
+  if (!config.documentUseLocalAgent) return null;
+  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
   const input = workspaceInput();
   const prompt = workspacePromptInput();
   const mapping = await lookupWorkspaceProject(input);
@@ -2014,8 +2012,8 @@ async function followWorkspaceRun(project: any, initialRun: any) {
     let run = initialRun;
     while (workspaceRunId.value === runId && workspaceRunGeneration.value === generation) {
       const current = await workspaceApi<{ run: any }>(
-        readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-        readerConfig.value?.localAgentToken || '',
+        readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+        readerConfig.value?.documentLocalAgentToken || '',
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
       );
       run = current.run;
@@ -2036,23 +2034,23 @@ async function followWorkspaceRun(project: any, initialRun: any) {
     if (workspaceRunGeneration.value !== generation || workspaceRunId.value !== runId) return;
     if (run.status !== 'cancelled') {
       run = await autoAcceptWorkspaceRunCandidates(
-        readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-        readerConfig.value?.localAgentToken || '',
+        readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+        readerConfig.value?.documentLocalAgentToken || '',
         project.projectId,
         run,
       );
       workspaceActiveRun.value = run;
     }
     const latest = await workspaceApi<{ project: any; runs?: any[] }>(
-      readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-      readerConfig.value?.localAgentToken || '',
+      readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+      readerConfig.value?.documentLocalAgentToken || '',
       '/api/documents/projects/' + encodeURIComponent(project.projectId),
     );
     workspaceProject.value = latest.project;
     workspaceActiveRun.value = (latest.runs || []).find((item) => item.runId === runId) || run;
     const accepted = await loadWorkspaceAcceptedTranslations(
-      readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-      readerConfig.value?.localAgentToken || '',
+      readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+      readerConfig.value?.documentLocalAgentToken || '',
       project.projectId,
       latest.project.segmentCount || doc.value.segments.length,
     );
@@ -2085,7 +2083,7 @@ async function runWorkspaceTranslation(options: {
   if (!doc.value || state.value.running) return;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (!config.useLocalAgent) return;
+  if (!config.documentUseLocalAgent) return;
   const project = await ensureDocumentWorkspace();
   if (!project) return;
   const activeRun = workspaceActiveRun.value;
@@ -2097,13 +2095,13 @@ async function runWorkspaceTranslation(options: {
     // 兼容升级前留下的待采纳结果，先自动写入当前版本，再继续用户请求。
     try {
       const fullRun = await workspaceApi<{ run: any }>(
-        config.localAgentUrl || 'http://127.0.0.1:8789',
-        config.localAgentToken || '',
+        config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+        config.documentLocalAgentToken || '',
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(activeRun.runId),
       );
-      await autoAcceptWorkspaceRunCandidates(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', project.projectId, fullRun.run);
-      const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
-      const accepted = await loadWorkspaceAcceptedTranslations(config.localAgentUrl || 'http://127.0.0.1:8789', config.localAgentToken || '', project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0);
+      await autoAcceptWorkspaceRunCandidates(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', project.projectId, fullRun.run);
+      const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
+      const accepted = await loadWorkspaceAcceptedTranslations(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0);
       workspaceProject.value = refreshed.project;
       // Keep interrupted/failed remainder visible; only clear a fully resolved legacy run.
       workspaceActiveRun.value = (refreshed.runs || []).find((run) => run.runId === activeRun.runId && ['paused', 'partial', 'failed'].includes(run.status)) || null;
@@ -2118,8 +2116,8 @@ async function runWorkspaceTranslation(options: {
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
-  const base = config.localAgentUrl || 'http://127.0.0.1:8789';
-  const token = config.localAgentToken || '';
+  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
   const response = await workspaceApi<{ run: any; started: boolean }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs',
     { method: 'POST', body: JSON.stringify({ scope, prompt: workspacePromptInput() }) },
@@ -2200,13 +2198,13 @@ async function runWorkspaceTranslation(options: {
 }
 
 async function stopCurrentTranslation() {
-  if (workspaceRunId.value && workspaceProject.value && readerConfig.value?.useLocalAgent) {
+  if (workspaceRunId.value && workspaceProject.value && readerConfig.value?.documentUseLocalAgent) {
     const runId = workspaceRunId.value;
     const generation = workspaceRunGeneration.value;
     workspaceRunGeneration.value++;
     workspaceRunId.value = '';
     try {
-      const response = await workspaceApi<{ run: any }>(readerConfig.value.localAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.localAgentToken || '',
+      const response = await workspaceApi<{ run: any }>(readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.documentLocalAgentToken || '',
         '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/runs/' + encodeURIComponent(runId) + '/cancel',
         { method: 'POST', body: '{}' });
       workspaceActiveRun.value = response.run;
@@ -2249,7 +2247,7 @@ async function translateCurrentVisiblePage() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (config.useLocalAgent) {
+  if (config.documentUseLocalAgent) {
     const project = await ensureDocumentWorkspace();
     if (!project || workspaceSourceChanged.value) return;
     const ids = visibleSegments.value
@@ -2271,7 +2269,7 @@ async function startTranslate() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (config.useLocalAgent) {
+  if (config.documentUseLocalAgent) {
     try {
       const project = await ensureDocumentWorkspace();
       if (workspaceSourceChanged.value) return;
@@ -2284,24 +2282,24 @@ async function startTranslate() {
           (workspaceActiveRun.value.counts?.candidate || 0) > 0) {
         // 兼容旧会话：先自动完成最后的保存步骤，不再强迫用户切换页面手工采纳。
         const fullRun = await workspaceApi<{ run: any }>(
-          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-          readerConfig.value?.localAgentToken || '',
+          readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.documentLocalAgentToken || '',
           '/api/documents/projects/' + encodeURIComponent(workspaceProject.value?.projectId || '') + '/runs/' + encodeURIComponent(workspaceActiveRun.value.runId),
         );
         await autoAcceptWorkspaceRunCandidates(
-          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-          readerConfig.value?.localAgentToken || '',
+          readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.documentLocalAgentToken || '',
           workspaceProject.value?.projectId || '',
           fullRun.run,
         );
         const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
-          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-          readerConfig.value?.localAgentToken || '',
+          readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.documentLocalAgentToken || '',
           '/api/documents/projects/' + encodeURIComponent(workspaceProject.value?.projectId || ''),
         );
         const accepted = await loadWorkspaceAcceptedTranslations(
-          readerConfig.value?.localAgentUrl || 'http://127.0.0.1:8789',
-          readerConfig.value?.localAgentToken || '',
+          readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.documentLocalAgentToken || '',
           refreshed.project.projectId,
           refreshed.project.segmentCount || doc.value.segments.length,
         );
@@ -2330,7 +2328,7 @@ async function startTranslate() {
     await nextTick();
   }
   if (!currentPage.value || !visibleSegments.value.length) return;
-  if (config.useLocalAgent) {
+  if (config.documentUseLocalAgent) {
     const ids = visibleSegments.value
       .filter((segment) => !state.value.translations.get(segment.id)?.trim())
       .map((segment) => segment.id);
@@ -2351,7 +2349,7 @@ async function forceTranslateCurrentPage() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (config.useLocalAgent) {
+  if (config.documentUseLocalAgent) {
     await runWorkspaceTranslation({ ids: visibleSegments.value.map((segment) => segment.id), forceRefresh: true });
     return;
   }
@@ -2369,7 +2367,7 @@ async function retry() {
   if (!doc.value) return;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (config.useLocalAgent) {
+  if (config.documentUseLocalAgent) {
     await runWorkspaceTranslation({ scope: { type: 'failed' } });
     return;
   }
