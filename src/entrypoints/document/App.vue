@@ -533,6 +533,7 @@
           :system-prompt="documentSystemPromptEditor || builtInDocumentSystemPrompt"
           :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
           :literary-memory="literaryMemory"
+          :glossary="glossary"
           @accepted-translations="applyAgentTranslations"
           @workspace-sync="syncWorkspaceTranslations"
         />
@@ -611,6 +612,8 @@ const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
 const workspaceRunGeneration = ref(0);
+/** 尚未被用户/阅读页运行采纳的 workspace 候选只用于预览，不混进当前正式译文 Map。 */
+const workspaceCandidateTranslations = ref(new Map<string, string>());
 const englishFontFamily = ref('Georgia');
 const chineseFontFamily = ref('Noto Serif CJK SC');
 const englishFontSize = ref(17);
@@ -1584,6 +1587,253 @@ async function buildTranslationOptions() {
     documentWarnings: doc.value.meta.warnings,
     onCheckpoint: persistCurrentSession,
   };
+}
+
+function workspaceInput() {
+  if (!doc.value) throw new Error('尚未打开文档');
+  return {
+    title: doc.value.title,
+    format: doc.value.format,
+    sourceFileName: documentFileName,
+    segments: doc.value.segments.map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+      kind: segment.kind,
+      contextPath: segment.contextPath,
+      page: segment.page,
+      level: segment.level,
+      marker: segment.marker,
+      path: (segment as any).path,
+      start: segment.start,
+      end: segment.end,
+    })),
+  };
+}
+
+function workspacePromptInput() {
+  const config = readerConfig.value;
+  return {
+    systemPrompt: documentSystemPromptEditor.value || builtInDocumentSystemPrompt.value,
+    userPromptTemplate: documentUserPromptEditor.value || BUILT_IN_USER_PROMPT_TEMPLATE,
+    sourceLang: sourceLang.value,
+    targetLang: targetLang.value,
+    provider: config?.localAgentProvider || 'workbuddy',
+    model: config?.localAgentModel || 'auto',
+    translationMode: (literaryMode.value ? 'literary' : (config?.translationMode || 'technical')) as 'technical' | 'literary',
+    literaryReview: literaryMode.value && literaryReview.value,
+    glossary: glossary.value,
+    literaryMemory: literaryMemory.value,
+  };
+}
+
+async function replaceCurrentTranslations(items: Array<{ id: string; text: string }>) {
+  if (!doc.value) return;
+  const validIds = new Set(doc.value.segments.map((segment) => segment.id));
+  const next = new Map<string, string>();
+  for (const item of items) {
+    if (validIds.has(item.id) && item.text.trim()) next.set(item.id, item.text);
+  }
+  state.value.translations.clear();
+  for (const [id, text] of next) state.value.translations.set(id, text);
+  workspaceCandidateTranslations.value = new Map();
+  persistedTranslations.value = new Map(next);
+  await persistCurrentSession();
+}
+
+async function syncWorkspaceTranslations(items: Array<{ id: string; text: string }>) {
+  if (workspaceSourceChanged.value) workspaceSourceChanged.value = false;
+  await replaceCurrentTranslations(items);
+}
+
+/** 保证只有一份本机项目：导入旧阅读记录、刷新 SQLite 的当前版本，并备份原件。 */
+async function ensureDocumentWorkspace(): Promise<any | null> {
+  if (!doc.value) return null;
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (!config.useLocalAgent) return null;
+  const base = config.localAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.localAgentToken || '';
+  const input = workspaceInput();
+  const prompt = workspacePromptInput();
+  const mapping = await lookupWorkspaceProject(input);
+  let project: any = null;
+  if (mapping.projectId) {
+    try {
+      const current = await workspaceApi<{ project: any }>(
+        base, token, '/api/documents/projects/' + encodeURIComponent(mapping.projectId),
+      );
+      project = current.project;
+    } catch (error) {
+      // 映射可能指向已归档/清理的项目，只有确认服务真的返回 404 才创建新项目。
+      if (!(error instanceof Error) || !/HTTP 404/.test(error.message)) throw error;
+    }
+  }
+  if (project && mapping.sourceChanged) {
+    workspaceProject.value = project;
+    workspaceSourceChanged.value = true;
+    persistenceMessage.value = '同名文档的原文内容已变化。请切换到“翻译 Agent”，明确选择导入新来源版本或另建项目后再继续翻译。';
+    activeTab.value = 'agent';
+    return null;
+  }
+  workspaceSourceChanged.value = false;
+  if (!project) {
+    const created = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects', {
+      method: 'POST',
+      body: JSON.stringify({ ...input, prompt }),
+    });
+    project = created.project;
+    await rememberWorkspaceProject(input, project.projectId);
+  } else {
+    // 保存同一份 Prompt 配置；两个 Tab 的下一次运行会拿到同一个版本指纹。
+    await workspaceApi(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/prompts', {
+      method: 'POST',
+      body: JSON.stringify(prompt),
+    });
+  }
+  // 首次切换时迁移 IndexedDB 已有译文；只填数据库中没有当前来源版本的片段。
+  await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
+  if (!project.sourceFileSaved && loadedSourceFile.value) {
+    try {
+      await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
+    } catch (error) {
+      // 原文备份是 workspace 的重要能力，但失败不应丢失已有译文或阻断可恢复运行。
+      persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' + (error instanceof Error ? error.message : String(error));
+    }
+  }
+  const refreshed = await workspaceApi<{ project: any }>(
+    base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
+  );
+  workspaceProject.value = refreshed.project;
+  const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length);
+  await replaceCurrentTranslations(accepted);
+  return refreshed.project;
+}
+
+async function runWorkspaceTranslation(options: {
+  ids?: string[];
+  scope?: { type: 'failed' | 'stale' | 'all'; };
+  forceRefresh?: boolean;
+}) {
+  if (!doc.value || state.value.running) return;
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (!config.useLocalAgent) return;
+  const project = await ensureDocumentWorkspace();
+  if (!project) return;
+  const scope = options.scope || { type: 'ids' as const, ids: options.ids || [] };
+  if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
+  const base = config.localAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.localAgentToken || '';
+  const response = await workspaceApi<{ run: any; started: boolean }>(
+    base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs',
+    { method: 'POST', body: JSON.stringify({ scope, prompt: workspacePromptInput() }) },
+  );
+  const runId = response.run.runId as string;
+  const generation = ++workspaceRunGeneration.value;
+  workspaceRunId.value = runId;
+  workspaceTranslationActive.value = true;
+  workspaceCandidateTranslations.value = new Map();
+  state.value.running = response.started;
+  state.value.error = '';
+  state.value.failedBatches = [];
+  state.value.activeSegmentIds = new Set(
+    scope.type === 'ids' ? (scope.ids || []) : doc.value.segments.filter((segment) => !state.value.translations.get(segment.id)?.trim()).map((segment) => segment.id),
+  );
+  state.value.workChapter = currentPage.value?.title || doc.value.title || 'document';
+  state.value.workStage = 'workspace Agent 正在翻译';
+  state.value.workDone = 0;
+  state.value.workTotal = response.run.counts?.total || 0;
+  if (!response.started) {
+    state.value.running = false;
+    workspaceRunId.value = '';
+    workspaceTranslationActive.value = false;
+    state.value.activeSegmentIds = new Set();
+    return;
+  }
+  try {
+    let terminalRun: any = response.run;
+    while (workspaceRunId.value === runId && workspaceRunGeneration.value === generation) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const current = await workspaceApi<{ run: any }>(
+        base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
+      );
+      terminalRun = current.run;
+      const candidates = Array.isArray(terminalRun.segments) ? terminalRun.segments : [];
+      let changed = false;
+      for (const row of candidates) {
+        if (typeof row.candidateTranslation !== 'string' || !row.candidateTranslation.trim()) continue;
+        // 候选与已采纳版本分开存储；阅读页可以预览，但退出/失败时仍能恢复正式译文。
+        workspaceCandidateTranslations.value.set(row.id, row.candidateTranslation);
+        changed = true;
+      }
+      const counts = terminalRun.counts || {};
+      state.value.workTotal = counts.total || state.value.workTotal;
+      state.value.workDone = (counts.candidate || 0) + (counts.accepted || 0) + (counts.failed || 0);
+      state.value.workStage = 'workspace Agent：' + terminalRun.status;
+      if (changed) await persistCurrentSession();
+      if (!['queued', 'running'].includes(terminalRun.status)) break;
+    }
+    if (workspaceRunGeneration.value !== generation || workspaceRunId.value !== runId) return;
+    if (terminalRun.status !== 'cancelled') {
+      const candidateIds = (terminalRun.segments || [])
+        .filter((row: any) => row.status === 'candidate' && typeof row.candidateTranslation === 'string')
+        .map((row: any) => row.id as string);
+      if (candidateIds.length) {
+        await workspaceApi(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId) + '/accept', {
+          method: 'POST', body: JSON.stringify({ segmentIds: candidateIds }),
+        });
+      }
+      const finalProject = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId));
+      workspaceProject.value = finalProject.project;
+      const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, finalProject.project.segmentCount || doc.value.segments.length);
+      await replaceCurrentTranslations(accepted);
+      if (terminalRun.counts?.failed || terminalRun.status === 'partial' || terminalRun.status === 'failed' || terminalRun.status === 'paused') {
+        state.value.error = terminalRun.error || '部分片段尚未完成，可在“翻译 Agent”中继续或重试失败项。';
+        state.value.failedBatches = terminalRun.counts?.failed ? [0] : [];
+      }
+    }
+  } catch (error) {
+    state.value.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (workspaceRunGeneration.value === generation && workspaceRunId.value === runId) {
+      state.value.running = false;
+      state.value.workStage = '';
+      state.value.activeSegmentIds = new Set();
+      workspaceRunId.value = '';
+      workspaceTranslationActive.value = false;
+      workspaceCandidateTranslations.value = new Map();
+      await persistCurrentSession();
+    }
+  }
+}
+
+async function stopCurrentTranslation() {
+  if (workspaceRunId.value && workspaceProject.value && readerConfig.value?.useLocalAgent) {
+    const runId = workspaceRunId.value;
+    const generation = workspaceRunGeneration.value;
+    workspaceRunGeneration.value++;
+    workspaceRunId.value = '';
+    try {
+      await workspaceApi(readerConfig.value.localAgentUrl || 'http://127.0.0.1:8789', readerConfig.value.localAgentToken || '',
+        '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/runs/' + encodeURIComponent(runId) + '/cancel',
+        { method: 'POST', body: '{}' });
+    } catch (error) {
+      state.value.error = '停止 workspace 运行失败：' + (error instanceof Error ? error.message : String(error));
+    }
+    state.value.running = false;
+    state.value.workStage = '';
+    state.value.activeSegmentIds = new Set();
+    workspaceTranslationActive.value = false;
+    workspaceCandidateTranslations.value = new Map();
+    await persistCurrentSession();
+    void generation;
+    return;
+  }
+  stopTranslation();
+}
+
+function displayTranslation(segmentId: string): string {
+  return workspaceCandidateTranslations.value.get(segmentId) || state.value.translations.get(segmentId) || '';
 }
 
 async function startTranslate() {
