@@ -1549,7 +1549,7 @@ async function startTranslate() {
     ...options,
     onlyPrioritySegments: true,
     prioritySegmentIds: visibleSegments.value.map((segment) => segment.id),
-    currentPageTitle: currentPage.value.title || doc.value.title,
+    currentPageTitle: currentPage.value?.title || doc.value?.title || 'document',
   }, true);
 }
 
