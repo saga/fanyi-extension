@@ -624,7 +624,7 @@
         v-if="doc"
         v-show="activeTab === 'agent'"
         :active="activeTab === 'agent'"
-        :key="documentFileName + ':' + doc.format"
+        :key="documentAgentWorkspaceKey"
         :title="doc.title"
         :format="doc.format"
         :source-file-name="documentFileName"
@@ -760,6 +760,13 @@ let rawText = '';
 const glossary = ref<Glossary | undefined>(undefined);
 /** 保留真实上传文件名；PDF 标题可能从正文提取，不应覆盖文件名。 */
 let documentFileName = 'document';
+/**
+ * Agent 面板常驻后，必须按文档内容身份而不是只按文件名重建实例。
+ * 同名 EPUB/PDF 被重新打开时，新来源不能继承前一个文档的项目状态。
+ */
+const documentAgentWorkspaceKey = computed(() =>
+  doc.value ? buildDocumentAgentSessionId(doc.value, documentFileName) : 'empty-document',
+);
 
 const {
   state,
