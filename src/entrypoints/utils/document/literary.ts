@@ -88,6 +88,9 @@ export interface CharacterVoiceAnchor {
   segmentId: string;
   status: 'candidate' | 'approved' | 'rejected';
   approvedBy: 'user' | 'reviewer' | 'manual-edit';
+  /** 原文中用于判断说话人归属的可核对证据；没有它不能批准声音锚点。 */
+  attributionEvidence?: string;
+  attributionConfidence?: number;
   tags: string[];
 }
 export interface LiteraryVoiceContext {
@@ -373,6 +376,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       status: reviewState(value.status, ['candidate', 'approved', 'rejected']) as CharacterVoiceAnchor['status'],
       approvedBy: value.approvedBy === 'user' || value.approvedBy === 'reviewer' || value.approvedBy === 'manual-edit'
         ? value.approvedBy : 'reviewer',
+      ...(safeText(value.attributionEvidence, 240) ? { attributionEvidence: safeText(value.attributionEvidence, 240) } : {}),
+      ...(typeof value.attributionConfidence === 'number' && Number.isFinite(value.attributionConfidence)
+        ? { attributionConfidence: safeConfidence(value.attributionConfidence) } : {}),
       tags: safeList(value.tags, 8, 80),
     });
   }
@@ -587,20 +593,27 @@ export function buildLiteraryContextForBatch(input: {
     [profile.canonicalSourceName, ...profile.aliases].some((name) => name && selectedText.includes(name.toLocaleLowerCase())) ||
     matchedNames.has(profile.canonicalSourceName.toLocaleLowerCase()),
   );
-  // 无可靠角色命中时不猜说话人；只给少量已确认角色作有限参考，不将画像变成强制标签。
-  let characterVoices = (directlyMatched.length ? directlyMatched : allCharacters.slice(0, 2)).slice(0, 4);
+  // 不因“无明确人名”而随机塞入前两个角色。前文只用于代词/对话轮次消歧；
+  // 如果依然无法关联人物，则只传全书风格与精确命中的术语，不强行赋予角色声线。
+  const characterVoices = directlyMatched.slice(0, 4);
   const characterIds = new Set(characterVoices.map((profile) => profile.characterId));
   const relationshipVoiceRules = memory.relationshipVoiceRules.filter((rule) =>
     rule.status === 'confirmed' && characterIds.has(rule.speakerId) && characterIds.has(rule.addresseeId),
   ).slice(0, 4);
   const anchorNames = new Set(characterVoices.map((profile) => profile.characterId));
+  // 声音锚点是跨章节可复用的原文—译文样本：按已命中的说话人检索，不能只取本章或当前句恰好重复的锚点。
   const voiceAnchors = memory.voiceAnchors.filter((anchor) =>
     anchor.status === 'approved' && anchorNames.has(anchor.speakerId) &&
-    (selectedText.includes(anchor.source.toLocaleLowerCase()) || input.segments.some((segment) => segment.contextPath && anchor.chapter === segment.contextPath)),
-  ).slice(0, 2).map(({ anchorId, speakerId, addresseeId, source, target, chapter, segmentId, tags }) =>
-    ({ anchorId, speakerId, addresseeId, source, target, chapter, segmentId, tags }),
+    typeof anchor.attributionEvidence === 'string' && !!anchor.attributionEvidence.trim() &&
+    (anchor.attributionConfidence ?? 0) >= 0.7,
+  ).sort((a, b) => {
+    const aSameChapter = input.segments.some((segment) => segment.contextPath && a.chapter === segment.contextPath) ? 1 : 0;
+    const bSameChapter = input.segments.some((segment) => segment.contextPath && b.chapter === segment.contextPath) ? 1 : 0;
+    return bSameChapter - aSameChapter;
+  }).slice(0, 2).map(({ anchorId, speakerId, addresseeId, source, target, chapter, segmentId, tags, attributionEvidence, attributionConfidence }) =>
+    ({ anchorId, speakerId, addresseeId, source, target, chapter, segmentId, tags, attributionEvidence, attributionConfidence }),
   );
-  const entities = (matchedEntities.length ? matchedEntities : memory.entities.filter((item) => item.reviewStatus === 'confirmed').slice(0, 4)).slice(0, 8)
+  const entities = matchedEntities.slice(0, 8)
     .map(({ source, target, kind, aliases, reviewStatus }) => ({ source, target, kind, aliases, reviewStatus }));
   const names = new Set(entities.map((entity) => entity.source.toLocaleLowerCase()));
   const relationships = memory.relationships.filter((relation) =>
@@ -645,9 +658,15 @@ export function buildLiteraryContextForBatch(input: {
   while (JSON.stringify(result).length > budget && result.voiceAnchors.length > 0) result.voiceAnchors.pop();
   while (JSON.stringify(result).length > budget && result.relationshipVoiceRules.length > 1) result.relationshipVoiceRules.pop();
   while (JSON.stringify(result).length > budget && result.characterVoices.length > 1) result.characterVoices.pop();
-  while (JSON.stringify(result).length > budget && result.recentExamples.length) result.recentExamples.shift();
   while (JSON.stringify(result).length > budget && result.relationships.length) result.relationships.pop();
-  while (JSON.stringify(result).length > budget && result.entities.length > 2) result.entities.pop();
+  while (JSON.stringify(result).length > budget && result.entities.length) result.entities.pop();
+  while (JSON.stringify(result).length > budget && result.recentExamples.length) result.recentExamples.shift();
+  // 最后的预算回退也按完整字段裁剪；不通过 string.slice 破坏 JSON。
+  if (JSON.stringify(result).length > budget) {
+    result.characterVoices = [];
+    result.relationshipVoiceRules = [];
+    result.voiceAnchors = [];
+  }
   return result;
 }
 
