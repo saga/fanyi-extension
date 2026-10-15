@@ -574,6 +574,12 @@
           <p v-if="finding.draftExcerpt"><strong>初译摘录：</strong>{{ finding.draftExcerpt }}</p>
           <p v-if="finding.reason"><strong>问题：</strong>{{ finding.reason }}</p>
           <p v-if="finding.suggestion"><strong>审校意见：</strong>{{ finding.suggestion }}</p>
+          <p v-if="finding.dimension"><strong>专项维度：</strong>
+            {{ finding.dimension === 'character_voice' ? '人物声音' : finding.dimension === 'register' ? '语域' : finding.dimension === 'narrative_style' ? '叙述风格' : '节奏 / 停顿' }}
+            <template v-if="finding.characterId"> · 人物 {{ characterName(finding.characterId) }}</template>
+            <template v-if="finding.relatedCharacterId"> · 对照人物 {{ characterName(finding.relatedCharacterId) }}</template>
+          </p>
+          <p v-if="finding.evidenceSegmentIds?.length"><strong>证据片段：</strong>{{ finding.evidenceSegmentIds.join('、') }}</p>
 
           <div v-if="finding.category === 'style' && finding.proposedTranslation" class="review-proposal">
             <strong>完整候选译文</strong>
