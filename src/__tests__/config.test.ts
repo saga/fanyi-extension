@@ -22,6 +22,13 @@ const defaultConfig: Config = {
   deepseekApiKey: '',
   provider: 'deepseek',
   promptStyle: 'default',
+  translationMode: 'technical',
+  documentEnglishFontFamily: 'Georgia',
+  documentChineseFontFamily: 'Noto Serif CJK SC',
+  documentEnglishFontSize: 17,
+  documentChineseFontSize: 18,
+  documentSystemPromptOverride: '',
+  documentUserPromptTemplate: '',
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
