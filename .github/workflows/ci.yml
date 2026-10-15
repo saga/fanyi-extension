@@ -14,6 +14,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Checkout vocal-saga for cross-project checks
+        uses: actions/checkout@v4
+        with:
+          repository: devweekly/vocal-saga
+          ref: main
+          path: .cross-sync/vocal-saga
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -25,6 +31,11 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check shared translation modules
+        env:
+          VOCAL_SAGA_PATH: ${{ github.workspace }}/.cross-sync/vocal-saga
+          FANYI_EXTENSION_PATH: ${{ github.workspace }}
+        run: pnpm dlx tsx .cross-sync/vocal-saga/scripts/check-sync.ts
       - name: Unit tests
         run: pnpm test
       - name: Build Chrome extension
