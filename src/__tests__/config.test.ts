@@ -73,7 +73,7 @@ describe('config', () => {
 
 
   describe('document-specific translation config', () => {
-    it('inherits legacy global provider values until document settings are explicitly saved', async () => {
+    it('snapshots legacy global provider values into document settings during migration', async () => {
       store['local:config'] = {
         provider: 'openrouter',
         deepseekApiKey: 'page-key',
@@ -89,15 +89,17 @@ describe('config', () => {
       expect(config.documentLocalAgentProvider).toBe('opencode');
       expect(config.documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
       expect(config.documentTranslationMode).toBe('literary');
+      expect(store['local:config'].documentProvider).toBe('openrouter');
+      expect(store['local:config'].documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
     });
 
-    it('does not freeze inherited document settings when saving a global page provider change', async () => {
+    it('keeps the migrated document provider unchanged when saving a global page provider change', async () => {
       store['local:config'] = { provider: 'deepseek', localAgentModel: 'global-model' };
       await setConfig({ provider: 'gemini' });
       expect(store['local:config'].provider).toBe('gemini');
-      expect(Object.hasOwn(store['local:config'], 'documentProvider')).toBe(false);
-      expect(Object.hasOwn(store['local:config'], 'documentLocalAgentModel')).toBe(false);
-      expect((await getConfig()).documentProvider).toBe('gemini');
+      expect(Object.hasOwn(store['local:config'], 'documentProvider')).toBe(true);
+      expect(Object.hasOwn(store['local:config'], 'documentLocalAgentModel')).toBe(true);
+      expect((await getConfig()).documentProvider).toBe('deepseek');
     });
 
     it('keeps document provider independent once a document profile is saved', async () => {
