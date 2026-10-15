@@ -1653,7 +1653,7 @@ function workspacePromptInput() {
     provider: config?.localAgentProvider || 'workbuddy',
     model: config?.localAgentModel || 'auto',
     translationMode: (literaryMode.value ? 'literary' : (config?.translationMode || 'technical')) as 'technical' | 'literary',
-    literaryReview: literaryMode.value && literaryReview.value,
+    literaryReview: (literaryMode.value || config?.translationMode === 'literary') && literaryReview.value,
     glossary: glossary.value,
     literaryMemory: literaryMemory.value,
   };
