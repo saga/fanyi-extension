@@ -26,6 +26,7 @@ export async function retryGlobalMissing(
   config: { sourceLang: string; targetLang: string; useLocalAgent?: boolean; translationMode?: TranslationMode },
   isMobile: boolean,
   promptStyle?: PromptStyle,
+  literaryVoiceContext?: unknown,
 ): Promise<void> {
   const stillMissingIds: string[] = [];
   for (const [id] of nodeMap) {
@@ -55,6 +56,7 @@ export async function retryGlobalMissing(
     promptStyle,
     config.useLocalAgent === true,
     config.translationMode || 'technical',
+    literaryVoiceContext === undefined ? null : literaryVoiceContext,
   );
 
   let recoveredCount = 0;
