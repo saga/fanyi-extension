@@ -366,6 +366,12 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const source = safeText(value.source, 400);
     const target = safeText(value.target, 500);
     if (!speakerId || !segmentId || !source || !target) continue;
+    const attributionEvidence = safeText(value.attributionEvidence, 240);
+    const attributionConfidence = typeof value.attributionConfidence === 'number' && Number.isFinite(value.attributionConfidence)
+      ? safeConfidence(value.attributionConfidence) : 0;
+    const claimedStatus = reviewState(value.status, ['candidate', 'approved', 'rejected']) as CharacterVoiceAnchor['status'];
+    const status = claimedStatus === 'approved' && (!attributionEvidence || attributionConfidence < 0.7)
+      ? 'candidate' : claimedStatus;
     voiceAnchors.push({
       anchorId: safeText(value.anchorId, 120) || 'anchor_' + stableCharacterId(segmentId + source).slice(5),
       speakerId,
@@ -373,12 +379,12 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       source, target,
       ...(safeText(value.chapter, 120) ? { chapter: safeText(value.chapter, 120) } : {}),
       segmentId,
-      status: reviewState(value.status, ['candidate', 'approved', 'rejected']) as CharacterVoiceAnchor['status'],
+      status,
       approvedBy: value.approvedBy === 'user' || value.approvedBy === 'reviewer' || value.approvedBy === 'manual-edit'
         ? value.approvedBy : 'reviewer',
-      ...(safeText(value.attributionEvidence, 240) ? { attributionEvidence: safeText(value.attributionEvidence, 240) } : {}),
+      ...(attributionEvidence ? { attributionEvidence } : {}),
       ...(typeof value.attributionConfidence === 'number' && Number.isFinite(value.attributionConfidence)
-        ? { attributionConfidence: safeConfidence(value.attributionConfidence) } : {}),
+        ? { attributionConfidence } : {}),
       tags: safeList(value.tags, 8, 80),
     });
   }
