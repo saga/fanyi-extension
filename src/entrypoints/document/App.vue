@@ -219,6 +219,91 @@
         </label>
       </section>
 
+      <section class="panel reader-appearance-settings">
+        <div class="settings-heading">
+          <div>
+            <h3>阅读排版</h3>
+            <p class="muted small">英文原文和中文译文的字体、字号分别设置，立即影响阅读显示，不会修改译文内容。</p>
+          </div>
+        </div>
+        <div class="reader-font-grid">
+          <label class="field">
+            <span>英文字体</span>
+            <select v-model="englishFontFamily">
+              <option value="Georgia">Georgia（衬线）</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Arial">Arial（无衬线）</option>
+              <option value="Verdana">Verdana</option>
+              <option value="system-ui">系统默认</option>
+              <option value="serif">系统衬线</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>英文原文字号</span>
+            <select v-model.number="englishFontSize">
+              <option v-for="size in [14, 15, 16, 17, 18, 20, 22, 24, 26, 28]" :key="'en-size-' + size" :value="size">{{ size }} px</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>中文字体</span>
+            <select v-model="chineseFontFamily">
+              <option value="Noto Serif CJK SC">Noto Serif CJK SC（衬线）</option>
+              <option value="PingFang SC">苹方</option>
+              <option value="Microsoft YaHei">微软雅黑</option>
+              <option value="SimSun">宋体</option>
+              <option value="system-ui">系统默认</option>
+              <option value="serif">系统衬线</option>
+              <option value="sans-serif">系统无衬线</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>中文译文字号</span>
+            <select v-model.number="chineseFontSize">
+              <option v-for="size in [14, 15, 16, 17, 18, 20, 22, 24, 26, 28]" :key="'zh-size-' + size" :value="size">{{ size }} px</option>
+            </select>
+          </label>
+        </div>
+        <div class="settings-actions">
+          <button class="btn primary" @click="saveDocumentTypography">保存阅读排版</button>
+          <span class="muted small">字号可随时调节；阅读位置与译文不会受影响。</span>
+        </div>
+      </section>
+
+      <section class="panel prompt-editor-panel">
+        <div class="settings-heading">
+          <div>
+            <h3>文档翻译 Prompt</h3>
+            <p class="muted small">这里显示当前文档使用的 System Prompt 和 User Prompt 模板。保存后仅影响后续请求；已有译文不会自动重写。强制重译当前页可绕过旧译文缓存。</p>
+          </div>
+        </div>
+        <label class="prompt-editor-label">
+          <span><strong>System Prompt</strong> · 系统指令</span>
+          <textarea v-model="documentSystemPromptEditor" rows="12" spellcheck="false"
+            aria-label="文档 System Prompt"></textarea>
+          <small class="muted">默认显示当前翻译类型与文风对应的内置系统指令。修改后会覆盖内置指令，包括其中的输出格式要求；请保留准确性、ID 和 JSON 结构约束。</small>
+        </label>
+        <details class="built-in-prompt-preview">
+          <summary>查看当前内置 System Prompt（用于对照/恢复）</summary>
+          <pre>{{ builtInDocumentSystemPrompt }}</pre>
+        </details>
+        <label class="prompt-editor-label">
+          <span><strong>User Prompt</strong> · 用户消息模板</span>
+          <textarea v-model="documentUserPromptEditor" rows="7" spellcheck="false"
+            aria-label="文档 User Prompt 模板"></textarea>
+          <small class="muted">使用 <code>{{ '{{CONTENT}}' }}</code> 作为本批内容占位符。内容是包含片段 ID、原文和结构元数据的 JSON；不要删除占位符，否则系统会自动在末尾追加 JSON。</small>
+        </label>
+        <details class="built-in-prompt-preview">
+          <summary>查看完整模板会怎样替换本批内容</summary>
+          <p class="muted small">实际请求会将模板中的 <code>{{ '{{CONTENT}}' }}</code> 替换为当前页的段落 JSON，不会把整本书一次塞进单条请求。</p>
+          <pre>{{ documentUserPromptEditor.replace('{{ '{{CONTENT}}', '[当前页片段 JSON 在发送时插入]').replace('}}', '') }}</pre>
+        </details>
+        <div class="settings-actions">
+          <button class="btn primary" @click="saveDocumentPromptSettings">保存 Prompt</button>
+          <button class="btn" @click="restoreBuiltInDocumentPrompts">恢复内置 Prompt</button>
+          <span class="muted small">Prompt 会保存在扩展配置中，重启后仍可恢复。</span>
+        </div>
+      </section>
+
       <section v-if="state.total > 0" class="panel progress-panel">
         <div class="progress"><div class="bar"
           :style="{ width: (state.done / state.total) * 100 + '%' }"></div></div>
