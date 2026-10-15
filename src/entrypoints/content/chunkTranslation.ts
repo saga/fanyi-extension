@@ -282,7 +282,9 @@ export async function translateChunksViaBackground(
   if (voiceContext) logger.debug('[ContentScript] Page literary entity context ready:',
     (voiceContext as { entities?: unknown[] }).entities?.length ?? 0, 'entities');
   logger.debug(
-    `[ContentScript] Warmup serial, then parallel=${maxConcurrency} (isMobile=${isMobile})`,
+    skipWarmup
+      ? `[ContentScript] Parallel dispatch=${maxConcurrency} (Local Agent; isMobile=${isMobile})`
+      : `[ContentScript] Warmup serial, then parallel=${maxConcurrency} (remote Provider; isMobile=${isMobile})`,
   );
 
   // pool starts at concurrency=1 (serial); addAllWithWarmup bumps after warmup
