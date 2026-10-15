@@ -366,7 +366,7 @@ async function handleFullTranslation(
   }
 
   showStatus(`翻译进度: 0/${chunks.length}`, 'loading');
-  const { translatedIds } = await translateChunksViaBackground(
+  const { translatedIds, voiceContext } = await translateChunksViaBackground(
     chunks,
     config.sourceLang,
     config.targetLang,
@@ -381,7 +381,7 @@ async function handleFullTranslation(
     config.translationMode || 'technical',
   );
 
-  await retryGlobalMissing(blocks, nodeMap, translatedIds, config, isMobile, effectiveStyle);
+  await retryGlobalMissing(blocks, nodeMap, translatedIds, config, isMobile, effectiveStyle, voiceContext);
 
   const missingIds = markMissingBlocks(nodeMap, translatedIds);
 
