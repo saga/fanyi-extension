@@ -332,11 +332,11 @@ flowchart TD
     A[Open EPUB/PDF/Office] --> B[Browser parser emits stable segments]
     B --> C[Create/select Local Agent project and start run]
     C --> D[Service persists run plan and allocates bounded workers]
-    D --> E[Translate batch: up to 3 workers, independent scopes]
+    D --> E[Translate batch: up to 2 workers while review runs, independent scopes]
     E --> F[Persist first-pass candidate + emit batch.translation.completed]
     F --> G{Literary review enabled?}
     G -- No --> H[Emit batch.completed]
-    G -- Yes --> I[Enqueue detached Reviewer: default concurrency 1]
+    G -- Yes --> I[Enqueue detached Reviewer: default concurrency 2]
     I --> J[Persist findings and actual revised candidates]
     J --> K[Emit batch.completed after review settles]
     F -. Free worker and continue queued translation .-> E
@@ -377,7 +377,7 @@ pnpm zip:firefox     # 打包 Firefox 为 .zip
 - **不要手动设置 `TreeWalker.currentNode`** —— 真实 Chrome/Firefox 与 jsdom 行为不同（见 `blockExtractor.ts` 注释）。
 - **配置写入**：Vue refs 是 Proxy 代理，写入 `@wxt-dev/storage` 时用 `JSON.parse(JSON.stringify(...))` 剥离 Proxy。
 - **Cache key**：非加密 hash，仅用于去重；TTL 7 天。
-- **Chunk 调度**：Provider 路径不同。远程 DeepSeek 使用 `globalQueue`（并发 1、最多重试 2 次、重试间隔 1 秒）；网页本机 Provider 使用独立的 4 并发队列。Project-based 文档 Agent 另在本机服务内默认分配 3 个翻译 worker + 1 个审校 worker，并按 Workbuddy pool 大小收敛。
+- **Chunk 调度**：Provider 路径不同。远程 DeepSeek 使用 `globalQueue`（并发 1、最多重试 2 次、重试间隔 1 秒）；网页本机 Provider 使用独立的 4 并发队列。Project-based 文档 Agent 在四槽位下默认分配 2 个翻译 worker + 2 个审校 worker；关闭审校时翻译可使用最多 4 个槽位。
 - **Popup UI**：`Element Plus` + 自定义 `theme.css`。
 
 ### 添加新站点规则
