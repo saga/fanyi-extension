@@ -87,7 +87,7 @@
           <span class="muted small">
             本页 {{ currentPageTranslatedCount }}/{{ visibleSegments.length }} 段
             · 全书 {{ translatedSegmentCount }}/{{ doc.meta.segmentCount }} 段
-            <template v-if="state.running && state.workChapter"> · 正在翻译「{{ state.workChapter }}」{{ state.workTotal > 0 ? `${state.workDone}/${state.workTotal} 批` : '' }}{{ state.workStage ? ` · ${state.workStage}` : '' }}</template>
+            <template v-if="state.running && state.workChapter"> · 正在翻译「{{ state.workChapter }}」{{ state.workTotal > 0 ? `${state.workDone}/${state.workTotal} ${workspaceTranslationActive ? '段' : '批'}` : '' }}{{ state.workStage ? ` · ${state.workStage}` : '' }}</template>
           </span>
         </div>
         <div class="action-controls">
@@ -1712,7 +1712,7 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
 
 async function runWorkspaceTranslation(options: {
   ids?: string[];
-  scope?: { type: 'failed' | 'stale' | 'all'; };
+  scope?: { type: 'failed' } | { type: 'stale' } | { type: 'all' };
   forceRefresh?: boolean;
 }) {
   if (!doc.value || state.value.running) return;
@@ -1721,7 +1721,8 @@ async function runWorkspaceTranslation(options: {
   if (!config.useLocalAgent) return;
   const project = await ensureDocumentWorkspace();
   if (!project) return;
-  const scope = options.scope || { type: 'ids' as const, ids: options.ids || [] };
+  const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
+    options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
   const base = config.localAgentUrl || 'http://127.0.0.1:8789';
   const token = config.localAgentToken || '';
@@ -1760,18 +1761,15 @@ async function runWorkspaceTranslation(options: {
       );
       terminalRun = current.run;
       const candidates = Array.isArray(terminalRun.segments) ? terminalRun.segments : [];
-      let changed = false;
       for (const row of candidates) {
         if (typeof row.candidateTranslation !== 'string' || !row.candidateTranslation.trim()) continue;
-        // 候选与已采纳版本分开存储；阅读页可以预览，但退出/失败时仍能恢复正式译文。
+        // 候选与已采纳版本分开存储；阅读页可以预览，但切换 Tab 时不会把它导入为已采纳版本。
         workspaceCandidateTranslations.value.set(row.id, row.candidateTranslation);
-        changed = true;
       }
       const counts = terminalRun.counts || {};
       state.value.workTotal = counts.total || state.value.workTotal;
       state.value.workDone = (counts.candidate || 0) + (counts.accepted || 0) + (counts.failed || 0);
       state.value.workStage = 'workspace Agent：' + terminalRun.status;
-      if (changed) await persistCurrentSession();
       if (!['queued', 'running'].includes(terminalRun.status)) break;
     }
     if (workspaceRunGeneration.value !== generation || workspaceRunId.value !== runId) return;
