@@ -1,178 +1,225 @@
 <template>
-  <section class="panel document-agent-workspace">
-    <div class="workspace-heading">
-      <div>
-        <h3>文档翻译 Agent</h3>
-        <p class="muted small">把这份 EPUB/PDF 作为长期项目管理。每次运行生成候选版本；接受前不会覆盖当前采用译文，人工修订会单独留档。</p>
+  <section class="document-agent-workspace">
+    <header class="agent-hero">
+      <div class="agent-kicker">文档翻译 · Agent</div>
+      <div class="agent-hero-main">
+        <div class="agent-title-copy">
+          <h2>{{ title }}</h2>
+          <p>翻译、审校、保存进度会自动完成。你可以随时回到阅读页查看结果。</p>
+        </div>
+        <span class="agent-format">{{ format.toUpperCase() }}</span>
       </div>
-      <span v-if="project" class="status-chip">{{ project.format.toUpperCase() }} · {{ project.segmentCount.toLocaleString() }} 段</span>
-    </div>
+      <div class="agent-meta">
+        <span>{{ segments.length.toLocaleString() }} 段内容</span>
+        <span class="agent-meta-dot">·</span>
+        <span>{{ sourceLang }} → {{ targetLang }}</span>
+        <span class="agent-meta-dot">·</span>
+        <span>{{ translationMode === 'literary' ? '文学翻译' : '通用翻译' }}</span>
+      </div>
+    </header>
 
-    <div v-if="!useLocalAgent" class="notice">
-      请先在“设置与记忆”中启用本机 Workbuddy / OpenCode，文档 Agent 才能通过本机服务保存项目并执行任务。
-    </div>
-    <div v-else-if="restoringProject && !project" class="notice">
-      正在恢复这份文档已有的本机项目关联…
-    </div>
-    <div v-else-if="restorationError && !project" class="notice">
+    <section v-if="!useLocalAgent" class="agent-notice">
+      <strong>启用本机 Agent 后即可开始</strong>
+      <p>请先到“设置与记忆”启用 Workbuddy 或 OpenCode。启用后，Agent 会自动建立项目、翻译内容并保存进度。</p>
+    </section>
+
+    <section v-else-if="restoringProject && !project" class="agent-notice">
+      <span class="agent-spinner" aria-hidden="true"></span>
+      <div>
+        <strong>正在恢复文档进度</strong>
+        <p>正在连接这份文档已有的本机项目，不需要重新创建。</p>
+      </div>
+    </section>
+
+    <section v-else-if="restorationError && !project" class="agent-notice agent-notice-error">
+      <strong>暂时无法恢复文档进度</strong>
       <p>{{ restorationError }}</p>
-      <div class="agent-actions">
-        <button class="btn" :disabled="restoringProject || busy" @click="loadExistingProject">重试恢复关联</button>
-        <button v-if="restorationProjectMissing" class="btn primary" :disabled="restoringProject || busy" @click="createProject">重建项目关联</button>
+      <div class="agent-inline-actions">
+        <button class="agent-button agent-button-secondary" :disabled="restoringProject || busy" @click="loadExistingProject">重试</button>
+        <button v-if="restorationProjectMissing" class="agent-button agent-button-primary" :disabled="restoringProject || busy" @click="createProject">重建项目</button>
       </div>
-    </div>
-    <div v-else-if="!project" class="project-create">
-      <div class="project-description">
-        <strong>{{ title }}</strong>
-        <span class="muted small">{{ format.toUpperCase() }} · {{ segments.length.toLocaleString() }} 个结构化片段</span>
-        <span class="muted small">项目数据库独立存放于本机 documents 目录；切换 Prompt、纠正译文和重复运行都会保留运行记录。</span>
-      </div>
-      <button class="btn primary" :disabled="busy || segments.length === 0" @click="createProject">
-        {{ busy ? '正在创建…' : '创建 / 关联本机文档项目' }}
-      </button>
-    </div>
+    </section>
+
+    <template v-else-if="!project">
+      <section class="agent-work-card agent-ready-card">
+        <div class="agent-state-mark" aria-hidden="true">文</div>
+        <div class="agent-ready-copy">
+          <h3>准备好开始翻译</h3>
+          <p>首次运行会自动建立本机项目。之后直接续译未完成内容，不会要求你手动填写译文。</p>
+        </div>
+        <button
+          class="agent-button agent-button-primary agent-button-large"
+          :disabled="busy || restoringProject || segments.length === 0"
+          @click="startRun('stale')"
+        >
+          {{ busy ? '正在准备…' : '开始翻译' }}
+        </button>
+      </section>
+    </template>
 
     <template v-if="project">
-      <div v-if="sourceChanged" class="source-change-notice">
-        <strong>检测到同名文档的来源内容已经变化</strong>
-        <p>系统不会自动覆盖旧来源。确认后可以在同一项目中登记新的来源版本；旧运行和人工修订仍会保留。未确认前禁止启动翻译，避免把旧译文映射到新原文。</p>
-        <div class="agent-actions">
-          <button class="btn primary" :disabled="busy || isRunning || !segments.length" @click="updateSourceRevision">导入为新来源版本</button>
-          <button class="btn" :disabled="busy || isRunning" @click="createSeparateProject">另建独立项目</button>
-        </div>
-      </div>
-      <div v-else-if="!project.sourceFileSaved && sourceFile" class="source-change-notice">
-        <strong>尚未备份原始文件</strong>
-        <p>当前项目已保存解析后的源文本与片段。上传原始文件到本机项目目录，便于后续恢复、核对和导出。</p>
-        <button class="btn" :disabled="busy" @click="uploadCurrentSourceFile">备份原始文件</button>
-      </div>
-      <div class="project-overview">
-        <div class="overview-item">
-          <span class="muted small">来源版本</span>
-          <strong>{{ project.currentSourceRevisionId?.slice(0, 8) || '—' }}</strong>
-        </div>
-        <div class="overview-item">
-          <span class="muted small">当前已采用</span>
-          <strong>{{ verification?.acceptedSegments ?? '—' }}/{{ verification?.totalSegments ?? project.segmentCount }}</strong>
-        </div>
-        <div class="overview-item">
-          <span class="muted small">待翻译 / 过期</span>
-          <strong>{{ verification ? verification.missingSegmentIds.length + verification.staleSourceIds.length : '—' }}</strong>
-        </div>
-        <div class="overview-item">
-          <span class="muted small">最近运行</span>
-          <strong>{{ activeRun?.status || '尚未运行' }}</strong>
-        </div>
-      </div>
-
-      <div class="agent-actions">
-        <button class="btn primary" :disabled="busy || isRunning || sourceChanged" @click="startRun('stale')">翻译过期 / 未完成内容</button>
-        <button class="btn" :disabled="busy || isRunning || sourceChanged" @click="startRun('failed')">重试失败片段</button>
-        <button class="btn" :disabled="busy || isRunning || sourceChanged || !visibleSegments.length" @click="startRun('visible')">重译当前阅读页</button>
-        <button class="btn" :disabled="busy || isRunning || sourceChanged" @click="startRun('all')">生成全书新候选</button>
-        <button v-if="isRunning" class="btn warn" :disabled="busy" @click="cancelRun">停止运行</button>
-        <button v-else-if="activeRun?.status === 'paused' || activeRun?.status === 'failed' || activeRun?.status === 'partial'" class="btn" :disabled="busy" @click="resumeRun">恢复 / 继续失败项</button>
-        <button class="btn ghost" :disabled="busy" @click="refreshProject">刷新状态</button>
-      </div>
-
-      <div class="prompt-summary">
-        <div>
-          <strong>本次运行参数</strong>
-          <p class="muted small">{{ sourceLang }} → {{ targetLang }} · {{ translationMode }} · {{ localAgentProvider }} / {{ localAgentModel || 'auto' }}</p>
-          <p class="muted small">运行使用下方所示的当前 Prompt；若 Prompt 指纹、源片段或模型配置变化，系统会把对应结果视为过期候选，而不是覆盖已有译文。</p>
-        </div>
-        <button class="btn" :disabled="busy" @click="savePromptRevision">保存 Prompt 版本</button>
-      </div>
-
-      <div v-if="activeRun" class="run-card">
-        <div class="run-heading">
-          <div>
-            <strong>运行 {{ activeRun.runId.slice(0, 8) }}</strong>
-            <span class="muted small">{{ activeRun.scope?.type || 'stale' }} · {{ new Date(activeRun.createdAt).toLocaleString() }}</span>
-          </div>
-          <span class="run-status" :class="'status-' + activeRun.status">{{ runStatusLabel(activeRun.status) }}</span>
-        </div>
-        <div class="run-progress">
-          <span v-for="status in progressItems" :key="status.key" class="progress-item">
-            <strong>{{ activeRun.counts?.[status.key] || 0 }}</strong><small>{{ status.label }}</small>
-          </span>
-        </div>
-        <p v-if="activeRun.error" class="err-text small">{{ activeRun.error }}</p>
-        <div v-if="activeRun.status === 'awaiting_acceptance' || (activeRun.counts?.candidate || 0) > 0" class="candidate-gate">
-          <div>
-            <strong>候选译文已保存</strong>
-            <p class="muted small">先检查候选结果。点击采纳后才会更新项目的当前采用版本；原来的人工修订和历史运行仍然保留。</p>
-          </div>
-          <button class="btn primary" :disabled="busy || !(activeRun.counts?.candidate || 0)" @click="acceptCandidates()">
-            采纳本次全部候选（{{ activeRun.counts?.candidate || 0 }}）
-          </button>
-        </div>
-        <div v-if="candidatePreview.length" class="candidate-preview">
-          <strong>候选译文预览（{{ candidatePreview.length }} 条）</strong>
-          <article v-for="item in candidatePreview" :key="item.id" class="candidate-preview-item">
-            <div class="candidate-preview-title">
-              <strong>{{ item.id }}</strong>
-              <span class="muted small">{{ item.contextPath || '' }}</span>
-            </div>
-            <p><span class="preview-label">原文</span>{{ item.source }}</p>
-            <p><span class="preview-label">当前采用</span>{{ item.accepted || '（暂无已采用译文）' }}</p>
-            <p class="new-candidate"><span class="preview-label">新候选</span>{{ item.candidate }}</p>
-            <button class="btn" :disabled="busy" @click="acceptCandidates([item.id])">只采纳此条</button>
-          </article>
-          <p class="muted small">只预览前 8 条；其余候选可通过运行详情 API 分页查看。采纳会应用本次所有候选。</p>
-        </div>
-        <div v-if="activeRun.findings?.length" class="finding-list">
-          <strong>审校发现 {{ activeRun.findings.length }} 条</strong>
-          <div v-for="finding in activeRun.findings.slice(0, 12)" :key="finding.findingId" class="finding-row">
-            <span class="finding-category">{{ finding.category === 'accuracy' ? '准确性' : finding.category === 'terminology' ? '术语' : '文风' }}</span>
-            <span class="muted small">{{ finding.segmentId }}</span>
-            <span>{{ finding.finding?.reason || finding.finding?.suggestion || '审校建议' }}</span>
-          </div>
-        </div>
-      </div>
-
-      <section class="manual-edit-panel">
-        <div>
-          <strong>人工修订当前阅读页</strong>
-          <p class="muted small">先在“阅读”页定位片段，再回到这里编辑。保存会写入项目数据库，并同步更新阅读器当前译文。</p>
-        </div>
-        <label class="manual-field">
-          <span>片段</span>
-          <select v-model="selectedSegmentId" @change="loadSelectedTranslation">
-            <option v-for="segment in visibleSegments" :key="segment.id" :value="segment.id">
-              {{ segment.id }} · {{ segment.text.slice(0, 70) }}
-            </option>
-          </select>
-        </label>
-        <label v-if="selectedSegment" class="manual-field">
-          <span>原文</span>
-          <div class="source-preview">{{ selectedSegment.text }}</div>
-        </label>
-        <label class="manual-field">
-          <span>修订后的译文</span>
-          <textarea v-model="manualText" rows="4" placeholder="输入你确认的完整译文"></textarea>
-        </label>
-        <div class="manual-actions">
-          <button class="btn" :disabled="busy || !selectedSegmentId || !manualText.trim()" @click="saveManualEdit">保存人工修订</button>
-          <span class="muted small">人工修订优先保留，不会被后台模型结果静默覆盖。</span>
+      <section v-if="sourceChanged" class="agent-notice agent-notice-warning">
+        <strong>这份文档的原文已经变化</strong>
+        <p>为了避免把旧译文错配到新原文，需要先登记新来源版本。旧版本和历史记录会保留。</p>
+        <div class="agent-inline-actions">
+          <button class="agent-button agent-button-primary" :disabled="busy || isRunning || !segments.length" @click="updateSourceRevision">更新来源并保留历史</button>
+          <button class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="createSeparateProject">另建项目</button>
         </div>
       </section>
 
-      <details class="run-history">
-        <summary>运行历史（{{ runs.length }}）</summary>
-        <div v-for="run in runs" :key="run.runId" class="history-row">
-          <div>
-            <strong>{{ run.runId.slice(0, 8) }}</strong>
-            <span class="muted small">{{ new Date(run.createdAt).toLocaleString() }} · {{ run.scope?.type }}</span>
+      <section v-else class="agent-work-card agent-progress-card">
+        <div class="agent-progress-heading">
+          <div class="agent-progress-copy">
+            <div class="agent-section-kicker">{{ isRunning ? '正在处理' : pendingSegmentCount > 0 ? '等待继续' : '翻译状态' }}</div>
+            <h3>{{ isRunning ? 'Agent 正在翻译这份文档' : pendingSegmentCount > 0 ? '继续完成这份文档' : '这份文档已完成' }}</h3>
+            <p v-if="isRunning">翻译结果会自动保存。关闭此页面也不会删除已经记录的进度。</p>
+            <p v-else-if="pendingSegmentCount > 0">Agent 会自动处理所有未完成或已过期的内容，并保留已完成的人工修订。</p>
+            <p v-else>所有段落都已有当前有效译文。可以返回阅读，或在“更多选项”中重新翻译。</p>
           </div>
-          <span class="run-status" :class="'status-' + run.status">{{ runStatusLabel(run.status) }}</span>
-          <button class="btn ghost" :disabled="busy" @click="selectRun(run.runId)">查看</button>
+          <div class="agent-progress-number" :class="{ 'is-complete': pendingSegmentCount === 0 && !isRunning }">
+            <strong>{{ isRunning ? runProgressPercent : documentProgressPercent }}%</strong>
+            <span>{{ isRunning ? '本次任务' : '全书完成度' }}</span>
+          </div>
+        </div>
+
+        <div class="agent-progress-track" role="progressbar" :aria-valuenow="isRunning ? runProgressPercent : documentProgressPercent" aria-valuemin="0" aria-valuemax="100">
+          <div class="agent-progress-fill" :style="{ width: (isRunning ? runProgressPercent : documentProgressPercent) + '%' }"></div>
+        </div>
+
+        <div class="agent-progress-foot">
+          <span>{{ acceptedSegmentCount.toLocaleString() }} / {{ totalSegmentCount.toLocaleString() }} 段已采用</span>
+          <span v-if="pendingSegmentCount > 0">{{ pendingSegmentCount.toLocaleString() }} 段待处理</span>
+          <span v-else>没有待处理段落</span>
+        </div>
+
+        <div class="agent-main-actions">
+          <button
+            v-if="isRunning"
+            class="agent-button agent-button-primary agent-button-large"
+            disabled
+          >
+            <span class="agent-spinner" aria-hidden="true"></span>
+            正在翻译…
+          </button>
+          <button
+            v-else-if="pendingSegmentCount > 0"
+            class="agent-button agent-button-primary agent-button-large"
+            :disabled="busy || sourceChanged"
+            @click="startRun('stale')"
+          >
+            {{ busy ? '正在准备…' : acceptedSegmentCount > 0 ? '继续翻译' : '开始翻译' }}
+            <span v-if="pendingSegmentCount > 0" class="agent-button-count">{{ pendingSegmentCount.toLocaleString() }}</span>
+          </button>
+          <span v-else class="agent-complete-label"><span aria-hidden="true">✓</span> 翻译已完成</span>
+          <button v-if="isRunning" class="agent-button agent-button-secondary" :disabled="busy" @click="cancelRun">停止</button>
+        </div>
+
+        <div v-if="autoAcceptingRunId && autoAcceptingRunId === activeRun?.runId" class="agent-inline-status">
+          正在自动保存译文并同步到阅读页…
+        </div>
+        <div v-else-if="activeRun && !isRunning && (activeRun.counts?.candidate || 0) > 0" class="agent-pending-output">
+          <div>
+            <strong>译文已生成，正在等待写入</strong>
+            <p>系统暂时没能自动保存这次结果。重试保存即可，不需要重新翻译。</p>
+          </div>
+          <button class="agent-button agent-button-secondary" :disabled="busy" @click="autoAcceptReadyCandidates">重试保存</button>
+        </div>
+
+        <div v-if="activeRun" class="agent-run-summary">
+          <span class="agent-status-dot" :class="'status-' + activeRun.status"></span>
+          <span>{{ runStatusLabel(activeRun.status) }}</span>
+          <span class="agent-meta-dot">·</span>
+          <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString() }}</span>
+          <span v-if="activeRun.counts?.failed" class="agent-run-failure">有 {{ activeRun.counts.failed }} 段需要重试</span>
+        </div>
+      </section>
+
+      <p v-if="message" class="agent-feedback" role="status">{{ message }}</p>
+      <p v-if="error" class="agent-feedback agent-feedback-error" role="alert">{{ error }}</p>
+
+      <details class="agent-options">
+        <summary>
+          <span>更多选项</span>
+          <span class="agent-options-hint">手动修订、重试、重新翻译与历史记录</span>
+        </summary>
+        <div class="agent-options-content">
+          <section class="agent-option-group">
+            <div class="agent-option-heading">
+              <h4>翻译控制</h4>
+              <p>一般情况下只需使用上方的开始 / 继续翻译。以下操作用于有明确需要时。</p>
+            </div>
+            <div class="agent-inline-actions">
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !(activeRun?.counts?.failed)" @click="startRun('failed')">
+                重试失败内容<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
+              </button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="startRun('all')">重新翻译全文</button>
+              <button class="agent-button agent-button-tertiary" :disabled="busy || isRunning" @click="refreshProject">刷新状态</button>
+            </div>
+            <p class="agent-footnote">重新翻译会生成新结果。相同原文版本下已有的人工修订会优先保留。</p>
+          </section>
+
+          <section v-if="!project.sourceFileSaved && sourceFile" class="agent-option-group">
+            <div class="agent-option-heading">
+              <h4>原始文件备份</h4>
+              <p>项目已保存解析后的原文。备份原始 EPUB/PDF，方便将来恢复和核对。</p>
+            </div>
+            <button class="agent-button agent-button-secondary" :disabled="busy" @click="uploadCurrentSourceFile">备份原文件</button>
+          </section>
+
+          <details class="agent-subdetails">
+            <summary>手动修订（可选）</summary>
+            <p class="agent-detail-description">只有当你想纠正某一段时才需要使用。Agent 翻译不需要你预先提供译文；保存的修订会作为人工版本留档。</p>
+            <label class="agent-field">
+              <span>当前阅读页片段</span>
+              <select v-model="selectedSegmentId" @change="loadSelectedTranslation">
+                <option v-for="segment in visibleSegments" :key="segment.id" :value="segment.id">
+                  {{ segment.id }} · {{ segment.text.slice(0, 70) }}
+                </option>
+              </select>
+            </label>
+            <label v-if="selectedSegment" class="agent-field">
+              <span>原文</span>
+              <div class="agent-source-preview">{{ selectedSegment.text }}</div>
+            </label>
+            <label class="agent-field">
+              <span>修订后的译文</span>
+              <textarea v-model="manualText" rows="4" placeholder="仅在需要人工纠正时填写"></textarea>
+            </label>
+            <div class="agent-inline-actions">
+              <button class="agent-button agent-button-secondary" :disabled="busy || !selectedSegmentId || !manualText.trim()" @click="saveManualEdit">保存修订</button>
+              <span class="agent-footnote">人工修订会同步到阅读器，并优先于同一原文版本的模型结果。</span>
+            </div>
+          </details>
+
+          <details class="agent-subdetails">
+            <summary>运行历史（{{ runs.length }}）</summary>
+            <div v-if="runs.length" class="agent-history-list">
+              <div v-for="run in runs" :key="run.runId" class="agent-history-row">
+                <div class="agent-history-copy">
+                  <strong>{{ new Date(run.createdAt).toLocaleString() }}</strong>
+                  <span>{{ run.scope?.type === 'stale' ? '未完成内容' : run.scope?.type === 'all' ? '全文重译' : run.scope?.type === 'failed' ? '失败重试' : '指定范围' }} · {{ run.runId.slice(0, 8) }}</span>
+                </div>
+                <span class="agent-history-status">{{ runStatusLabel(run.status) }}</span>
+                <button class="agent-button agent-button-tertiary" :disabled="busy" @click="selectRun(run.runId)">查看</button>
+              </div>
+            </div>
+            <p v-else class="agent-detail-description">完成首次翻译后，这里会保留每次运行记录。</p>
+          </details>
+
+          <details v-if="activeRun?.findings?.length" class="agent-subdetails">
+            <summary>审校意见（{{ activeRun.findings.length }}）</summary>
+            <div class="agent-findings">
+              <div v-for="finding in activeRun.findings.slice(0, 12)" :key="finding.findingId" class="agent-finding-row">
+                <span class="agent-finding-kind">{{ finding.category === 'accuracy' ? '准确性' : finding.category === 'terminology' ? '术语' : '文风' }}</span>
+                <span class="agent-finding-id">{{ finding.segmentId }}</span>
+                <p>{{ finding.finding?.reason || finding.finding?.suggestion || '审校建议' }}</p>
+              </div>
+            </div>
+          </details>
         </div>
       </details>
     </template>
-
-    <p v-if="message" class="muted small workspace-message">{{ message }}</p>
-    <p v-if="error" class="err-text small workspace-error">{{ error }}</p>
   </section>
 </template>
 
@@ -643,49 +690,411 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.document-agent-workspace { display: flex; flex-direction: column; gap: 1rem; }
-.workspace-heading, .run-heading, .prompt-summary, .candidate-gate, .manual-actions, .history-row {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem;
+.document-agent-workspace {
+  --agent-blue: #0071e3;
+  --agent-blue-hover: #0077ed;
+  --agent-ink: #1d1d1f;
+  --agent-secondary: #6e6e73;
+  --agent-line: #e5e5ea;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  color: var(--agent-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif;
 }
-.workspace-heading h3 { margin: 0 0 .3rem; }
-.workspace-heading p, .prompt-summary p, .candidate-gate p, .manual-edit-panel p { margin: .25rem 0 0; line-height: 1.5; }
-.status-chip, .run-status { border-radius: 999px; padding: .2rem .6rem; background: #f0f2f5; font-size: .78rem; white-space: nowrap; }
-.run-status.status-running { background: #e6f4ff; color: #0958d9; }
-.run-status.status-failed, .run-status.status-partial { background: #fff1f0; color: #a8071a; }
-.run-status.status-awaiting_acceptance { background: #fff7e6; color: #ad6800; }
-.run-status.status-completed { background: #f6ffed; color: #389e0d; }
-.notice { padding: .8rem; border-radius: 6px; background: #fafafa; }
-.project-create { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.project-description { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
-.project-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; }
-.overview-item { display: flex; flex-direction: column; gap: .25rem; padding: .7rem; border: 1px solid #e8e8e8; border-radius: 7px; min-width: 0; }
-.overview-item strong { overflow-wrap: anywhere; }
-.agent-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.prompt-summary, .run-card, .manual-edit-panel, .run-history { padding: .9rem; border: 1px solid #e8e8e8; border-radius: 8px; }
-.prompt-summary { align-items: center; }
-.run-card { display: flex; flex-direction: column; gap: .8rem; }
-.run-heading > div { display: flex; flex-direction: column; gap: .2rem; }
-.run-progress { display: flex; flex-wrap: wrap; gap: .65rem; }
-.progress-item { display: flex; flex-direction: column; min-width: 3.5rem; gap: .1rem; }
-.progress-item strong { font-size: 1.1rem; }
-.progress-item small { color: #666; }
-.candidate-gate { align-items: center; padding: .75rem; border: 1px solid #ffe7ba; background: #fffbe6; border-radius: 6px; }
-.finding-list { display: flex; flex-direction: column; gap: .4rem; }
-.finding-row { display: grid; grid-template-columns: 4.5rem 7rem 1fr; gap: .5rem; align-items: start; padding: .45rem 0; border-top: 1px solid #f0f0f0; }
-.finding-category { font-size: .78rem; color: #595959; }
-.manual-edit-panel { display: flex; flex-direction: column; gap: .7rem; }
-.manual-field { display: flex; flex-direction: column; gap: .3rem; }
-.manual-field select, .manual-field textarea { width: 100%; border: 1px solid #d9d9d9; border-radius: 5px; padding: .5rem; background: white; color: inherit; }
-.source-preview { white-space: pre-wrap; max-height: 8rem; overflow: auto; padding: .55rem; border-radius: 5px; background: #fafafa; }
-.manual-actions { align-items: center; justify-content: flex-start; flex-wrap: wrap; }
-.run-history summary { cursor: pointer; font-weight: 600; }
-.history-row { align-items: center; padding: .55rem 0; border-top: 1px solid #f0f0f0; }
-.history-row > div { display: flex; flex-direction: column; gap: .2rem; }
-.workspace-message { margin: 0; }
-.workspace-error { margin: 0; }
-@media (max-width: 700px) {
-  .project-create, .prompt-summary, .candidate-gate { align-items: stretch; flex-direction: column; }
-  .project-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .finding-row { grid-template-columns: 1fr; gap: .2rem; }
+.agent-hero { padding: .25rem .1rem .5rem; }
+.agent-kicker, .agent-section-kicker {
+  color: var(--agent-secondary);
+  font-size: .76rem;
+  font-weight: 650;
+  letter-spacing: .055em;
+}
+.agent-hero-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: .35rem;
+}
+.agent-title-copy { min-width: 0; }
+.agent-title-copy h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  line-height: 1.22;
+  font-weight: 680;
+  letter-spacing: -.035em;
+  overflow-wrap: anywhere;
+}
+.agent-title-copy p {
+  max-width: 42rem;
+  margin: .55rem 0 0;
+  color: var(--agent-secondary);
+  line-height: 1.6;
+  font-size: .94rem;
+}
+.agent-format {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: .35rem .7rem;
+  background: #f5f5f7;
+  color: #424245;
+  font-size: .76rem;
+  font-weight: 650;
+  letter-spacing: .025em;
+}
+.agent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .9rem;
+  color: var(--agent-secondary);
+  font-size: .82rem;
+}
+.agent-meta-dot { color: #c7c7cc; }
+.agent-work-card {
+  border: 1px solid var(--agent-line);
+  border-radius: 18px;
+  background: #fff;
+  padding: clamp(1.1rem, 3vw, 1.6rem);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .025);
+}
+.agent-ready-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 1rem;
+  row-gap: 1rem;
+}
+.agent-state-mark {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 13px;
+  background: #f0f6ff;
+  color: var(--agent-blue);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.agent-ready-copy h3, .agent-progress-copy h3 {
+  margin: .2rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 670;
+  letter-spacing: -.02em;
+  line-height: 1.4;
+}
+.agent-ready-copy p, .agent-progress-copy p {
+  margin: .4rem 0 0;
+  color: var(--agent-secondary);
+  font-size: .9rem;
+  line-height: 1.6;
+}
+.agent-ready-card .agent-button { grid-column: 2; justify-self: start; }
+.agent-progress-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+.agent-progress-copy { min-width: 0; }
+.agent-progress-number {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .2rem;
+  min-width: 5.4rem;
+}
+.agent-progress-number strong {
+  font-size: 2rem;
+  line-height: 1;
+  font-weight: 680;
+  letter-spacing: -.055em;
+  font-variant-numeric: tabular-nums;
+}
+.agent-progress-number span { color: var(--agent-secondary); font-size: .73rem; }
+.agent-progress-number.is-complete strong { color: #248a3d; }
+.agent-progress-track {
+  height: 7px;
+  margin-top: 1.35rem;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #ededf0;
+}
+.agent-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--agent-blue);
+  transition: width .35s ease;
+}
+.agent-progress-foot {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: .65rem;
+  color: var(--agent-secondary);
+  font-size: .78rem;
+  font-variant-numeric: tabular-nums;
+}
+.agent-main-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem;
+  margin-top: 1.35rem;
+}
+.agent-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  min-height: 2.35rem;
+  padding: .55rem .95rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--agent-ink);
+  font: inherit;
+  font-size: .86rem;
+  font-weight: 570;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.agent-button:focus-visible, .agent-options summary:focus-visible, .agent-subdetails summary:focus-visible {
+  outline: 3px solid rgba(0, 113, 227, .28);
+  outline-offset: 2px;
+}
+.agent-button:disabled { opacity: .52; cursor: not-allowed; transform: none; }
+.agent-button-primary {
+  background: var(--agent-blue);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .04);
+}
+.agent-button-primary:hover:not(:disabled) { background: var(--agent-blue-hover); }
+.agent-button-secondary {
+  background: #f5f5f7;
+  border-color: #e5e5ea;
+  color: #1d1d1f;
+}
+.agent-button-secondary:hover:not(:disabled) { background: #ececf0; }
+.agent-button-tertiary {
+  min-height: 2rem;
+  padding: .35rem .55rem;
+  color: var(--agent-blue);
+  background: transparent;
+}
+.agent-button-tertiary:hover:not(:disabled) { background: #f0f6ff; }
+.agent-button-large { min-height: 2.8rem; padding: .75rem 1.25rem; font-size: .94rem; }
+.agent-button-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0 .3rem;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, .2);
+  font-size: .78rem;
+  font-variant-numeric: tabular-nums;
+}
+.agent-complete-label {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem .1rem;
+  color: #248a3d;
+  font-weight: 650;
+  font-size: .94rem;
+}
+.agent-complete-label > span {
+  display: grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 50%;
+  background: #e8f6ec;
+}
+.agent-run-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-top: 1.3rem;
+  padding-top: .95rem;
+  border-top: 1px solid #f0f0f2;
+  color: var(--agent-secondary);
+  font-size: .77rem;
+}
+.agent-status-dot {
+  width: .42rem;
+  height: .42rem;
+  border-radius: 50%;
+  background: #8e8e93;
+}
+.agent-status-dot.status-running, .agent-status-dot.status-queued { background: var(--agent-blue); }
+.agent-status-dot.status-completed { background: #248a3d; }
+.agent-status-dot.status-failed, .agent-status-dot.status-partial { background: #d94841; }
+.agent-run-failure { color: #b42318; }
+.agent-inline-status {
+  margin-top: 1rem;
+  padding: .7rem .85rem;
+  border-radius: 10px;
+  background: #f0f6ff;
+  color: #145ea8;
+  font-size: .84rem;
+}
+.agent-pending-output {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: .9rem;
+  border: 1px solid #f0d7a4;
+  border-radius: 12px;
+  background: #fffbf2;
+}
+.agent-pending-output strong { font-size: .87rem; }
+.agent-pending-output p { margin: .3rem 0 0; color: var(--agent-secondary); font-size: .8rem; line-height: 1.5; }
+.agent-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: .8rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--agent-line);
+  border-radius: 14px;
+  background: #f8f8fa;
+  color: var(--agent-ink);
+}
+.agent-notice > div { min-width: 0; }
+.agent-notice strong { font-size: .9rem; }
+.agent-notice p { margin: .35rem 0 0; color: var(--agent-secondary); font-size: .86rem; line-height: 1.6; overflow-wrap: anywhere; }
+.agent-notice-error { border-color: #f1c8c5; background: #fff8f7; }
+.agent-notice-warning { border-color: #f0d7a4; background: #fffbf2; display: block; }
+.agent-notice-warning > p { margin-bottom: .8rem; }
+.agent-inline-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.agent-feedback {
+  margin: -.35rem 0 0;
+  padding: .1rem .1rem;
+  color: #248a3d;
+  font-size: .82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-feedback-error { color: #b42318; }
+.agent-options {
+  border: 1px solid var(--agent-line);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+.agent-options > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .4rem .8rem;
+  padding: .95rem 1.1rem;
+  cursor: pointer;
+  list-style-position: inside;
+  font-size: .9rem;
+  font-weight: 650;
+}
+.agent-options > summary::marker { color: #8e8e93; }
+.agent-options-hint { color: var(--agent-secondary); font-size: .77rem; font-weight: 400; }
+.agent-options-content { padding: 0 1.1rem 1rem; }
+.agent-option-group { padding: 1rem 0; border-top: 1px solid #f0f0f2; }
+.agent-option-heading h4 { margin: 0; font-size: .9rem; font-weight: 650; }
+.agent-option-heading p, .agent-detail-description {
+  margin: .35rem 0 .75rem;
+  color: var(--agent-secondary);
+  font-size: .82rem;
+  line-height: 1.55;
+}
+.agent-footnote {
+  margin: .15rem 0 0;
+  color: var(--agent-secondary);
+  font-size: .76rem;
+  line-height: 1.5;
+}
+.agent-subdetails { padding: .8rem 0; border-top: 1px solid #f0f0f2; }
+.agent-subdetails > summary { cursor: pointer; font-size: .86rem; font-weight: 600; }
+.agent-subdetails .agent-detail-description { margin-top: .65rem; }
+.agent-field { display: flex; flex-direction: column; gap: .35rem; margin-top: .8rem; color: #424245; font-size: .8rem; }
+.agent-field select, .agent-field textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d2d2d7;
+  border-radius: 9px;
+  background: #fff;
+  padding: .65rem .75rem;
+  color: var(--agent-ink);
+  font: inherit;
+  font-size: .88rem;
+}
+.agent-field select:focus, .agent-field textarea:focus { outline: 3px solid rgba(0, 113, 227, .18); border-color: var(--agent-blue); }
+.agent-field textarea { resize: vertical; line-height: 1.55; }
+.agent-source-preview {
+  padding: .7rem .75rem;
+  border-radius: 9px;
+  background: #f5f5f7;
+  color: #424245;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-history-list, .agent-findings { display: grid; gap: .6rem; margin-top: .75rem; }
+.agent-history-row {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .65rem 0;
+  border-bottom: 1px solid #f0f0f2;
+}
+.agent-history-row:last-child { border-bottom: 0; }
+.agent-history-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: .2rem; }
+.agent-history-copy strong { font-size: .82rem; font-weight: 600; }
+.agent-history-copy span, .agent-history-status { color: var(--agent-secondary); font-size: .76rem; }
+.agent-history-status { white-space: nowrap; }
+.agent-finding-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: start; gap: .6rem; padding: .6rem 0; border-bottom: 1px solid #f0f0f2; }
+.agent-finding-row p { margin: 0; font-size: .82rem; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-finding-kind { padding: .16rem .4rem; border-radius: 6px; background: #f5f5f7; color: #424245; font-size: .72rem; white-space: nowrap; }
+.agent-finding-id { color: var(--agent-secondary); font-size: .75rem; white-space: nowrap; }
+.agent-spinner {
+  display: inline-block;
+  width: .85rem;
+  height: .85rem;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: agent-spin .75s linear infinite;
+}
+@keyframes agent-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-spinner { animation: none; }
+  .agent-progress-fill, .agent-button { transition: none; }
+}
+@media (max-width: 640px) {
+  .agent-hero-main { align-items: flex-start; }
+  .agent-title-copy h2 { font-size: 1.4rem; }
+  .agent-title-copy p { font-size: .88rem; }
+  .agent-ready-card { grid-template-columns: auto minmax(0, 1fr); }
+  .agent-ready-card .agent-button { grid-column: 1 / -1; justify-self: stretch; }
+  .agent-progress-heading { gap: .7rem; }
+  .agent-progress-number strong { font-size: 1.7rem; }
+  .agent-progress-number { min-width: 4.3rem; }
+  .agent-progress-copy h3 { font-size: 1.04rem; }
+  .agent-pending-output { align-items: flex-start; flex-direction: column; }
+  .agent-options > summary { align-items: flex-start; flex-direction: column; }
+  .agent-history-row { align-items: flex-start; flex-wrap: wrap; }
+  .agent-history-status { margin-left: auto; }
+  .agent-finding-row { grid-template-columns: auto minmax(0, 1fr); }
+  .agent-finding-row p { grid-column: 1 / -1; }
 }
 </style>
