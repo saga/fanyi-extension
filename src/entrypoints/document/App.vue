@@ -156,8 +156,8 @@
       <article ref="readerRef" class="reader" :key="currentPage?.id || 'empty-reader'">
         <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
           :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0), { 'is-active': state.activeSegmentIds?.has(seg.id) }]">
-          <div v-if="viewMode !== 'translation'" class="or font-en">{{ seg.text }}</div>
-          <div v-if="viewMode !== 'original'" class="tr font-zh">
+          <div v-if="viewMode !== 'translation'" class="or" :class="languageFontClass(sourceLang, seg.text)">{{ seg.text }}</div>
+          <div v-if="viewMode !== 'original'" class="tr" :class="languageFontClass(targetLang, state.translations.get(seg.id) || '')">
             <template v-if="state.translations.get(seg.id)">{{ state.translations.get(seg.id) }}</template>
             <span v-else-if="state.running && state.activeSegmentIds?.has(seg.id)" class="tr-pending">翻译中…</span>
             <span v-else-if="!state.running && state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
@@ -618,6 +618,15 @@ const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
 const currentPagePending = computed(() => visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()));
+
+function languageFontClass(language: string, text: string): 'font-en' | 'font-zh' {
+  const normalized = (language || 'auto').toLowerCase();
+  if (normalized.startsWith('zh')) return 'font-zh';
+  if (normalized.startsWith('en')) return 'font-en';
+  if (normalized === 'auto') return /[\\u3400-\\u9fff]/.test(text) ? 'font-zh' : 'font-en';
+  // This reader exposes separate English/Chinese typography; other scripts use the English fallback.
+  return 'font-en';
+}
 const builtInDocumentSystemPrompt = computed(() => {
   const base = buildStyledSystemContent(
     sourceLang.value,
