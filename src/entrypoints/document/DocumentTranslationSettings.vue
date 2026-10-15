@@ -209,7 +209,7 @@ watch(
 
 function applyActiveDocumentLanguages() {
   // 文档会话可以单独保存语言选择；打开第二个 Tab 时应显示当前文档实际使用的语言，
-  // 而不是用全局设置静默覆盖恢复出来的会话。只有用户手动改语言时才写回全局配置。
+  // 而不是用网页翻译的全局设置覆盖当前文档会话。手动修改后会保存到文档专用配置。
   if (props.activeSourceLang) config.value.documentSourceLang = props.activeSourceLang;
   if (props.activeTargetLang) config.value.documentTargetLang = props.activeTargetLang;
 }
