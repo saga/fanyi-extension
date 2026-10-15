@@ -144,24 +144,25 @@ src/rules/
 
 ## 🏗️ 技术架构
 
-### 流水线
+### 网页翻译流水线
 
-```
-网页 DOM
-  ↓ (blockExtractor: TreeWalker 提取文本块)
-TextBlock[]
-  ↓ (chunkBuilder: 块按大小/数量分批)
-Chunk[]
-  ↓ (background.ts: 全局队列调度，逐 chunk 调用 DeepSeek)
-DeepSeekTranslationService
-  ├─ 串行流式接口 (translateStream, AsyncGenerator)
-  └─ 非流式接口 (translate, 配 cache)
-  ↓ (translationDisplay: 包成 <span> 而非清空 DOM)
-原文 <span class="fanyi-original"> + 译文 <span class="fanyi-translation">
-  ↓ (DOMObserver: 监听新增节点增量翻译)
-持续翻译
+```mermaid
+flowchart TD
+    A[网页 DOM] --> B[BlockExtractor 提取 TextBlock]
+    B --> C[ChunkBuilder 生成分块]
+    C --> D{选择翻译 Provider}
+    D -- 远程 Provider --> E[globalQueue：默认并发 1]
+    E --> F[远程 DeepSeek / Vocal Saga API]
+    D -- Local Agent --> G[独立 localAgentQueue：并发 4]
+    G --> H[本机 /v1/chat/completions]
+    H --> I[本机 SQLite 缓存与模型 Runtime]
+    F --> J[校验结果 ID 并写缓存]
+    I --> J
+    J --> K[translationDisplay 保留原 DOM 并插入译文]
+    K --> L[DOMObserver 处理后续新增节点]
 ```
 
+远程 DeepSeek 的单并发队列与本机队列分开。本机 Provider 失败时直接报错，不会自动切换到远程翻译服务。
 ### 目录结构
 
 ```
@@ -216,16 +217,16 @@ src/
 
 | 模块 | 职责 |
 |------|------|
-| `entrypoints/background.ts` | 后台消息路由、API key 校验、缓存管理、全局翻译队列调度 |
+| `entrypoints/background.ts` | 后台消息路由、缓存管理和 Provider 路由；远程与本机请求使用不同队列 |
 | `entrypoints/content.ts` | 内容脚本：注入页面、提取 DOM 块、应用/还原翻译、监听 DOM 变化 |
 | `entrypoints/service/deepseek.ts` | DeepSeek API 客户端（流式 + 非流式 + 术语表抽取） |
 | `entrypoints/service/streamParser.ts` | SSE 协议逐行解析，跨 `read()` 分片累积 |
 | `entrypoints/utils/translationDisplay.ts` | 把翻译结果以 `<span class="fanyi-original">/fanyi-translation` 包裹原元素，**不修改原 DOM 子节点**，链接、`<strong>`、`<code>` 等内联元素完整保留 |
-| `entrypoints/utils/blockExtractor.ts` | `TreeWalker` 遍历 DOM 提取 `TextBlock` |
+| `entrypoints/utils/blockExtractor/` | `TreeWalker` 遍历 DOM 提取 `TextBlock`；规则和类型分文件维护 |
 | `entrypoints/utils/chunkBuilder.ts` | 文本块按字符数上限分批 |
 | `entrypoints/utils/domObserver.ts` | `MutationObserver` 增量翻译新出现节点 |
 | `entrypoints/utils/glossaryExtractor.ts` | 调用 LLM 抽取专有名词 + 译法 |
-| `entrypoints/utils/translationQueue.ts` | 全局串行队列，避免并发请求冲突 |
+| `entrypoints/utils/translationQueue.ts` | 可配置有界队列；远程 globalQueue 默认并发 1，本机网页翻译另用并发 4 的队列 |
 | `entrypoints/utils/cacheManager.ts` | `@wxt-dev/storage` 缓存（7 天 TTL，简单 hash key） |
 | `entrypoints/utils/config.ts` | `@wxt-dev/storage` 持久化配置 |
 
@@ -245,6 +246,107 @@ src/
 | Firefox (Android) | v2 | 触屏手势 | 触屏优先 |
 
 构建钩子（`wxt.config.ts:63`）会重写 HTML 中的绝对资源路径为相对路径，跨 target 兼容。
+
+## 系统架构与关键流程
+
+### C4 — 系统上下文
+
+```mermaid
+C4Context
+    title fanyi-extension system context
+    Person(reader, "Reader", "Reads web pages and local documents")
+    System(extension, "fanyi-extension", "WXT browser extension; page translation, sidebar and EPUB/PDF reader")
+    System(cloud, "Vocal Saga Cloud API", "Remote translation API / OpenAI-compatible proxy")
+    System(local, "Vocal Saga Local Agent Service", "Optional loopback-only local HTTP service")
+    System_Ext(remoteModel, "Remote model providers", "DeepSeek and configured compatible providers")
+    System_Ext(localModel, "Local model runtime", "Workbuddy/CodeBuddy SDK or OpenCode CLI")
+    Rel(reader, extension, "Uses")
+    Rel(extension, cloud, "HTTPS when remote mode is selected")
+    Rel(extension, local, "127.0.0.1 when Local Agent mode is selected")
+    Rel(cloud, remoteModel, "Model requests")
+    Rel(local, localModel, "SDK / CLI requests")
+```
+
+### C4 — 扩展内部与本机服务容器
+
+```mermaid
+C4Container
+    title fanyi-extension and local Agent containers
+    System_Boundary(browser, "Browser extension") {
+        Container(content, "Content Script", "TypeScript", "DOM extraction, translation display and DOM observer")
+        Container(background, "Background", "TypeScript", "Provider routing, queueing and cache coordination")
+        Container(document, "Document Reader / Agent UI", "Vue 3", "EPUB/PDF/Office parsing, reader and project workspace")
+        Container(store, "Browser storage", "WXT storage / IndexedDB", "Settings, page cache and reader recovery state")
+    }
+    System_Boundary(localSvc, "Optional Local Agent Service") {
+        Container(api, "HTTP API and document workflow", "Express / TypeScript", "Structured model calls, project runs, review queue and durable events")
+        ContainerDb(sqlite, "SQLite", "node:sqlite", "Translation cache, request history, source revisions, candidates and findings")
+    }
+    System_Ext(cloud, "Vocal Saga Cloud API", "Cloudflare Workers / Hono")
+    System_Ext(localRuntime, "Workbuddy/CodeBuddy or OpenCode", "Local model runtime")
+    Rel(content, background, "Message passing")
+    Rel(background, store, "Read/write cache and settings")
+    Rel(document, store, "Reader state and recovery snapshot")
+    Rel(background, cloud, "Remote Provider requests")
+    Rel(background, api, "Local Provider requests")
+    Rel(document, api, "Project runs, segments and events")
+    Rel(api, sqlite, "Persist request/cache/workflow data")
+    Rel(api, localRuntime, "Bounded requests")
+```
+
+### 时序图 — 网页翻译的 Provider 路由
+
+```mermaid
+sequenceDiagram
+    actor Reader
+    participant Content as Content Script
+    participant Background
+    participant Cache as Browser cache
+    participant Provider as Selected Provider
+    participant SQLite as Local SQLite (optional)
+    Reader->>Content: Trigger page translation
+    Content->>Content: Extract blocks and build chunks
+    Content->>Background: Translate chunk + provider config
+    Background->>Cache: Check browser cache
+    alt Cache hit
+        Cache-->>Background: Cached translations
+    else Cache miss
+        alt Local Agent enabled
+            Background->>Provider: localAgentQueue (bounded concurrency 4)
+            Provider->>SQLite: Read/write shared local translation cache
+            Provider-->>Background: Structured translation or explicit error
+        else Remote Provider selected
+            Background->>Provider: globalQueue (default concurrency 1)
+            Provider-->>Background: Structured translation or explicit error
+        end
+        Background->>Cache: Persist successful translations
+    end
+    Background-->>Content: Translations mapped by block ID
+    Content->>Content: Apply translated spans without replacing original child DOM
+```
+
+### 流程图 — EPUB/PDF project-based Agent
+
+```mermaid
+flowchart TD
+    A[Open EPUB/PDF/Office file] --> B[Browser parser creates stable segments and metadata]
+    B --> C[Create or select local Agent project]
+    C --> D[Start run: all / stale / failed / selected / chapter scope]
+    D --> E[Service plans work and persists run state]
+    E --> F[Up to 3 translation workers; isolated batch scopes]
+    F --> G[Persist first-pass candidate and emit batch.translation.completed]
+    G --> H{Literary review enabled?}
+    H -- No --> L[Finalize after all translations settle]
+    H -- Yes --> I[Queue Reviewer worker; default concurrency 1]
+    I --> J[Persist findings and actual revised candidates]
+    J --> K[Emit batch.completed after review settles]
+    K --> L
+    L --> M[Reader refreshes segments/events and applies valid results]
+    F -. Pause/cancel stops new batch allocation .-> N[Ignore late results after cancellation]
+    I -. Cancellation .-> N
+```
+
+> Local Agent mode is an explicit routing choice. Local model failures do not trigger automatic fallback to the cloud/DeepSeek provider.
 
 ## 📝 开发
 
@@ -271,7 +373,7 @@ pnpm zip:firefox     # 打包 Firefox 为 .zip
 - **不要手动设置 `TreeWalker.currentNode`** —— 真实 Chrome/Firefox 与 jsdom 行为不同（见 `blockExtractor.ts` 注释）。
 - **配置写入**：Vue refs 是 Proxy 代理，写入 `@wxt-dev/storage` 时用 `JSON.parse(JSON.stringify(...))` 剥离 Proxy。
 - **Cache key**：非加密 hash，仅用于去重；TTL 7 天。
-- **Chunk 调度**：队列串行处理，desktop 间隔 100ms，mobile 间隔 200ms。
+- **Chunk 调度**：Provider 路径不同。远程 DeepSeek 使用 `globalQueue`（并发 1、最多重试 2 次、重试间隔 1 秒）；网页本机 Provider 使用独立的 4 并发队列。Project-based 文档 Agent 另在本机服务内默认分配 3 个翻译 worker + 1 个审校 worker，并按 Workbuddy pool 大小收敛。
 - **Popup UI**：`Element Plus` + 自定义 `theme.css`。
 
 ### 添加新站点规则
