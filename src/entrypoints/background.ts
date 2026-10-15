@@ -11,7 +11,7 @@ import {
 } from './utils/translateApi';
 import { translationCache } from './utils/cacheManager';
 import { globalQueue, TranslationQueue } from './utils/translationQueue';
-import { generateTranslationCacheKey } from './utils/cacheKey';
+import { generateTranslationCacheKey, simpleHash } from './utils/cacheKey';
 import { translateSingleflight } from './utils/singleflight';
 import { matchSiteRule, buildSitePrompt } from '../rules';
 import type { SiteRule } from '../rules/types';
@@ -393,7 +393,7 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate, voiceContext } = message;
         // A document may explicitly enter literary mode even when the global profile is technical.
         const translationMode: TranslationMode = message.translationMode === 'literary' || !!literaryContext
           ? 'literary'
@@ -438,8 +438,14 @@ export default defineBackground({
 
         // 缓存 key 纳入 glossary + sitePrompt：改术语表/站点规则后不再命中旧脏缓存（分析报告 P0）。
         // glossary/sitePrompt 为空时 key 与改动前一致，旧缓存不无谓失效。
+        // 声音画像/关系规则/锚点发生变化时必须失效旧文学译文缓存。这个 hash 只进入缓存身份，
+        // 不进入 system prompt；普通网页请求没有 voiceContext，缓存身份和行为保持不变。
+        const voiceContextHash = voiceContext === undefined ? '' : String(simpleHash(JSON.stringify(voiceContext)));
+        const cachePromptFingerprint = voiceContextHash
+          ? effectivePrompt + '|voice-context-v1:' + voiceContextHash
+          : effectivePrompt;
         const cacheKey = providedCacheKey
-          ? providedCacheKey + '|mode:' + translationMode
+          ? providedCacheKey + '|mode:' + translationMode + (voiceContextHash ? '|voice-v1:' + voiceContextHash : '')
           : generateTranslationCacheKey(
             jsonContent,
             sourceLang,
@@ -447,7 +453,7 @@ export default defineBackground({
             getEffectiveProviderKey(config),
             promptStyle,
             effectiveGlossary,
-            effectivePrompt,
+            cachePromptFingerprint,
             translationMode,
           );
 
@@ -526,18 +532,20 @@ export default defineBackground({
               const translated = await service.translate(
                 jsonContent, sourceLang, targetLang, effectiveGlossary, effectivePrompt,
                 message.responseFormat,
-                message.documentSessionId
+                message.documentSessionId || voiceContext !== undefined
                   ? {
-                      documentSessionId: message.documentSessionId,
+                      ...(message.documentSessionId ? { documentSessionId: message.documentSessionId } : {}),
                       sessionLane: message.documentSessionLane,
                       role: 'translation',
                       sourceLang,
                       targetLang,
                       promptStyle,
                       translationMode,
-                      contextVersion: getDocumentPromptVersion(documentSystemPromptOverride, documentUserPromptTemplate),
+                      contextVersion: getDocumentPromptVersion(documentSystemPromptOverride, documentUserPromptTemplate) +
+                        (voiceContextHash ? '|voice-v1:' + voiceContextHash : ''),
                       systemPromptOverride: documentSystemPromptOverride,
                       userPromptTemplate: documentUserPromptTemplate,
+                      ...(voiceContext !== undefined ? { voiceContext } : {}),
                     }
                   : undefined,
               );
