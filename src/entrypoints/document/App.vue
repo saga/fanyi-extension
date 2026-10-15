@@ -160,7 +160,9 @@
         <div v-for="seg in visibleSegments" :key="seg.id" class="seg"
           :class="['kind-' + seg.kind, 'level-' + (seg.level ?? 0), { 'is-active': state.activeSegmentIds?.has(seg.id) }]">
           <div v-if="viewMode !== 'translation'" class="or" :class="languageFontClass(sourceLang, seg.text)">{{ seg.text }}</div>
-          <div v-if="viewMode !== 'original'" class="tr" :class="languageFontClass(targetLang, displayTranslation(seg.id))">
+          <div v-if="viewMode !== 'original'" class="tr"
+            :class="[languageFontClass(targetLang, displayTranslation(seg.id)), { 'is-workspace-candidate': workspaceCandidateTranslations.has(seg.id) }]">
+            <span v-if="workspaceCandidateTranslations.has(seg.id)" class="workspace-candidate-label">Agent 候选 · 尚未采纳</span>
             <template v-if="displayTranslation(seg.id)">{{ displayTranslation(seg.id) }}</template>
             <span v-else-if="state.running && state.activeSegmentIds?.has(seg.id)" class="tr-pending">翻译中…</span>
             <span v-else-if="!state.running && state.total > 0" class="tr-idle">待翻译 — 点击上方「{{ startLabel }}」</span>
@@ -2453,6 +2455,20 @@ async function resetAll() {
 }
 .seg .or { color: #1f2328; white-space: pre-wrap; }
 .seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .2em; }
+.workspace-candidate-label {
+  display: block;
+  width: fit-content;
+  margin: 0 0 .4rem;
+  padding: .12rem .4rem;
+  border-radius: 4px;
+  background: #fff7e6;
+  color: #ad6800;
+  border: 1px solid #ffe7ba;
+  font-size: .72rem;
+  line-height: 1.4;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+.seg .tr.is-workspace-candidate { border-left: 2px solid #d48806; padding-left: .7rem; }
 .seg .font-en { font-family: var(--document-font-en, Georgia), serif; font-size: var(--document-size-en, 17px); }
 .seg .font-zh { font-family: var(--document-font-zh, 'Noto Serif CJK SC'), serif; font-size: var(--document-size-zh, 18px); }
 .seg.kind-heading.level-1 .font-en, .seg.kind-heading.level-1 .font-zh { font-size: 1.7em; }
