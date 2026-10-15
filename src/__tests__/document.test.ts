@@ -239,7 +239,11 @@ describe('文学书籍记忆', () => {
 
   it('同一人物的全名与别名跨章节合并为一个规范译名', () => {
     const first = sanitizeLiteraryMemory({
-      entities: [{ source: 'Kiri', target: '吉莉', kind: 'person', aliases: ['Kiri'], reviewStatus: 'confirmed' }],
+      // Simulate old saved memory that already contains two conflicting rows.
+      entities: [
+        { source: 'Kiri', target: '吉莉', kind: 'person', aliases: ['Kiri'], reviewStatus: 'confirmed' },
+        { source: 'Kiritsubo', target: '吉罗', kind: 'person', aliases: [], reviewStatus: 'suggested' },
+      ],
     });
     const next = sanitizeLiteraryMemory({
       entities: [{ source: 'Kiritsubo', target: '吉罗', kind: 'person', aliases: ['Kiri'], reviewStatus: 'suggested' }],
