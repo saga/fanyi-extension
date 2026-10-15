@@ -217,6 +217,7 @@ async function translateSegmentsViaServer(
   runId: number,
   isCurrentRun: (runId: number) => boolean,
   bookMemory?: LiteraryBookMemory,
+  precedingSegments: DocumentSegment[] = [],
 ): Promise<ServerDocumentTranslationResponse | null> {
   if (options.useLocalAgent) {
     throw new Error('本机 Provider 已启用，拒绝调用远程文档翻译端点');
@@ -244,6 +245,18 @@ async function translateSegmentsViaServer(
     ...(options.translationMode === 'literary' || (options.literaryMode && bookMemory)
       ? {
           ...(bookMemory ? { literaryContext: bookMemory } : {}),
+          ...(bookMemory ? {
+            voiceContext: buildLiteraryContextForBatch({
+              memory: bookMemory,
+              segments: segments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
+              precedingSegments: precedingSegments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
+              chapterTitle: segments[0]?.contextPath || options.documentTitle,
+              tokenBudget: 2500,
+            }),
+          } : {}),
+          precedingSegments: precedingSegments.slice(-4).map((segment) => ({
+            id: segment.id, text: segment.text.slice(0, 900), contextPath: segment.contextPath,
+          })),
           literaryReview: !options.skipReview,
           chapterTitle: segments[0]?.contextPath,
         }
@@ -441,6 +454,7 @@ async function reviewLiteraryBatchViaServer(
   memory: LiteraryBookMemory,
   runId: number,
   isCurrentRun: (runId: number) => boolean,
+  precedingSegments: DocumentSegment[] = [],
 ): Promise<{ translations: Map<string, string>; findings: LiteraryReviewFinding[] } | null> {
   const candidates = segments.flatMap((segment) => {
     const draft = drafts.get(segment.id);
@@ -462,9 +476,13 @@ async function reviewLiteraryBatchViaServer(
       chapterTitle: candidates[0]?.contextPath || options.documentTitle,
       segments: candidates,
       memory,
+      precedingSegments: precedingSegments.slice(-4).map((segment) => ({
+        id: segment.id, text: segment.text.slice(0, 900), contextPath: segment.contextPath,
+      })),
       voiceContext: buildLiteraryContextForBatch({
         memory,
         segments: candidates.map((item) => ({ id: item.id, text: item.source, contextPath: item.contextPath })),
+        precedingSegments: precedingSegments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
         chapterTitle: candidates[0]?.contextPath || options.documentTitle,
         tokenBudget: 3000,
       }),
@@ -732,10 +750,11 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     runId: number,
     bookMemory?: LiteraryBookMemory,
+    precedingSegments: DocumentSegment[] = [],
   ): Promise<boolean> {
     if (shouldUseRemoteDocumentTranslation(options)) {
       // 服务端路径对文学模式执行初译 + 独立 reviewer；普通文档仍走原管线。
-      const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun, bookMemory);
+      const result = await translateSegmentsViaServer(batch, options, runId, isCurrentRun, bookMemory, precedingSegments);
       if (!result || !isCurrentRun(runId)) return false;
       const expectedIds = batch.map((segment) => segment.id);
       const batchTextById = new Map(batch.map((segment) => [segment.id, segment.text]));
@@ -775,8 +794,8 @@ export function useDocumentTranslation() {
       return isCurrentRun(runId);
     }
 
-    const normalized = await translateBatchText(batch, options, runId, bookMemory);
-    await reviewBatchText(batch, normalized, options, bookMemory, runId);
+    const normalized = await translateBatchText(batch, options, runId, bookMemory, precedingSegments);
+    await reviewBatchText(batch, normalized, options, bookMemory, runId, precedingSegments);
     await checkpoint(options);
     return isCurrentRun(runId);
   }
@@ -791,6 +810,7 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     runId: number,
     bookMemory?: LiteraryBookMemory,
+    precedingSegments: DocumentSegment[] = [],
   ): Promise<Map<string, string>> {
     // 本地初译依旧走扩展现有 provider；仅在书籍模式追加受限的书籍记忆 prompt。
     // 模型偶发只回第一条就停（同样的整批重试经实测复现相同结果，只是白烧时间）：
@@ -811,6 +831,7 @@ export function useDocumentTranslation() {
         ? buildLiteraryContextForBatch({
             memory: bookMemory,
             segments: segments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
+            precedingSegments: precedingSegments.map((segment) => ({ id: segment.id, text: segment.text, contextPath: segment.contextPath })),
             chapterTitle,
             tokenBudget: 2500,
           })
@@ -925,13 +946,14 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     bookMemory: LiteraryBookMemory | undefined,
     runId: number,
+    precedingSegments: DocumentSegment[] = [],
   ): Promise<void> {
     const expectedIds = batch.map((segment) => segment.id);
     if ((!options.literaryMode && options.translationMode !== 'literary') || options.skipReview) return;
     state.value.workStage = '审校中';
     try {
       const reviewed = await reviewLiteraryBatchViaServer(
-        batch, new Map(drafts), options, bookMemory, runId, isCurrentRun,
+        batch, new Map(drafts), options, bookMemory, runId, isCurrentRun, precedingSegments,
       );
       if (reviewed && isCurrentRun(runId)) {
         const mustFixIds = new Set(reviewed.findings.filter((finding) => finding.priority === 'must_fix').map((finding) => finding.id));
