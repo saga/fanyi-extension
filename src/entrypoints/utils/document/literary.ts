@@ -94,6 +94,10 @@ export interface LiteraryVoiceContext {
   version: 1;
   policyVersion: 'character-voice-v1';
   styleGuide: LiteraryStyleGuide;
+  /** 与当前批有关的确认实体译名和剧情关系，不能被角色声线替代。 */
+  entities: Array<Pick<LiteraryEntity, 'source' | 'target' | 'kind' | 'aliases' | 'reviewStatus'>>;
+  relationships: LiteraryRelationship[];
+  recentExamples: LiteraryExample[];
   characterVoices: CharacterVoiceProfile[];
   relationshipVoiceRules: RelationshipVoiceRule[];
   voiceAnchors: CharacterVoiceAnchor[];
@@ -618,6 +622,9 @@ export function buildLiteraryContextForBatch(input: {
   const result: LiteraryVoiceContext = {
     version: 1, policyVersion: 'character-voice-v1',
     styleGuide: memory.styleGuide,
+    entities,
+    relationships,
+    recentExamples: memory.recentExamples.slice(-2),
     characterVoices: compactCharacters as CharacterVoiceProfile[],
     relationshipVoiceRules,
     voiceAnchors,
@@ -631,6 +638,9 @@ export function buildLiteraryContextForBatch(input: {
   while (JSON.stringify(result).length > budget && result.voiceAnchors.length > 0) result.voiceAnchors.pop();
   while (JSON.stringify(result).length > budget && result.relationshipVoiceRules.length > 1) result.relationshipVoiceRules.pop();
   while (JSON.stringify(result).length > budget && result.characterVoices.length > 1) result.characterVoices.pop();
+  while (JSON.stringify(result).length > budget && result.recentExamples.length) result.recentExamples.shift();
+  while (JSON.stringify(result).length > budget && result.relationships.length) result.relationships.pop();
+  while (JSON.stringify(result).length > budget && result.entities.length > 2) result.entities.pop();
   return result;
 }
 
