@@ -531,6 +531,7 @@
           :local-agent-token="readerConfig?.localAgentToken || ''"
           :system-prompt="documentSystemPromptEditor || builtInDocumentSystemPrompt"
           :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
+          :literary-memory="literaryMemory"
           @accepted-translations="applyAgentTranslations"
         />
       </template>
