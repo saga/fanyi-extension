@@ -619,10 +619,12 @@
         <p class="muted small">当前文档未启用书籍翻译模式。EPUB / PDF 打开时默认启用；也可在本页上方勾选「实体一致性与文风审校」。</p>
       </section>
       </template>
-      <template v-else>
-        <DocumentAgentWorkspace
-          v-if="doc"
-          :key="documentFileName + ':' + doc.format"
+      <!-- 保持 Agent workspace 实例常驻；切换阅读页或设置 Tab 时只隐藏，不销毁已建立的项目关联。 -->
+      <DocumentAgentWorkspace
+        v-if="doc"
+        v-show="activeTab === 'agent'"
+        :active="activeTab === 'agent'"
+        :key="documentFileName + ':' + doc.format"
           :title="doc.title"
           :format="doc.format"
           :source-file-name="documentFileName"
@@ -645,8 +647,7 @@
           :glossary="glossary"
           @accepted-translations="applyAgentTranslations"
           @workspace-sync="syncWorkspaceTranslations"
-        />
-      </template>
+      />
     </template>
   </div>
 </template>
