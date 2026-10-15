@@ -496,7 +496,8 @@ export default defineBackground({
 
         const queue = config.useLocalAgent ? localAgentQueue : globalQueue;
         const enqueuedAt = performance.now();
-        const jsonResult = await translateSingleflight(cacheKey, () =>
+        const singleflightKey = forceRefresh ? cacheKey + '|force-refresh|' + performance.now().toString() : cacheKey;
+        const jsonResult = await translateSingleflight(singleflightKey, () =>
           queue.add(async () => {
             const providerStartedAt = performance.now();
             logger.debug('[Background][Perf] Translation dequeued', {
