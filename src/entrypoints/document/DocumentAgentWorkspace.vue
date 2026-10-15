@@ -220,6 +220,8 @@ const props = defineProps<{
   localAgentToken: string;
   systemPrompt: string;
   userPromptTemplate: string;
+  literaryMemory: unknown;
+  glossary: unknown;
 }>();
 const emit = defineEmits<{
   acceptedTranslations: [items: Array<{ id: string; text: string }>];
