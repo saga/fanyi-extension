@@ -74,6 +74,9 @@
           设置与记忆
           <span v-if="literaryMode" class="tab-badge">{{ literaryMemory.entities.length }}实体·{{ literaryStatus.reviewFindings.length }}审校</span>
         </button>
+        <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'agent' }" @click="activeTab = 'agent'">
+          翻译 Agent
+        </button>
       </nav>
 
       <!-- Tab 1 阅读：只留操作条 + 章节导航 + 正文。设置、记忆、词典都在第二个 Tab。 -->
@@ -180,7 +183,7 @@
       </section>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeTab === 'memory'">
       <DocumentTranslationSettings
         :active-source-lang="sourceLang"
         :active-target-lang="targetLang"
@@ -507,6 +510,30 @@
         <p class="muted small">当前文档未启用书籍翻译模式。EPUB / PDF 打开时默认启用；也可在本页上方勾选「实体一致性与文风审校」。</p>
       </section>
       </template>
+      <template v-else>
+        <DocumentAgentWorkspace
+          v-if="doc"
+          :key="doc.meta.fileName + ':' + doc.format"
+          :title="doc.title"
+          :format="doc.format"
+          :source-file-name="documentFileName"
+          :segments="doc.segments"
+          :visible-segments="visibleSegments"
+          :translations="state.translations"
+          :source-lang="sourceLang"
+          :target-lang="targetLang"
+          :translation-mode="literaryMode ? 'literary' : (readerConfig?.translationMode || 'technical')"
+          :literary-review="literaryReview"
+          :use-local-agent="readerConfig?.useLocalAgent === true"
+          :local-agent-provider="readerConfig?.localAgentProvider || 'workbuddy'"
+          :local-agent-url="readerConfig?.localAgentUrl || 'http://127.0.0.1:8789'"
+          :local-agent-model="readerConfig?.localAgentModel || 'auto'"
+          :local-agent-token="readerConfig?.localAgentToken || ''"
+          :system-prompt="documentSystemPromptEditor || builtInDocumentSystemPrompt"
+          :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
+          @accepted-translations="applyAgentTranslations"
+        />
+      </template>
     </template>
   </div>
 </template>
@@ -515,6 +542,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
+import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
@@ -687,7 +715,7 @@ const translatedSegmentCount = computed(() =>
   doc.value?.segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length ?? 0,
 );
 /** 阅读 Tab 默认首屏；书籍记忆/审校移到第二个 Tab，避免挤占正文主屏。 */
-const activeTab = ref<'reading' | 'memory'>('reading');
+const activeTab = ref<'reading' | 'memory' | 'agent'>('reading');
 /** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
 const startLabel = computed(() => currentPagePending.value
   ? '翻译当前页'
@@ -752,6 +780,17 @@ onMounted(async () => {
 
 /** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
 /** 将 Reviewer 的完整文风候选稿明确应用到正文，而不是只把一条建议标成已读。 */
+async function applyAgentTranslations(items: Array<{ id: string; text: string }>) {
+  if (!doc.value || !items.length) return;
+  for (const item of items) {
+    if (doc.value.segments.some((segment) => segment.id === item.id) && item.text.trim()) {
+      state.value.translations.set(item.id, item.text);
+    }
+  }
+  persistedTranslations.value = new Map(state.value.translations);
+  await persistCurrentSession();
+}
+
 async function applyReviewProposal(finding: LiteraryReviewFinding) {
   if (!doc.value || !finding.proposedTranslation?.trim()) return;
   const segmentExists = doc.value.segments.some((segment) => segment.id === finding.id);
