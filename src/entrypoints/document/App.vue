@@ -531,7 +531,10 @@
               <span class="entity-status" :class="anchor.status === 'approved' ? 'is-confirmed' : anchor.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ anchor.status === 'approved' ? '已批准' : anchor.status === 'rejected' ? '已拒绝' : '候选' }}</span>
             </div>
             <p><strong>原文：</strong>{{ anchor.source }}</p>
-            <p><strong>译文：</strong>{{ anchor.target }}</p>
+            <label class="voice-anchor-target">
+              <span><strong>译文锚点</strong> · 应对应阅读器中当前已采纳译文的原文片段</span>
+              <textarea v-model="anchor.target" rows="2" @change="editVoiceAnchor(anchor)"></textarea>
+            </label>
             <p class="muted small">来源片段 {{ anchor.segmentId }} · {{ anchor.tags.join('、') }}</p>
             <div class="voice-profile-actions">
               <button class="btn primary" :disabled="anchor.status === 'approved'" @click="setVoiceAnchorStatus(anchor, 'approved')">批准并作为声音示例</button>
@@ -1530,10 +1533,21 @@ async function persistVoiceMemoryChange(message: string) {
   }
 }
 
+function normalizeVoiceEvidence(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
 async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-  if (status === 'confirmed' && !profile.evidence.length) {
-    persistenceMessage.value = '没有可定位的原文证据，不能确认这份人物声音画像。';
-    return;
+  if (status === 'confirmed') {
+    const grounded = profile.evidence.some((evidence) => {
+      const source = doc.value?.segments.find((segment) => segment.id === evidence.segmentId)?.text;
+      return !!source && !!evidence.sourceQuote.trim() &&
+        normalizeVoiceEvidence(source).includes(normalizeVoiceEvidence(evidence.sourceQuote));
+    });
+    if (!grounded) {
+      persistenceMessage.value = '人物声音画像没有匹配到当前文档中的原文证据，不能确认。';
+      return;
+    }
   }
   profile.status = status;
   await persistVoiceMemoryChange(
@@ -1553,11 +1567,25 @@ async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationship
       : status === 'rejected' ? '已拒绝该人物对话规则。' : '已将该人物对话规则移回候选。',
   );
 }
+async function editVoiceAnchor(anchor: LiteraryBookMemory['voiceAnchors'][number]) {
+  anchor.status = 'candidate';
+  anchor.approvedBy = 'reviewer';
+  await persistVoiceMemoryChange('声音锚点译文已修改，需要重新批准。');
+}
+
 async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'candidate' | 'approved' | 'rejected') {
   const sourceSegment = doc.value?.segments.find((segment) => segment.id === anchor.segmentId);
-  if (status === 'approved' && (!sourceSegment || sourceSegment.text.trim() !== anchor.source.trim())) {
-    persistenceMessage.value = '锚点原文与当前文档片段不一致，不能批准。';
+  if (status === 'approved' && (!sourceSegment ||
+    !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.source)))) {
+    persistenceMessage.value = '锚点原文片段与当前文档不一致，不能批准。';
     return;
+  }
+  if (status === 'approved') {
+    const acceptedTranslation = state.value.translations.get(anchor.segmentId) || '';
+    if (!acceptedTranslation.trim() || !normalizeVoiceEvidence(acceptedTranslation).includes(normalizeVoiceEvidence(anchor.target))) {
+      persistenceMessage.value = '锚点译文必须能在该段当前已采纳译文中找到。请先修改锚点译文，再批准。';
+      return;
+    }
   }
   if (status === 'approved' && !literaryMemory.value.characterVoices.some((profile) => profile.characterId === anchor.speakerId && profile.status === 'confirmed')) {
     persistenceMessage.value = '请先确认该说话人的声音画像，再批准此声音锚点。';
@@ -2656,6 +2684,8 @@ async function resetAll() {
 .voice-profile-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
 .voice-profile-heading p { margin: .2rem 0 0; }
 .voice-profile-fields p, .voice-profile-card > p { margin: .25rem 0; line-height: 1.55; }
+.voice-anchor-target { display: flex; flex-direction: column; gap: .3rem; }
+.voice-anchor-target textarea { width: 100%; border: 1px solid #d9d9d9; border-radius: 5px; padding: .5rem; background: white; color: inherit; }
 .voice-evidence { border-top: 1px solid #f0f0f0; padding: .5rem 0; }
 .voice-evidence p { margin: 0 0 .35rem; }
 .voice-evidence blockquote { margin: .3rem 0; padding: .4rem .7rem; border-left: 2px solid #d0d7de; background: #f6f8fa; white-space: pre-wrap; }
