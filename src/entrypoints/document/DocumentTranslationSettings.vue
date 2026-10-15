@@ -3,22 +3,22 @@
     <div class="settings-heading">
       <div>
         <h3>翻译设置</h3>
-        <p class="muted small">设置会自动保存，网页翻译和文档翻译共用。正在运行的任务沿用启动时配置；改动对下一次翻译或重试生效，不会重写已有译文。</p>
+        <p class="muted small">这些配置只影响文档翻译，不会改变网页或选中文本的翻译 Provider。正在运行的任务沿用启动时配置；更改对下一次翻译或重试生效。</p>
       </div>
       <span v-if="saving" class="save-state">保存中…</span>
       <span v-else-if="saveMessage" class="save-state">{{ saveMessage }}</span>
     </div>
 
-    <div v-if="!config.useLocalAgent" class="setting-field">
+    <div v-if="!config.documentUseLocalAgent" class="setting-field">
       <label for="document-deepseek-key">DeepSeek API Key</label>
-      <input id="document-deepseek-key" v-model="config.deepseekApiKey" type="password"
-        autocomplete="off" placeholder="输入 DeepSeek API Key" @change="saveConfig('deepseekApiKey')" />
+      <input id="document-deepseek-key" v-model="config.documentDeepseekApiKey" type="password"
+        autocomplete="off" placeholder="输入 DeepSeek API Key" @change="saveConfig('documentDeepseekApiKey')" />
     </div>
 
     <div class="settings-grid">
       <label class="setting-field">
         <span>源语言</span>
-        <select v-model="config.sourceLang" @change="saveConfig('sourceLang')">
+        <select v-model="config.documentSourceLang" @change="saveConfig('documentSourceLang')">
           <option value="auto">自动检测</option>
           <option value="en">英语</option>
           <option value="zh">中文</option>
@@ -30,7 +30,7 @@
       </label>
       <label class="setting-field">
         <span>目标语言</span>
-        <select v-model="config.targetLang" @change="saveConfig('targetLang')">
+        <select v-model="config.documentTargetLang" @change="saveConfig('documentTargetLang')">
           <option value="zh">中文</option>
           <option value="en">英语</option>
           <option value="ja">日语</option>
@@ -43,7 +43,7 @@
 
     <label class="setting-field">
       <span>翻译类型</span>
-      <select v-model="config.translationMode" @change="saveConfig('translationMode')">
+      <select v-model="config.documentTranslationMode" @change="saveConfig('documentTranslationMode')">
         <option value="technical">科技/信息翻译</option>
         <option value="literary">文学翻译</option>
       </select>
@@ -54,7 +54,7 @@
 
     <label class="setting-field">
       <span>翻译文风</span>
-      <select v-model="config.promptStyle" @change="saveConfig('promptStyle')">
+      <select v-model="config.documentPromptStyle" @change="saveConfig('documentPromptStyle')">
         <option value="default">通用直译</option>
         <option value="ja-source-natural">日语原文汉译</option>
         <option value="jinyong">金庸武侠</option>
@@ -64,33 +64,33 @@
     </label>
 
     <label class="switch-line">
-      <input v-model="config.useLocalAgent" type="checkbox" @change="onLocalAgentToggle" />
+      <input v-model="config.documentUseLocalAgent" type="checkbox" @change="onLocalAgentToggle" />
       <span>使用本机 Workbuddy / OpenCode 翻译</span>
     </label>
 
-    <div v-if="config.useLocalAgent" class="settings-subpanel">
+    <div v-if="config.documentUseLocalAgent" class="settings-subpanel">
       <label class="setting-field">
         <span>本机 Agent</span>
-        <select v-model="config.localAgentProvider" @change="saveConfig('localAgentProvider')">
+        <select v-model="config.documentLocalAgentProvider" @change="saveConfig('documentLocalAgentProvider')">
           <option value="workbuddy">Workbuddy / CodeBuddy SDK</option>
           <option value="opencode">OpenCode CLI</option>
         </select>
       </label>
       <label class="setting-field">
         <span>本机服务地址</span>
-        <input v-model="config.localAgentUrl" type="url" placeholder="http://127.0.0.1:8789"
+        <input v-model="config.documentLocalAgentUrl" type="url" placeholder="http://127.0.0.1:8789"
           @change="saveLocalAgentUrl" />
       </label>
       <label class="setting-field">
         <span>模型覆盖（可选）</span>
-        <input v-model="config.localAgentModel" placeholder="auto；或 provider/model"
-          @change="saveConfig('localAgentModel')" />
+        <input v-model="config.documentLocalAgentModel" placeholder="auto；或 provider/model"
+          @change="saveConfig('documentLocalAgentModel')" />
         <small class="muted">auto 优先使用本机服务环境变量；OpenCode 示例：openai/gpt-5.4。</small>
       </label>
       <label class="setting-field">
         <span>本机服务 Token（可选）</span>
-        <input v-model="config.localAgentToken" type="password" autocomplete="off"
-          placeholder="服务端未配置 Token 时留空" @change="saveConfig('localAgentToken')" />
+        <input v-model="config.documentLocalAgentToken" type="password" autocomplete="off"
+          placeholder="服务端未配置 Token 时留空" @change="saveConfig('documentLocalAgentToken')" />
       </label>
       <div class="connection-row">
         <button type="button" class="btn" :disabled="checking" @click="checkLocalService">
@@ -102,22 +102,22 @@
     </div>
 
     <label class="switch-line">
-      <input v-model="config.useServerTranslation" type="checkbox" :disabled="config.useLocalAgent"
-        @change="saveConfig('useServerTranslation')" />
+      <input v-model="config.documentUseServerTranslation" type="checkbox" :disabled="config.documentUseLocalAgent"
+        @change="saveConfig('documentUseServerTranslation')" />
       <span>通过远程服务翻译</span>
     </label>
-    <p v-if="config.useLocalAgent" class="muted small">当前使用本机 Agent，网页/文档翻译及文学分析、审校均优先走本机；远程翻译已关闭。</p>
+    <p v-if="config.documentUseLocalAgent" class="muted small">文档翻译使用本机 Agent；网页和选中文本翻译仍使用它们自己的配置。</p>
 
-    <details v-if="config.useServerTranslation" class="settings-subpanel server-settings" open>
+    <details v-if="config.documentUseServerTranslation" class="settings-subpanel server-settings" open>
       <summary>服务端翻译设置</summary>
       <label class="setting-field">
         <span>服务端翻译地址</span>
-        <input v-model="config.serverUrl" type="url" placeholder="https://s.sunxiunan.com/fanyi/page"
-          @change="saveConfig('serverUrl')" />
+        <input v-model="config.documentServerUrl" type="url" placeholder="https://s.sunxiunan.com/fanyi/page"
+          @change="saveConfig('documentServerUrl')" />
       </label>
       <label class="setting-field">
         <span>服务端翻译 Provider</span>
-        <select v-model="config.provider" @change="saveConfig('provider')">
+        <select v-model="config.documentProvider" @change="saveConfig('documentProvider')">
           <option value="deepseek">DeepSeek</option>
           <option value="openrouter">OpenRouter</option>
           <option value="nvidia">NVIDIA</option>
@@ -171,6 +171,19 @@ const config = ref<Config>({
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
+  documentSourceLang: 'auto',
+  documentTargetLang: 'zh',
+  documentDeepseekApiKey: '',
+  documentProvider: 'deepseek',
+  documentPromptStyle: 'default',
+  documentTranslationMode: 'technical',
+  documentUseServerTranslation: false,
+  documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
+  documentUseLocalAgent: false,
+  documentLocalAgentProvider: 'workbuddy',
+  documentLocalAgentUrl: 'http://127.0.0.1:8789',
+  documentLocalAgentModel: 'auto',
+  documentLocalAgentToken: '',
 });
 const initialized = ref(false);
 const saving = ref(false);
@@ -184,7 +197,7 @@ onMounted(async () => {
   config.value = await getConfig();
   applyActiveDocumentLanguages();
   initialized.value = true;
-  if (config.value.useLocalAgent) void checkLocalService();
+  if (config.value.documentUseLocalAgent) void checkLocalService();
 });
 
 watch(
@@ -197,38 +210,46 @@ watch(
 function applyActiveDocumentLanguages() {
   // 文档会话可以单独保存语言选择；打开第二个 Tab 时应显示当前文档实际使用的语言，
   // 而不是用全局设置静默覆盖恢复出来的会话。只有用户手动改语言时才写回全局配置。
-  if (props.activeSourceLang) config.value.sourceLang = props.activeSourceLang;
-  if (props.activeTargetLang) config.value.targetLang = props.activeTargetLang;
+  if (props.activeSourceLang) config.value.documentSourceLang = props.activeSourceLang;
+  if (props.activeTargetLang) config.value.documentTargetLang = props.activeTargetLang;
 }
+
+const documentConfigFields: (keyof Config)[] = [
+  'documentSourceLang', 'documentTargetLang', 'documentDeepseekApiKey', 'documentProvider',
+  'documentPromptStyle', 'documentTranslationMode', 'documentUseServerTranslation', 'documentServerUrl',
+  'documentUseLocalAgent', 'documentLocalAgentProvider', 'documentLocalAgentUrl',
+  'documentLocalAgentModel', 'documentLocalAgentToken',
+];
 
 async function saveConfig(...fields: (keyof Config)[]) {
   if (!initialized.value || fields.length === 0) return;
-  const patch = Object.fromEntries(fields.map((field) => [field, config.value[field]])) as Partial<Config>;
+  // First document-setting edit snapshots inherited values into a complete document-only profile.
+  const patch = Object.fromEntries(documentConfigFields.map((field) => [field, config.value[field]])) as Partial<Config>;
   saving.value = true;
   saveMessage.value = '';
   try {
     await setConfig(patch);
     emit('updated', JSON.parse(JSON.stringify(config.value)) as Config, fields);
-    saveMessage.value = '已自动保存';
+    saveMessage.value = '文档配置已保存';
   } finally {
     saving.value = false;
   }
 }
 
 async function onLocalAgentToggle() {
-  if (config.value.useLocalAgent) {
-    config.value.useServerTranslation = false;
+  if (config.value.documentUseLocalAgent) {
+    config.value.documentUseServerTranslation = false;
     localStatus.value = 'unknown';
   } else {
     localStatus.value = 'unknown';
   }
-  await saveConfig('useLocalAgent', 'useServerTranslation');
-  if (config.value.useLocalAgent) void checkLocalService();
+  await saveConfig('documentUseLocalAgent', 'documentUseServerTranslation');
+  if (config.value.documentUseLocalAgent) void checkLocalService();
 }
 
 async function saveLocalAgentUrl() {
-  await saveConfig('localAgentUrl');
-  if (config.value.useLocalAgent) void checkLocalService();
+  await saveConfig('documentLocalAgentUrl');
+  if (config.value.documentUseLocalAgent) void checkLocalService();
 }
 
 async function checkLocalService() {
@@ -236,7 +257,7 @@ async function checkLocalService() {
   localStatus.value = 'unknown';
   try {
     localStatus.value = await isLocalAgentServiceAvailable(
-      config.value.localAgentUrl || 'http://127.0.0.1:8789',
+      config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789',
     ) ? 'ok' : 'fail';
   } catch {
     localStatus.value = 'fail';
@@ -250,17 +271,25 @@ async function checkConfiguration() {
   configStatus.value = 'unknown';
   configStatusDetail.value = '';
   try {
-    if (!config.value.useLocalAgent && !config.value.deepseekApiKey) {
-      configStatus.value = 'fail';
-      configStatusDetail.value = '未配置 API Key，也未启用本机模式';
+    if (config.value.documentUseLocalAgent) {
+      const available = await isLocalAgentServiceAvailable(config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789');
+      configStatus.value = available ? 'ok' : 'fail';
+      configStatusDetail.value = available ? '' : '本机文档 Agent 服务不可连接';
       return;
     }
-    const response = await browser.runtime.sendMessage({ action: 'checkConfig' }) as {
-      success?: boolean;
-      error?: string;
-    };
-    configStatus.value = response?.success ? 'ok' : 'fail';
-    configStatusDetail.value = response?.success ? '' : (response?.error || '配置检查失败');
+    if (config.value.documentUseServerTranslation) {
+      const validUrl = /^https?:\/\//i.test(config.value.documentServerUrl || '');
+      configStatus.value = validUrl ? 'ok' : 'fail';
+      configStatusDetail.value = validUrl ? '远程文档翻译地址格式正常；Provider 密钥由服务端管理' : '请填写有效的文档翻译服务 URL';
+      return;
+    }
+    if (config.value.documentProvider === 'deepseek' && !config.value.documentDeepseekApiKey) {
+      configStatus.value = 'fail';
+      configStatusDetail.value = '文档翻译尚未配置 DeepSeek API Key';
+      return;
+    }
+    configStatus.value = 'ok';
+    configStatusDetail.value = '文档 Provider 配置已保存';
   } catch (error) {
     configStatus.value = 'fail';
     configStatusDetail.value = error instanceof Error ? error.message : String(error);
