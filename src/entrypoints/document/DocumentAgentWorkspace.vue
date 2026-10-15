@@ -310,6 +310,11 @@ async function createProject() {
     await rememberWorkspaceProject(projectInput(), project.value.projectId);
     // 先迁移普通阅读页中已有的译文，再开始新的 Agent 运行。
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
+    // 旧阅读会话可能已有批准锚点；只有项目数据库也有其已采纳译文时才能保留批准状态。
+    await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/literary-memory', {
+      method: 'POST',
+      body: JSON.stringify({ memory: props.literaryMemory }),
+    });
     if (props.sourceFile) {
       try {
         await uploadCurrentSourceFile();
