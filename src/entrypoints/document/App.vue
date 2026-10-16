@@ -1299,7 +1299,7 @@ function agentTrajectoryDetail(event: any): string {
   if (type === 'context-graph.scan.completed') {
     details.push('扫描 ' + (p.segmentCount ?? '?') + ' 段 / ' + (p.chapterCount ?? '?') + ' 章');
     details.push('名称候选 ' + (p.nameCandidateCount ?? 0) + '，重复短语 ' + (p.repeatedPhraseCandidateCount ?? 0));
-    details.push('对话片段 ' + (p.dialogueSegmentCount ?? 0)，抽样 ' + (p.sampleCount ?? 0) + ' 段');
+    details.push('对话片段 ' + (p.dialogueSegmentCount ?? 0) + '，抽样 ' + (p.sampleCount ?? 0) + ' 段');
   }
   if (type === 'context-graph.completed') {
     details.push('人物 ' + (p.characterCount ?? 0) + '，其他实体 ' + (p.entityCount ?? 0) + '，关系 ' + (p.relationshipCount ?? 0));
