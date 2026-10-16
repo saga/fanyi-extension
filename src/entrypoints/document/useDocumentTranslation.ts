@@ -1315,7 +1315,17 @@ export function useDocumentTranslation() {
       .filter((item) => item.batch.length > 0);
     state.value.running = pendingBatches.length > 0;
     state.value.activeSegmentIds = new Set();
-    if (pendingBatches.length === 0) return state.value;
+    if (pendingBatches.length === 0) {
+      if (options.literaryMode || options.translationMode === 'literary') {
+        recordDiagnostic('run', 'info', '本次没有待翻译片段，因此未调用分析、初译或审校', {
+          totalSegments: segments.length,
+          existingTranslations: segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length,
+          forceRefresh: !!options.forceRefresh,
+          preserveExisting,
+        });
+      }
+      return state.value;
+    }
 
     const effectiveOptions: TranslateOptions = {
       ...options,
