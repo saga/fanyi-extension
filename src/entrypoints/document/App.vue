@@ -2160,7 +2160,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     }];
   });
   const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
-    .toLocaleLowerCase().replace(/[\s._'’\-]+/g, ' ').trim();
+    .toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
   for (const candidate of candidates) {
     const candidateNames = new Set([candidate.source, ...(candidate.aliases || [])].map(normalizeName).filter(Boolean));
     const index = existing.findIndex((prior) =>
