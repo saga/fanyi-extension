@@ -345,6 +345,56 @@
         </p>
       </section>
 
+      <section v-if="literaryMode && readerConfig?.documentUseLocalAgent" class="panel context-graph-status">
+        <div class="literary-status-title">
+          <strong>全书预处理与规范译名</strong>
+          <span class="chip" :class="'diagnostic-' + contextGraphState.status">{{ contextGraphStatusLabel }}</span>
+          <span class="chip">当前原文 {{ contextGraphState.segmentCount.toLocaleString() }} 段</span>
+          <span class="chip">章节 {{ contextGraphState.counts.chapters }}</span>
+          <span class="chip">人物 {{ contextGraphState.counts.characters }}</span>
+          <span class="chip">其他实体 {{ contextGraphState.counts.entities }}</span>
+          <span class="chip">关系 {{ contextGraphState.counts.relationships }}</span>
+        </div>
+        <p>{{ contextGraphPhaseLabel }}<template v-if="contextGraphState.runId"> · Run {{ contextGraphState.runId.slice(0, 8) }}</template></p>
+        <div v-if="contextGraphState.status === 'running' || contextGraphState.status === 'queued'" class="progress context-graph-progress">
+          <div class="bar" :style="{ width: contextGraphProgressPercent + '%' }"></div>
+        </div>
+        <p class="muted small" v-if="contextGraphState.progress && Object.keys(contextGraphState.progress).length">
+          已扫描 {{ contextGraphState.progress.scan?.segmentCount ?? contextGraphState.segmentCount }} 段、
+          {{ contextGraphState.progress.scan?.chapterCount ?? contextGraphState.progress.chapterCount ?? contextGraphState.counts.chapters }} 章；
+          扫描到 {{ contextGraphState.progress.scan?.nameCandidateCount ?? 0 }} 个名称候选；
+          本轮抽样 {{ contextGraphState.progress.sampleCount ?? contextGraphState.progress.scan?.samplePlan?.length ?? 0 }} 段。
+          已核验人物 {{ contextGraphState.progress.characterCount ?? contextGraphState.counts.characters }} 个、
+          其他实体 {{ contextGraphState.progress.entityCount ?? contextGraphState.counts.entities }} 个；
+          有规范译名 {{ contextGraphState.progress.canonicalNameMappingCount ?? 0 }} 个。
+          <template v-if="contextGraphState.progress.invalidEvidenceCount != null">拒绝无效证据 {{ contextGraphState.progress.invalidEvidenceCount }} 条。</template>
+        </p>
+        <p class="muted small" v-if="contextGraphState.sourceRevisionId">
+          来源版本：{{ contextGraphState.sourceRevisionId.slice(0, 12) }}
+          <template v-if="contextGraphState.startedAt"> · 开始 {{ new Date(contextGraphState.startedAt).toLocaleString() }}</template>
+          <template v-if="contextGraphState.finishedAt"> · 结束 {{ new Date(contextGraphState.finishedAt).toLocaleString() }}</template>
+          <template v-if="contextGraphState.checkedAt"> · 最近检查 {{ new Date(contextGraphState.checkedAt).toLocaleTimeString() }}</template>
+        </p>
+        <p class="warn" v-if="contextGraphState.error">{{ contextGraphState.error }}</p>
+        <p class="warn" v-else-if="contextGraphState.status === 'completed' && contextGraphState.counts.characters + contextGraphState.counts.entities === 0">
+          预处理已结束，但没有保存任何有原文证据的人物或实体。请检查本轮模型响应、抽样内容与证据校验计数；可重新分析。
+        </p>
+        <p class="muted small" v-else-if="contextGraphState.status === 'not-started'">
+          这本书尚无当前原文版本的预处理记录。开启后会先扫描全书，再进行有原文证据的人物、专名、关系和章节分析；不会自动覆盖已确认译名。
+        </p>
+        <div class="settings-actions context-graph-actions">
+          <button class="btn ghost" type="button" :disabled="contextGraphState.loading" @click="refreshContextGraphStatus()">
+            {{ contextGraphState.loading ? '刷新中…' : '刷新预处理状态' }}
+          </button>
+          <button class="btn" type="button"
+            :disabled="contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
+            @click="reanalyzeContextGraph">
+            {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
+          </button>
+          <span class="muted small">预处理独立于逐段翻译；已有译文不会阻止补建实体图谱。</span>
+        </div>
+      </section>
+
       <details v-if="literaryStatus.enabled" class="panel literary-diagnostics">
         <summary>翻译诊断轨迹（{{ literaryStatus.diagnostics.length }}）</summary>
         <p class="muted small">用于定位分析、上下文注入、翻译请求和审校阶段。只记录状态、配置与计数，不保存完整原文或译文。</p>
@@ -684,7 +734,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
@@ -754,6 +804,16 @@ const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
 const workspaceRunGeneration = ref(0);
+const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v3-name-map';
+const contextGraphState = ref<any>({
+  projectId: '', sourceRevisionId: '', segmentCount: 0,
+  counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
+  status: 'not-started', phase: 'not-started', progress: {}, runId: '',
+  startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
+});
+const contextGraphAnalyzing = ref(false);
+let contextGraphPollTimer: number | null = null;
+let ensureWorkspacePromise: Promise<any | null> | null = null;
 /** Agent 候选在运行结束时自动采纳；此 Map 仅用于运行中的临时预览或保存失败时提示。 */
 const workspaceCandidateTranslations = ref(new Map<string, string>());
 const englishFontFamily = ref('Georgia');
@@ -813,6 +873,32 @@ const {
 } = useDocumentTranslation();
 
 /** 页级分页不改变原始片段顺序，导出仍以完整文档为准。 */
+const contextGraphStatusLabel = computed(() => ({
+  'not-started': '尚未运行', queued: '等待执行', running: '运行中',
+  completed: '已完成', failed: '失败',
+}[contextGraphState.value.status] || contextGraphState.value.status || '未知'));
+const contextGraphPhaseLabel = computed(() => {
+  const run = contextGraphState.value;
+  const phase = run.phase;
+  const labels: Record<string, string> = {
+    'not-started': '尚未预处理当前原文版本。',
+    queued: '预处理已排队，等待开始。',
+    sample: '阶段 1/2：扫描全书结构、对话密度和名称线索，规划代表性样本。',
+    'model-analysis': '阶段 2/2：模型正在分析人物、规范译名、实体、关系、文风与章节摘要。',
+    completed: '全书预处理完成。翻译批次会注入与当前原文匹配的规范专名和有时间边界的上下文。',
+    failed: '预处理失败。错误详情已记录；修复配置后可以重新分析。',
+  };
+  return labels[phase] || labels[run.status] || '读取预处理状态中。';
+});
+const contextGraphProgressPercent = computed(() => {
+  const status = contextGraphState.value.status;
+  if (status === 'completed' || status === 'failed') return 100;
+  if (status === 'model-analysis') return 68;
+  if (status === 'sample') return 32;
+  if (status === 'running') return 12;
+  if (status === 'queued') return 4;
+  return 0;
+});
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
@@ -952,6 +1038,24 @@ watch(literaryMemory, () => {
   if (literaryMode.value) void persistCurrentSession();
 }, { deep: true });
 
+watch([doc, literaryMode, () => readerConfig.value?.documentUseLocalAgent], ([currentDoc, isLiterary, useLocalAgent]) => {
+  if (!currentDoc || !isLiterary || useLocalAgent !== true) return;
+  // Existing documents must receive preprocessing too; opening an old reading snapshot must not
+  // be mistaken for a completed whole-book analysis.
+  void ensureDocumentWorkspace().catch((error) => {
+    contextGraphState.value = {
+      ...contextGraphState.value,
+      status: 'failed',
+      error: '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error)),
+    };
+  });
+}, { flush: 'post' });
+
+onUnmounted(() => {
+  if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
+  contextGraphPollTimer = null;
+});
+
 onMounted(async () => {
   // 文档翻译默认沿用 popup 的全局配置；恢复旧会话时，保存的语言选择仍由恢复逻辑覆盖。
   const config = await getConfig();
@@ -992,6 +1096,15 @@ function exportLiteraryDiagnostics() {
       characterVoices: literaryMemory.value.characterVoices.length,
       reviewFindings: literaryStatus.value.reviewFindings.length,
       warnings: literaryStatus.value.warnings,
+    },
+    contextGraph: {
+      projectId: contextGraphState.value.projectId,
+      sourceRevisionId: contextGraphState.value.sourceRevisionId,
+      status: contextGraphState.value.status,
+      phase: contextGraphState.value.phase,
+      counts: contextGraphState.value.counts,
+      progress: contextGraphState.value.progress,
+      error: contextGraphState.value.error,
     },
     events: literaryStatus.value.diagnostics,
   };
@@ -1953,8 +2066,224 @@ async function syncWorkspaceTranslations(items: Array<{ id: string; text: string
   await replaceCurrentTranslations(items);
 }
 
-/** 保证只有一份本机项目：导入旧阅读记录、刷新 SQLite 的当前版本，并备份原件。 */
+function clearContextGraphPoll() {
+  if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
+  contextGraphPollTimer = null;
+}
+
+function scheduleContextGraphPoll(projectId: string) {
+  clearContextGraphPoll();
+  contextGraphPollTimer = window.setTimeout(() => {
+    contextGraphPollTimer = null;
+    if (workspaceProject.value?.projectId !== projectId) return;
+    void refreshContextGraphStatus(workspaceProject.value, true);
+  }, 1200);
+}
+
+async function loadContextGraph(project: any, schedulePoll = true): Promise<any> {
+  const config = readerConfig.value || await getConfig();
+  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
+  const projectId = String(project?.projectId || '');
+  if (!projectId) throw new Error('无法查询预处理状态：缺少文档 projectId。');
+  const result = await workspaceApi<{ contextGraph: any }>(
+    base, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph',
+  );
+  const graph = result.contextGraph || {};
+  const run = Array.isArray(graph.runs) ? graph.runs[0] : null;
+  const status = run?.status || 'not-started';
+  contextGraphState.value = {
+    projectId,
+    sourceRevisionId: graph.sourceRevisionId || '',
+    segmentCount: Number(graph.segmentCount || 0),
+    counts: {
+      characters: Number(graph.counts?.characters || 0),
+      entities: Number(graph.counts?.entities || 0),
+      relationships: Number(graph.counts?.relationships || 0),
+      chapters: Number(graph.counts?.chapters || 0),
+      evidencedNodes: Number(graph.counts?.evidencedNodes || 0),
+    },
+    status,
+    phase: run?.phase || 'not-started',
+    progress: run?.progress || {},
+    runId: run?.runId || '',
+    startedAt: run?.startedAt || null,
+    finishedAt: run?.finishedAt || null,
+    error: run?.error || '',
+    loading: false,
+    checkedAt: new Date().toISOString(),
+  };
+  if (schedulePoll && ['queued', 'running'].includes(status)) scheduleContextGraphPoll(projectId);
+  else if (!['queued', 'running'].includes(status)) clearContextGraphPoll();
+  return graph;
+}
+
+async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = true) {
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (!config.documentUseLocalAgent) return;
+  let project = projectOverride || workspaceProject.value;
+  if (!project?.projectId && doc.value) project = await ensureDocumentWorkspace();
+  if (!project?.projectId) return;
+  contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
+  try {
+    await loadContextGraph(project, schedulePoll);
+  } catch (error) {
+    contextGraphState.value = {
+      ...contextGraphState.value,
+      projectId: project.projectId,
+      loading: false,
+      checkedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
+  const next = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
+  const existing = [...(next.entities || [])];
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const candidates: LiteraryEntity[] = nodes.flatMap((node: any) => {
+    const target = typeof node?.attributes?.suggestedTranslation === 'string'
+      ? node.attributes.suggestedTranslation.trim() : '';
+    const source = typeof node?.name === 'string' ? node.name.trim() : '';
+    if (!source || !target || !Array.isArray(node.evidence) || !node.evidence.length) return [];
+    const rawKind = node.kind === 'character' ? 'person' : node.attributes?.entityKind;
+    const kind = ['person', 'place', 'object', 'organization', 'concept', 'other'].includes(rawKind) ? rawKind : 'other';
+    const aliases = Array.isArray(node.attributes?.aliases)
+      ? Array.from(new Set(node.attributes.aliases.filter((item: unknown): item is string => typeof item === 'string' && item.trim())))
+      : [];
+    return [{
+      source, target, kind, aliases,
+      evidence: typeof node.evidence[0]?.quote === 'string' ? node.evidence[0].quote : '',
+      reviewStatus: node.status === 'confirmed' ? 'confirmed' : 'suggested',
+    }];
+  });
+  const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
+    .toLocaleLowerCase().replace(/[\s._'’\-]+/g, ' ').trim();
+  for (const candidate of candidates) {
+    const candidateNames = new Set([candidate.source, ...(candidate.aliases || [])].map(normalizeName).filter(Boolean));
+    const index = existing.findIndex((prior) =>
+      [prior.source, ...(prior.aliases || [])].map(normalizeName).some((name) => candidateNames.has(name)));
+    if (index < 0) {
+      existing.push(candidate);
+      continue;
+    }
+    const prior = existing[index]!;
+    const aliases = Array.from(new Set([...(prior.aliases || []), prior.source, ...(candidate.aliases || []), candidate.source]
+      .filter((name) => normalizeName(name) !== normalizeName(prior.source))));
+    // Graph re-analysis repairs stale AI suggestions, but never overwrites an explicitly confirmed human mapping.
+    existing[index] = prior.reviewStatus === 'confirmed'
+      ? { ...prior, aliases: aliases.slice(0, 12), evidence: prior.evidence || candidate.evidence }
+      : { ...prior, source: candidate.source, target: candidate.target, kind: candidate.kind,
+          aliases: aliases.slice(0, 12), evidence: candidate.evidence || prior.evidence, reviewStatus: 'suggested' };
+  }
+  next.entities = existing.slice(0, 120);
+  return next;
+}
+
+async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
+  const next = mergeContextGraphEntitySuggestions(graph);
+  if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities)) return;
+  literaryMemory.value = next;
+  await persistCurrentSession();
+  const config = readerConfig.value || await getConfig();
+  await workspaceApi(
+    config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+    config.documentLocalAgentToken || '',
+    '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+    { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
+  );
+}
+
+async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
+  if (!project?.projectId || !literaryMode.value || readerConfig.value?.documentUseLocalAgent !== true) return;
+  const base = readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = readerConfig.value.documentLocalAgentToken || '';
+  const latestTranslationStatus = workspaceActiveRun.value?.status;
+  const translationAlreadyActive = ['queued', 'running'].includes(latestTranslationStatus);
+  contextGraphAnalyzing.value = true;
+  try {
+    let graph = await loadContextGraph(project, false);
+    let status = contextGraphState.value.status;
+    let run = Array.isArray(graph.runs) ? graph.runs[0] : null;
+    const needsVersionUpgrade = status === 'completed' &&
+      run?.progress?.analysisVersion !== CONTEXT_GRAPH_ANALYSIS_VERSION;
+    const shouldStart = options.force === true || status === 'not-started' || needsVersionUpgrade;
+    if (translationAlreadyActive && shouldStart) {
+      contextGraphState.value = {
+        ...contextGraphState.value,
+        error: '当前项目已有翻译任务运行，服务会保护本轮上下文不被修改。翻译结束后再启动预处理。',
+      };
+      return;
+    }
+    if (shouldStart) {
+      await workspaceApi(
+        base, token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/analyze',
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      graph = await loadContextGraph(project, false);
+      const deadline = Date.now() + 45 * 60 * 1000;
+      while (['queued', 'running'].includes(contextGraphState.value.status) && Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        graph = await loadContextGraph(project, false);
+      }
+      status = contextGraphState.value.status;
+      run = Array.isArray(graph.runs) ? graph.runs[0] : null;
+      if (['queued', 'running'].includes(status)) {
+        contextGraphState.value = {
+          ...contextGraphState.value,
+          error: '预处理仍在运行；页面会继续显示当前状态。稍后刷新即可查看结果。',
+        };
+        scheduleContextGraphPoll(project.projectId);
+        return;
+      }
+    } else if (['queued', 'running'].includes(status)) {
+      const deadline = Date.now() + 45 * 60 * 1000;
+      while (['queued', 'running'].includes(contextGraphState.value.status) && Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        graph = await loadContextGraph(project, false);
+      }
+      status = contextGraphState.value.status;
+      run = Array.isArray(graph.runs) ? graph.runs[0] : null;
+    }
+    if (status === 'completed' && run?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION) {
+      await syncContextGraphEntitiesToMemory(project, graph);
+    }
+  } catch (error) {
+    contextGraphState.value = {
+      ...contextGraphState.value,
+      status: 'failed',
+      loading: false,
+      error: error instanceof Error ? error.message : String(error),
+      checkedAt: new Date().toISOString(),
+    };
+  } finally {
+    contextGraphAnalyzing.value = false;
+  }
+}
+
+async function reanalyzeContextGraph() {
+  const project = workspaceProject.value || await ensureDocumentWorkspace();
+  if (!project?.projectId) return;
+  await ensureContextGraphPreprocessing(project, { force: true });
+}
+
+/** 合并并发的阅读器初始化，防止自动预处理与用户点击翻译同时创建同一本书的项目。 */
 async function ensureDocumentWorkspace(): Promise<any | null> {
+  if (ensureWorkspacePromise) return ensureWorkspacePromise;
+  const pending = ensureDocumentWorkspaceInternal();
+  ensureWorkspacePromise = pending;
+  try {
+    return await pending;
+  } finally {
+    if (ensureWorkspacePromise === pending) ensureWorkspacePromise = null;
+  }
+}
+
+/** 保证只有一份本机项目：导入旧阅读记录、刷新 SQLite 的当前版本，并备份原件。 */
+async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
   if (!doc.value) return null;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
@@ -2021,6 +2350,9 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
   workspaceActiveRun.value = (refreshed.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
   const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length);
   await replaceCurrentTranslations(accepted);
+  if (literaryMode.value && config.documentUseLocalAgent) {
+    await ensureContextGraphPreprocessing(refreshed.project, { force: false });
+  }
   return refreshed.project;
 }
 
