@@ -642,7 +642,7 @@
           <details>
             <summary>原文证据（{{ profile.evidence.length }}）与人物对比（{{ profile.contrastRules.length }}）</summary>
             <div v-for="(evidence, index) in profile.evidence" :key="profile.characterId + '-ev-' + index" class="voice-evidence">
-              <p><strong>{{ evidence.dimension }} · {{ Math.round(evidence.confidence * 100) }}%</strong> · {{ evidence.observation }}</p>
+              <p><strong>{{ evidence.dimension === 'role_traits' ? '人物角色/特征' : evidence.dimension }} · {{ Math.round(evidence.confidence * 100) }}%</strong> · {{ evidence.observation }}</p>
               <blockquote>{{ evidence.sourceQuote }}</blockquote>
               <button class="btn ghost" @click="showReviewSegment(evidence.segmentId)">定位证据片段 {{ evidence.segmentId }}</button>
             </div>
