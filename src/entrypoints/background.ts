@@ -479,7 +479,27 @@ export default defineBackground({
             if (config.useLocalAgent) {
               void setLocalSqliteCache(config, cacheKey, cached);
             }
-            sendResponse({ success: true, result: inputIds.map((id) => [id, cached.get(id)!]) });
+            const cacheResult = inputIds.map((id) => [id, cached.get(id)!] as [string, string]);
+            sendResponse({
+              success: true,
+              result: cacheResult,
+              trace: {
+                inputBytes: jsonContent.length,
+                estInputTokens: Math.ceil(jsonContent.length / 4),
+                reservedMaxTokens: Math.max(256, Math.ceil(Math.ceil(jsonContent.length / 4) * 2 * 1.2)),
+                outputBytes: JSON.stringify(cacheResult).length,
+                outputBlocks: cacheResult.length,
+                outputIds: inputIds.slice(0, 30),
+                outputPreview: '',
+                missingInResponse: [],
+                jsonParseFailed: false,
+                outputTail: '',
+                parseError: '',
+                cacheSource: 'extension-cache',
+                provider: config.useLocalAgent ? 'local-agent' : 'deepseek',
+                translationMode,
+              },
+            });
             return;
           }
           logger.warn('[Background] Ignoring incomplete/no-op/invalid extension translation cache entry:', cacheKey);
@@ -493,7 +513,27 @@ export default defineBackground({
               void cacheTranslation(cacheKey, localCached).catch((error) => {
                 logger.debug('[Background] Failed to warm extension cache from SQLite:', error);
               });
-              sendResponse({ success: true, result: inputIds.map((id) => [id, localCached.get(id)!]) });
+              const cacheResult = inputIds.map((id) => [id, localCached.get(id)!] as [string, string]);
+              sendResponse({
+                success: true,
+                result: cacheResult,
+                trace: {
+                  inputBytes: jsonContent.length,
+                  estInputTokens: Math.ceil(jsonContent.length / 4),
+                  reservedMaxTokens: Math.max(256, Math.ceil(Math.ceil(jsonContent.length / 4) * 2 * 1.2)),
+                  outputBytes: JSON.stringify(cacheResult).length,
+                  outputBlocks: cacheResult.length,
+                  outputIds: inputIds.slice(0, 30),
+                  outputPreview: '',
+                  missingInResponse: [],
+                  jsonParseFailed: false,
+                  outputTail: '',
+                  parseError: '',
+                  cacheSource: 'local-sqlite-cache',
+                  provider: 'local-agent',
+                  translationMode,
+                },
+              });
               return;
             }
             logger.warn('[Background] Ignoring incomplete/no-op/invalid SQLite translation cache entry:', cacheKey);
@@ -677,6 +717,9 @@ export default defineBackground({
           jsonParseFailed,
           outputTail: jsonParseFailed ? outputTail : '',
           parseError: parseErrorMsg,
+          cacheSource: 'model',
+          provider: config.useLocalAgent ? 'local-agent' : 'deepseek',
+          translationMode,
         };
         sendResponse({ success: true, result: Array.from(result.entries()), trace });
       } catch (error) {
