@@ -335,7 +335,7 @@ describe('文档翻译服务端模式', () => {
       throw new Error('unexpected URL: ' + url);
     });
 
-    const { run, state } = useDocumentTranslation();
+    const { run, state, literaryStatus, literaryMemory } = useDocumentTranslation();
     const segments = [
       {
         id: 'chapter1-s0', index: 0, text: 'Alice enters the room.',
@@ -371,6 +371,11 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.translations.get('chapter2-s0')).toBe('审校-chapter2-s0');
     expect(state.value.translations.has('chapter1-s0')).toBe(false);
     expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(literaryMemory.value.entities).toHaveLength(0);
+    expect(literaryStatus.value.warnings.some((warning) => warning.includes('没有提取到实体/人物记忆'))).toBe(true);
+    expect(literaryStatus.value.diagnostics.some((event) =>
+      event.stage === 'book-analysis' && event.status === 'warning' && event.message.includes('没有提取到实体/人物记忆'),
+    )).toBe(true);
   });
 
   it('文学模式同章多批并行推进，而不是串行等待', async () => {
