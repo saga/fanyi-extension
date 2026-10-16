@@ -2580,7 +2580,15 @@ async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = t
   if (!project?.projectId) return;
   contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
   try {
-    await loadContextGraph(project, schedulePoll);
+    const graph = await loadContextGraph(project, schedulePoll);
+    const latestRun = Array.isArray(graph?.runs) ? graph.runs[0] : null;
+    if (literaryMode.value && latestRun?.status === 'completed' &&
+        latestRun?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION &&
+        graph?.sourceRevisionId === contextGraphState.value.sourceRevisionId) {
+      // Also bridge completed analyses created by CLI or another UI session into the editable
+      // character-memory workflow. The merge preserves human-confirmed names and voice profiles.
+      await syncContextGraphEntitiesToMemory(project, graph);
+    }
   } catch (error) {
     contextGraphState.value = {
       ...contextGraphState.value,
