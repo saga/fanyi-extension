@@ -51,6 +51,7 @@ const defaultConfig: Config = {
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
+  documentAutoSelectLocalAgent: true,
   documentLocalAgentProvider: 'workbuddy',
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
@@ -86,11 +87,21 @@ describe('config', () => {
       expect(config.documentProvider).toBe('openrouter');
       expect(config.documentDeepseekApiKey).toBe('page-key');
       expect(config.documentUseLocalAgent).toBe(true);
+      expect(config.documentAutoSelectLocalAgent).toBe(true);
       expect(config.documentLocalAgentProvider).toBe('opencode');
       expect(config.documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
       expect(config.documentTranslationMode).toBe('literary');
       expect(store['local:config'].documentProvider).toBe('openrouter');
       expect(store['local:config'].documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
+    });
+
+    it('keeps document auto-selection independent of webpage Agent settings', async () => {
+      store['local:config'] = { useLocalAgent: false, localAgentUrl: 'http://127.0.0.1:9999' };
+      const config = await getConfig();
+      expect(config.useLocalAgent).toBe(false);
+      expect(config.documentUseLocalAgent).toBe(false);
+      expect(config.documentAutoSelectLocalAgent).toBe(true);
+      expect(config.documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
     });
 
     it('keeps the migrated document provider unchanged when saving a global page provider change', async () => {
