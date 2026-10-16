@@ -67,6 +67,7 @@
       <input v-model="config.documentUseLocalAgent" type="checkbox" @change="onLocalAgentToggle" />
       <span>使用本机 Workbuddy / OpenCode 翻译</span>
     </label>
+    <small class="muted">文档翻译会独立检测本机服务；服务可用时默认启用。手动关闭后会记住选择，不影响网页翻译配置。</small>
 
     <div v-if="config.documentUseLocalAgent" class="settings-subpanel">
       <label class="setting-field">
@@ -180,6 +181,7 @@ const config = ref<Config>({
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
+  documentAutoSelectLocalAgent: true,
   documentLocalAgentProvider: 'workbuddy',
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
@@ -197,7 +199,9 @@ onMounted(async () => {
   config.value = await getConfig();
   applyActiveDocumentLanguages();
   initialized.value = true;
-  if (config.value.documentUseLocalAgent) void checkLocalService();
+  // Probe independently of the webpage profile. The saved auto-select preference
+  // distinguishes first-run defaults from an explicit user opt-out.
+  void checkLocalService();
 });
 
 watch(
@@ -217,7 +221,7 @@ function applyActiveDocumentLanguages() {
 const documentConfigFields: (keyof Config)[] = [
   'documentSourceLang', 'documentTargetLang', 'documentDeepseekApiKey', 'documentProvider',
   'documentPromptStyle', 'documentTranslationMode', 'documentUseServerTranslation', 'documentServerUrl',
-  'documentUseLocalAgent', 'documentLocalAgentProvider', 'documentLocalAgentUrl',
+  'documentUseLocalAgent', 'documentAutoSelectLocalAgent', 'documentLocalAgentProvider', 'documentLocalAgentUrl',
   'documentLocalAgentModel', 'documentLocalAgentToken',
 ];
 
@@ -237,13 +241,16 @@ async function saveConfig(...fields: (keyof Config)[]) {
 }
 
 async function onLocalAgentToggle() {
+  config.value.documentAutoSelectLocalAgent = config.value.documentUseLocalAgent;
   if (config.value.documentUseLocalAgent) {
     config.value.documentUseServerTranslation = false;
     localStatus.value = 'unknown';
   } else {
+    // A manual opt-out must survive future settings-panel mounts.
+    config.value.documentAutoSelectLocalAgent = false;
     localStatus.value = 'unknown';
   }
-  await saveConfig('documentUseLocalAgent', 'documentUseServerTranslation');
+  await saveConfig('documentUseLocalAgent', 'documentAutoSelectLocalAgent', 'documentUseServerTranslation');
   if (config.value.documentUseLocalAgent) void checkLocalService();
 }
 
@@ -256,9 +263,15 @@ async function checkLocalService() {
   checking.value = true;
   localStatus.value = 'unknown';
   try {
-    localStatus.value = await isLocalAgentServiceAvailable(
+    const available = await isLocalAgentServiceAvailable(
       config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-    ) ? 'ok' : 'fail';
+    );
+    localStatus.value = available ? 'ok' : 'fail';
+    if (available && config.value.documentAutoSelectLocalAgent && !config.value.documentUseLocalAgent) {
+      config.value.documentUseLocalAgent = true;
+      config.value.documentUseServerTranslation = false;
+      await saveConfig('documentUseLocalAgent', 'documentUseServerTranslation');
+    }
   } catch {
     localStatus.value = 'fail';
   } finally {
