@@ -1034,18 +1034,12 @@ export function useDocumentTranslation() {
           memoryEntities: bookMemory?.entities.length ?? 0,
           characterVoices: bookMemory?.characterVoices.length ?? 0,
         });
-      } else if (isCurrentRun(runId)) {
-        recordDiagnostic('review', 'warning', '审校结果因运行已切换而被丢弃', {
-          requestedSegments: expectedIds.length,
-        });
-      }
         const mustFixIds = new Set(reviewed.findings.filter((finding) => finding.priority === 'must_fix').map((finding) => finding.id));
         const pendingStyleIds = new Set(reviewed.findings
           .filter((finding) => finding.category === 'style' && finding.applicationStatus === 'pending' && !mustFixIds.has(finding.id))
           .map((finding) => finding.id));
         for (const [id, text] of reviewed.translations) {
-          // Accuracy/terminology errors are corrected automatically. Pure style preferences stay
-          // as explicit proposals; users can compare and apply the complete alternative below.
+          // 准确性和实体译名错误自动修正；纯文风建议保留为候选稿，供用户比较后决定。
           if (expectedIds.includes(id) && text.trim() && !pendingStyleIds.has(id)) {
             state.value.translations.set(id, text);
           }
@@ -1058,7 +1052,6 @@ export function useDocumentTranslation() {
         if (missingReview.length) {
           literaryStatus.value.warnings.push('本批审校未返回 ' + missingReview.length + ' 段，已保留初译');
         }
-        // worker 计进度时例子记的是初译，审校落定后换成审校版，免得次优译文影响后续章节。
         literaryMemory.value = refreshLiteraryExampleTargets(
           literaryMemory.value,
           batch.flatMap((segment) => {
@@ -1071,6 +1064,10 @@ export function useDocumentTranslation() {
             }] : [];
           }),
         );
+      } else if (isCurrentRun(runId)) {
+        recordDiagnostic('review', 'warning', '审校结果因运行已切换而被丢弃', {
+          requestedSegments: expectedIds.length,
+        });
       }
     } catch (error) {
       if (isCurrentRun(runId)) {
