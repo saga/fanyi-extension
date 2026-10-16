@@ -365,6 +365,7 @@
           <div class="bar" :style="{ width: contextGraphProgressPercent + '%' }"></div>
         </div>
         <p class="muted small" v-if="contextGraphState.progress && Object.keys(contextGraphState.progress).length">
+          分析语言 {{ contextGraphState.progress.sourceLang || 'auto' }} → {{ contextGraphState.progress.targetLang || targetLang }}；
           已扫描 {{ contextGraphState.progress.scan?.segmentCount ?? contextGraphState.segmentCount }} 段、
           {{ contextGraphState.progress.scan?.chapterCount ?? contextGraphState.progress.chapterCount ?? contextGraphState.counts.chapters }} 章；
           扫描到 {{ contextGraphState.progress.scan?.nameCandidateCount ?? 0 }} 个名称候选；
