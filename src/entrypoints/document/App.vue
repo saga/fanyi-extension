@@ -397,7 +397,7 @@
             @click="reanalyzeContextGraph">
             {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
           </button>
-          <span class="muted small">预处理独立于逐段翻译；已有译文不会阻止补建实体图谱。</span>
+          <span class="muted small">图谱会约束后续翻译与审校；已有译文不会自动改写。确认规范译名后，可点击“强制重译当前页”修复旧译文中的专名漂移。</span>
         </div>
       </section>
 
