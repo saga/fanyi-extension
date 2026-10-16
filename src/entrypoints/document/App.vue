@@ -2292,7 +2292,8 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
 }
 async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
   const next = mergeContextGraphEntitySuggestions(graph);
-  if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities)) return;
+  if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities) &&
+      JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices)) return;
   literaryMemory.value = next;
   await persistCurrentSession();
   const config = readerConfig.value || await getConfig();
