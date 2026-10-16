@@ -47,6 +47,10 @@ export interface CharacterVoiceProfile {
   characterId: string;
   canonicalSourceName: string;
   targetName?: string;
+  /** 简短角色定位；只在画像确认后注入 prompt。 */
+  role?: string;
+  /** 原文支持的人物特征；候选阶段仅显示给人工核对。 */
+  traits?: string[];
   aliases: string[];
   status: 'candidate' | 'confirmed' | 'rejected';
   confidence: number;
@@ -376,6 +380,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const profile: CharacterVoiceProfile = {
       characterId, canonicalSourceName,
       ...(safeText(value.targetName, 120) ? { targetName: safeText(value.targetName, 120) } : {}),
+      ...(safeText(value.role, 360) ? { role: safeText(value.role, 360) } : {}),
+      ...(safeList(value.traits, 10, 160).length ? { traits: safeList(value.traits, 10, 160) } : {}),
       aliases: safeList(value.aliases, 12, 80),
       status, confidence: safeConfidence(value.confidence),
       voiceCore: {
@@ -512,6 +518,8 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
     map.set(candidate.characterId, {
       ...prior,
       ...(!conflicts ? { voiceCore: { ...candidate.voiceCore, ...prior.voiceCore } } : {}),
+      ...(!prior.role && candidate.role ? { role: candidate.role } : {}),
+      ...(!prior.traits?.length && candidate.traits?.length ? { traits: candidate.traits } : {}),
       status: prior.status === 'rejected' ? 'rejected' : 'candidate',
       confidence: Math.max(prior.confidence, candidate.confidence),
       aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
@@ -672,6 +680,8 @@ export function buildLiteraryContextForBatch(input: {
     characterId: profile.characterId,
     canonicalSourceName: profile.canonicalSourceName,
     targetName: profile.targetName,
+    ...(profile.status === 'confirmed' && profile.role ? { role: profile.role } : {}),
+    ...(profile.status === 'confirmed' && profile.traits?.length ? { traits: profile.traits } : {}),
     aliases: profile.aliases,
     status: profile.status,
     voiceCore: profile.voiceCore,
