@@ -44,6 +44,11 @@ export interface ChunkTrace {
   jsonParseFailed: boolean;
   outputTail: string;
   parseError: string;
+  /** Whether the result came from either cache or a fresh provider call. */
+  cacheSource?: 'extension-cache' | 'local-sqlite-cache' | 'model' | 'unknown';
+  /** Logical provider label only; never include credentials or user-specific tokens. */
+  provider?: string;
+  translationMode?: TranslationMode;
 }
 
 /** 错误响应里附带的调试信息，便于 content script 在状态条上展示 stack。 */
