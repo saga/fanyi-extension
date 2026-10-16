@@ -2914,9 +2914,13 @@ async function ensureContextGraphPreprocessing(project: any, options: { force?: 
   }
 }
 
-watch([sourceLang, targetLang], async ([nextSource, nextTarget], [previousSource, previousTarget]) => {
-  if (nextSource === previousSource && nextTarget === previousTarget) return;
-  if (!activeSessionReady.value || !literaryMode.value ||
+watch([sourceLang, targetLang, literaryMode], async (
+  [nextSource, nextTarget, nextLiteraryMode],
+  [previousSource, previousTarget, previousLiteraryMode],
+) => {
+  if (nextSource === previousSource && nextTarget === previousTarget &&
+      nextLiteraryMode === previousLiteraryMode) return;
+  if (!activeSessionReady.value || !nextLiteraryMode ||
       readerConfig.value?.documentUseLocalAgent !== true || !workspaceProject.value?.projectId) return;
   const config = readerConfig.value;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
