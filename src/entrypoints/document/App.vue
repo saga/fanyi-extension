@@ -1126,6 +1126,13 @@ const confirmedCharacterVoiceCount = computed(() => literaryMemory.value.charact
 const confirmableRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) =>
   relation.reviewStatus !== 'confirmed' && !!relation.subject.trim() && !!relation.predicate.trim() && !!relation.object.trim(),
 ).length);
+const hasStyleGuideContent = computed(() => {
+  const style = literaryMemory.value.styleGuide || {};
+  return [style.narrativeVoice, style.register, style.rhythm, style.dialogue, style.diction]
+    .some((value) => typeof value === 'string' && value.trim()) ||
+    (style.rules || []).some((value) => value.trim()) ||
+    (style.avoid || []).some((value) => value.trim());
+});
 const filteredLiteraryEntities = computed(() => {
   const query = entitySearch.value.toLocaleLowerCase();
   return literaryMemory.value.entities
@@ -2724,12 +2731,31 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   }
   next.entities = existing.slice(0, 120);
   next.characterVoices = existingVoices.slice(0, 80);
+  const currentStyle = next.styleGuide || {};
+  const currentStyleHasContent = [currentStyle.narrativeVoice, currentStyle.register, currentStyle.rhythm, currentStyle.dialogue, currentStyle.diction]
+    .some((value) => typeof value === 'string' && value.trim()) ||
+    (currentStyle.rules || []).some((value) => value.trim()) ||
+    (currentStyle.avoid || []).some((value) => value.trim());
+  const suggestedNarrative = typeof graph?.overview?.narrativeStyle === 'string' ? graph.overview.narrativeStyle.trim() : '';
+  const suggestedRules = Array.isArray(graph?.overview?.styleRules)
+    ? Array.from(new Set(graph.overview.styleRules.filter((value: unknown): value is string => typeof value === 'string' && value.trim()))).slice(0, 16)
+    : [];
+  if (next.styleGuideStatus !== 'confirmed' && !currentStyleHasContent && (suggestedNarrative || suggestedRules.length)) {
+    next.styleGuide = {
+      ...currentStyle,
+      ...(suggestedNarrative ? { narrativeVoice: suggestedNarrative } : {}),
+      ...(suggestedRules.length ? { rules: suggestedRules } : {}),
+    };
+    next.styleGuideStatus = 'candidate';
+  }
   return next;
 }
 async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
   const next = mergeContextGraphEntitySuggestions(graph);
   if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities) &&
-      JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices)) return;
+      JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices) &&
+      JSON.stringify(next.styleGuide) === JSON.stringify(literaryMemory.value.styleGuide) &&
+      next.styleGuideStatus === literaryMemory.value.styleGuideStatus) return;
   literaryMemory.value = next;
   await persistCurrentSession();
   const config = readerConfig.value || await getConfig();
@@ -2739,6 +2765,60 @@ async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
     '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
     { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
   );
+}
+
+async function persistLiteraryMemoryToWorkspace() {
+  await persistCurrentSession();
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (!config.documentUseLocalAgent) return;
+  const project = workspaceProject.value || await ensureDocumentWorkspace();
+  if (!project?.projectId) return;
+  await workspaceApi(
+    config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+    config.documentLocalAgentToken || '',
+    '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+    { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
+  );
+}
+
+function markStyleGuideCandidate() {
+  literaryMemory.value.styleGuideStatus = 'candidate';
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存全书文风基准失败：' + (error instanceof Error ? error.message : String(error));
+  });
+}
+
+function setStyleGuideLines(field: 'rules' | 'avoid', event: Event) {
+  const raw = (event.target as HTMLTextAreaElement | null)?.value || '';
+  literaryMemory.value.styleGuide[field] = Array.from(new Set(
+    raw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
+  )).slice(0, field === 'rules' ? 16 : 12);
+  markStyleGuideCandidate();
+}
+
+function importContextGraphStyleGuide() {
+  const style = literaryMemory.value.styleGuide || {};
+  const narrativeVoice = contextGraphOverview.value.narrativeStyle.trim();
+  const rules = contextGraphOverview.value.styleRules.slice(0, 16);
+  literaryMemory.value.styleGuide = {
+    ...style,
+    ...(narrativeVoice ? { narrativeVoice } : {}),
+    ...(rules.length ? { rules } : {}),
+  };
+  literaryMemory.value.styleGuideStatus = 'candidate';
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存预处理文风候选失败：' + (error instanceof Error ? error.message : String(error));
+  });
+}
+
+async function setStyleGuideStatus(status: 'candidate' | 'confirmed') {
+  if (status === 'confirmed' && !hasStyleGuideContent.value) return;
+  literaryMemory.value.styleGuideStatus = status;
+  await persistLiteraryMemoryToWorkspace();
+  persistenceMessage.value = status === 'confirmed'
+    ? '全书文风基准已确认，后续文学翻译与 Reviewer 会注入这组风格规则。'
+    : '全书文风基准已恢复为候选，不再注入后续翻译。';
 }
 
 async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
