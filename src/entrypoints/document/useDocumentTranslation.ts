@@ -847,6 +847,25 @@ export function useDocumentTranslation() {
             tokenBudget: 2500,
           })
         : undefined;
+      if (literaryMode) {
+        const injected = (voiceContext || {}) as Record<string, unknown>;
+        const count = (key: string) => Array.isArray(injected[key]) ? (injected[key] as unknown[]).length : 0;
+        recordDiagnostic('translation-request', 'started', '准备发送本批初译请求', {
+          route: shouldUseRemoteDocumentTranslation(options) ? 'cloud-document-api'
+            : options.useLocalAgent ? 'local-agent-via-extension-provider' : 'extension-provider',
+          chapter: chapterTitle, segmentCount: segments.length,
+          sourceChars: segments.reduce((sum, segment) => sum + segment.text.length, 0),
+          firstSegmentId: segments[0]?.id || '', precedingSegments: precedingSegments.length,
+          memoryEntities: bookMemory?.entities.length ?? 0, voiceContextIncluded: !!voiceContext,
+          injectedEntities: count('entities'), injectedRelationships: count('relationships'),
+          injectedCharacterVoices: count('characterVoices'),
+          injectedRelationshipVoiceRules: count('relationshipVoiceRules'),
+          injectedVoiceAnchors: count('voiceAnchors'), injectedChapterSummaries: count('chapterSummaries'),
+          promptOverride: !!options.documentSystemPromptOverride?.trim(),
+          userTemplate: !!options.documentUserPromptTemplate?.trim(),
+          responseFormat: responseFormat?.type || 'json_object',
+        });
+      }
       // contextPath 只表示源文档结构；角色声音由独立的只读 voiceContext 传递。
       const jsonContent = JSON.stringify(
         segments.map((segment) => ({
@@ -887,7 +906,13 @@ export function useDocumentTranslation() {
       })) as TranslateChunkResponse;
 
       if (!isCurrentRun(runId)) return [];
-      if (!response?.success) throw new Error(response?.error || '翻译失败');
+      if (!response?.success) {
+        if (literaryMode) recordDiagnostic('translation-request', 'failed', '本批初译请求失败', {
+          firstSegmentId: segments[0]?.id || '', segmentCount: segments.length,
+          error: (response?.error || '翻译失败').slice(0, 240),
+        });
+        throw new Error(response?.error || '翻译失败');
+      }
 
       const roundIds = segments.map((segment) => segment.id);
       for (const [id, text] of normalizeDocumentBatchResult(response.result, roundIds)) {
@@ -897,8 +922,10 @@ export function useDocumentTranslation() {
       // 本轮空转条目（长段原文返回）必须剔除、不入库：否则英文冒充译文，
       // 缺失检查发现不了，还会随 checkpoint 存住。剔除后它们回到缺失集合，
       // 走对半缩小重发（短 prompt 弱模型也更容易跟上）。
+      let noOpCount = 0;
       if (options.sourceLang !== options.targetLang) {
         const noOpIds = findNoOpBlockIds(normalized, segments);
+        noOpCount = noOpIds.length;
         if (noOpIds.length) {
           sawNoOp = true;
           for (const id of noOpIds) {
@@ -911,7 +938,15 @@ export function useDocumentTranslation() {
           );
         }
       }
-      return getMissingDocumentBatchIds(roundIds, normalized);
+      const missingIds = getMissingDocumentBatchIds(roundIds, normalized);
+      if (literaryMode) recordDiagnostic('translation-response', missingIds.length ? 'warning' : 'completed',
+        missingIds.length ? '本轮模型响应缺少部分片段，将进入有界缩小重试' : '本轮初译结果已通过片段 ID 完整性检查',
+        {
+          requestedSegments: roundIds.length, returnedSegments: roundIds.length - missingIds.length,
+          missingCount: missingIds.length, missingIds: missingIds.slice(0, 8).join(','),
+          unchangedSourceCount: noOpCount,
+        });
+      return missingIds;
     };
     let pending = batch;
     const maxRounds = 6;
@@ -965,13 +1000,45 @@ export function useDocumentTranslation() {
     precedingSegments: DocumentSegment[] = [],
   ): Promise<void> {
     const expectedIds = batch.map((segment) => segment.id);
-    if ((!options.literaryMode && options.translationMode !== 'literary') || options.skipReview) return;
+    const literaryRequest = options.literaryMode || options.translationMode === 'literary';
+    if (!literaryRequest) return;
+    if (options.skipReview) {
+      recordDiagnostic('review', 'info', '文学审校已配置为关闭；本批只保留初译', {
+        segmentCount: expectedIds.length, firstSegmentId: expectedIds[0] || '',
+      });
+      return;
+    }
     state.value.workStage = '审校中';
+    recordDiagnostic('review', 'started', '开始独立文学审校', {
+      segmentCount: expectedIds.length, precedingSegments: precedingSegments.length,
+      memoryEntities: bookMemory?.entities.length ?? 0,
+      characterVoices: bookMemory?.characterVoices.length ?? 0,
+      relationshipVoiceRules: bookMemory?.relationshipVoiceRules.length ?? 0,
+      voiceAnchors: bookMemory?.voiceAnchors.length ?? 0,
+      provider: options.localAgentProvider || options.provider || 'default',
+      model: options.localAgentModel || options.model || 'auto',
+      firstSegmentId: expectedIds[0] || '',
+    });
     try {
       const reviewed = await reviewLiteraryBatchViaLocalAgent(
         batch, new Map(drafts), options, bookMemory, runId, isCurrentRun, precedingSegments,
       );
       if (reviewed && isCurrentRun(runId)) {
+        recordDiagnostic('review', 'completed', '文学审校已返回结果', {
+          requestedSegments: expectedIds.length, reviewedSegments: reviewed.translations.size,
+          findings: reviewed.findings.length,
+          accuracyFindings: reviewed.findings.filter((item) => item.category === 'accuracy').length,
+          terminologyFindings: reviewed.findings.filter((item) => item.category === 'terminology').length,
+          styleFindings: reviewed.findings.filter((item) => item.category === 'style').length,
+          mustFixFindings: reviewed.findings.filter((item) => item.priority === 'must_fix').length,
+          memoryEntities: bookMemory?.entities.length ?? 0,
+          characterVoices: bookMemory?.characterVoices.length ?? 0,
+        });
+      } else if (isCurrentRun(runId)) {
+        recordDiagnostic('review', 'warning', '审校结果因运行已切换而被丢弃', {
+          requestedSegments: expectedIds.length,
+        });
+      }
         const mustFixIds = new Set(reviewed.findings.filter((finding) => finding.priority === 'must_fix').map((finding) => finding.id));
         const pendingStyleIds = new Set(reviewed.findings
           .filter((finding) => finding.category === 'style' && finding.applicationStatus === 'pending' && !mustFixIds.has(finding.id))
@@ -1007,9 +1074,11 @@ export function useDocumentTranslation() {
       }
     } catch (error) {
       if (isCurrentRun(runId)) {
-        literaryStatus.value.warnings.push(
-          '文学审校不可用，已保留初译：' + (error instanceof Error ? error.message : String(error)),
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        recordDiagnostic('review', 'failed', '文学审校失败，已保留初译', {
+          error: message.slice(0, 240), segmentCount: expectedIds.length,
+        });
+        literaryStatus.value.warnings.push('文学审校不可用，已保留初译：' + message);
       }
     }
     await checkpoint(options);
@@ -1091,23 +1160,53 @@ export function useDocumentTranslation() {
     options: TranslateOptions,
     runId: number,
   ): Promise<boolean> {
-    if (!options.literaryMode || analyzedChapterKeys.has(key)) return isCurrentRun(runId);
+    if (!options.literaryMode) {
+      recordDiagnostic('chapter-analysis', 'warning', '未启用书籍级文学模式，跳过实体/人物记忆分析', {
+        translationMode: options.translationMode || 'technical', chapter: key,
+      });
+      return isCurrentRun(runId);
+    }
+    if (analyzedChapterKeys.has(key)) {
+      recordDiagnostic('chapter-analysis', 'info', '本章本次会话已分析过，复用现有记忆', {
+        chapter: key, memoryEntities: literaryMemory.value.entities.length,
+        characterVoices: literaryMemory.value.characterVoices.length,
+      });
+      return isCurrentRun(runId);
+    }
     literaryStatus.value.chapterTitle = key;
     state.value.workStage = '实体分析中';
+    recordDiagnostic('chapter-analysis', 'started', '开始分析当前章节实体与人物声音', {
+      chapter: key, sourceSegments: segments.length,
+      provider: options.localAgentProvider || options.provider || 'default',
+      model: options.localAgentModel || options.model || 'auto',
+      priorEntities: literaryMemory.value.entities.length,
+      priorCharacterVoices: literaryMemory.value.characterVoices.length,
+    });
     try {
       const result = await analyzeLiteraryChapterViaLocalAgent(
         key, segments, options, literaryMemory.value, runId, isCurrentRun,
       );
       if (!result || !isCurrentRun(runId)) return false;
       literaryMemory.value = result.memory;
+      recordDiagnostic('chapter-analysis', result.warning ? 'warning' : 'completed',
+        result.warning || (result.analyzed ? '章节分析完成' : '分析接口返回，但未标记 analyzed'),
+        {
+          chapter: key, analyzed: result.analyzed,
+          entities: result.memory.entities.length, relationships: result.memory.relationships.length,
+          characterVoices: result.memory.characterVoices.length,
+          confirmedVoices: result.memory.characterVoices.filter((item) => item.status === 'confirmed').length,
+          relationshipVoiceRules: result.memory.relationshipVoiceRules.length,
+          voiceAnchors: result.memory.voiceAnchors.length,
+        });
       if (result.warning) literaryStatus.value.warnings.push(result.warning);
       if (result.analyzed) literaryStatus.value.analyzedChapters++;
     } catch (error) {
       if (!isCurrentRun(runId)) return false;
-      // 分析失败不阻断阅读；后续仍按通用文学 prompt 和已有记忆翻译。
-      literaryStatus.value.warnings.push(
-        '本章实体/文风分析失败，继续翻译：' + (error instanceof Error ? error.message : String(error)),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      recordDiagnostic('chapter-analysis', 'failed', '本章记忆分析失败；翻译将继续使用现有上下文', {
+        chapter: key, error: message.slice(0, 240),
+      });
+      literaryStatus.value.warnings.push('本章实体/文风分析失败，继续翻译：' + message);
     }
     // 即使分析服务失败也只尝试一次，避免每批反复支付同一分析的成本。
     analyzedChapterKeys.add(key);
@@ -1206,15 +1305,38 @@ export function useDocumentTranslation() {
       translationMode: literaryProfileEnabled ? 'literary' : (options.translationMode || 'technical'),
       promptStyle: resolveDocumentStyle(segments, options),
     };
+    if (literaryProfileEnabled) {
+      recordDiagnostic('run', 'started', '开始文学翻译运行', {
+        sourceLang: effectiveOptions.sourceLang, targetLang: effectiveOptions.targetLang,
+        literaryBookMode: literaryEnabled, translationMode: effectiveOptions.translationMode || 'technical',
+        route: shouldUseRemoteDocumentTranslation(effectiveOptions) ? 'cloud-document-api'
+          : effectiveOptions.useLocalAgent ? 'local-agent-via-extension-provider' : 'extension-provider',
+        provider: effectiveOptions.localAgentProvider || effectiveOptions.provider || 'default',
+        model: effectiveOptions.localAgentModel || effectiveOptions.model || 'auto',
+        sourceSegments: segments.length, selectedSegments: workInputSegments.length,
+        pendingBatches: pendingBatches.length,
+        reviewEnabled: !effectiveOptions.skipReview && !shouldUseRemoteDocumentTranslation(effectiveOptions),
+        systemPromptOverride: !!effectiveOptions.documentSystemPromptOverride?.trim(),
+        userPromptTemplate: !!effectiveOptions.documentUserPromptTemplate?.trim(),
+        memoryEntitiesBeforeAnalysis: literaryMemory.value.entities.length,
+        characterVoicesBeforeAnalysis: literaryMemory.value.characterVoices.length,
+      });
+    }
 
     // 第一个正式译稿之前，先用覆盖全书的少量代表片段建立实体/关系和声线底稿。
     // 这样早期章节也能认识后续章节反复出现的人物；翻译本身仍然逐批渐次执行。
     if (literaryEnabled && !literaryStatus.value.bookProfileReady && isCurrentRun(runId)) {
       literaryStatus.value.chapterTitle = '全书预分析';
+      const bookSample = selectLiteraryBookSample(segments, options.documentFormat);
+      recordDiagnostic('book-analysis', 'started', '开始全书实体、人物与关系预分析', {
+        sourceSegments: segments.length, sampledSegments: bookSample.length,
+        provider: effectiveOptions.localAgentProvider || effectiveOptions.provider || 'default',
+        model: effectiveOptions.localAgentModel || effectiveOptions.model || 'auto',
+      });
       try {
         const profile = await analyzeLiteraryChapterViaLocalAgent(
           '全书预分析',
-          selectLiteraryBookSample(segments, options.documentFormat),
+          bookSample,
           effectiveOptions,
           literaryMemory.value,
           runId,
@@ -1223,6 +1345,16 @@ export function useDocumentTranslation() {
         if (!profile || !isCurrentRun(runId)) return state.value;
         literaryMemory.value = profile.memory;
         literaryStatus.value.bookProfileReady = profile.analyzed;
+        recordDiagnostic('book-analysis', profile.warning ? 'warning' : 'completed',
+          profile.warning || (profile.analyzed ? '全书预分析完成' : '分析接口返回，但未标记 analyzed'),
+          {
+            analyzed: profile.analyzed, entities: profile.memory.entities.length,
+            relationships: profile.memory.relationships.length,
+            characterVoices: profile.memory.characterVoices.length,
+            confirmedVoices: profile.memory.characterVoices.filter((item) => item.status === 'confirmed').length,
+            relationshipVoiceRules: profile.memory.relationshipVoiceRules.length,
+            voiceAnchors: profile.memory.voiceAnchors.length,
+          });
         if (profile.analyzed) {
           // 单章文件的全书抽样已经覆盖了本章，无须为同一章再付一次分析请求。
           const chapterKeys = new Set(
@@ -1238,10 +1370,11 @@ export function useDocumentTranslation() {
         if (profile.warning) literaryStatus.value.warnings.push(profile.warning);
         await checkpoint(effectiveOptions);
       } catch (error) {
-        literaryStatus.value.warnings.push(
-          '全书预分析失败，将逐章补充实体记忆：' +
-          (error instanceof Error ? error.message : String(error)),
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        recordDiagnostic('book-analysis', 'failed', '全书预分析失败；后续尝试逐章补充实体记忆', {
+          error: message.slice(0, 240),
+        });
+        literaryStatus.value.warnings.push('全书预分析失败，将逐章补充实体记忆：' + message);
         await checkpoint(effectiveOptions);
       }
     }
@@ -1377,6 +1510,13 @@ export function useDocumentTranslation() {
             if (ok) break;
           } catch (err) {
             if (!isCurrentRun(runId)) return;
+            if (literaryProfileEnabled) recordDiagnostic('translation-batch', attempt === retries ? 'failed' : 'warning',
+              attempt === retries ? '翻译批次最终失败' : '翻译批次失败，准备重试',
+              {
+                batchIndex: index, attempt: attempt + 1, retriesAllowed: retries,
+                segmentCount: batch.length, firstSegmentId: batchIds[0] || '',
+                error: (err instanceof Error ? err.message : String(err)).slice(0, 240),
+              });
             if (attempt === retries) {
               state.value.failedBatches.push(index);
               state.value.error = (err as Error).message;
@@ -1424,6 +1564,19 @@ export function useDocumentTranslation() {
       state.value.running = false;
       state.value.workStage = '';
       state.value.activeSegmentIds = new Set();
+      if (literaryProfileEnabled) {
+        recordDiagnostic('run', state.value.failedBatches.length ? 'warning' : 'completed',
+          state.value.failedBatches.length ? '文学翻译运行结束，但仍有失败批次' : '文学翻译运行完成',
+          {
+            translatedSegments: state.value.translations.size, totalSegments: segments.length,
+            finishedBatches: state.value.workDone, totalWorkBatches: state.value.workTotal,
+            failedBatches: state.value.failedBatches.length,
+            reviewedSegments: literaryStatus.value.reviewedSegments,
+            findings: literaryStatus.value.reviewFindings.length,
+            entities: literaryMemory.value.entities.length,
+            characterVoices: literaryMemory.value.characterVoices.length,
+          });
+      }
       await checkpoint(effectiveOptions);
     }
     return state.value;
