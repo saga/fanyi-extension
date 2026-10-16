@@ -70,9 +70,12 @@
     <template v-if="doc">
       <nav class="tabs" aria-label="文档功能分区">
         <button class="tab" :class="{ active: activeTab === 'reading' }" @click="activeTab = 'reading'">阅读</button>
-        <button class="tab" :class="{ active: activeTab === 'memory' }" @click="activeTab = 'memory'">
-          设置与记忆
-          <span v-if="literaryMode" class="tab-badge">{{ literaryMemory.entities.length }}实体·{{ literaryStatus.reviewFindings.length }}审校</span>
+        <button class="tab" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">
+          设置与配置
+        </button>
+        <button class="tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
+          人物与预处理
+          <span v-if="literaryMode" class="tab-badge">{{ literaryMemory.characterVoices.length }}人物·{{ literaryMemory.entities.length }}实体</span>
         </button>
         <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'agent' }" @click="activeTab = 'agent'">
           翻译 Agent
@@ -198,7 +201,7 @@
       </section>
       </template>
 
-      <template v-else-if="activeTab === 'memory'">
+      <template v-else-if="activeTab === 'settings'">
       <DocumentTranslationSettings
         :active-source-lang="sourceLang"
         :active-target-lang="targetLang"
@@ -333,6 +336,9 @@
         </span>
       </section>
 
+      </template>
+
+      <template v-else-if="activeTab === 'characters'">
       <section v-if="literaryStatus.enabled" class="panel literary-status">
         <div class="literary-status-title">
           <strong>书籍一致性与文风审校</strong>
@@ -403,6 +409,63 @@
             {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
           </button>
           <span class="muted small">图谱会约束后续翻译与审校；已有译文不会自动改写。确认规范译名后，可点击“强制重译当前页”修复旧译文中的专名漂移。</span>
+        </div>
+      </section>
+
+      <section v-if="literaryMode" class="panel literary-style-guide">
+        <div class="dictionary-heading">
+          <div>
+            <h3>全书文风基准</h3>
+            <p class="muted small">预处理得到的全书文风只作为候选。确认后才会进入初译和两类 Reviewer 的 TranslationBrief；本面板不存放剧情摘要。</p>
+          </div>
+          <span class="entity-status" :class="literaryMemory.styleGuideStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
+            {{ literaryMemory.styleGuideStatus === 'confirmed' ? '已确认并注入' : '候选 · 尚未注入' }}
+          </span>
+        </div>
+        <div class="settings-actions">
+          <button class="btn" type="button"
+            :disabled="!contextGraphOverview.narrativeStyle && !contextGraphOverview.styleRules.length"
+            @click="importContextGraphStyleGuide">载入预处理文风建议</button>
+          <span class="muted small">导入后仍是候选，需要检查并确认；后续可以随时撤销确认。</span>
+        </div>
+        <div class="literary-style-grid">
+          <label class="field">
+            <span>叙述声音</span>
+            <textarea v-model="literaryMemory.styleGuide.narrativeVoice" rows="3" @change="markStyleGuideCandidate"></textarea>
+          </label>
+          <label class="field">
+            <span>语域</span>
+            <textarea v-model="literaryMemory.styleGuide.register" rows="2" @change="markStyleGuideCandidate"></textarea>
+          </label>
+          <label class="field">
+            <span>节奏与句法</span>
+            <textarea v-model="literaryMemory.styleGuide.rhythm" rows="2" @change="markStyleGuideCandidate"></textarea>
+          </label>
+          <label class="field">
+            <span>对白特征</span>
+            <textarea v-model="literaryMemory.styleGuide.dialogue" rows="2" @change="markStyleGuideCandidate"></textarea>
+          </label>
+          <label class="field">
+            <span>措辞与词汇</span>
+            <textarea v-model="literaryMemory.styleGuide.diction" rows="2" @change="markStyleGuideCandidate"></textarea>
+          </label>
+          <label class="field">
+            <span>规则（每行一条）</span>
+            <textarea :value="(literaryMemory.styleGuide.rules || []).join('\n')" rows="4"
+              @change="setStyleGuideLines('rules', $event)"></textarea>
+          </label>
+          <label class="field">
+            <span>避免的风格问题（每行一条）</span>
+            <textarea :value="(literaryMemory.styleGuide.avoid || []).join('\n')" rows="3"
+              @change="setStyleGuideLines('avoid', $event)"></textarea>
+          </label>
+        </div>
+        <div class="settings-actions">
+          <button class="btn primary" :disabled="!hasStyleGuideContent || literaryMemory.styleGuideStatus === 'confirmed'"
+            @click="setStyleGuideStatus('confirmed')">确认并注入后续翻译</button>
+          <button class="btn" :disabled="literaryMemory.styleGuideStatus !== 'confirmed'"
+            @click="setStyleGuideStatus('candidate')">撤销确认</button>
+          <span class="muted small">已确认规则属于风格约束，不应包含人物身份、秘密或剧情结论。</span>
         </div>
       </section>
 
@@ -907,7 +970,7 @@ const agentTrajectoryError = ref('');
 const agentTrajectoryFilter = ref<'all' | 'model' | 'issues'>('all');
 let agentTrajectoryPollTimer: number | null = null;
 let agentTrajectoryRequestGeneration = 0;
-const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v4-target-language';
+const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v5-language-pinned';
 const contextGraphState = ref<any>({
   projectId: '', sourceRevisionId: '', segmentCount: 0,
   counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
@@ -915,6 +978,7 @@ const contextGraphState = ref<any>({
   startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
 });
 const contextGraphAnalyzing = ref(false);
+const contextGraphOverview = ref<{ narrativeStyle: string; styleRules: string[] }>({ narrativeStyle: '', styleRules: [] });
 let contextGraphPollTimer: number | null = null;
 let ensureWorkspacePromise: Promise<any | null> | null = null;
 /** Agent 候选在运行结束时自动采纳；此 Map 仅用于运行中的临时预览或保存失败时提示。 */
@@ -1081,8 +1145,8 @@ const currentPageTranslatedCount = computed(() =>
 const translatedSegmentCount = computed(() =>
   doc.value?.segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length ?? 0,
 );
-/** 阅读 Tab 默认首屏；书籍记忆/审校移到第二个 Tab，避免挤占正文主屏。 */
-const activeTab = ref<'reading' | 'memory' | 'agent' | 'trajectory'>('reading');
+/** 阅读、配置、人物/预处理、Agent 工作区和轨迹分区相互独立。 */
+const activeTab = ref<'reading' | 'settings' | 'characters' | 'agent' | 'trajectory'>('reading');
 /** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
 const startLabel = computed(() => currentPagePending.value
   ? '翻译当前页'
@@ -1567,7 +1631,7 @@ async function rereviewSegment(id: string) {
     persistenceMessage.value = '没有找到这段现有译文。请先翻译对应页面，再重新审校。';
     return;
   }
-  activeTab.value = 'memory';
+  activeTab.value = 'characters';
   const options = await buildTranslationOptions();
   await reviewExistingSegments([segment], options);
   if (!state.value.error) {
@@ -2466,6 +2530,10 @@ async function loadContextGraph(project: any, schedulePoll = true): Promise<any>
     base, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph',
   );
   const graph = result.contextGraph || {};
+  contextGraphOverview.value = {
+    narrativeStyle: typeof graph.overview?.narrativeStyle === 'string' ? graph.overview.narrativeStyle : '',
+    styleRules: Array.isArray(graph.overview?.styleRules) ? graph.overview.styleRules.filter((item: unknown): item is string => typeof item === 'string') : [],
+  };
   const run = Array.isArray(graph.runs) ? graph.runs[0] : null;
   const status = run?.status || 'not-started';
   contextGraphState.value = {
@@ -2678,7 +2746,7 @@ async function ensureContextGraphPreprocessing(project: any, options: { force?: 
   const base = readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = readerConfig.value.documentLocalAgentToken || '';
   const latestTranslationStatus = workspaceActiveRun.value?.status;
-  const translationAlreadyActive = ['queued', 'running'].includes(latestTranslationStatus);
+  const translationAlreadyActive = ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(latestTranslationStatus);
   contextGraphAnalyzing.value = true;
   try {
     let graph = await loadContextGraph(project, false);
@@ -2686,7 +2754,10 @@ async function ensureContextGraphPreprocessing(project: any, options: { force?: 
     let run = Array.isArray(graph.runs) ? graph.runs[0] : null;
     const needsVersionUpgrade = status === 'completed' &&
       run?.progress?.analysisVersion !== CONTEXT_GRAPH_ANALYSIS_VERSION;
-    const shouldStart = options.force === true || status === 'not-started' || needsVersionUpgrade;
+    const needsLanguageRefresh = status === 'completed' &&
+      (run?.progress?.sourceLang !== sourceLang.value || run?.progress?.targetLang !== targetLang.value);
+    const shouldStart = options.force === true || status === 'not-started' || status === 'failed' ||
+      needsVersionUpgrade || needsLanguageRefresh;
     if (translationAlreadyActive && shouldStart) {
       contextGraphState.value = {
         ...contextGraphState.value,
