@@ -2675,32 +2675,37 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       ? Array.from(new Set(node.attributes.aliases.filter((item: unknown): item is string =>
           typeof item === 'string' && item.trim()))).slice(0, 12)
       : [];
+    const role = typeof node?.attributes?.role === 'string' ? node.attributes.role.trim().slice(0, 360) : '';
+    const traits = Array.isArray(node?.attributes?.traits)
+      ? Array.from(new Set(node.attributes.traits.filter((item: unknown): item is string =>
+          typeof item === 'string' && item.trim()))).slice(0, 10).map((item) => item.slice(0, 160))
+      : [];
     const evidenceRows = Array.isArray(node?.evidence) ? node.evidence.filter((item: any) =>
       typeof item?.segmentId === 'string' && typeof item?.quote === 'string' && item.quote.trim()).slice(0, 6) : [];
-    if (!canonicalSourceName || !voices.length || !evidenceRows.length) return [];
-    const observation = voices.join('；').slice(0, 240);
+    if (!canonicalSourceName || (!voices.length && !role && !traits.length) || !evidenceRows.length) return [];
+    const observation = voices.length
+      ? voices.join('；').slice(0, 240)
+      : '角色定位/人物特征候选；请核对下列原文证据后再确认。';
+    const evidenceDimension = voices.length ? 'register' as const : 'role_traits' as const;
     return [{
       characterId: 'context-graph-' + String(node.id || normalizeName(canonicalSourceName)).slice(0, 80),
       canonicalSourceName,
       ...(targetName ? { targetName } : {}),
       aliases,
-      ...(typeof node?.attributes?.role === 'string' && node.attributes.role.trim()
-        ? { role: node.attributes.role.trim().slice(0, 360) } : {}),
-      ...(Array.isArray(node?.attributes?.traits)
-        ? { traits: Array.from(new Set(node.attributes.traits.filter((item: unknown): item is string =>
-            typeof item === 'string' && item.trim()))).slice(0, 10).map((item) => item.slice(0, 160)) } : {}),
+      ...(role ? { role } : {}),
+      ...(traits.length ? { traits } : {}),
       status: 'candidate' as const,
       confidence: 0.55,
-      voiceCore: { register: observation },
+      voiceCore: voices.length ? { register: observation } : {},
       contrastRules: [],
       evidence: evidenceRows.map((item: any) => ({
         segmentId: item.segmentId,
         sourceQuote: item.quote.slice(0, 240),
         observation,
-        dimension: 'register' as const,
+        dimension: evidenceDimension,
         confidence: 0.55,
       })),
-      openQuestions: ['全书预分析生成的候选声音特征；请结合完整对白核对后再确认。'],
+      openQuestions: ['全书预分析生成的候选角色/声音信息；请结合完整对白与原文证据核对后再确认。'],
     }];
   });
   for (const candidate of voiceCandidates) {
