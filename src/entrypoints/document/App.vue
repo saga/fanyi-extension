@@ -3859,6 +3859,10 @@ async function resetAll() {
 
 .export { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 
+.literary-style-guide { display: flex; flex-direction: column; gap: .75rem; }
+.literary-style-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.literary-style-grid .field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.literary-style-grid textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #d0d7de; border-radius: 6px; padding: .55rem; color: #1f2328; background: #fff; line-height: 1.5; }
 .character-voice-bible { display: flex; flex-direction: column; gap: .9rem; }
 .voice-counts { display: flex; flex-wrap: wrap; gap: .35rem; }
 .voice-profile-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: .85rem; display: flex; flex-direction: column; gap: .55rem; }
@@ -4018,6 +4022,7 @@ async function resetAll() {
 .danger-text { color: #a40e26; }
 
 @media (max-width: 640px) {
+  .literary-style-grid { grid-template-columns: minmax(0, 1fr); }
   .reader-font-grid { grid-template-columns: 1fr 1fr; }
   .prompt-editor-label textarea { font-size: .76rem; }
   .doc-page { padding: 1rem .75rem 3rem; }
