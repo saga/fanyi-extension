@@ -218,8 +218,18 @@
                 <span class="agent-finding-id">{{ finding.segmentId }}</span>
                 <p>{{ finding.finding?.reason || finding.finding?.suggestion || '审校建议' }}</p>
                 <div v-if="finding.finding?.proposedTranslation" class="agent-style-proposal">
-                  <strong>文风候选译文（待确认）</strong>
+                  <strong>文风候选译文</strong>
                   <p>{{ finding.finding.proposedTranslation }}</p>
+                  <div class="agent-style-proposal-actions">
+                    <button class="agent-button agent-button-primary"
+                      :disabled="busy || finding.status === 'applied' || finding.finding?.applicationStatus === 'applied'"
+                      @click="applyStyleFinding(finding)">
+                      {{ finding.status === 'applied' || finding.finding?.applicationStatus === 'applied' ? '已采用' : '采用并保存' }}
+                    </button>
+                    <button class="agent-button agent-button-tertiary"
+                      :disabled="busy || finding.status === 'dismissed' || finding.finding?.applicationStatus === 'dismissed' || finding.status === 'applied'"
+                      @click="dismissStyleFinding(finding)">保留当前译文</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -714,6 +724,47 @@ async function autoAcceptReadyCandidates() {
   }
 }
 
+async function applyStyleFinding(finding: any) {
+  if (!project.value || !activeRun.value || !finding?.findingId) return;
+  busy.value = true;
+  error.value = '';
+  message.value = '';
+  try {
+    const response = await api(
+      '/api/documents/projects/' + encodeURIComponent(project.value.projectId) +
+        '/runs/' + encodeURIComponent(activeRun.value.runId) + '/findings/' + encodeURIComponent(String(finding.findingId)),
+      { method: 'POST', body: JSON.stringify({ action: 'apply' }) },
+    );
+    activeRun.value = response.run;
+    await emitWorkspaceSnapshot();
+    await refreshProjectWithoutRun();
+    message.value = '文风候选已作为人工译文保存，并同步到阅读器：' + finding.segmentId;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function dismissStyleFinding(finding: any) {
+  if (!project.value || !activeRun.value || !finding?.findingId) return;
+  busy.value = true;
+  error.value = '';
+  try {
+    const response = await api(
+      '/api/documents/projects/' + encodeURIComponent(project.value.projectId) +
+        '/runs/' + encodeURIComponent(activeRun.value.runId) + '/findings/' + encodeURIComponent(String(finding.findingId)),
+      { method: 'POST', body: JSON.stringify({ action: 'dismiss' }) },
+    );
+    activeRun.value = response.run;
+    message.value = '已保留当前译文，并记录对文风建议的决定：' + finding.segmentId;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function acceptCandidates(segmentIds?: string[], automatic = false): Promise<boolean> {
   if (!activeRun.value || !project.value) return false;
   const runId = activeRun.value.runId as string;
@@ -1201,6 +1252,7 @@ onUnmounted(() => {
 }
 .agent-style-proposal strong { font-size: .75rem; }
 .agent-style-proposal p { margin: .35rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-style-proposal-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .5rem; }
 .agent-finding-kind { padding: .16rem .4rem; border-radius: 6px; background: #f5f5f7; color: #424245; font-size: .72rem; white-space: nowrap; }
 .agent-finding-id { color: var(--agent-secondary); font-size: .75rem; white-space: nowrap; }
 .agent-spinner {
