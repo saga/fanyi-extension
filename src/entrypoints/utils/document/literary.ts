@@ -33,7 +33,7 @@ export interface LiteraryStyleGuide {
 }
 export type LiteraryVoiceDimension =
   | 'register' | 'syntax_rhythm' | 'lexicon' | 'discourse'
-  | 'stance' | 'humor_irony' | 'disfluency' | 'relationship';
+  | 'stance' | 'humor_irony' | 'disfluency' | 'relationship' | 'role_traits';
 
 export interface CharacterVoiceEvidence {
   segmentId: string;
@@ -159,7 +159,7 @@ const MAX_EXAMPLES = 8;
 const MAX_CHARACTER_VOICES = 80;
 const MAX_VOICE_RULES = 160;
 const MAX_VOICE_ANCHORS = 240;
-const VOICE_DIMENSIONS = new Set<LiteraryVoiceDimension>(['register', 'syntax_rhythm', 'lexicon', 'discourse', 'stance', 'humor_irony', 'disfluency', 'relationship']);
+const VOICE_DIMENSIONS = new Set<LiteraryVoiceDimension>(['register', 'syntax_rhythm', 'lexicon', 'discourse', 'stance', 'humor_irony', 'disfluency', 'relationship', 'role_traits']);
 
 function stableCharacterId(name: string): string {
   let hash = 0x811c9dc5;
@@ -398,7 +398,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       openQuestions: safeList(value.openQuestions, 8, 180),
     };
     // 空画像没有可执行信息时跳过，避免人物数量膨胀且持续注入噪音。
-    if (Object.keys(profile.voiceCore).length && evidence.length) characterVoices.push(profile);
+    if ((Object.keys(profile.voiceCore).length || profile.role || profile.traits?.length) && evidence.length) characterVoices.push(profile);
   }
   const voiceRuleInput = Array.isArray(raw.relationshipVoiceRules) ? raw.relationshipVoiceRules : [];
   const relationshipVoiceRules: RelationshipVoiceRule[] = [];
