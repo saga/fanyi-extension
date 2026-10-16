@@ -348,6 +348,9 @@
       <details v-if="literaryStatus.enabled" class="panel literary-diagnostics">
         <summary>翻译诊断轨迹（{{ literaryStatus.diagnostics.length }}）</summary>
         <p class="muted small">用于定位分析、上下文注入、翻译请求和审校阶段。只记录状态、配置与计数，不保存完整原文或译文。</p>
+        <button class="btn ghost" type="button" :disabled="!literaryStatus.diagnostics.length" @click="exportLiteraryDiagnostics">
+          导出诊断 JSON
+        </button>
         <div v-if="!literaryStatus.diagnostics.length" class="review-empty">
           尚无诊断事件。开始翻译后，这里会记录各阶段是否真正执行及其结果。
         </div>
@@ -966,6 +969,40 @@ onMounted(async () => {
   if (config.documentTranslationMode === 'literary') literaryMode.value = true;
   await refreshSavedSessionSummary();
 });
+
+/** 将当前轻量诊断轨迹导出为 JSON，便于复现问题；不包含整段原文、译文或完整 Prompt。 */
+function exportLiteraryDiagnostics() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    document: {
+      title: doc.value?.title || '',
+      format: doc.value?.format || '',
+      sourceLang: sourceLang.value,
+      targetLang: targetLang.value,
+      literaryMode: literaryMode.value,
+      localAgentEnabled: readerConfig.value?.documentUseLocalAgent === true,
+      provider: readerConfig.value?.documentLocalAgentProvider || 'workbuddy',
+      model: readerConfig.value?.documentLocalAgentModel || 'auto',
+    },
+    status: {
+      bookProfileReady: literaryStatus.value.bookProfileReady,
+      analyzedChapters: literaryStatus.value.analyzedChapters,
+      reviewedSegments: literaryStatus.value.reviewedSegments,
+      entities: literaryMemory.value.entities.length,
+      characterVoices: literaryMemory.value.characterVoices.length,
+      reviewFindings: literaryStatus.value.reviewFindings.length,
+      warnings: literaryStatus.value.warnings,
+    },
+    events: literaryStatus.value.diagnostics,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'literary-translation-diagnostics-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 /** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
 /** 将 Reviewer 的完整文风候选稿明确应用到正文，而不是只把一条建议标成已读。 */
