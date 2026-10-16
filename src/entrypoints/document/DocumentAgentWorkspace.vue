@@ -217,6 +217,10 @@
                 <span class="agent-finding-kind">{{ finding.category === 'accuracy' ? '准确性' : finding.category === 'terminology' ? '术语' : '文风' }}</span>
                 <span class="agent-finding-id">{{ finding.segmentId }}</span>
                 <p>{{ finding.finding?.reason || finding.finding?.suggestion || '审校建议' }}</p>
+                <div v-if="finding.finding?.proposedTranslation" class="agent-style-proposal">
+                  <strong>文风候选译文（待确认）</strong>
+                  <p>{{ finding.finding.proposedTranslation }}</p>
+                </div>
               </div>
             </div>
           </details>
@@ -1185,6 +1189,18 @@ onUnmounted(() => {
 .agent-history-status { white-space: nowrap; }
 .agent-finding-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: start; gap: .6rem; padding: .6rem 0; border-bottom: 1px solid #f0f0f2; }
 .agent-finding-row p { margin: 0; font-size: .82rem; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-style-proposal {
+  grid-column: 3;
+  margin-top: .25rem;
+  padding: .65rem .7rem;
+  border-left: 3px solid #8250df;
+  border-radius: 4px;
+  background: #f6f0ff;
+  color: #3d2468;
+  min-width: 0;
+}
+.agent-style-proposal strong { font-size: .75rem; }
+.agent-style-proposal p { margin: .35rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-finding-kind { padding: .16rem .4rem; border-radius: 6px; background: #f5f5f7; color: #424245; font-size: .72rem; white-space: nowrap; }
 .agent-finding-id { color: var(--agent-secondary); font-size: .75rem; white-space: nowrap; }
 .agent-spinner {
