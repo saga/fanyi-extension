@@ -1230,6 +1230,7 @@ function agentTrajectoryTitle(event: any): string {
     'review.context.ready': 'Reviewer 上下文已准备',
     'review.discarded': '审校结果已丢弃',
     'run.failed': '运行失败',
+    'run.finished': p.status === 'failed' ? '运行结束但存在失败' : p.status === 'partial' ? '运行部分完成' : '运行结束',
     'context-graph.phase': p.phase === 'model-analysis' ? '开始分析人物、实体与规范译名' : '开始扫描全书原文',
     'context-graph.scan.completed': '全书扫描与样本规划完成',
     'context-graph.completed': '全书预处理完成',
@@ -1283,6 +1284,11 @@ function agentTrajectoryDetail(event: any): string {
     details.push('人物声音 ' + (p.injectedCharacterVoices ?? 0) + '，声音规则 ' + (p.injectedRelationshipVoiceRules ?? 0) +
       '，已批准锚点 ' + (p.injectedVoiceAnchors ?? 0));
   }
+  if (type === 'run.finished') {
+    const counts = p.counts || {};
+    details.push('候选 ' + (counts.candidate ?? 0) + ' 段，已接受 ' + (counts.accepted ?? 0) + ' 段，失败 ' + (counts.failed ?? 0) + ' 段');
+    if (p.error) details.push('状态信息：' + p.error);
+  }
   if (type === 'stage.completed') {
     if (p.reviewedIds) details.push('审校片段 ' + p.reviewedIds.length + ' 段');
     if (p.findingCount != null) details.push('发现 ' + p.findingCount + ' 项');
@@ -1314,6 +1320,9 @@ function agentTrajectoryDetail(event: any): string {
 
 function agentTrajectoryStatus(event: any): string {
   const type = String(event?.type || '');
+  const runStatus = String(event?.payload?.status || '');
+  if (type === 'run.finished' && runStatus === 'failed') return 'failed';
+  if (type === 'run.finished' && runStatus === 'partial') return 'warning';
   if (type.endsWith('.failed') || type === 'model.call.failed' || type === 'run.failed') return 'failed';
   if (type === 'stage.warning' || type === 'batch.partial' || type === 'batch.output.validation') return 'warning';
   if (type === 'batch.started' || type === 'stage.started' || type === 'context-graph.phase' || type === 'batch.prompt.ready') return 'running';
