@@ -364,7 +364,7 @@
           <span class="chip">当前原文 {{ contextGraphState.segmentCount.toLocaleString() }} 段</span>
           <span class="chip">章节 {{ contextGraphState.counts.chapters }}</span>
           <span class="chip">人物 {{ contextGraphState.counts.characters }}</span>
-          <span class="chip">人物声音档案 {{ literaryMemory.characterVoices.length }}</span>
+          <span class="chip">人物画像 {{ literaryMemory.characterVoices.length }}</span>
           <span class="chip">其他实体 {{ contextGraphState.counts.entities }}</span>
           <span class="chip">关系 {{ contextGraphState.counts.relationships }}</span>
         </div>
@@ -604,8 +604,8 @@
       <section v-if="literaryMode" class="panel character-voice-bible">
         <div class="dictionary-heading">
           <div>
-            <h3>人物声音档案</h3>
-            <p class="muted small">只记录有原文证据、能落实到措辞与句式的声音特征。候选画像不会强制套用到译文；确认后才进入常规翻译上下文。</p>
+            <h3>人物角色与声音档案</h3>
+            <p class="muted small">预处理提取的角色定位、人物特征和声音观察先作为候选。请核对下方原文证据；确认后，角色定位与人物特征才会进入翻译上下文。</p>
           </div>
           <div class="voice-counts">
             <span class="chip">人物 {{ literaryMemory.characterVoices.length }}</span>
@@ -614,8 +614,8 @@
           </div>
         </div>
         <div v-if="!literaryMemory.characterVoices.length" class="review-empty">
-          <strong>尚未建立人物声音档案</strong>
-          <p class="muted small">翻译流程分析到足够的对白证据后，会生成候选画像。系统不会为了填满档案而猜测人物口头禅、方言或性格。</p>
+          <strong>尚未建立人物角色与声音画像</strong>
+          <p class="muted small">完成全书预处理后会出现带原文证据的角色/特征候选；具备对白证据时还会生成声音观察。系统不会为了填满档案而猜测人物口头禅、方言或性格。</p>
         </div>
         <article v-for="profile in literaryMemory.characterVoices" :key="profile.characterId" class="voice-profile-card">
           <div class="voice-profile-heading">
