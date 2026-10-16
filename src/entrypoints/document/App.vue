@@ -345,6 +345,26 @@
         </p>
       </section>
 
+      <details v-if="literaryStatus.enabled" class="panel literary-diagnostics">
+        <summary>翻译诊断轨迹（{{ literaryStatus.diagnostics.length }}）</summary>
+        <p class="muted small">用于定位分析、上下文注入、翻译请求和审校阶段。只记录状态、配置与计数，不保存完整原文或译文。</p>
+        <div v-if="!literaryStatus.diagnostics.length" class="review-empty">
+          尚无诊断事件。开始翻译后，这里会记录各阶段是否真正执行及其结果。
+        </div>
+        <article
+          v-for="entry in [...literaryStatus.diagnostics].slice(-40).reverse()"
+          :key="entry.id"
+          class="literary-diagnostic-row"
+        >
+          <div class="literary-diagnostic-heading">
+            <span class="chip">{{ entry.stage }}</span>
+            <span class="chip" :class="'diagnostic-' + entry.status">{{ entry.status }}</span>
+            <time class="muted small">{{ new Date(entry.at).toLocaleTimeString() }}</time>
+          </div>
+          <p>{{ entry.message }}</p>
+          <p v-if="entry.details" class="muted small literary-diagnostic-details">{{ entry.details }}</p>
+        </article>
+      </details>
 
       <!-- 实体映射决定同一人物、地点、组织或重要物品在后续章节统一使用什么译名。 -->
       <section v-if="literaryMode" class="panel literary-dictionary">
