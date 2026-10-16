@@ -353,6 +353,7 @@
           <span class="chip">当前原文 {{ contextGraphState.segmentCount.toLocaleString() }} 段</span>
           <span class="chip">章节 {{ contextGraphState.counts.chapters }}</span>
           <span class="chip">人物 {{ contextGraphState.counts.characters }}</span>
+          <span class="chip">人物声音档案 {{ literaryMemory.characterVoices.length }}</span>
           <span class="chip">其他实体 {{ contextGraphState.counts.entities }}</span>
           <span class="chip">关系 {{ contextGraphState.counts.relationships }}</span>
         </div>
@@ -2149,6 +2150,7 @@ async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = t
 function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   const next = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
   const existing = [...(next.entities || [])];
+  const existingVoices = [...(next.characterVoices || [])];
   const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const candidates: LiteraryEntity[] = nodes.flatMap((node: any) => {
     const target = typeof node?.attributes?.suggestedTranslation === 'string'
@@ -2204,7 +2206,88 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     };
     for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
   }
+
+  // Context Graph voice observations are grounded in sampled source quotes. Bridge them into
+  // the reader's existing candidate-review workflow, but do not auto-confirm voice profiles.
+  const voiceCandidates = nodes.flatMap((node: any) => {
+    if (node?.kind !== 'character') return [];
+    const canonicalSourceName = typeof node?.name === 'string' ? node.name.trim() : '';
+    const targetName = typeof node?.attributes?.suggestedTranslation === 'string'
+      ? node.attributes.suggestedTranslation.trim() : '';
+    const voices = Array.isArray(node?.attributes?.voice)
+      ? Array.from(new Set(node.attributes.voice.filter((item: unknown): item is string =>
+          typeof item === 'string' && item.trim()))).slice(0, 8)
+      : [];
+    const aliases = Array.isArray(node?.attributes?.aliases)
+      ? Array.from(new Set(node.attributes.aliases.filter((item: unknown): item is string =>
+          typeof item === 'string' && item.trim()))).slice(0, 12)
+      : [];
+    const evidenceRows = Array.isArray(node?.evidence) ? node.evidence.filter((item: any) =>
+      typeof item?.segmentId === 'string' && typeof item?.quote === 'string' && item.quote.trim()).slice(0, 6) : [];
+    if (!canonicalSourceName || !voices.length || !evidenceRows.length) return [];
+    const observation = voices.join('；').slice(0, 240);
+    return [{
+      characterId: 'context-graph-' + String(node.id || normalizeName(canonicalSourceName)).slice(0, 80),
+      canonicalSourceName,
+      ...(targetName ? { targetName } : {}),
+      aliases,
+      status: 'candidate' as const,
+      confidence: 0.55,
+      voiceCore: { register: observation },
+      contrastRules: [],
+      evidence: evidenceRows.map((item: any) => ({
+        segmentId: item.segmentId,
+        sourceQuote: item.quote.slice(0, 240),
+        observation,
+        dimension: 'register' as const,
+        confidence: 0.55,
+      })),
+      openQuestions: ['全书预分析生成的候选声音特征；请结合完整对白核对后再确认。'],
+    }];
+  });
+  for (const candidate of voiceCandidates) {
+    const candidateNames = new Set([candidate.canonicalSourceName, ...candidate.aliases].map(normalizeName).filter(Boolean));
+    const matchingIndices: number[] = [];
+    existingVoices.forEach((prior, index) => {
+      if ([prior.canonicalSourceName, ...prior.aliases].map(normalizeName).some((name) => candidateNames.has(name))) {
+        matchingIndices.push(index);
+      }
+    });
+    if (!matchingIndices.length) {
+      existingVoices.push(candidate);
+      continue;
+    }
+    const canonicalIndex = matchingIndices[0]!;
+    const matching = matchingIndices.map((index) => existingVoices[index]!);
+    const protectedProfile = matching.find((profile) => profile.status === 'confirmed' || profile.status === 'rejected');
+    const canonicalSourceName = protectedProfile?.canonicalSourceName || candidate.canonicalSourceName;
+    const aliases = Array.from(new Set([
+      ...matching.flatMap((profile) => [profile.canonicalSourceName, ...profile.aliases]),
+      candidate.canonicalSourceName, ...candidate.aliases,
+    ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSourceName)))).slice(0, 12);
+    const evidence = [
+      ...(protectedProfile?.evidence || matching[0]!.evidence),
+      ...candidate.evidence,
+    ].filter((item, index, all) =>
+      all.findIndex((other) => other.segmentId === item.segmentId && other.sourceQuote === item.sourceQuote) === index,
+    ).slice(0, 12);
+    existingVoices[canonicalIndex] = {
+      ...(protectedProfile || candidate),
+      characterId: protectedProfile?.characterId || candidate.characterId,
+      canonicalSourceName,
+      ...(protectedProfile?.targetName ? { targetName: protectedProfile.targetName } : candidate.targetName ? { targetName: candidate.targetName } : {}),
+      aliases,
+      status: protectedProfile?.status || 'candidate',
+      confidence: Math.max(...matching.map((profile) => profile.confidence), candidate.confidence),
+      voiceCore: protectedProfile ? protectedProfile.voiceCore : candidate.voiceCore,
+      contrastRules: protectedProfile?.contrastRules || [],
+      evidence,
+      openQuestions: Array.from(new Set([...matching.flatMap((profile) => profile.openQuestions), ...candidate.openQuestions])).slice(0, 8),
+    };
+    for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existingVoices.splice(index, 1);
+  }
   next.entities = existing.slice(0, 120);
+  next.characterVoices = existingVoices.slice(0, 80);
   return next;
 }
 async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
