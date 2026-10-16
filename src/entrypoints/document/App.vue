@@ -810,7 +810,7 @@ const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
 const workspaceRunGeneration = ref(0);
-const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v3-name-map';
+const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v4-target-language';
 const contextGraphState = ref<any>({
   projectId: '', sourceRevisionId: '', segmentCount: 0,
   counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
