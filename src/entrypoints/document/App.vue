@@ -3032,4 +3032,30 @@ async function resetAll() {
   .entity-card-spacer { display: none; }
   .dictionary-actions { align-items: stretch; }
 }
+.literary-diagnostics { margin-top: .7rem; }
+.literary-diagnostics > summary {
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 650;
+}
+.literary-diagnostics > p { line-height: 1.55; }
+.literary-diagnostic-row {
+  padding: .65rem .75rem;
+  margin-top: .55rem;
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.literary-diagnostic-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+}
+.literary-diagnostic-row > p { margin: .4rem 0 0; line-height: 1.5; overflow-wrap: anywhere; }
+.literary-diagnostic-details { white-space: normal; word-break: break-word; }
+.diagnostic-failed { color: #b42318 !important; background: #ffebe9 !important; }
+.diagnostic-warning { color: #7d4e00 !important; background: #fff1c2 !important; }
+.diagnostic-completed { color: #1a7f37 !important; background: #dafbe1 !important; }
+.diagnostic-started { color: #0969da !important; background: #ddf4ff !important; }
 </style>
