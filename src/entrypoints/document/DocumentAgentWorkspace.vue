@@ -220,6 +220,22 @@
               </div>
             </div>
           </details>
+
+          <details v-if="project" class="agent-subdetails">
+            <summary>Agent 执行轨迹（{{ runEvents.length }} 条）</summary>
+            <p class="agent-detail-description">显示本次运行实际执行的阶段、上下文注入计数、模型响应和异常。轨迹不包含完整原文、译文或 Prompt。</p>
+            <div v-if="runEvents.length" class="agent-trace-list">
+              <article v-for="event in [...runEvents].slice(-80).reverse()" :key="event.eventId" class="agent-trace-row">
+                <div class="agent-trace-heading">
+                  <strong>{{ eventTitle(event.type) }}</strong>
+                  <span>{{ event.type }}</span>
+                  <time>{{ new Date(event.createdAt).toLocaleTimeString() }}</time>
+                </div>
+                <p v-if="eventSummary(event)">{{ eventSummary(event) }}</p>
+              </article>
+            </div>
+            <p v-else class="agent-detail-description">该运行还没有可显示的持久化事件。启动或刷新运行后会自动读取。</p>
+          </details>
         </div>
       </details>
     </template>
@@ -298,6 +314,8 @@ const restorationProjectMissing = ref(false);
 const verification = ref<any>(null);
 const activeRun = ref<any>(null);
 const runs = ref<any[]>([]);
+const runEvents = ref<any[]>([]);
+let eventCursor = 0;
 const busy = ref(false);
 const error = ref('');
 const message = ref('');
@@ -339,6 +357,43 @@ const runLabels: Record<string, string> = {
 };
 function runStatusLabel(status: string): string { return runLabels[status] || status; }
 
+const eventLabels: Record<string, string> = {
+  'run.context.ready': '上下文准备完成',
+  'plan.ready': '批次计划',
+  'stage.started': '阶段开始',
+  'stage.completed': '阶段完成',
+  'stage.warning': '阶段警告',
+  'batch.started': '批次开始',
+  'batch.prompt.ready': '翻译请求上下文',
+  'batch.model.response': '模型返回结果',
+  'batch.translation.completed': '初译完成',
+  'batch.completed': '批次完成',
+  'batch.partial': '批次部分返回',
+  'model.call.failed': '模型调用失败',
+  'run.failed': '运行失败',
+  'run.completed': '运行完成',
+  'review.context.ready': '审校上下文',
+  'review.discarded': '审校结果已丢弃',
+  'translations.accepted': '译文已采纳',
+};
+function eventTitle(type: string): string { return eventLabels[type] || type; }
+function eventSummary(event: any): string {
+  const payload = event?.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+  // 避免在调试面板复述正文/译文或完整 Prompt；只展示排障所需的元数据。
+  return Object.entries(payload)
+    .filter(([key]) => !/(?:sourceText|draft|translatedText|translationText|prompt|rawOutput|content)/i.test(key))
+    .map(([key, value]) => {
+      const rendered = Array.isArray(value)
+        ? value.slice(0, 8).map(String).join(', ') + (value.length > 8 ? '…' : '')
+        : value && typeof value === 'object'
+          ? JSON.stringify(value).slice(0, 180)
+          : String(value);
+      return key + '=' + rendered.slice(0, 240);
+    })
+    .join(' · ')
+    .slice(0, 900);
+}
 
 function promptInput(): PromptInput {
   return {
@@ -451,6 +506,17 @@ async function refreshProject() {
   if (activeRun.value) await refreshRun(activeRun.value.runId);
 }
 
+async function refreshRunEvents(runId: string): Promise<void> {
+  if (!project.value || !runId) return;
+  const endpoint = '/api/documents/projects/' + encodeURIComponent(project.value.projectId) +
+    '/events?runId=' + encodeURIComponent(runId) + '&after=' + eventCursor + '&limit=1000';
+  const result = await api(endpoint);
+  const incoming = Array.isArray(result.events) ? result.events : [];
+  if (!incoming.length) return;
+  runEvents.value = [...runEvents.value, ...incoming].slice(-1000);
+  eventCursor = Math.max(eventCursor, ...incoming.map((item: any) => Number(item.eventId) || 0));
+}
+
 function projectInput() {
   return {
     title: props.title,
@@ -533,6 +599,8 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
       method: 'POST',
       body: JSON.stringify({ scope: runScope, prompt: promptInput() }),
     });
+    runEvents.value = [];
+    eventCursor = 0;
     activeRun.value = response.run;
     message.value = response.started ? '翻译 Agent 已启动；进度和模型调用结果会持久化到项目数据库。' : '当前范围没有需要处理的片段。';
     await refreshProject();
@@ -544,6 +612,8 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
 
 async function selectRun(runId: string) {
   try {
+    runEvents.value = [];
+    eventCursor = 0;
     await refreshRun(runId);
     if (isRunning.value) schedulePoll(runId);
   } catch (e) {
@@ -553,8 +623,9 @@ async function selectRun(runId: string) {
 
 async function refreshRun(runId: string) {
   if (!project.value) return;
-  const result = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + encodeURIComponent(runId));
+  const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/runs/' + encodeURIComponent(runId));
   activeRun.value = result.run;
+  await refreshRunEvents(runId);
 }
 
 function schedulePoll(runId: string) {
@@ -603,6 +674,7 @@ async function cancelRun() {
       method: 'POST', body: '{}',
     });
     activeRun.value = response.run;
+    await refreshRunEvents(activeRun.value.runId);
     message.value = '已请求停止；已持久化的候选不会删除。';
     if (pollTimer) clearTimeout(pollTimer);
   } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
