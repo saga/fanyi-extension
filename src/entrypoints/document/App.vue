@@ -2602,8 +2602,8 @@ async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = t
 
 function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   const next = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
-  const existing = [...(next.entities || [])];
-  const existingVoices = [...(next.characterVoices || [])];
+  let existing = [...(next.entities || [])];
+  let existingVoices = [...(next.characterVoices || [])];
   const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const candidates: LiteraryEntity[] = nodes.flatMap((node: any) => {
     if (node?.status === 'rejected') return [];
@@ -2624,6 +2624,22 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   });
   const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
     .toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
+  const rejectedGraphNames = new Set(nodes
+    .filter((node: any) => node?.status === 'rejected')
+    .flatMap((node: any) => [
+      node?.name,
+      ...(Array.isArray(node?.attributes?.aliases) ? node.attributes.aliases : []),
+    ])
+    .map(normalizeName)
+    .filter(Boolean));
+  if (rejectedGraphNames.size) {
+    existing = existing.filter((entity) => entity.reviewStatus === 'confirmed' ||
+      ![entity.source, ...(entity.aliases || [])].some((name) => rejectedGraphNames.has(normalizeName(name))));
+    existingVoices = existingVoices.filter((profile) =>
+      profile.status === 'confirmed' || profile.status === 'rejected' ||
+      !profile.characterId.startsWith('context-graph-') ||
+      ![profile.canonicalSourceName, ...profile.aliases].some((name) => rejectedGraphNames.has(normalizeName(name))));
+  }
   const entityNames = (entity: LiteraryEntity) =>
     new Set([entity.source, ...(entity.aliases || [])].map(normalizeName).filter(Boolean));
   const overlaps = (a: LiteraryEntity, b: LiteraryEntity) => {
