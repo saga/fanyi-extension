@@ -345,10 +345,11 @@
         </p>
       </section>
 
-      <section v-if="literaryMode && readerConfig?.documentUseLocalAgent" class="panel context-graph-status">
+      <section v-if="literaryMode" class="panel context-graph-status">
         <div class="literary-status-title">
           <strong>全书预处理与规范译名</strong>
           <span class="chip" :class="'diagnostic-' + contextGraphState.status">{{ contextGraphStatusLabel }}</span>
+          <span v-if="readerConfig?.documentUseLocalAgent !== true" class="chip">需要启用本机 Agent</span>
           <span class="chip">当前原文 {{ contextGraphState.segmentCount.toLocaleString() }} 段</span>
           <span class="chip">章节 {{ contextGraphState.counts.chapters }}</span>
           <span class="chip">人物 {{ contextGraphState.counts.characters }}</span>
@@ -356,6 +357,9 @@
           <span class="chip">关系 {{ contextGraphState.counts.relationships }}</span>
         </div>
         <p>{{ contextGraphPhaseLabel }}<template v-if="contextGraphState.runId"> · Run {{ contextGraphState.runId.slice(0, 8) }}</template></p>
+        <p v-if="readerConfig?.documentUseLocalAgent !== true" class="muted small">
+          全书实体预处理需要使用本机 Agent。启用后，已有小说也会自动检查并补做分析；不会删除已有译文。
+        </p>
         <div v-if="contextGraphState.status === 'running' || contextGraphState.status === 'queued'" class="progress context-graph-progress">
           <div class="bar" :style="{ width: contextGraphProgressPercent + '%' }"></div>
         </div>
@@ -383,11 +387,11 @@
           这本书尚无当前原文版本的预处理记录。开启后会先扫描全书，再进行有原文证据的人物、专名、关系和章节分析；不会自动覆盖已确认译名。
         </p>
         <div class="settings-actions context-graph-actions">
-          <button class="btn ghost" type="button" :disabled="contextGraphState.loading" @click="refreshContextGraphStatus()">
+          <button class="btn ghost" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphState.loading" @click="refreshContextGraphStatus()">
             {{ contextGraphState.loading ? '刷新中…' : '刷新预处理状态' }}
           </button>
           <button class="btn" type="button"
-            :disabled="contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
+            :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
             @click="reanalyzeContextGraph">
             {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
           </button>
@@ -891,12 +895,15 @@ const contextGraphPhaseLabel = computed(() => {
   return labels[phase] || labels[run.status] || '读取预处理状态中。';
 });
 const contextGraphProgressPercent = computed(() => {
-  const status = contextGraphState.value.status;
+  const { status, phase, progress } = contextGraphState.value;
   if (status === 'completed' || status === 'failed') return 100;
-  if (status === 'model-analysis') return 68;
-  if (status === 'sample') return 32;
-  if (status === 'running') return 12;
   if (status === 'queued') return 4;
+  if (phase === 'sample') return 32;
+  if (phase === 'model-analysis') {
+    const sampleCount = Number(progress?.sampleCount || progress?.scan?.samplePlan?.length || 0);
+    return sampleCount > 0 ? 68 : 55;
+  }
+  if (status === 'running') return 12;
   return 0;
 });
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
@@ -2161,27 +2168,45 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   });
   const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
     .toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
+  const entityNames = (entity: LiteraryEntity) =>
+    new Set([entity.source, ...(entity.aliases || [])].map(normalizeName).filter(Boolean));
+  const overlaps = (a: LiteraryEntity, b: LiteraryEntity) => {
+    const namesA = entityNames(a);
+    return Array.from(entityNames(b)).some((name) => namesA.has(name));
+  };
+
   for (const candidate of candidates) {
-    const candidateNames = new Set([candidate.source, ...(candidate.aliases || [])].map(normalizeName).filter(Boolean));
-    const index = existing.findIndex((prior) =>
-      [prior.source, ...(prior.aliases || [])].map(normalizeName).some((name) => candidateNames.has(name)));
-    if (index < 0) {
+    // A new alias can bridge multiple old rows; collapse the connected group instead of
+    // leaving conflicting translations for the same character in the visible glossary.
+    const matchingIndices: number[] = [];
+    existing.forEach((prior, index) => {
+      if (overlaps(prior, candidate)) matchingIndices.push(index);
+    });
+    if (!matchingIndices.length) {
       existing.push(candidate);
       continue;
     }
-    const prior = existing[index]!;
-    const aliases = Array.from(new Set([...(prior.aliases || []), prior.source, ...(candidate.aliases || []), candidate.source]
-      .filter((name) => normalizeName(name) !== normalizeName(prior.source))));
-    // Graph re-analysis repairs stale AI suggestions, but never overwrites an explicitly confirmed human mapping.
-    existing[index] = prior.reviewStatus === 'confirmed'
-      ? { ...prior, aliases: aliases.slice(0, 12), evidence: prior.evidence || candidate.evidence }
-      : { ...prior, source: candidate.source, target: candidate.target, kind: candidate.kind,
-          aliases: aliases.slice(0, 12), evidence: candidate.evidence || prior.evidence, reviewStatus: 'suggested' };
+    const canonicalIndex = matchingIndices[0]!;
+    const matching = matchingIndices.map((index) => existing[index]!);
+    const confirmed = matching.find((item) => item.reviewStatus === 'confirmed');
+    const canonicalSource = confirmed?.source || candidate.source;
+    const target = confirmed?.target || candidate.target;
+    const kind = confirmed?.kind || candidate.kind;
+    const aliases = Array.from(new Set([
+      ...matching.flatMap((item) => [item.source, ...(item.aliases || [])]),
+      candidate.source, ...(candidate.aliases || []),
+    ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSource))));
+    const evidence = confirmed?.evidence || candidate.evidence || matching.find((item) => item.evidence)?.evidence || '';
+    existing[canonicalIndex] = {
+      source: canonicalSource, target, kind, aliases: aliases.slice(0, 12),
+      ...(evidence ? { evidence } : {}),
+      reviewStatus: confirmed ? 'confirmed' : 'suggested',
+    };
+    for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
   }
   next.entities = existing.slice(0, 120);
   return next;
 }
-
 async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
   const next = mergeContextGraphEntitySuggestions(graph);
   if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities)) return;
