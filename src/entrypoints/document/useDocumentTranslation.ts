@@ -913,6 +913,27 @@ export function useDocumentTranslation() {
         });
         throw new Error(response?.error || '翻译失败');
       }
+      if (literaryMode && response.trace) {
+        const trace = response.trace;
+        recordDiagnostic('provider-trace', trace.cacheSource === 'model' ? 'completed' : 'info',
+          trace.cacheSource === 'model' ? '本批由翻译 Provider 新生成结果' :
+            trace.cacheSource === 'extension-cache' ? '本批直接命中扩展缓存，未调用模型' :
+              trace.cacheSource === 'local-sqlite-cache' ? '本批直接命中本机 SQLite 缓存，未调用模型' :
+                '翻译 Provider 返回了诊断信息，但未标明结果来源',
+          {
+            cacheSource: trace.cacheSource || 'unknown',
+            provider: trace.provider || 'unknown',
+            translationMode: trace.translationMode || 'unknown',
+            inputBytes: trace.inputBytes,
+            reservedMaxTokens: trace.reservedMaxTokens,
+            outputBytes: trace.outputBytes,
+            outputBlocks: trace.outputBlocks,
+            missingInResponseCount: trace.missingInResponse?.length ?? 0,
+            missingIds: (trace.missingInResponse || []).slice(0, 8).join(','),
+            jsonParseFailed: trace.jsonParseFailed,
+            parseError: trace.parseError?.slice(0, 160) || '',
+          });
+      }
 
       const roundIds = segments.map((segment) => segment.id);
       for (const [id, text] of normalizeDocumentBatchResult(response.result, roundIds)) {
