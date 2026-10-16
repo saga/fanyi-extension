@@ -77,6 +77,11 @@
         <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'agent' }" @click="activeTab = 'agent'">
           翻译 Agent
         </button>
+        <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'trajectory' }" @click="activeTab = 'trajectory'">
+          Agent 轨迹
+          <span v-if="agentTrajectoryActiveTasks.length" class="tab-badge">{{ agentTrajectoryActiveTasks.length }} 运行中</span>
+          <span v-else-if="agentTrajectoryEvents.length" class="tab-badge">{{ agentTrajectoryEvents.length }} 事件</span>
+        </button>
       </nav>
 
       <!-- Tab 1 阅读：只留操作条 + 章节导航 + 正文。设置、记忆、词典都在第二个 Tab。 -->
@@ -706,6 +711,91 @@
         <p class="muted small">当前文档未启用书籍翻译模式。EPUB / PDF 打开时默认启用；也可在本页上方勾选「实体一致性与文风审校」。</p>
       </section>
       </template>
+      <section v-if="activeTab === 'trajectory'" class="agent-trajectory-page">
+        <div class="agent-trajectory-header">
+          <div>
+            <h2>Agent 轨迹</h2>
+            <p class="muted small">显示本机服务持久化的真实执行事件，不是根据动画推测的进度。并发运行的初译、准确性审校、文风审校和全书预处理会分别记录。</p>
+          </div>
+          <div class="agent-trajectory-controls">
+            <select v-model="agentTrajectoryFilter" aria-label="筛选 Agent 轨迹">
+              <option value="all">全部事件</option>
+              <option value="model">模型调用</option>
+              <option value="issues">警告与失败</option>
+            </select>
+            <button class="btn ghost" :disabled="agentTrajectoryLoading" @click="refreshAgentTrajectory(true)">
+              {{ agentTrajectoryLoading ? '刷新中…' : '刷新轨迹' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="agent-trajectory-summary">
+          <span class="chip" :class="'diagnostic-' + (workspaceActiveRun?.status || 'idle')">
+            {{ workspaceActiveRun?.status === 'running' || workspaceActiveRun?.status === 'queued'
+              ? '翻译任务运行中' : workspaceActiveRun?.status === 'failed' ? '最近任务失败' : '显示持久化执行记录' }}
+          </span>
+          <span class="chip">项目 {{ workspaceProject?.projectId?.slice(0, 8) || '未连接' }}</span>
+          <span class="chip">事件 {{ agentTrajectoryEvents.length }}</span>
+          <span class="chip">最近事件 ID {{ agentTrajectoryCursor || '—' }}</span>
+        </div>
+
+        <p v-if="agentTrajectoryError" class="warn agent-trajectory-error">{{ agentTrajectoryError }}</p>
+        <p v-else-if="readerConfig?.documentUseLocalAgent !== true" class="warn agent-trajectory-error">
+          尚未启用本机 Local Agent。启用后，翻译批次和审校阶段才会记录在这里。
+        </p>
+        <p v-else-if="agentTrajectoryLoading && !agentTrajectoryEvents.length" class="muted small">正在读取 SQLite 中保存的 Agent 事件…</p>
+
+        <div class="agent-trajectory-current" v-if="agentTrajectoryActiveTasks.length">
+          <h3>当前正在执行</h3>
+          <div class="agent-trajectory-active-grid">
+            <article v-for="task in agentTrajectoryActiveTasks" :key="task.key" class="agent-task-card">
+              <span class="agent-task-pulse"></span>
+              <div class="agent-task-main">
+                <strong>{{ task.role }}</strong>
+                <span>{{ task.title }}</span>
+                <small class="muted">{{ task.runId ? 'Run ' + task.runId.slice(0, 8) : '' }}{{ task.batchLabel ? ' · ' + task.batchLabel : '' }}</small>
+              </div>
+            </article>
+          </div>
+        </div>
+        <div v-else-if="agentTrajectoryEvents.length" class="agent-trajectory-idle">
+          最近没有未完成的 Agent 阶段。下面保留了本次项目的执行历史，包括已经结束的模型调用。
+        </div>
+
+        <div class="agent-trajectory-list">
+          <article
+            v-for="event in agentTrajectoryVisibleEvents"
+            :key="event.eventId"
+            class="agent-trace-row"
+            :class="'trace-' + agentTrajectoryStatus(event)"
+          >
+            <div class="agent-trace-rail">
+              <span class="agent-trace-dot"></span>
+              <span class="agent-trace-line"></span>
+            </div>
+            <div class="agent-trace-body">
+              <div class="agent-trace-heading">
+                <strong>{{ agentTrajectoryTitle(event) }}</strong>
+                <span class="chip">{{ agentTrajectoryRole(event) }}</span>
+                <span class="chip" :class="'diagnostic-' + agentTrajectoryStatus(event)">{{ agentTrajectoryStatusLabel(event) }}</span>
+                <time class="muted small">{{ new Date(event.createdAt).toLocaleTimeString() }}</time>
+              </div>
+              <p class="agent-trace-detail">{{ agentTrajectoryDetail(event) }}</p>
+              <div class="agent-trace-meta">
+                <span v-if="event.runId">Run {{ event.runId.slice(0, 8) }}</span>
+                <span>事件 #{{ event.eventId }}</span>
+                <span v-if="event.payload?.batchIndex">批次 {{ event.payload.batchIndex }}{{ event.payload.batchCount ? '/' + event.payload.batchCount : '' }}</span>
+                <span v-if="event.payload?.durationMs != null">耗时 {{ formatAgentDuration(event.payload.durationMs) }}</span>
+                <span v-if="event.payload?.requestId">Request {{ event.payload.requestId.slice(0, 12) }}</span>
+              </div>
+            </div>
+          </article>
+          <p v-if="!agentTrajectoryLoading && !agentTrajectoryVisibleEvents.length" class="review-empty">
+            {{ agentTrajectoryEvents.length ? '当前筛选条件下没有事件。' : '还没有 Agent 事件。打开本机 Agent 并启动一次翻译或全书预处理后，这里会自动显示各阶段轨迹。' }}
+          </p>
+        </div>
+      </section>
+
       <!-- 保持 Agent workspace 实例常驻；切换阅读页或设置 Tab 时只隐藏，不销毁已建立的项目关联。 -->
       <DocumentAgentWorkspace
         v-if="doc"
@@ -810,6 +900,13 @@ const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
 const workspaceRunGeneration = ref(0);
+const agentTrajectoryEvents = ref<any[]>([]);
+const agentTrajectoryCursor = ref(0);
+const agentTrajectoryLoading = ref(false);
+const agentTrajectoryError = ref('');
+const agentTrajectoryFilter = ref<'all' | 'model' | 'issues'>('all');
+let agentTrajectoryPollTimer: number | null = null;
+let agentTrajectoryRequestGeneration = 0;
 const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v4-target-language';
 const contextGraphState = ref<any>({
   projectId: '', sourceRevisionId: '', segmentCount: 0,
@@ -1016,6 +1113,256 @@ function jumpToWorkChapter() {
   }
 }
 
+function stopAgentTrajectoryPolling() {
+  if (agentTrajectoryPollTimer !== null) window.clearTimeout(agentTrajectoryPollTimer);
+  agentTrajectoryPollTimer = null;
+  agentTrajectoryRequestGeneration++;
+}
+
+function formatAgentDuration(value: unknown): string {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  return ms >= 60000
+    ? Math.floor(ms / 60000) + ' 分 ' + Math.round((ms % 60000) / 1000) + ' 秒'
+    : (ms / 1000).toFixed(1) + ' 秒';
+}
+
+async function refreshAgentTrajectory(reset = false): Promise<void> {
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  if (!config.documentUseLocalAgent) {
+    agentTrajectoryError.value = '请先启用本机 Local Agent，才能读取持久化 Agent 轨迹。';
+    return;
+  }
+  let project = workspaceProject.value;
+  if (!project?.projectId) project = await ensureDocumentWorkspace();
+  if (!project?.projectId) {
+    agentTrajectoryError.value = '尚未建立当前文档的本机项目，暂时无法读取事件。';
+    return;
+  }
+  const generation = agentTrajectoryRequestGeneration;
+  agentTrajectoryLoading.value = true;
+  try {
+    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+    const token = config.documentLocalAgentToken || '';
+    const query = reset || agentTrajectoryCursor.value <= 0
+      ? '?latest=true&limit=500'
+      : '?after=' + agentTrajectoryCursor.value + '&limit=500';
+    const response = await workspaceApi<{ events: any[] }>(
+      base, token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events' + query,
+    );
+    if (generation !== agentTrajectoryRequestGeneration || activeTab.value !== 'trajectory') return;
+    const incoming = Array.isArray(response.events) ? response.events : [];
+    if (reset || agentTrajectoryCursor.value <= 0) {
+      agentTrajectoryEvents.value = incoming.slice(-600);
+    } else if (incoming.length) {
+      const seen = new Set(agentTrajectoryEvents.value.map((item) => item.eventId));
+      agentTrajectoryEvents.value = [...agentTrajectoryEvents.value, ...incoming.filter((item) => !seen.has(item.eventId))].slice(-600);
+    }
+    agentTrajectoryCursor.value = agentTrajectoryEvents.value.reduce(
+      (max, item) => Math.max(max, Number(item.eventId) || 0), agentTrajectoryCursor.value,
+    );
+    agentTrajectoryError.value = '';
+  } catch (error) {
+    if (generation === agentTrajectoryRequestGeneration) {
+      agentTrajectoryError.value = '读取 Agent 轨迹失败：' + (error instanceof Error ? error.message : String(error));
+    }
+  } finally {
+    if (generation === agentTrajectoryRequestGeneration) agentTrajectoryLoading.value = false;
+  }
+}
+
+function scheduleAgentTrajectoryPoll(): void {
+  if (activeTab.value !== 'trajectory') return;
+  if (agentTrajectoryPollTimer !== null) window.clearTimeout(agentTrajectoryPollTimer);
+  agentTrajectoryPollTimer = window.setTimeout(async () => {
+    agentTrajectoryPollTimer = null;
+    await refreshAgentTrajectory(false);
+    scheduleAgentTrajectoryPoll();
+  }, 1200);
+}
+
+async function startAgentTrajectoryPolling(): Promise<void> {
+  stopAgentTrajectoryPolling();
+  if (activeTab.value !== 'trajectory') return;
+  await refreshAgentTrajectory(true);
+  scheduleAgentTrajectoryPoll();
+}
+
+function agentTrajectoryRole(event: any): string {
+  const type = String(event?.type || '');
+  const stage = String(event?.payload?.stage || '');
+  if (type.startsWith('context-graph.')) return '全书预处理';
+  if (stage === 'style-review' || (type === 'stage.started' && /文风|声音/.test(String(event?.payload?.label || '')))) return '人物声音 / 文风 Agent';
+  if (stage === 'review' || type === 'review.context.ready') return '准确性 / 术语 Reviewer';
+  if (stage === 'translate' || type.startsWith('batch.') || type === 'translation-brief.ready') return '翻译 Agent';
+  if (type.startsWith('run.') || type === 'plan.ready') return '任务编排';
+  return 'Agent 工作流';
+}
+
+function agentTrajectoryTitle(event: any): string {
+  const type = String(event?.type || '');
+  const p = event?.payload || {};
+  const stage = String(p.stage || '');
+  const labels: Record<string, string> = {
+    'run.planned': '翻译运行已创建',
+    'plan.ready': '批次计划已生成',
+    'run.context.ready': '运行上下文已固定',
+    'batch.started': '开始翻译批次',
+    'translation-brief.ready': 'TranslationBrief 已组装',
+    'batch.prompt.ready': '向模型提交请求',
+    'batch.model.response': '模型已返回结果',
+    'batch.translation.completed': '初译候选已保存',
+    'batch.partial': '模型返回不完整，正在重试',
+    'batch.output.validation': '模型输出校验告警',
+    'batch.completed': '批次与审校流程结束',
+    'batch.discarded': '批次结果已丢弃',
+    'stage.started': String(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'translate' ? '初译阶段' : '工作流阶段')) + '开始',
+    'stage.completed': String(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'validate' ? '结果校验' : '工作流阶段')) + '完成',
+    'stage.warning': String(stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : '工作流阶段') + '告警',
+    'model.call.failed': '模型调用失败',
+    'review.context.ready': 'Reviewer 上下文已准备',
+    'review.discarded': '审校结果已丢弃',
+    'run.failed': '运行失败',
+    'context-graph.phase': p.phase === 'model-analysis' ? '开始分析人物、实体与规范译名' : '开始扫描全书原文',
+    'context-graph.scan.completed': '全书扫描与样本规划完成',
+    'context-graph.completed': '全书预处理完成',
+    'context-graph.failed': '全书预处理失败',
+    'context-graph.reviewed': '人工修改图谱状态',
+  };
+  return labels[type] || type.replace(/[.-]/g, ' ');
+}
+
+function agentTrajectoryDetail(event: any): string {
+  const p = event?.payload || {};
+  const type = String(event?.type || '');
+  const details: string[] = [];
+  if (p.chapter) details.push('章节：' + p.chapter);
+  if (type === 'plan.ready') {
+    details.push('原文片段 ' + (p.segmentCount ?? '?') + ' 段，规划 ' + (p.batchCount ?? '?') + ' 批');
+    details.push('初译并发 ' + (p.translationConcurrency ?? '?') + '，审校并发 ' + (p.reviewConcurrency ?? 0));
+  }
+  if (type === 'run.context.ready') {
+    details.push('模型 ' + (p.provider || '?') + '/' + (p.model || '运行时默认'));
+    details.push('语言方向 ' + (p.sourceLang || '?') + ' → ' + (p.targetLang || '?'));
+    details.push('实体 ' + (p.memoryEntities ?? 0) + '，人物声音 ' + (p.characterVoices ?? 0) + '，术语 ' + (p.glossaryTerms ?? 0));
+  }
+  if (type === 'batch.started') {
+    details.push('片段 ' + (Array.isArray(p.segmentIds) ? p.segmentIds.length : '?') + ' 段');
+    details.push('前文上下文 ' + (p.precedingContextCount ?? 0) + ' 段');
+    details.push('会话策略：' + (p.sessionStrategy || '独立批次'));
+  }
+  if (type === 'translation-brief.ready') {
+    details.push('上下文 ' + (p.contextChars ?? 0) + ' 字符');
+    details.push('实体 ' + (p.entityCount ?? 0) + '，关系 ' + (p.relationshipCount ?? 0) +
+      '，人物声音 ' + (p.characterVoiceCount ?? 0) + '，规范译名 ' + (p.nameMappingCount ?? 0));
+    if (p.contextHash) details.push('Context hash ' + String(p.contextHash).slice(0, 12));
+  }
+  if (type === 'batch.prompt.ready') {
+    details.push('模型 ' + (p.provider || '?') + '/' + (p.model || '运行时默认'));
+    details.push('原文 ' + (p.sourceChars ?? '?') + ' 字符，系统指令 ' + (p.systemPromptChars ?? '?') + ' 字符，用户提示 ' + (p.userPromptChars ?? '?') + ' 字符');
+    details.push('前文 ' + (p.precedingSegmentCount ?? 0) + ' 段，规范译名 ' + (p.contextGraphNameMappingCount ?? 0));
+    if (Array.isArray(p.contextGraphNameMappingPreview) && p.contextGraphNameMappingPreview.length) {
+      details.push('译名映射：' + p.contextGraphNameMappingPreview.slice(0, 8).map((item: any) => item.source + ' → ' + item.target).join('；'));
+    }
+  }
+  if (type === 'batch.model.response') {
+    details.push('返回 ' + (p.returnedSegments ?? 0) + '/' + (p.requestedSegments ?? 0) + ' 段');
+    if (p.missingCount) details.push('缺少 ' + p.missingCount + ' 段：' + (p.missingIds || []).slice(0, 8).join(', '));
+  }
+  if (type === 'batch.translation.completed') details.push('候选 ' + (p.candidateCount ?? 0) + ' 段，审校 ' + (p.reviewScheduled ? '已排队' : '关闭'));
+  if (type === 'review.context.ready') {
+    details.push('注入实体 ' + (p.injectedEntities ?? 0) + '，关系 ' + (p.injectedRelationships ?? 0) +
+      '，章节摘要 ' + (p.injectedChapterSummaries ?? 0));
+    details.push('人物声音 ' + (p.injectedCharacterVoices ?? 0) + '，声音规则 ' + (p.injectedRelationshipVoiceRules ?? 0) +
+      '，已批准锚点 ' + (p.injectedVoiceAnchors ?? 0));
+  }
+  if (type === 'stage.completed') {
+    if (p.reviewedIds) details.push('审校片段 ' + p.reviewedIds.length + ' 段');
+    if (p.findingCount != null) details.push('发现 ' + p.findingCount + ' 项');
+    if (p.accuracyFindingCount != null) details.push('准确性问题 ' + p.accuracyFindingCount + ' 项');
+    if (p.terminologyFindingCount != null) details.push('术语问题 ' + p.terminologyFindingCount + ' 项');
+    if (p.styleFindingCount != null) details.push('文风问题 ' + p.styleFindingCount + ' 项');
+    if (p.revisedCount != null) details.push('新修订候选 ' + p.revisedCount + ' 段');
+  }
+  if (type === 'context-graph.phase') {
+    details.push('来源扫描 ' + (p.segmentCount ?? '?') + ' 段');
+    if (p.sampleCount != null) details.push('本轮样本 ' + p.sampleCount + ' 段');
+    if (p.sourceLang) details.push('语言方向 ' + p.sourceLang + ' → ' + (p.targetLang || '?'));
+    if (p.model) details.push('模型 ' + p.provider + '/' + p.model);
+  }
+  if (type === 'context-graph.scan.completed') {
+    details.push('扫描 ' + (p.segmentCount ?? '?') + ' 段 / ' + (p.chapterCount ?? '?') + ' 章');
+    details.push('名称候选 ' + (p.nameCandidateCount ?? 0) + '，重复短语 ' + (p.repeatedPhraseCandidateCount ?? 0));
+    details.push('对话片段 ' + (p.dialogueSegmentCount ?? 0)，抽样 ' + (p.sampleCount ?? 0) + ' 段');
+  }
+  if (type === 'context-graph.completed') {
+    details.push('人物 ' + (p.characterCount ?? 0) + '，其他实体 ' + (p.entityCount ?? 0) + '，关系 ' + (p.relationshipCount ?? 0));
+    details.push('规范译名 ' + (p.canonicalNameMappingCount ?? 0) + ' · 无效证据 ' + (p.invalidEvidenceCount ?? 0));
+  }
+  const error = p.error || p.warning;
+  if (error) details.push('错误：' + String(error));
+  if (p.reason) details.push('原因：' + String(p.reason));
+  return details.join(' · ') || (p.label ? String(p.label) : '已记录持久化事件。');
+}
+
+function agentTrajectoryStatus(event: any): string {
+  const type = String(event?.type || '');
+  if (type.endsWith('.failed') || type === 'model.call.failed' || type === 'run.failed') return 'failed';
+  if (type === 'stage.warning' || type === 'batch.partial' || type === 'batch.output.validation') return 'warning';
+  if (type === 'batch.started' || type === 'stage.started' || type === 'context-graph.phase' || type === 'batch.prompt.ready') return 'running';
+  return 'completed';
+}
+
+function agentTrajectoryStatusLabel(event: any): string {
+  const status = agentTrajectoryStatus(event);
+  return status === 'failed' ? '失败' : status === 'warning' ? '告警' : status === 'running' ? '进行中' : '已记录';
+}
+
+const agentTrajectoryVisibleEvents = computed(() => {
+  const events = agentTrajectoryEvents.value;
+  if (agentTrajectoryFilter.value === 'issues') return events.filter((event) => ['failed', 'warning'].includes(agentTrajectoryStatus(event)));
+  if (agentTrajectoryFilter.value === 'model') return events.filter((event) =>
+    ['batch.started', 'batch.prompt.ready', 'batch.model.response', 'batch.translation.completed',
+      'stage.started', 'stage.completed', 'stage.warning', 'model.call.failed', 'context-graph.phase',
+      'context-graph.scan.completed', 'context-graph.completed', 'context-graph.failed'].includes(event.type));
+  return events;
+});
+
+const agentTrajectoryActiveTasks = computed(() => {
+  const tasks = new Map<string, any>();
+  for (const event of agentTrajectoryEvents.value) {
+    const type = String(event.type || '');
+    const p = event.payload || {};
+    const runId = String(event.runId || '');
+    if (type === 'context-graph.phase') {
+      const key = runId + ':context-graph';
+      tasks.set(key, { key, runId, role: '全书预处理 Agent', title: p.phase === 'model-analysis' ? '正在分析人物、实体与规范译名' : '正在扫描原文并选择样本' });
+    } else if (type === 'context-graph.completed' || type === 'context-graph.failed') {
+      tasks.delete(runId + ':context-graph');
+    } else if (type === 'batch.started') {
+      const key = runId + ':translate:' + p.batchIndex;
+      tasks.set(key, { key, runId, role: '翻译 Agent', title: '正在翻译本批原文', batchLabel: p.batchIndex ? '批次 ' + p.batchIndex + (p.batchCount ? '/' + p.batchCount : '') : '' });
+    } else if (type === 'batch.translation.completed') {
+      tasks.delete(runId + ':translate:' + p.batchIndex);
+    } else if (type === 'stage.started') {
+      const key = runId + ':' + p.stage + ':' + (p.batchIndex ?? 0);
+      tasks.set(key, { key, runId, role: agentTrajectoryRole(event), title: String(p.label || agentTrajectoryTitle(event)), batchLabel: p.batchIndex ? '批次 ' + p.batchIndex + (p.batchCount ? '/' + p.batchCount : '') : '' });
+    } else if (type === 'stage.completed' || type === 'stage.warning') {
+      tasks.delete(runId + ':' + p.stage + ':' + (p.batchIndex ?? 0));
+    } else if (type === 'batch.completed' || type === 'run.failed') {
+      for (const key of Array.from(tasks.keys())) if (key.startsWith(runId + ':')) tasks.delete(key);
+    }
+  }
+  return Array.from(tasks.values()).slice(-8).reverse();
+});
+
+watch(activeTab, (nextTab) => {
+  if (nextTab === 'trajectory') void startAgentTrajectoryPolling();
+  else stopAgentTrajectoryPolling();
+});
+
 watch(activeTab, async (nextTab, previousTab) => {
   if (nextTab !== 'reading' || previousTab !== 'agent' || !doc.value) return;
   const config = readerConfig.value || await getConfig();
@@ -1063,6 +1410,7 @@ watch([doc, literaryMode, () => readerConfig.value?.documentUseLocalAgent], ([cu
 onUnmounted(() => {
   if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
   contextGraphPollTimer = null;
+  stopAgentTrajectoryPolling();
 });
 
 onMounted(async () => {
@@ -2461,7 +2809,9 @@ async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
   const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length);
   await replaceCurrentTranslations(accepted);
   if (literaryMode.value && config.documentUseLocalAgent) {
-    await ensureContextGraphPreprocessing(refreshed.project, { force: false });
+    // Do not block workspace initialization on a potentially long full-book model analysis.
+    // The trajectory tab must be able to poll and show each preprocessing phase while it runs.
+    void ensureContextGraphPreprocessing(refreshed.project, { force: false });
   }
   return refreshed.project;
 }
