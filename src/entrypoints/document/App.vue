@@ -1128,6 +1128,7 @@ function formatAgentDuration(value: unknown): string {
 }
 
 async function refreshAgentTrajectory(reset = false): Promise<void> {
+  if (reset) agentTrajectoryRequestGeneration++;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (!config.documentUseLocalAgent) {
@@ -1355,7 +1356,7 @@ const agentTrajectoryActiveTasks = computed(() => {
       tasks.set(key, { key, runId, role: agentTrajectoryRole(event), title: String(p.label || agentTrajectoryTitle(event)), batchLabel: p.batchIndex ? '批次 ' + p.batchIndex + (p.batchCount ? '/' + p.batchCount : '') : '' });
     } else if (type === 'stage.completed' || type === 'stage.warning') {
       tasks.delete(runId + ':' + p.stage + ':' + (p.batchIndex ?? 0));
-    } else if (type === 'batch.completed' || type === 'run.failed') {
+    } else if (type === 'batch.completed' || type === 'run.failed' || type === 'run.finished') {
       for (const key of Array.from(tasks.keys())) if (key.startsWith(runId + ':')) tasks.delete(key);
     }
   }
