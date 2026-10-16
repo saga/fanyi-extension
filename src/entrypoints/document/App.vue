@@ -2606,6 +2606,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   const existingVoices = [...(next.characterVoices || [])];
   const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const candidates: LiteraryEntity[] = nodes.flatMap((node: any) => {
+    if (node?.status === 'rejected') return [];
     const target = typeof node?.attributes?.suggestedTranslation === 'string'
       ? node.attributes.suggestedTranslation.trim() : '';
     const source = typeof node?.name === 'string' ? node.name.trim() : '';
@@ -2663,7 +2664,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   // Context Graph voice observations are grounded in sampled source quotes. Bridge them into
   // the reader's existing candidate-review workflow, but do not auto-confirm voice profiles.
   const voiceCandidates = nodes.flatMap((node: any) => {
-    if (node?.kind !== 'character') return [];
+    if (node?.kind !== 'character' || node?.status === 'rejected') return [];
     const canonicalSourceName = typeof node?.name === 'string' ? node.name.trim() : '';
     const targetName = typeof node?.attributes?.suggestedTranslation === 'string'
       ? node.attributes.suggestedTranslation.trim() : '';
