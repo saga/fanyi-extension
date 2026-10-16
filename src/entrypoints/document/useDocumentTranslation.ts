@@ -282,6 +282,17 @@ async function translateSegmentsViaServer(
 }
 
 
+type LiteraryDiagnosticStatus = 'started' | 'completed' | 'info' | 'warning' | 'failed';
+
+interface LiteraryDiagnosticEvent {
+  id: string;
+  at: string;
+  stage: string;
+  status: LiteraryDiagnosticStatus;
+  message: string;
+  details: string;
+}
+
 interface LiteraryStatus {
   enabled: boolean;
   chapterTitle: string;
@@ -290,6 +301,7 @@ interface LiteraryStatus {
   reviewedSegments: number;
   warnings: string[];
   reviewFindings: LiteraryReviewFinding[];
+  diagnostics: LiteraryDiagnosticEvent[];
 }
 
 /** 从长章中均匀抽样；分析请求有界，书籍全文不会送进单个请求。 */
@@ -606,7 +618,8 @@ export function useDocumentTranslation() {
   // 文学记忆属于当前阅读会话，继续/重试保留；切换文档时重置。
   const literaryMemory = ref<LiteraryBookMemory>(createEmptyLiteraryMemory());
   const literaryStatus = ref<LiteraryStatus>({
-    enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0, warnings: [], reviewFindings: [],
+    enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0,
+    warnings: [], reviewFindings: [], diagnostics: [],
   });
   let analyzedChapterKeys = new Set<string>();
 
@@ -614,7 +627,35 @@ export function useDocumentTranslation() {
   let generation = 0;
   // 重试必须沿用上一轮批次顺序（其中可能把当前阅读页提到了最前面）。
   let lastRunSegmentIds: string[] = [];
+  let diagnosticSequence = 0;
   const isCurrentRun = (runId: number) => generation === runId;
+
+  /**
+   * 在控制台和会话快照中记录轻量诊断事件。details 只允许计数、配置名和片段 ID，
+   * 不记录整段原文、完整译文、Prompt、令牌或本机鉴权信息。
+   */
+  function recordDiagnostic(
+    stage: string,
+    status: LiteraryDiagnosticStatus,
+    message: string,
+    details: Record<string, string | number | boolean | null> = {},
+  ): void {
+    const at = new Date().toISOString();
+    const entry: LiteraryDiagnosticEvent = {
+      id: at + '-' + (++diagnosticSequence),
+      at,
+      stage,
+      status,
+      message,
+      details: Object.entries(details)
+        .filter(([, value]) => value !== null && value !== '')
+        .map(([key, value]) => key + '=' + String(value))
+        .join(' · '),
+    };
+    literaryStatus.value.diagnostics = [...literaryStatus.value.diagnostics, entry].slice(-120);
+    const log = status === 'failed' ? console.error : status === 'warning' ? console.warn : console.info;
+    log.call(console, '[document-reader][trace]', JSON.stringify({ ...entry, details }));
+  }
 
   async function checkpoint(options: TranslateOptions): Promise<void> {
     try {
@@ -669,6 +710,15 @@ export function useDocumentTranslation() {
         ? status.warnings.filter((warning): warning is string => typeof warning === 'string').slice(-20)
         : [],
       reviewFindings: normalizeLiteraryReviewFindings(status?.reviewFindings),
+      diagnostics: Array.isArray(status?.diagnostics)
+        ? status.diagnostics.filter((item): item is LiteraryDiagnosticEvent =>
+            !!item && typeof item === 'object' &&
+            typeof item.id === 'string' && typeof item.at === 'string' &&
+            typeof item.stage === 'string' && typeof item.message === 'string' &&
+            typeof item.details === 'string' &&
+            ['started', 'completed', 'info', 'warning', 'failed'].includes(item.status))
+          .slice(-120)
+        : [],
     };
     state.value = {
       translations: new Map(restoredTranslations),
@@ -694,7 +744,8 @@ export function useDocumentTranslation() {
     analyzedChapterKeys = new Set<string>();
     literaryMemory.value = createEmptyLiteraryMemory();
     literaryStatus.value = {
-      enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0, warnings: [], reviewFindings: [],
+      enabled: false, bookProfileReady: false, chapterTitle: '', analyzedChapters: 0, reviewedSegments: 0,
+      warnings: [], reviewFindings: [], diagnostics: [],
     };
     state.value = {
       translations: new Map(),
