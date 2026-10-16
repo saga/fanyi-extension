@@ -283,6 +283,12 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.translations.has('chapter2-s0')).toBe(false);
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(3); // 全书预分析 + 第一章分析 + 第一章审校
+    expect(literaryStatus.value.diagnostics.some((event) => event.stage === 'book-analysis' && event.status === 'completed')).toBe(true);
+    expect(literaryStatus.value.diagnostics.some((event) => event.stage === 'chapter-analysis' && event.status === 'completed')).toBe(true);
+    expect(literaryStatus.value.diagnostics.some((event) => event.stage === 'translation-request' && event.status === 'started')).toBe(true);
+    expect(literaryStatus.value.diagnostics.some((event) => event.stage === 'translation-response' && event.status === 'completed')).toBe(true);
+    expect(literaryStatus.value.diagnostics.some((event) => event.stage === 'review' && event.status === 'completed')).toBe(true);
+    expect(literaryStatus.value.diagnostics.some((event) => event.stage === 'run' && event.status === 'completed')).toBe(true);
 
     await run(segments, options, true);
     expect(state.value.done).toBe(2);
