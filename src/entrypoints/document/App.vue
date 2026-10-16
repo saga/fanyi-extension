@@ -87,7 +87,7 @@
         </button>
       </nav>
 
-      <!-- Tab 1 阅读：只留操作条 + 章节导航 + 正文。设置、记忆、词典都在第二个 Tab。 -->
+      <!-- 阅读区只保留操作条、章节导航和正文；配置与人物/预处理分别放在独立 Tab。 -->
       <template v-if="activeTab === 'reading'">
       <section class="panel action-bar">
         <div class="action-title">
