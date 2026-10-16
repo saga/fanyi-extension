@@ -36,6 +36,15 @@ export interface DocumentTranslationSnapshot {
     reviewedSegments: number;
     warnings: string[];
     reviewFindings: LiteraryReviewFinding[];
+    /** Backward-compatible lightweight diagnostic trail; absent in older saved sessions. */
+    diagnostics?: Array<{
+      id: string;
+      at: string;
+      stage: string;
+      status: string;
+      message: string;
+      details: string;
+    }>;
   };
   analyzedChapterKeys: string[];
   lastRunSegmentIds: string[];
@@ -231,6 +240,7 @@ function sessionFromCreate(input: CreateActiveDocumentSessionInput, now: number)
       reviewedSegments: 0,
       warnings: [],
       reviewFindings: [],
+      diagnostics: [],
     },
     analyzedChapterKeys: [],
     lastRunSegmentIds: [],
