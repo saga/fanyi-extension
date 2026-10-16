@@ -380,19 +380,24 @@ function eventTitle(type: string): string { return eventLabels[type] || type; }
 function eventSummary(event: any): string {
   const payload = event?.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
-  // 避免在调试面板复述正文/译文或完整 Prompt；只展示排障所需的元数据。
-  return Object.entries(payload)
-    .filter(([key]) => !/(?:sourceText|draft|translatedText|translationText|prompt|rawOutput|content)/i.test(key))
-    .map(([key, value]) => {
-      const rendered = Array.isArray(value)
-        ? value.slice(0, 8).map(String).join(', ') + (value.length > 8 ? '…' : '')
-        : value && typeof value === 'object'
-          ? JSON.stringify(value).slice(0, 180)
-          : String(value);
-      return key + '=' + rendered.slice(0, 240);
-    })
-    .join(' · ')
-    .slice(0, 900);
+  // 仅显示有限元数据。Prompt/正文/译文类字段严格按名称排除，避免连 promptRevisionId
+  // 和 prompt 长度等诊断字段一起过滤；嵌套对象不展开，避免意外显示原文片段。
+  const sensitiveKey = /^(?:source|sourceText|sourceExcerpt|draft|draftExcerpt|translation|translationText|translatedText|finalTranslation|prompt|systemPrompt|userPrompt|promptText|rawOutput|content|segments)$/i;
+  const rows: string[] = [];
+  for (const [key, value] of Object.entries(payload)) {
+    if (sensitiveKey.test(key)) continue;
+    if (value && typeof value === 'object' && !Array.isArray(value)) continue;
+    let rendered = '';
+    if (Array.isArray(value)) {
+      // Only show identifier arrays, never arbitrary text arrays.
+      if (!/(?:ids|segmentIds)$/i.test(key)) continue;
+      rendered = value.slice(0, 8).map(String).join(', ') + (value.length > 8 ? '…' : '');
+    } else {
+      rendered = String(value);
+    }
+    rows.push(key + '=' + rendered.slice(0, 240));
+  }
+  return rows.join(' · ').slice(0, 900);
 }
 
 function promptInput(): PromptInput {
@@ -1191,6 +1196,32 @@ onUnmounted(() => {
   border-right-color: transparent;
   border-radius: 50%;
   animation: agent-spin .75s linear infinite;
+}
+.agent-trace-list { display: grid; gap: .55rem; margin-top: .75rem; }
+.agent-trace-row {
+  padding: .7rem .75rem;
+  border: 1px solid #e5e5ea;
+  border-radius: 9px;
+  background: #fafafa;
+  min-width: 0;
+}
+.agent-trace-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .45rem .7rem;
+  color: var(--agent-secondary);
+  font-size: .72rem;
+}
+.agent-trace-heading strong { color: var(--agent-ink); font-size: .8rem; }
+.agent-trace-heading time { margin-left: auto; white-space: nowrap; }
+.agent-trace-row p {
+  margin: .4rem 0 0;
+  color: #424245;
+  font-size: .76rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 @keyframes agent-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
