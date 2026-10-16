@@ -1000,8 +1000,10 @@ function exportLiteraryDiagnostics() {
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = 'literary-translation-diagnostics-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** 子设置面板只提交用户实际改动的字段，避免打开第二个 Tab 时覆盖会话语言。 */
