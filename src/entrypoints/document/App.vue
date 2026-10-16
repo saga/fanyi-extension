@@ -628,6 +628,8 @@
             </span>
           </div>
           <div class="voice-profile-fields">
+            <p v-if="profile.role"><strong>角色定位（候选/确认后使用）：</strong>{{ profile.role }}</p>
+            <p v-if="profile.traits?.length"><strong>人物特征（候选/确认后使用）：</strong>{{ profile.traits.join('；') }}</p>
             <p v-if="profile.voiceCore.register"><strong>语域：</strong>{{ profile.voiceCore.register }}</p>
             <p v-if="profile.voiceCore.syntaxRhythm?.length"><strong>句法 / 节奏：</strong>{{ profile.voiceCore.syntaxRhythm.join('；') }}</p>
             <p v-if="profile.voiceCore.lexicalPreferences?.length"><strong>词汇：</strong>{{ profile.voiceCore.lexicalPreferences.join('；') }}</p>
@@ -2674,6 +2676,11 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       canonicalSourceName,
       ...(targetName ? { targetName } : {}),
       aliases,
+      ...(typeof node?.attributes?.role === 'string' && node.attributes.role.trim()
+        ? { role: node.attributes.role.trim().slice(0, 360) } : {}),
+      ...(Array.isArray(node?.attributes?.traits)
+        ? { traits: Array.from(new Set(node.attributes.traits.filter((item: unknown): item is string =>
+            typeof item === 'string' && item.trim()))).slice(0, 10).map((item) => item.slice(0, 160)) } : {}),
       status: 'candidate' as const,
       confidence: 0.55,
       voiceCore: { register: observation },
@@ -2723,6 +2730,8 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       status: protectedProfile?.status || 'candidate',
       confidence: Math.max(...matching.map((profile) => profile.confidence), candidate.confidence),
       voiceCore: protectedProfile ? protectedProfile.voiceCore : candidate.voiceCore,
+      ...(protectedProfile?.role ? { role: protectedProfile.role } : candidate.role ? { role: candidate.role } : {}),
+      ...(protectedProfile?.traits?.length ? { traits: protectedProfile.traits } : candidate.traits?.length ? { traits: candidate.traits } : {}),
       contrastRules: protectedProfile?.contrastRules || [],
       evidence,
       openQuestions: Array.from(new Set([...matching.flatMap((profile) => profile.openQuestions), ...candidate.openQuestions])).slice(0, 8),
