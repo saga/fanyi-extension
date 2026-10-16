@@ -55,6 +55,8 @@ export interface Config {
   documentUseServerTranslation: boolean;
   documentServerUrl: string;
   documentUseLocalAgent: boolean;
+  /** Automatically select the document-local Agent when health checks succeed; a manual opt-out disables this. */
+  documentAutoSelectLocalAgent: boolean;
   documentLocalAgentProvider: LocalAgentProvider;
   documentLocalAgentUrl: string;
   documentLocalAgentModel: string;
@@ -102,6 +104,7 @@ const defaultConfig: Config = {
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
+  documentAutoSelectLocalAgent: true,
   documentLocalAgentProvider: 'workbuddy',
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
