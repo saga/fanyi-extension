@@ -2892,6 +2892,27 @@ async function ensureContextGraphPreprocessing(project: any, options: { force?: 
   }
 }
 
+watch([sourceLang, targetLang], async ([nextSource, nextTarget], [previousSource, previousTarget]) => {
+  if (nextSource === previousSource && nextTarget === previousTarget) return;
+  if (!activeSessionReady.value || !literaryMode.value ||
+      readerConfig.value?.documentUseLocalAgent !== true || !workspaceProject.value?.projectId) return;
+  const config = readerConfig.value;
+  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
+  try {
+    // Context Graph language metadata and the active Prompt must move together. Save the new
+    // language first, then let the existing preprocessing state machine rebuild stale analysis.
+    await workspaceApi(
+      base, token,
+      '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/prompts',
+      { method: 'POST', body: JSON.stringify(workspacePromptInput()) },
+    );
+    await ensureContextGraphPreprocessing(workspaceProject.value, { force: false });
+  } catch (error) {
+    persistenceMessage.value = '更新预处理语言失败：' + (error instanceof Error ? error.message : String(error));
+  }
+});
+
 async function reanalyzeContextGraph() {
   const project = workspaceProject.value || await ensureDocumentWorkspace();
   if (!project?.projectId) return;
