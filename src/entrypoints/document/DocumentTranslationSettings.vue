@@ -100,6 +100,86 @@
         <span v-if="localStatus === 'ok'" class="connection-ok">本机服务可连接</span>
         <span v-else-if="localStatus === 'fail'" class="connection-fail">本机服务不可用，请检查地址和服务进程</span>
       </div>
+
+      <details class="strategy-settings" open>
+        <summary>高级运行策略</summary>
+        <p class="muted small">
+          仅影响通过本机 Local Agent 新建的翻译运行。修改后保存到文档配置，并在下一次运行生效。
+          服务端会再次限制最大值；文学模式仍强制按章节分批，并保留证据边界与防剧透约束。
+        </p>
+        <div class="settings-grid">
+          <label class="setting-field">
+            <span>每批最多片段数</span>
+            <select v-model.number="config.documentBatchMaxSegments" @change="saveConfig('documentBatchMaxSegments')">
+              <option :value="8">8 段</option>
+              <option :value="12">12 段</option>
+              <option :value="16">16 段（默认）</option>
+              <option :value="20">20 段</option>
+              <option :value="24">24 段</option>
+            </select>
+          </label>
+          <label class="setting-field">
+            <span>每批原文字符上限</span>
+            <select v-model.number="config.documentBatchMaxSourceChars" @change="saveConfig('documentBatchMaxSourceChars')">
+              <option :value="4000">4,000 字符</option>
+              <option :value="6000">6,000 字符</option>
+              <option :value="8000">8,000 字符（默认）</option>
+              <option :value="10000">10,000 字符</option>
+              <option :value="12000">12,000 字符</option>
+            </select>
+          </label>
+          <label class="setting-field">
+            <span>初译并发上限</span>
+            <select v-model.number="config.documentTranslationConcurrency" @change="saveConfig('documentTranslationConcurrency')">
+              <option :value="1">1 路</option>
+              <option :value="2">2 路</option>
+              <option :value="3">3 路</option>
+              <option :value="4">4 路（默认）</option>
+              <option :value="5">5 路</option>
+              <option :value="6">6 路</option>
+            </select>
+            <small class="muted">实际并发还受本机 Provider 会话池容量约束。</small>
+          </label>
+          <label class="setting-field">
+            <span>审校并发上限</span>
+            <select v-model.number="config.documentReviewConcurrency" @change="saveConfig('documentReviewConcurrency')">
+              <option :value="1">1 路</option>
+              <option :value="2">2 路（默认）</option>
+              <option :value="3">3 路</option>
+              <option :value="4">4 路</option>
+            </select>
+            <small class="muted">只在开启文学审校时生效，与初译共享会话池。</small>
+          </label>
+          <label class="setting-field">
+            <span>前文参考片段数</span>
+            <select v-model.number="config.documentPrecedingContextSegments" @change="saveConfig('documentPrecedingContextSegments')">
+              <option :value="0">不注入前文</option>
+              <option :value="2">2 段</option>
+              <option :value="4">4 段（默认）</option>
+              <option :value="6">6 段</option>
+            </select>
+            <small class="muted">只用于指代和场景消歧，不进入本批翻译结果；不能读取后续章节。</small>
+          </label>
+          <label class="setting-field">
+            <span>TranslationBrief 上下文预算</span>
+            <select v-model.number="config.documentContextBudgetChars" @change="saveConfig('documentContextBudgetChars')">
+              <option :value="8000">8,000 字符</option>
+              <option :value="12000">12,000 字符</option>
+              <option :value="16000">16,000 字符</option>
+              <option :value="18000">18,000 字符（默认）</option>
+            </select>
+            <small class="muted">预算不足时优先裁剪低优先级记忆；服务端硬上限为 18,000 字符。</small>
+          </label>
+          <label class="setting-field">
+            <span>单批模型调用最大尝试次数</span>
+            <select v-model.number="config.documentMaxModelAttempts" @change="saveConfig('documentMaxModelAttempts')">
+              <option :value="1">1 次（不重试）</option>
+              <option :value="2">2 次（默认，允许重试一次）</option>
+            </select>
+            <small class="muted">重试时只提交未返回的片段，不重发已成功的整批内容。</small>
+          </label>
+        </div>
+      </details>
     </div>
 
     <label class="switch-line">
@@ -186,6 +266,13 @@ const config = ref<Config>({
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
   documentLocalAgentToken: '',
+  documentBatchMaxSegments: 16,
+  documentBatchMaxSourceChars: 8000,
+  documentTranslationConcurrency: 4,
+  documentReviewConcurrency: 2,
+  documentPrecedingContextSegments: 4,
+  documentContextBudgetChars: 18000,
+  documentMaxModelAttempts: 2,
 });
 const initialized = ref(false);
 const saving = ref(false);
@@ -223,6 +310,9 @@ const documentConfigFields: (keyof Config)[] = [
   'documentPromptStyle', 'documentTranslationMode', 'documentUseServerTranslation', 'documentServerUrl',
   'documentUseLocalAgent', 'documentAutoSelectLocalAgent', 'documentLocalAgentProvider', 'documentLocalAgentUrl',
   'documentLocalAgentModel', 'documentLocalAgentToken',
+  'documentBatchMaxSegments', 'documentBatchMaxSourceChars', 'documentTranslationConcurrency',
+  'documentReviewConcurrency', 'documentPrecedingContextSegments', 'documentContextBudgetChars',
+  'documentMaxModelAttempts',
 ];
 
 async function saveConfig(...fields: (keyof Config)[]) {
@@ -379,12 +469,20 @@ async function checkConfiguration() {
   border-radius: 8px;
   background: #f8fafc;
 }
-.server-settings summary {
+.server-settings summary,
+.strategy-settings summary {
   cursor: pointer;
   color: #57606a;
   font-size: .82rem;
   margin-bottom: .25rem;
 }
+.strategy-settings {
+  display: grid;
+  gap: .65rem;
+  padding-top: .75rem;
+  border-top: 1px solid #e1e6ec;
+}
+.strategy-settings > p { margin: 0; line-height: 1.5; }
 .connection-row, .connection-footer {
   display: flex;
   align-items: center;
