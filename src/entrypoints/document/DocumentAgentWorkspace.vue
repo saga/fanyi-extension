@@ -1259,6 +1259,14 @@ onUnmounted(() => {
 .agent-notice strong { font-size: .9rem; }
 .agent-notice p { margin: .35rem 0 0; color: var(--agent-secondary); font-size: .86rem; line-height: 1.6; overflow-wrap: anywhere; }
 .agent-notice-error { border-color: #f1c8c5; background: #fff8f7; }
+.agent-preprocessing-notice { align-items: center; border-color: #f0d7a4; background: #fffbf2; }
+.agent-preprocessing-copy { flex: 1; min-width: 0; }
+.agent-preprocessing-notice strong { color: #7d4e00; }
+.agent-preprocessing-failed { border-color: #f1c8c5; background: #fff8f7; }
+.agent-preprocessing-failed strong { color: #a61d24; }
+.agent-preprocessing-progress { height: 6px; margin-top: .65rem; overflow: hidden; border-radius: 99px; background: #f1e3c8; }
+.agent-preprocessing-progress > div { height: 100%; border-radius: inherit; background: #b78125; transition: width .25s ease; }
+
 .agent-notice-warning { border-color: #f0d7a4; background: #fffbf2; display: block; }
 .agent-notice-warning > p { margin-bottom: .8rem; }
 .agent-inline-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
