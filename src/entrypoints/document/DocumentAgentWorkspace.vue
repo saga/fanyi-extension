@@ -389,6 +389,12 @@ const eventLabels: Record<string, string> = {
   'review.context.ready': '审校上下文',
   'review.discarded': '审校结果已丢弃',
   'translations.accepted': '译文已采纳',
+  'translation.context-delta.parsed': '初译上下文证据校验',
+  'translation.context-delta.saved': '人物与上下文候选已保存',
+  'translation.context-wave.ready': '后续翻译上下文已冻结',
+  'translation.context-memory.persisted': '项目人物记忆已更新',
+  'translation.context-memory.skipped': '项目记忆更新已跳过',
+  'translation.context-memory.unchanged': '没有新的上下文候选',
 };
 function eventTitle(type: string): string { return eventLabels[type] || type; }
 function eventSummary(event: any): string {
