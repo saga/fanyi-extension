@@ -1574,8 +1574,8 @@ watch(literaryMemory, () => {
   if (literaryMode.value) void persistCurrentSession();
 }, { deep: true });
 
-watch([doc, literaryMode, () => readerConfig.value?.documentUseLocalAgent], ([currentDoc, isLiterary, useLocalAgent]) => {
-  if (!currentDoc || !isLiterary || useLocalAgent !== true) return;
+watch([doc, effectiveDocumentTranslationMode, () => readerConfig.value?.documentUseLocalAgent], ([currentDoc, translationMode, useLocalAgent]) => {
+  if (!currentDoc || translationMode !== 'literary' || useLocalAgent !== true) return;
   // Existing documents must receive preprocessing too; opening an old reading snapshot must not
   // be mistaken for a completed whole-book analysis.
   void ensureDocumentWorkspace().catch((error) => {
@@ -2616,7 +2616,7 @@ function workspacePromptInput(includeLiteraryMemory = false) {
     provider: config?.documentLocalAgentProvider || 'workbuddy',
     model: config?.documentLocalAgentModel || 'auto',
     translationMode: effectiveDocumentTranslationMode.value as 'technical' | 'literary',
-    literaryReview: (literaryMode.value || config?.documentTranslationMode === 'literary') && literaryReview.value,
+    literaryReview: effectiveDocumentTranslationMode.value === 'literary' && literaryReview.value,
     glossary: glossary.value,
     ...(includeLiteraryMemory ? { literaryMemory: literaryMemory.value } : {}),
     translationStrategy: {
@@ -3130,13 +3130,13 @@ async function ensureContextGraphPreprocessing(project: any, options: { force?: 
   }
 }
 
-watch([sourceLang, targetLang, literaryMode], async (
-  [nextSource, nextTarget, nextLiteraryMode],
-  [previousSource, previousTarget, previousLiteraryMode],
+watch([sourceLang, targetLang, effectiveDocumentTranslationMode], async (
+  [nextSource, nextTarget, nextTranslationMode],
+  [previousSource, previousTarget, previousTranslationMode],
 ) => {
   if (nextSource === previousSource && nextTarget === previousTarget &&
-      nextLiteraryMode === previousLiteraryMode) return;
-  if (!activeSessionReady.value || !nextLiteraryMode ||
+      nextTranslationMode === previousTranslationMode) return;
+  if (!activeSessionReady.value || nextTranslationMode !== 'literary' ||
       readerConfig.value?.documentUseLocalAgent !== true || !workspaceProject.value?.projectId) return;
   const config = readerConfig.value;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
