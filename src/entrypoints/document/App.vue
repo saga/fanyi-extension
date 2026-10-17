@@ -2505,6 +2505,15 @@ function workspacePromptInput() {
     literaryReview: (literaryMode.value || config?.documentTranslationMode === 'literary') && literaryReview.value,
     glossary: glossary.value,
     literaryMemory: literaryMemory.value,
+    translationStrategy: {
+      maxBatchSegments: config?.documentBatchMaxSegments ?? 16,
+      maxBatchSourceChars: config?.documentBatchMaxSourceChars ?? 8000,
+      translationConcurrency: config?.documentTranslationConcurrency ?? 4,
+      reviewConcurrency: config?.documentReviewConcurrency ?? 2,
+      precedingContextSegments: config?.documentPrecedingContextSegments ?? 4,
+      contextBudgetChars: config?.documentContextBudgetChars ?? 18000,
+      maxModelAttempts: config?.documentMaxModelAttempts ?? 2,
+    },
   };
 }
 
