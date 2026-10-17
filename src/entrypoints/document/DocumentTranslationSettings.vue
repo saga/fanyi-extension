@@ -103,6 +103,11 @@
 
       <details class="strategy-settings" open>
         <summary>高级运行策略</summary>
+        <label class="switch-line">
+          <input v-model="config.documentLiteraryReviewEnabled" type="checkbox"
+            @change="saveConfig('documentLiteraryReviewEnabled')" />
+          <span>默认启用文学审校（准确性/术语与人物声音/文风）</span>
+        </label>
         <p class="muted small">
           仅影响通过本机 Local Agent 新建的翻译运行。修改后保存到文档配置，并在下一次运行生效。
           服务端会再次限制最大值；文学模式仍强制按章节分批，并保留证据边界与防剧透约束。
@@ -273,6 +278,7 @@ const config = ref<Config>({
   documentPrecedingContextSegments: 4,
   documentContextBudgetChars: 18000,
   documentMaxModelAttempts: 2,
+  documentLiteraryReviewEnabled: true,
 });
 const initialized = ref(false);
 const saving = ref(false);
@@ -312,7 +318,7 @@ const documentConfigFields: (keyof Config)[] = [
   'documentLocalAgentModel', 'documentLocalAgentToken',
   'documentBatchMaxSegments', 'documentBatchMaxSourceChars', 'documentTranslationConcurrency',
   'documentReviewConcurrency', 'documentPrecedingContextSegments', 'documentContextBudgetChars',
-  'documentMaxModelAttempts',
+  'documentMaxModelAttempts', 'documentLiteraryReviewEnabled',
 ];
 
 async function saveConfig(...fields: (keyof Config)[]) {
