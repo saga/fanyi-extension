@@ -907,6 +907,11 @@ import {
   rememberWorkspaceProject,
   workspaceApi,
 } from './documentWorkspaceClient';
+import {
+  assessContextGraphReadiness,
+  CONTEXT_GRAPH_ANALYSIS_VERSION,
+  contextGraphSnapshotFromResponse,
+} from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
@@ -972,7 +977,6 @@ const agentTrajectoryError = ref('');
 const agentTrajectoryFilter = ref<'all' | 'model' | 'issues'>('all');
 let agentTrajectoryPollTimer: number | null = null;
 let agentTrajectoryRequestGeneration = 0;
-const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v5-language-pinned';
 const contextGraphState = ref<any>({
   projectId: '', sourceRevisionId: '', segmentCount: 0,
   counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
@@ -1071,6 +1075,38 @@ const contextGraphProgressPercent = computed(() => {
   if (status === 'running') return 12;
   return 0;
 });
+
+const effectiveDocumentTranslationMode = computed(() =>
+  literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
+);
+const translationPreprocessingRequired = computed(() =>
+  readerConfig.value?.documentUseLocalAgent === true && effectiveDocumentTranslationMode.value === 'literary',
+);
+const translationPreprocessingReadiness = computed(() => assessContextGraphReadiness({
+  required: translationPreprocessingRequired.value,
+  loading: contextGraphState.value.loading || contextGraphAnalyzing.value,
+  snapshot: contextGraphState.value,
+  expectedProjectId: workspaceProject.value?.projectId || null,
+  expectedSourceRevisionId: workspaceProject.value?.currentSourceRevisionId || null,
+  sourceLang: sourceLang.value,
+  targetLang: targetLang.value,
+}));
+const translationBlockedByPreprocessing = computed(() =>
+  translationPreprocessingRequired.value && !translationPreprocessingReadiness.value.ready,
+);
+const translationPreprocessingUiState = computed(() => ({
+  ...contextGraphState.value,
+  required: translationPreprocessingRequired.value,
+  ready: translationPreprocessingReadiness.value.ready,
+  reason: translationPreprocessingReadiness.value.reason,
+  message: translationPreprocessingReadiness.value.message,
+  progressPercent: contextGraphProgressPercent.value,
+  expectedProjectId: workspaceProject.value?.projectId || '',
+  expectedSourceRevisionId: workspaceProject.value?.currentSourceRevisionId || '',
+  sourceLang: sourceLang.value,
+  targetLang: targetLang.value,
+}));
+
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
