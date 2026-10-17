@@ -26,6 +26,12 @@
 
 ## 前后端协作约束
 
+**启用 Local Agent 时，阅读页和 Agent Workspace 必须共用同一个 Project/Run pipeline。** 阅读页的“翻译当前页/继续翻译下一待译页/翻译下一页/翻译下三页/强制重译当前页/重试失败项”，以及 Agent Workspace、CLI 和项目 API，都必须通过 `/api/documents/projects/:projectId/runs` 与 Local Agent Service 的同一 Run executor 执行。入口只选择 segment IDs / Run scope；不得在 `useDocumentTranslation.ts` 中为 Local Agent 再跑一套浏览器侧批次循环。该旧执行路径只供非 Local Agent/轻量服务模式使用。
+
+Local Agent 模式下，服务端 SQLite 是项目人物与上下文记忆的事实来源。扩展仅在新建项目时迁移旧阅读会话记忆；后续用户明确编辑/确认人物、实体、关系、角色声音或文风时，才通过 `/literary-memory` 显式保存。普通 Prompt 更新和 Run 创建不得把旧 IndexedDB 记忆快照隐式重写成当前记忆 revision。每个本地 Run 结束后，阅读页刷新服务端记忆，再保存本地阅读恢复快照。
+
+文学初译的 `context_delta` 验证、来源顺序合并、冻结 wave 边界、冲突审计和自动候选记忆持久化全部属于 `vocal-saga/local-agent-service`。扩展可以展示这些持久化事件，也可以编辑/确认候选，但不得复制服务端的提取/合并算法或直接把模型候选标记为已确认。统一管线不要求所有任务使用同一个 Prompt；小说/技术文档的策略可不同，但执行生命周期和可信数据边界必须统一。
+
 1. 扩展只发送完成任务所必需的输入、上下文和版本信息；不得把整个项目历史无差别重复发送给每个请求。
 2. 文档翻译的分段、章节边界、原文版本、已采纳译文和人工修订必须保持稳定关联，避免任务完成后译文写回错误段落。
 3. 对长任务使用服务端提供的持久化任务/项目接口和事件状态；不要依赖浏览器页面一直存活，也不要在 UI 线程中执行长时间模型调用。
