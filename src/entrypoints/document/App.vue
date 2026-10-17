@@ -930,7 +930,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
+import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -2503,7 +2503,7 @@ function workspaceInput() {
   };
 }
 
-function workspacePromptInput() {
+function workspacePromptInput(includeLiteraryMemory = false) {
   const config = readerConfig.value;
   return {
     systemPrompt: documentSystemPromptEditor.value || builtInDocumentSystemPrompt.value,
@@ -2515,7 +2515,7 @@ function workspacePromptInput() {
     translationMode: (literaryMode.value ? 'literary' : (config?.documentTranslationMode || 'technical')) as 'technical' | 'literary',
     literaryReview: (literaryMode.value || config?.documentTranslationMode === 'literary') && literaryReview.value,
     glossary: glossary.value,
-    literaryMemory: literaryMemory.value,
+    ...(includeLiteraryMemory ? { literaryMemory: literaryMemory.value } : {}),
     translationStrategy: {
       maxBatchSegments: config?.documentBatchMaxSegments ?? 16,
       maxBatchSourceChars: config?.documentBatchMaxSourceChars ?? 8000,
@@ -3038,12 +3038,14 @@ async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
     return null;
   }
   workspaceSourceChanged.value = false;
+  let createdNewProject = false;
   if (!project) {
     const created = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects', {
       method: 'POST',
-      body: JSON.stringify({ ...input, prompt }),
+      body: JSON.stringify({ ...input, prompt: workspacePromptInput(true) }),
     });
     project = created.project;
+    createdNewProject = true;
     await rememberWorkspaceProject(input, project.projectId);
   } else {
     // 保存同一份 Prompt 配置；两个 Tab 的下一次运行会拿到同一个版本指纹。
@@ -3054,11 +3056,43 @@ async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
   }
   // 首次切换时迁移 IndexedDB 已有译文；只填数据库中没有当前来源版本的片段。
   await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
-  // 初始化项目时可能先于导入旧译文保存了 Voice Bible；导入后重新核验锚点的原文与已采纳译文。
-  await workspaceApi(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory', {
-    method: 'POST',
-    body: JSON.stringify({ memory: literaryMemory.value }),
-  });
+  // 只有首次创建项目时才迁移扩展会话中的 Voice Bible。已有项目的记忆以服务端 SQLite 为准；
+  // 不能在每次翻页/启动 Run 时把旧的 IndexedDB 快照重新写成 current revision。
+  const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
+  if (createdNewProject) {
+    // 创建时保存的 Voice Bible 可能早于旧译文导入；导入后再提交一次，以便服务端重新核验锚点。
+    await workspaceApi(base, token, memoryPath, {
+      method: 'POST',
+      body: JSON.stringify({ memory: literaryMemory.value }),
+    });
+  }
+  let currentMemory = await workspaceApi<{ current: { memoryRevisionId: string | null; memory: unknown } }>(
+    base, token, memoryPath,
+  );
+  const cachedMemory = literaryMemory.value;
+  const hasLegacyMemory = cachedMemory.entities.length > 0 ||
+    cachedMemory.relationships.length > 0 ||
+    cachedMemory.chapterSummaries.length > 0 ||
+    cachedMemory.recentExamples.length > 0 ||
+    cachedMemory.characterVoices.length > 0 ||
+    cachedMemory.relationshipVoiceRules.length > 0 ||
+    cachedMemory.voiceAnchors.length > 0 ||
+    !!cachedMemory.styleGuideStatus &&
+      ([cachedMemory.styleGuide.narrativeVoice, cachedMemory.styleGuide.register, cachedMemory.styleGuide.rhythm,
+        cachedMemory.styleGuide.dialogue, cachedMemory.styleGuide.diction].some((value) => !!value?.trim()) ||
+       (cachedMemory.styleGuide.rules || []).length > 0 || (cachedMemory.styleGuide.avoid || []).length > 0);
+  // 兼容早期建立的项目：仅当 SQLite 从未拥有记忆 revision 时迁移本地会话，不覆盖已有服务端状态。
+  if (!createdNewProject && !currentMemory.current?.memoryRevisionId && hasLegacyMemory) {
+    await workspaceApi(base, token, memoryPath, {
+      method: 'POST',
+      body: JSON.stringify({ memory: cachedMemory }),
+    });
+    currentMemory = await workspaceApi<{ current: { memoryRevisionId: string | null; memory: unknown } }>(
+      base, token, memoryPath,
+    );
+  }
+  literaryMemory.value = sanitizeLiteraryMemory(currentMemory.current?.memory);
+  await persistCurrentSession();
   if (!project.sourceFileSaved && loadedSourceFile.value) {
     try {
       await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
