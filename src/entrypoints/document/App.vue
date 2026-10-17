@@ -2111,6 +2111,11 @@ async function clearSavedSession() {
 
 function markEntitySuggested(entity: LiteraryEntity) {
   entity.reviewStatus = 'suggested';
+  if (entity.source.trim() && entity.target.trim()) {
+    void persistLiteraryMemoryToWorkspace().catch((error) => {
+      persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
+    });
+  }
 }
 function entityKindLabel(kind: LiteraryEntity['kind']) {
   const labels: Record<LiteraryEntity['kind'], string> = {
@@ -2122,11 +2127,17 @@ function confirmEntity(entity: LiteraryEntity) {
   if (!entity.source.trim() || !entity.target.trim()) return;
   entity.reviewStatus = 'confirmed';
   persistenceMessage.value = '已纳入规范译名：' + entity.source + ' → ' + entity.target;
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存规范译名失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function toggleEntityConfirmation(entity: LiteraryEntity) {
   if (entity.reviewStatus === 'confirmed') {
     entity.reviewStatus = 'suggested';
     persistenceMessage.value = '已将“' + entity.source + '”移回待核对列表';
+    void persistLiteraryMemoryToWorkspace().catch((error) => {
+      persistenceMessage.value = '保存实体状态失败：' + (error instanceof Error ? error.message : String(error));
+    });
     return;
   }
   confirmEntity(entity);
@@ -2141,11 +2152,17 @@ function confirmAllEntities() {
     }
   }
   persistenceMessage.value = count > 0 ? '已将 ' + count + ' 项译名纳入规范，后续章节会优先采用' : '没有待核对的译名';
+  if (count > 0) void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存规范译名失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function setEntityAliases(entity: LiteraryEntity, event: Event) {
   const value = (event.target as HTMLInputElement | null)?.value ?? '';
   entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
   entity.reviewStatus = 'suggested';
+  if (entity.source.trim() && entity.target.trim()) void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function addEntity() {
   entitySearch.value = '';
@@ -2155,14 +2172,25 @@ function addEntity() {
 }
 function removeEntity(index: number) {
   literaryMemory.value.entities.splice(index, 1);
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '移除实体映射失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function markRelationshipSuggested(relation: LiteraryRelationship) {
   relation.reviewStatus = 'suggested';
+  if (relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
+    void persistLiteraryMemoryToWorkspace().catch((error) => {
+      persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
+    });
+  }
 }
 function confirmRelationship(relation: LiteraryRelationship) {
   if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) return;
   relation.reviewStatus = 'confirmed';
   persistenceMessage.value = '已确认关系：' + relation.subject + ' — ' + relation.predicate + ' → ' + relation.object;
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function confirmAllRelationships() {
   let count = 0;
@@ -2173,6 +2201,9 @@ function confirmAllRelationships() {
     }
   }
   persistenceMessage.value = count > 0 ? '已确认剩余关系 ' + count + ' 项' : '没有待确认的关系';
+  if (count > 0) void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function characterName(characterId: string): string {
   const profile = literaryMemory.value.characterVoices.find((item) => item.characterId === characterId);
@@ -2268,6 +2299,9 @@ function addRelationship() {
 }
 function removeRelationship(index: number) {
   literaryMemory.value.relationships.splice(index, 1);
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '移除人物关系失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 
 function pickFile() {
