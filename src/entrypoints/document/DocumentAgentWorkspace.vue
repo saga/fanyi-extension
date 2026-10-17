@@ -23,6 +23,41 @@
       <p>请先到“设置与记忆”启用 Workbuddy 或 OpenCode。启用后，Agent 会自动建立项目、翻译内容并保存进度。</p>
     </section>
 
+    <section
+      v-if="preprocessingState.required && !preprocessingState.ready"
+      class="agent-notice agent-preprocessing-notice"
+      :class="'agent-preprocessing-' + preprocessingState.reason"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="agent-preprocessing-copy">
+        <strong>
+          {{ ['queued', 'running'].includes(preprocessingState.status)
+            ? '全书预处理进行中，翻译暂不可用'
+            : preprocessingState.reason === 'failed'
+              ? '全书预处理失败，翻译暂不可用'
+              : '文学翻译需要先完成全书预处理' }}
+        </strong>
+        <p>{{ preprocessingState.message }}</p>
+        <p v-if="preprocessingState.runId" class="agent-footnote">
+          预处理任务 {{ String(preprocessingState.runId).slice(0, 8) }} · {{ preprocessingState.phase || '等待状态' }}
+        </p>
+        <div
+          v-if="['queued', 'running'].includes(preprocessingState.status)"
+          class="agent-preprocessing-progress"
+          role="progressbar"
+          :aria-valuenow="preprocessingState.progressPercent || 0"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div :style="{ width: (preprocessingState.progressPercent || 0) + '%' }"></div>
+        </div>
+      </div>
+      <button class="agent-button agent-button-secondary" type="button" @click="emit('openPreprocessing')">
+        {{ ['queued', 'running'].includes(preprocessingState.status) ? '查看预处理进度' : '前往预处理' }}
+      </button>
+    </section>
+
     <section v-else-if="restoringProject && !project" class="agent-notice">
       <span class="agent-spinner" aria-hidden="true"></span>
       <div>
@@ -49,10 +84,10 @@
         </div>
         <button
           class="agent-button agent-button-primary agent-button-large"
-          :disabled="busy || restoringProject || segments.length === 0"
+          :disabled="busy || restoringProject || segments.length === 0 || (preprocessingState.required && preprocessingState.ready === false && !!project)"
           @click="startRun('stale')"
         >
-          {{ busy ? '正在准备…' : '开始翻译' }}
+          {{ busy ? '正在准备…' : preprocessingState.required && !project ? '初始化项目并开始预处理' : '开始翻译' }}
         </button>
       </section>
     </template>
@@ -104,7 +139,7 @@
           <button
             v-else-if="pendingSegmentCount > 0"
             class="agent-button agent-button-primary agent-button-large"
-            :disabled="busy || sourceChanged"
+            :disabled="busy || sourceChanged || preprocessingBlockedByPreprocessing"
             @click="startRun('stale')"
           >
             {{ busy ? '正在准备…' : acceptedSegmentCount > 0 ? '继续翻译' : '开始翻译' }}
@@ -151,12 +186,12 @@
               <p>一般情况下只需使用上方的开始 / 继续翻译。以下操作用于有明确需要时。</p>
             </div>
             <div class="agent-inline-actions">
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !(activeRun?.counts?.failed)" @click="startRun('failed')">
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !(activeRun?.counts?.failed)" @click="startRun('failed')">
                 重试失败内容<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
               </button>
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="startRun('all')">重新翻译全文</button>
-              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="resumeRun">恢复中断任务</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing" @click="startRun('all')">重新翻译全文</button>
+              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing" @click="resumeRun">恢复中断任务</button>
               <button class="agent-button agent-button-tertiary" :disabled="busy || isRunning" @click="refreshProject">刷新状态</button>
             </div>
             <p class="agent-footnote">重新翻译会生成新结果。相同原文版本下已有的人工修订会优先保留。</p>
@@ -259,6 +294,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
+  assessContextGraphReadiness,
+  contextGraphSnapshotFromResponse,
+  type ContextGraphPreprocessingSnapshot,
+  type PreprocessingReadiness,
+} from './documentPreprocessing';
+import {
   backupWorkspaceSourceFile,
   importWorkspaceTranslations,
   loadWorkspaceAcceptedTranslations,
@@ -314,10 +355,30 @@ const props = defineProps<{
   userPromptTemplate: string;
   literaryMemory: unknown;
   glossary: unknown;
+  preprocessingState: {
+    required: boolean;
+    ready: boolean;
+    reason: string;
+    message: string;
+    status: string;
+    phase: string;
+    runId: string;
+    progressPercent: number;
+    projectId: string;
+    sourceRevisionId: string;
+    expectedProjectId: string;
+    expectedSourceRevisionId: string;
+    sourceLang: string;
+    targetLang: string;
+    loading?: boolean;
+  };
 }>();
 const emit = defineEmits<{
   acceptedTranslations: [items: Array<{ id: string; text: string }>];
   workspaceSync: [items: Array<{ id: string; text: string }>];
+  projectUpdated: [project: any];
+  openPreprocessing: [];
+  preprocessingStatusRefreshRequested: [project?: any];
 }>();
 
 const project = ref<any>(null);
@@ -341,6 +402,9 @@ const autoAcceptingRunId = ref('');
 const queuedAutoAcceptRunId = ref('');
 const autoAcceptError = ref('');
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
+const preprocessingBlockedByPreprocessing = computed(() =>
+  props.preprocessingState.required && !props.preprocessingState.ready,
+);
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
 const totalSegmentCount = computed(() =>
   Number(verification.value?.totalSegments ?? project.value?.segmentCount ?? props.segments.length),
