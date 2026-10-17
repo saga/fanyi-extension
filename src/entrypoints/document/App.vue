@@ -944,7 +944,6 @@ import {
 import {
   assessContextGraphReadiness,
   CONTEXT_GRAPH_ANALYSIS_VERSION,
-  contextGraphSnapshotFromResponse,
 } from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
@@ -1111,7 +1110,7 @@ const contextGraphProgressPercent = computed(() => {
 });
 
 const effectiveDocumentTranslationMode = computed(() =>
-  effectiveDocumentTranslationMode.value,
+  literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
 );
 const translationPreprocessingRequired = computed(() =>
   readerConfig.value?.documentUseLocalAgent === true && effectiveDocumentTranslationMode.value === 'literary',
