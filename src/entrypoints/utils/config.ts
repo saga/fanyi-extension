@@ -70,6 +70,7 @@ export interface Config {
   documentPrecedingContextSegments: number;
   documentContextBudgetChars: number;
   documentMaxModelAttempts: number;
+  documentLiteraryReviewEnabled: boolean;
 
   /** Document reader typography; English and Chinese can be adjusted independently. */
   documentEnglishFontFamily: string;
@@ -126,6 +127,7 @@ const defaultConfig: Config = {
   documentPrecedingContextSegments: 4,
   documentContextBudgetChars: 18000,
   documentMaxModelAttempts: 2,
+  documentLiteraryReviewEnabled: true,
 
   documentEnglishFontFamily: 'Georgia',
   documentChineseFontFamily: 'Noto Serif CJK SC',
