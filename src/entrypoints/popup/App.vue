@@ -101,6 +101,24 @@
         <span v-else-if="apiStatus === 'ok'" class="status-text success">本机服务可连接</span>
         <span v-else-if="apiStatus === 'fail'" class="status-text error">本机服务不可用，请检查地址、Token 和服务进程</span>
         <span v-if="apiStatus === 'fail' && apiStatusDetail" class="hint-text">{{ apiStatusDetail }}</span>
+        <div class="local-paths">
+          <div class="local-paths-heading">
+            <strong>本机服务存储路径</strong>
+            <button type="button" class="server-toggle" @click="loadLocalAgentDiagnostics">刷新</button>
+          </div>
+          <p v-if="!localAgentAvailable" class="hint-text">服务离线，暂时无法读取实际路径；这里不会显示猜测的默认路径。</p>
+          <p v-else-if="localAgentDiagnosticsError" class="hint-text error">{{ localAgentDiagnosticsError }}</p>
+          <dl v-else-if="localAgentDiagnostics">
+            <template v-for="item in localAgentPathItems" :key="item.key">
+              <dt>{{ item.label }}</dt>
+              <dd><code>{{ item.value || '未配置' }}</code></dd>
+            </template>
+          </dl>
+          <p v-if="localAgentDiagnostics" class="hint-text">
+            正文存储：{{ localAgentDiagnostics.storage.storeContent ? '已启用（请求历史策略）' : '请求历史正文存储已关闭' }}。
+            项目原件是否保存请以各文档项目的原件状态为准；只有分段文本的项目不代表原始文件已归档。
+          </p>
+        </div>
       </div>
 
       <label class="switch-item">
@@ -161,7 +179,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 import { openSidePanel } from '@/entrypoints/utils/sidePanel';
@@ -192,6 +210,19 @@ const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
 /** 后端返回的失败原因（如「端口没在监听」），比笼统的「不可用」更可操作。 */
 const apiStatusDetail = ref('');
 const localAgentAvailable = ref(false);
+type LocalAgentDiagnostics = {
+  paths: { dataDirectory: string; database: string; documentProjects: string; workspace: string; envFile: string };
+  storage: { storeContent: boolean; sourceFiles: string };
+};
+const localAgentDiagnostics = ref<LocalAgentDiagnostics | null>(null);
+const localAgentDiagnosticsError = ref('');
+const localAgentPathItems = computed(() => localAgentDiagnostics.value ? [
+  { key: 'dataDirectory', label: '数据目录', value: localAgentDiagnostics.value.paths.dataDirectory },
+  { key: 'database', label: '主数据库', value: localAgentDiagnostics.value.paths.database },
+  { key: 'documentProjects', label: '文档项目 / 原文', value: localAgentDiagnostics.value.paths.documentProjects },
+  { key: 'workspace', label: '工作目录', value: localAgentDiagnostics.value.paths.workspace },
+  { key: 'envFile', label: '环境配置文件', value: localAgentDiagnostics.value.paths.envFile },
+] : []);
 const cacheClearMessage = ref('');
 /** 服务端翻译设置面板折叠状态（默认收起，保持 popup 紧凑）。 */
 const serverExpanded = ref(false);
@@ -203,6 +234,7 @@ let healthCheckInProgress = false;
 onMounted(async () => {
   config.value = await getConfig();
   await refreshLocalAgentAvailability();
+  await loadLocalAgentDiagnostics();
   checkApiKey();
   // 弹窗打开期间持续更新：服务启动后状态提示自动转为可连接，服务停止后转为离线提示。
   // 开关本身常驻（不受可用性影响），否则「关掉本机 + 服务未起」会让用户失去恢复入口。
@@ -224,6 +256,26 @@ async function saveConfig() {
     Object.entries(config.value).filter(([key]) => !key.startsWith('document')),
   ) as Partial<Config>;
   await setConfig(pageTranslationConfig);
+}
+
+async function loadLocalAgentDiagnostics() {
+  localAgentDiagnosticsError.value = '';
+  localAgentDiagnostics.value = null;
+  if (!config.value.useLocalAgent) return;
+  const base = (config.value.localAgentUrl || 'http://127.0.0.1:8789').trim().replace(/\/+$/, '');
+  try {
+    const headers = new Headers();
+    if (config.value.localAgentToken) headers.set('Authorization', 'Bearer ' + config.value.localAgentToken);
+    const response = await fetch(new URL('/api/settings/diagnostics', base).toString(), {
+      method: 'GET', cache: 'no-store', headers,
+    });
+    const payload = await response.json().catch(() => ({})) as any;
+    if (!response.ok) throw new Error(payload.error?.message || payload.error || ('HTTP ' + response.status));
+    if (!payload.paths || !payload.storage) throw new Error('服务返回的诊断配置格式无效');
+    localAgentDiagnostics.value = payload as LocalAgentDiagnostics;
+  } catch (error) {
+    localAgentDiagnosticsError.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function refreshLocalAgentAvailability() {
@@ -248,6 +300,7 @@ async function onLocalAgentToggle() {
   }
   await saveConfig();
   await checkApiKey();
+  await loadLocalAgentDiagnostics();
 }
 
 async function disableLocalAgent() {
@@ -255,6 +308,7 @@ async function disableLocalAgent() {
   config.value.useLocalAgent = false;
   await saveConfig();
   await checkApiKey();
+  await loadLocalAgentDiagnostics();
 }
 
 function onApiKeyChange() {
@@ -595,4 +649,11 @@ h2 {
   margin-top: 2px;
   line-height: 1.4;
 }
+.local-paths { margin-top: 12px; padding: 10px; border: 1px solid var(--border-color, #ddd); border-radius: 8px; }
+.local-paths-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.local-paths dl { margin: 8px 0; }
+.local-paths dt { margin-top: 8px; font-size: 12px; opacity: .75; }
+.local-paths dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.local-paths code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.local-paths .error { color: #b42318; }
 </style>
