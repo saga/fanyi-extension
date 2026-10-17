@@ -89,6 +89,36 @@
 
       <!-- 阅读区只保留操作条、章节导航和正文；配置与人物/预处理分别放在独立 Tab。 -->
       <template v-if="activeTab === 'reading'">
+      <section
+        v-if="translationBlockedByPreprocessing"
+        class="panel preprocessing-gate-banner"
+        :class="'preprocessing-gate-' + translationPreprocessingReadiness.reason"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="preprocessing-gate-copy">
+          <strong>
+            {{ translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running'
+              ? '全书预处理进行中，翻译暂不可用'
+              : translationPreprocessingReadiness.reason === 'failed'
+                ? '全书预处理失败，翻译已暂停'
+                : translationPreprocessingReadiness.reason === 'language'
+                  ? '需要按当前语言设置重新预处理'
+                  : '文学翻译需要先完成全书预处理' }}
+          </strong>
+          <p>{{ translationPreprocessingReadiness.message }}</p>
+          <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
+            预处理任务 {{ contextGraphState.runId.slice(0, 8) }}
+            <span v-if="contextGraphPhaseLabel"> · {{ contextGraphPhaseLabel }}</span>
+          </p>
+          <div v-if="translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running'" class="preprocessing-gate-progress" role="progressbar" :aria-valuenow="contextGraphProgressPercent" aria-valuemin="0" aria-valuemax="100">
+            <div :style="{ width: contextGraphProgressPercent + '%' }"></div>
+          </div>
+        </div>
+        <button class="btn" type="button" @click="openPreprocessingAndEnsure">
+          {{ translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running' ? '查看预处理进度' : '前往预处理' }}
+        </button>
+      </section>
       <section class="panel action-bar">
         <div class="action-title">
           <strong>{{ doc.title }}</strong>
@@ -118,11 +148,11 @@
             @click="startTranslate">
             {{ startLabel }}
           </button>
-          <button v-if="!state.running && visibleSegments.length" class="btn warn" @click="forceTranslateCurrentPage">
+          <button v-if="!state.running && visibleSegments.length" class="btn warn" :disabled="translationBlockedByPreprocessing" @click="forceTranslateCurrentPage">
             强制重译当前页
           </button>
           <button v-if="state.running" class="btn" @click="stopCurrentTranslation">停止</button>
-          <button v-if="state.failedBatches.length" class="btn warn" @click="retry">
+          <button v-if="state.failedBatches.length" class="btn warn" :disabled="translationBlockedByPreprocessing" @click="retry">
             重试失败批次（{{ state.failedBatches.length }}）
           </button>
         </div>
@@ -184,8 +214,8 @@
 
       <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
       <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
-        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
-        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action" :disabled="state.running || translationBlockedByPreprocessing || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
+        <button class="quick-action" :disabled="state.running || translationBlockedByPreprocessing || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
         <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
       </div>
 
@@ -3121,6 +3151,26 @@ watch([sourceLang, targetLang, literaryMode], async (
     persistenceMessage.value = '更新预处理语言失败：' + (error instanceof Error ? error.message : String(error));
   }
 });
+
+async function openPreprocessingAndEnsure() {
+  activeTab.value = 'characters';
+  if (!translationPreprocessingRequired.value) {
+    await refreshContextGraphStatus(workspaceProject.value || undefined, true);
+    return;
+  }
+  try {
+    const project = workspaceProject.value || await ensureDocumentWorkspace();
+    if (!project?.projectId) return;
+    await refreshContextGraphStatus(project, true);
+    const readiness = translationPreprocessingReadiness.value;
+    if (readiness.ready) return;
+    if (!['queued', 'running'].includes(String(contextGraphState.value.status || ''))) {
+      await ensureContextGraphPreprocessing(project, { force: false });
+    }
+  } catch (error) {
+    persistenceMessage.value = '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error));
+  }
+}
 
 async function reanalyzeContextGraph() {
   const project = workspaceProject.value || await ensureDocumentWorkspace();
