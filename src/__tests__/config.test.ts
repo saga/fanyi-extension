@@ -56,6 +56,14 @@ const defaultConfig: Config = {
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
   documentLocalAgentToken: '',
+  documentBatchMaxSegments: 16,
+  documentBatchMaxSourceChars: 8000,
+  documentTranslationConcurrency: 4,
+  documentReviewConcurrency: 2,
+  documentPrecedingContextSegments: 4,
+  documentContextBudgetChars: 18000,
+  documentMaxModelAttempts: 2,
+  documentLiteraryReviewEnabled: true,
 };
 
 describe('config', () => {
