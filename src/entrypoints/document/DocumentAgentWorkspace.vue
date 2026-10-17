@@ -169,6 +169,19 @@
           <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString() }}</span>
           <span v-if="activeRun.counts?.failed" class="agent-run-failure">有 {{ activeRun.counts.failed }} 段需要重试</span>
         </div>
+        <details v-if="failedRunSegments.length" class="agent-failed-segments">
+          <summary>查看失败详情（{{ failedRunSegments.length }} 段）</summary>
+          <p class="agent-detail-description">下面列出本次运行中失败片段的最后记录原因、尝试次数与原文摘要。若原因只是“模型未返回完整的片段集合”，请同时查看 Agent 执行轨迹中的模型调用和重试事件。</p>
+          <article v-for="item in failedRunSegments" :key="item.id" class="agent-failed-segment">
+            <div class="agent-failed-segment-heading">
+              <strong>{{ item.contextPath || '失败片段' }}</strong>
+              <span class="agent-segment-id">{{ item.id }}</span>
+              <span class="agent-segment-attempts">尝试 {{ item.attempts || 0 }} 次</span>
+            </div>
+            <p class="agent-failed-segment-error">{{ item.error || '没有保存该片段的具体错误；请检查 Agent 执行轨迹中的模型调用事件。' }}</p>
+            <p v-if="item.sourceExcerpt" class="agent-failed-segment-source">原文：{{ item.sourceExcerpt }}</p>
+          </article>
+        </details>
       </section>
 
       <p v-if="message" class="agent-feedback" role="status">{{ message }}</p>
@@ -406,6 +419,17 @@ const preprocessingBlockedByPreprocessing = computed(() =>
   props.preprocessingState.required && !props.preprocessingState.ready,
 );
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
+const failedRunSegments = computed(() => {
+  const segments = Array.isArray(activeRun.value?.segments) ? activeRun.value.segments : [];
+  return segments.filter((segment: any) => segment.status === 'failed').map((segment: any) => {
+    const source = props.segments.find((item: any) => String(item.id) === String(segment.id));
+    return {
+      ...segment,
+      contextPath: String(source?.contextPath || source?.chapter || ''),
+      sourceExcerpt: String(source?.text || '').replace(/\\s+/g, ' ').trim().slice(0, 220),
+    };
+  });
+});
 const totalSegmentCount = computed(() =>
   Number(verification.value?.totalSegments ?? project.value?.segmentCount ?? props.segments.length),
 );
@@ -1429,4 +1453,15 @@ onUnmounted(() => {
   .agent-finding-row { grid-template-columns: auto minmax(0, 1fr); }
   .agent-finding-row p { grid-column: 1 / -1; }
 }
+
+.agent-failed-segments { margin-top: .8rem; padding: .75rem .85rem; border: 1px solid #f1c8c5; border-radius: 11px; background: #fff8f7; }
+.agent-failed-segments > summary { cursor: pointer; color: #b42318; font-size: .85rem; font-weight: 650; }
+.agent-failed-segment { padding: .7rem 0; border-top: 1px solid #f1d8d5; }
+.agent-failed-segment:first-of-type { margin-top: .6rem; }
+.agent-failed-segment-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .7rem; overflow-wrap: anywhere; }
+.agent-failed-segment-heading strong { font-size: .82rem; }
+.agent-segment-id, .agent-segment-attempts { color: var(--agent-secondary); font-size: .74rem; }
+.agent-failed-segment-error { margin: .4rem 0; color: #912018; font-size: .8rem; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.agent-failed-segment-source { margin: .35rem 0 0; color: var(--agent-secondary); font-size: .77rem; line-height: 1.5; overflow-wrap: anywhere; }
+
 </style>
