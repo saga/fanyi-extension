@@ -876,6 +876,47 @@
                 <span v-if="event.payload?.durationMs != null">耗时 {{ formatAgentDuration(event.payload.durationMs) }}</span>
                 <span v-if="event.payload?.requestId">Request {{ event.payload.requestId.slice(0, 12) }}</span>
               </div>
+              <button
+                v-if="agentTrajectoryHasFailureDetails(event)"
+                type="button"
+                class="btn ghost agent-trace-failure-toggle"
+                @click="toggleAgentTrajectoryFailureDetails(event)"
+              >
+                {{ expandedAgentFailureEventId === event.eventId ? '收起失败详情' : '查看失败片段（' + agentTrajectoryFailureCount(event) + '）' }}
+              </button>
+              <div v-if="expandedAgentFailureEventId === event.eventId" class="agent-trace-failure-details">
+                <p v-if="agentTrajectoryFailureLoading[event.runId]" class="muted small">正在读取本次运行的片段状态和失败原因…</p>
+                <p v-if="agentTrajectoryFailureErrors[event.runId]" class="agent-trajectory-error">{{ agentTrajectoryFailureErrors[event.runId] }}</p>
+                <template v-else-if="!agentTrajectoryFailureLoading[event.runId]">
+                  <p v-if="!(agentTrajectoryFailureDetails[event.runId] || []).length" class="muted small">
+                    未找到失败片段明细。请刷新轨迹，或在 Agent 工作区查看运行状态。
+                  </p>
+                  <article
+                    v-for="item in (agentTrajectoryFailureDetails[event.runId] || [])"
+                    :key="item.id"
+                    class="agent-trace-failure-item"
+                  >
+                    <div class="agent-trace-failure-item-heading">
+                      <strong>{{ item.contextPath || '失败片段' }}</strong>
+                      <span class="chip">{{ item.id }}</span>
+                      <span class="chip" :class="item.status === 'failed' ? 'diagnostic-failed' : 'diagnostic-warning'">
+                        {{ item.status === 'failed' ? '失败' : '当前状态：' + item.status }}
+                      </span>
+                      <span class="muted small">尝试 {{ item.attempts || 0 }} 次</span>
+                    </div>
+                    <p class="agent-trace-failure-reason">{{ item.error || (item.status === 'failed'
+                      ? '服务没有保存该片段的独立错误原因；请核对同一批次的模型调用、缺失片段和输出校验事件。'
+                      : '该片段曾被批次失败事件报告，但当前运行记录显示它已不再处于失败状态。') }}</p>
+                    <p v-if="item.sourceExcerpt" class="agent-trace-failure-source">原文摘要：{{ item.sourceExcerpt }}</p>
+                  </article>
+                  <div v-if="agentTrajectoryRelatedFailureEvents(event).length" class="agent-trace-failure-related">
+                    <strong>相关 Agent 轨迹</strong>
+                    <p v-for="related in agentTrajectoryRelatedFailureEvents(event)" :key="related.eventId">
+                      {{ new Date(related.createdAt).toLocaleTimeString() }} · {{ agentTrajectoryTitle(related) }} · {{ agentTrajectoryDetail(related) }}
+                    </p>
+                  </div>
+                </template>
+              </div>
             </div>
           </article>
           <p v-if="!agentTrajectoryLoading && !agentTrajectoryVisibleEvents.length" class="review-empty">
@@ -1001,6 +1042,10 @@ const agentTrajectoryCursor = ref(0);
 const agentTrajectoryLoading = ref(false);
 const agentTrajectoryError = ref('');
 const agentTrajectoryFilter = ref<'all' | 'model' | 'issues'>('all');
+const expandedAgentFailureEventId = ref<number | string | null>(null);
+const agentTrajectoryFailureDetails = ref<Record<string, any[]>>({});
+const agentTrajectoryFailureLoading = ref<Record<string, boolean>>({});
+const agentTrajectoryFailureErrors = ref<Record<string, string>>({});
 let agentTrajectoryPollTimer: number | null = null;
 let agentTrajectoryRequestGeneration = 0;
 const contextGraphState = ref<any>({
@@ -1346,6 +1391,16 @@ function agentTrajectoryTitle(event: any): string {
     const value = String(label || '');
     return value.endsWith(suffix) ? value : value + suffix;
   };
+  const payload = event?.payload || {};
+  if (type === 'run.finished' && Number(payload.counts?.failed || 0) > 0) {
+    return '运行结束（' + Number(payload.counts.failed) + ' 个片段失败）';
+  }
+  if (type === 'batch.completed' && Array.isArray(payload.failedIds) && payload.failedIds.length) {
+    return '批次流程结束（' + payload.failedIds.length + ' 个片段失败）';
+  }
+  if (type === 'batch.translation.completed' && Array.isArray(payload.failedIds) && payload.failedIds.length) {
+    return '初译完成（' + payload.failedIds.length + ' 个片段失败）';
+  }
   const labels: Record<string, string> = {
     'run.planned': '翻译运行已创建',
     'plan.ready': '批次计划已生成',
@@ -1428,7 +1483,24 @@ function agentTrajectoryDetail(event: any): string {
     details.push('返回 ' + (p.returnedSegments ?? 0) + '/' + (p.requestedSegments ?? 0) + ' 段');
     if (p.missingCount) details.push('缺少 ' + p.missingCount + ' 段：' + (p.missingIds || []).slice(0, 8).join(', '));
   }
-  if (type === 'batch.translation.completed') details.push('候选 ' + (p.candidateCount ?? 0) + ' 段，审校 ' + (p.reviewScheduled ? '已排队' : '关闭'));
+  if (type === 'batch.translation.completed') {
+    details.push('候选 ' + (p.candidateCount ?? 0) + ' 段，审校 ' + (p.reviewScheduled ? '已排队' : '关闭'));
+  }
+  if (type === 'batch.completed' || type === 'batch.translation.completed') {
+    if (Array.isArray(p.failedIds) && p.failedIds.length) {
+      details.push('失败片段 ' + p.failedIds.length + ' 个：' + p.failedIds.slice(0, 8).join(', ') +
+        (p.failedIds.length > 8 ? ' 等' : ''));
+    }
+  }
+  if (type === 'batch.partial') {
+    if (Array.isArray(p.missingIds) && p.missingIds.length) {
+      details.push('重试后仍缺少或曾缺少 ' + p.missingIds.length + ' 个片段：' + p.missingIds.slice(0, 8).join(', ') +
+        (p.missingIds.length > 8 ? ' 等' : ''));
+    }
+  }
+  if (type === 'batch.output.validation') {
+    details.push('重复 ID ' + (p.duplicateCount ?? 0) + '，未知 ID ' + (p.unexpectedCount ?? 0) + '，格式异常 ' + (p.malformedRowCount ?? 0));
+  }
   if (type === 'review.context.ready') {
     details.push('注入实体 ' + (p.injectedEntities ?? 0) + '，关系 ' + (p.injectedRelationships ?? 0) +
       '，章节摘要 ' + (p.injectedChapterSummaries ?? 0));
@@ -1471,13 +1543,104 @@ function agentTrajectoryDetail(event: any): string {
 
 function agentTrajectoryStatus(event: any): string {
   const type = String(event?.type || '');
-  const runStatus = String(event?.payload?.status || '');
+  const payload = event?.payload || {};
+  const runStatus = String(payload.status || '');
   if (type === 'run.finished' && runStatus === 'failed') return 'failed';
   if (type === 'run.finished' && runStatus === 'partial') return 'warning';
   if (type.endsWith('.failed') || type === 'model.call.failed' || type === 'run.failed') return 'failed';
+  if (type === 'run.finished' && Number(payload.counts?.failed || 0) > 0) return 'warning';
+  if (['batch.completed', 'batch.translation.completed'].includes(type) &&
+      Array.isArray(payload.failedIds) && payload.failedIds.length > 0) return 'warning';
   if (type === 'stage.warning' || type === 'batch.partial' || type === 'batch.output.validation') return 'warning';
   if (type === 'batch.started' || type === 'stage.started' || type === 'context-graph.phase' || type === 'batch.prompt.ready') return 'running';
   return 'completed';
+}
+
+function agentTrajectoryHasFailureDetails(event: any): boolean {
+  const payload = event?.payload || {};
+  return (Array.isArray(payload.failedIds) && payload.failedIds.length > 0) ||
+    Number(payload.counts?.failed || 0) > 0;
+}
+
+function agentTrajectoryFailureCount(event: any): number {
+  const payload = event?.payload || {};
+  return Array.isArray(payload.failedIds) && payload.failedIds.length
+    ? payload.failedIds.length
+    : Number(payload.counts?.failed || 0);
+}
+
+async function toggleAgentTrajectoryFailureDetails(event: any): Promise<void> {
+  if (expandedAgentFailureEventId.value === event?.eventId) {
+    expandedAgentFailureEventId.value = null;
+    return;
+  }
+  const runId = String(event?.runId || '');
+  if (!runId) return;
+  expandedAgentFailureEventId.value = event.eventId;
+  if (Object.prototype.hasOwnProperty.call(agentTrajectoryFailureDetails.value, runId)) return;
+
+  agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: true };
+  agentTrajectoryFailureErrors.value = { ...agentTrajectoryFailureErrors.value, [runId]: '' };
+  try {
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    if (!config.documentUseLocalAgent) throw new Error('请先启用本机 Local Agent，才能读取失败片段详情。');
+    const project = workspaceProject.value || await ensureDocumentWorkspace();
+    if (!project?.projectId) throw new Error('尚未建立当前文档的本机项目。');
+    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+    const token = config.documentLocalAgentToken || '';
+    const response = await workspaceApi<{ run: any }>(
+      base, token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
+    );
+    const run = response.run || {};
+    const runSegments = Array.isArray(run.segments) ? run.segments : [];
+    const failedRows = runSegments.filter((item: any) => item.status === 'failed');
+    const reportedIds = agentTrajectoryEvents.value
+      .filter((item) => String(item.runId || '') === runId)
+      .flatMap((item) => Array.isArray(item.payload?.failedIds) ? item.payload.failedIds.map(String) : []);
+    const ids = Array.from(new Set([
+      ...failedRows.map((item: any) => String(item.id)),
+      ...reportedIds,
+    ]));
+    const sourceById = new Map<string, any>(
+      (doc.value?.segments || []).map((item: any): [string, any] => [String(item.id), item]),
+    );
+    const details = ids.map((id) => {
+      const row = runSegments.find((item: any) => String(item.id) === id);
+      const source = sourceById.get(id);
+      return {
+        id,
+        status: String(row?.status || 'failed'),
+        attempts: Number(row?.attempts || 0),
+        error: typeof row?.error === 'string' ? row.error : '',
+        contextPath: String(source?.contextPath || source?.chapter || ''),
+        sourceExcerpt: String(source?.text || '').replace(/\\s+/g, ' ').trim().slice(0, 220),
+      };
+    });
+    agentTrajectoryFailureDetails.value = { ...agentTrajectoryFailureDetails.value, [runId]: details };
+  } catch (error) {
+    agentTrajectoryFailureErrors.value = {
+      ...agentTrajectoryFailureErrors.value,
+      [runId]: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: false };
+  }
+}
+
+function agentTrajectoryRelatedFailureEvents(event: any): any[] {
+  const runId = String(event?.runId || '');
+  if (!runId) return [];
+  const batchIndex = event?.payload?.batchIndex;
+  const relatedTypes = new Set([
+    'model.call.failed', 'batch.partial', 'batch.output.validation', 'stage.warning', 'batch.completed',
+  ]);
+  return agentTrajectoryEvents.value.filter((item) => {
+    if (String(item.runId || '') !== runId || !relatedTypes.has(String(item.type || ''))) return false;
+    if (batchIndex != null && item.payload?.batchIndex != null && item.payload.batchIndex !== batchIndex) return false;
+    return true;
+  }).slice(-8);
 }
 
 function agentTrajectoryStatusLabel(event: any): string {
@@ -4458,5 +4621,18 @@ async function resetAll() {
   .agent-trace-heading time { margin-left: 0; }
   .agent-trace-meta { gap: .35rem .55rem; }
 }
+
+
+.agent-trace-failure-toggle { margin-top: .45rem; font-size: .78rem; }
+.agent-trace-failure-details { margin-top: .65rem; padding: .75rem; border: 1px solid #f1c8c5; border-radius: 10px; background: var(--surface, #fff8f7); }
+.agent-trace-failure-item { padding: .65rem 0; border-bottom: 1px solid var(--border, #ead8d5); }
+.agent-trace-failure-item:last-of-type { border-bottom: 0; }
+.agent-trace-failure-item-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .55rem; overflow-wrap: anywhere; }
+.agent-trace-failure-item-heading strong { font-size: .82rem; }
+.agent-trace-failure-reason { margin: .4rem 0; color: var(--danger, #b42318); font-size: .8rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-trace-failure-source { margin: .3rem 0 0; color: var(--muted, #667085); font-size: .76rem; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-trace-failure-related { margin-top: .65rem; padding-top: .65rem; border-top: 1px dashed var(--border, #d0d5dd); }
+.agent-trace-failure-related > strong { font-size: .8rem; }
+.agent-trace-failure-related p { margin: .35rem 0; color: var(--text, #344054); font-size: .76rem; line-height: 1.5; overflow-wrap: anywhere; }
 
 </style>
