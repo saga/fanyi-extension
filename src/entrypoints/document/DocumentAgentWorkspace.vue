@@ -40,7 +40,7 @@
         </strong>
         <p>{{ preprocessingState.message }}</p>
         <p v-if="preprocessingState.runId" class="agent-footnote">
-          预处理任务 {{ String(preprocessingState.runId).slice(0, 8) }} · {{ preprocessingState.phase || '等待状态' }}
+          预处理任务 {{ preprocessingState.runId }} · {{ preprocessingState.phase || '等待状态' }}
         </p>
         <div
           v-if="['queued', 'running'].includes(preprocessingState.status)"
