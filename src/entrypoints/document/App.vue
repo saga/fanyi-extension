@@ -3845,6 +3845,36 @@ async function resetAll() {
   margin-left: .35rem;
 }
 .translating-hint { display: block; margin-top: .2rem; }
+.preprocessing-gate-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #f0d7a4;
+  background: #fffbf2;
+}
+.preprocessing-gate-copy { min-width: 0; flex: 1; }
+.preprocessing-gate-copy strong { display: block; color: #7d4e00; font-size: .9rem; }
+.preprocessing-gate-copy p { margin: .35rem 0 0; line-height: 1.55; overflow-wrap: anywhere; }
+.preprocessing-gate-meta { color: #825d28; font-size: .78rem; }
+.preprocessing-gate-progress {
+  height: 6px;
+  margin-top: .7rem;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #f1e3c8;
+}
+.preprocessing-gate-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: #b78125;
+  transition: width .25s ease;
+}
+.preprocessing-gate-failed { border-color: #f1c8c5; background: #fff8f7; }
+.preprocessing-gate-failed .preprocessing-gate-copy strong { color: #a61d24; }
+@media (max-width: 640px) {
+  .preprocessing-gate-banner { flex-direction: column; align-items: stretch; }
+}
 .action-bar {
   display: flex;
   align-items: center;
