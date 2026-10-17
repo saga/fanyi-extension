@@ -184,8 +184,8 @@
 
       <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
       <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
-        <button class="quick-action" :disabled="state.running || currentPageIndex >= pages.length - 1" @click="translatePages(1)">翻译下一页</button>
-        <button class="quick-action" :disabled="state.running || currentPageIndex >= pages.length - 1" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
+        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
         <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
       </div>
 
@@ -3315,14 +3315,19 @@ function displayTranslation(segmentId: string): string {
 }
 
 /**
- * 预翻译当前阅读位置之后的 N 页。直接按目标页的片段 ID 发任务，不修改 currentPageIndex，
- * 因而读者可以继续看当前页；翻译结果到达后只更新译文 Map 和持久化记录。
+ * 预翻译当前阅读位置附近的页面，不修改 currentPageIndex。
+ * 当前页仍有待译片段时，把当前页计入范围： “下一页”= 当前页 + 后 1 页，
+ * “下三页”= 当前页 + 后 3 页。当前页已译完时，仍只预翻译后续 N 页。
  */
 async function translatePages(pageCount: number) {
   if (!doc.value || state.value.running || pageCount < 1) return;
 
-  const firstTargetIndex = currentPageIndex.value + 1;
-  const targetPages = pages.value.slice(firstTargetIndex, firstTargetIndex + pageCount);
+  // 当前页存在任何待译片段时，必须先把当前页纳入范围，不能直接跳到下一页。
+  // pageCount 表示按钮要求的后续页数，因此当前页待译时总范围是 1 + pageCount 页。
+  const includeCurrentPage = currentPagePending.value;
+  const firstTargetIndex = currentPageIndex.value + (includeCurrentPage ? 0 : 1);
+  const targetPageCount = pageCount + (includeCurrentPage ? 1 : 0);
+  const targetPages = pages.value.slice(firstTargetIndex, firstTargetIndex + targetPageCount);
   if (!targetPages.length) return;
 
   const pendingSegments = targetPages
