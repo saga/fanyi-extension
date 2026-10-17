@@ -1283,6 +1283,10 @@ function agentTrajectoryTitle(event: any): string {
   const type = String(event?.type || '');
   const p = event?.payload || {};
   const stage = String(p.stage || '');
+  const withSuffix = (label: unknown, suffix: string) => {
+    const value = String(label || '');
+    return value.endsWith(suffix) ? value : value + suffix;
+  };
   const labels: Record<string, string> = {
     'run.planned': '翻译运行已创建',
     'plan.ready': '批次计划已生成',
@@ -1296,8 +1300,8 @@ function agentTrajectoryTitle(event: any): string {
     'batch.output.validation': '模型输出校验告警',
     'batch.completed': '批次与审校流程结束',
     'batch.discarded': '批次结果已丢弃',
-    'stage.started': String(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'translate' ? '初译阶段' : '工作流阶段')) + '开始',
-    'stage.completed': String(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'validate' ? '结果校验' : '工作流阶段')) + '完成',
+    'stage.started': withSuffix(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'translate' ? '初译阶段' : '工作流阶段'), '开始'),
+    'stage.completed': withSuffix(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'validate' ? '结果校验' : '工作流阶段'), '完成'),
     'stage.warning': String(stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : '工作流阶段') + '告警',
     'model.call.failed': '模型调用失败',
     'review.context.ready': 'Reviewer 上下文已准备',
