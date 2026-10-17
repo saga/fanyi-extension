@@ -80,16 +80,19 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
         : '全书预处理正在运行，正在扫描原文并分析人物、规范译名、关系与章节上下文。完成后会自动开放翻译。',
     };
   }
-  if (input.loading || snapshot.loading) {
-    return {
-      required: true, ready: false, reason: 'checking',
-      message: '正在刷新全书预处理状态；确认前不会启动文学翻译。',
-    };
-  }
   if (status === 'failed') {
     return {
       required: true, ready: false, reason: 'failed',
-      message: '全书预处理失败，文学翻译暂不可用。请查看失败原因并重新分析全书。',
+      message: snapshot.error
+        ? '全书预处理失败：' + snapshot.error + '。请重新分析全书后再翻译。'
+        : '全书预处理失败，文学翻译暂不可用。请查看失败原因并重新分析全书。',
+    };
+  }
+  if (snapshot.error || input.loading || snapshot.loading) {
+    return {
+      required: true, ready: false, reason: 'checking',
+      message: '无法确认本机服务中的最新预处理状态；为避免启动缺少上下文的文学翻译，已暂时禁用翻译。' +
+        (snapshot.error ? ' 状态读取错误：' + snapshot.error : ''),
     };
   }
   if (status !== 'completed') {
