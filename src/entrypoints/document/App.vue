@@ -528,7 +528,7 @@
         <div class="dictionary-heading">
           <div>
             <h3>实体译名表</h3>
-            <p class="muted small">检查原文名称与统一译名是否正确。已有原文依据的 AI 结果会自动纳入规范；没有依据的结果需要核对。修改任何字段后，请点击“确认并应用”。</p>
+            <p class="muted small">有原文依据且译名明确的实体会自动纳入规范，并立即用于本次及后续批次。缺少依据或存在冲突的映射才会保留为待补全。修改原文名称、译名或别名后会自动保存并应用，无需逐条确认。</p>
           </div>
           <span class="chip">共 {{ literaryMemory.entities.length }} 项</span>
         </div>
@@ -549,9 +549,6 @@
           </div>
           <div class="dictionary-actions">
             <button class="btn primary" @click="addEntity">添加实体映射</button>
-            <button class="btn" :disabled="confirmableEntityCount === 0" @click="confirmAllEntities">
-              一键确认待核对项（{{ pendingEntityCount }}）
-            </button>
           </div>
         </div>
 
@@ -560,14 +557,10 @@
             :key="'entity-' + index + '-' + entity.source" class="entity-card" :class="{ 'is-pending-card': entity.reviewStatus !== 'confirmed' }">
             <div class="entity-card-header">
               <span class="entity-status" :class="entity.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
-                {{ entity.reviewStatus === 'confirmed' ? '已纳入规范' : '待核对' }}
+                {{ entity.reviewStatus === 'confirmed' ? '自动纳入规范' : '待补全' }}
               </span>
               <span v-if="entity.kind" class="entity-kind">{{ entityKindLabel(entity.kind) }}</span>
               <span class="entity-card-spacer"></span>
-              <button class="btn ghost" :disabled="!entity.source.trim() || !entity.target.trim()"
-                @click="toggleEntityConfirmation(entity)">
-                {{ entity.reviewStatus === 'confirmed' ? '撤销确认' : '确认并应用' }}
-              </button>
               <button class="btn ghost danger-text" @click="removeEntity(index)">移除</button>
             </div>
 
@@ -628,7 +621,7 @@
             </div>
           </div>
         </details>
-        <p class="muted small dictionary-footnote">状态含义：已纳入规范＝已有原文依据的自动纳入结果或用户确认的译名；待核对＝AI 建议或被编辑过的映射。变更会保存在本机阅读会话中，并供后续章节参考。</p>
+        <p class="muted small dictionary-footnote">状态说明：自动纳入规范＝有原文证据的规范译名或用户填写完成的映射；待补全＝名称、译名或证据不足。修改后自动保存并生效；删除映射即可停用。</p>
       </section>
 
       <section v-if="literaryMode" class="panel character-voice-bible">
@@ -968,7 +961,7 @@ import {
   type SavedViewMode,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -2179,7 +2172,8 @@ async function clearSavedSession() {
 }
 
 function markEntitySuggested(entity: LiteraryEntity) {
-  entity.reviewStatus = 'suggested';
+  // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认。
+  entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
   if (entity.source.trim() && entity.target.trim()) {
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
@@ -2192,43 +2186,11 @@ function entityKindLabel(kind: LiteraryEntity['kind']) {
   };
   return labels[kind] || '其他实体';
 }
-function confirmEntity(entity: LiteraryEntity) {
-  if (!entity.source.trim() || !entity.target.trim()) return;
-  entity.reviewStatus = 'confirmed';
-  persistenceMessage.value = '已纳入规范译名：' + entity.source + ' → ' + entity.target;
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存规范译名失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function toggleEntityConfirmation(entity: LiteraryEntity) {
-  if (entity.reviewStatus === 'confirmed') {
-    entity.reviewStatus = 'suggested';
-    persistenceMessage.value = '已将“' + entity.source + '”移回待核对列表';
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '保存实体状态失败：' + (error instanceof Error ? error.message : String(error));
-    });
-    return;
-  }
-  confirmEntity(entity);
-}
-// 剩余待确认一键确认：内容为空的跳过（confirmEntity 本来就会拒绝）。
-function confirmAllEntities() {
-  let count = 0;
-  for (const entity of literaryMemory.value.entities) {
-    if (entity.reviewStatus !== 'confirmed' && entity.source.trim() && entity.target.trim()) {
-      entity.reviewStatus = 'confirmed';
-      count++;
-    }
-  }
-  persistenceMessage.value = count > 0 ? '已将 ' + count + ' 项译名纳入规范，后续章节会优先采用' : '没有待核对的译名';
-  if (count > 0) void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存规范译名失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
+
 function setEntityAliases(entity: LiteraryEntity, event: Event) {
   const value = (event.target as HTMLInputElement | null)?.value ?? '';
   entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
-  entity.reviewStatus = 'suggested';
+  entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
   if (entity.source.trim() && entity.target.trim()) void persistLiteraryMemoryToWorkspace().catch((error) => {
     persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
   });
@@ -2237,7 +2199,7 @@ function addEntity() {
   entitySearch.value = '';
   entityFilter.value = 'all';
   literaryMemory.value.entities.push({ source: '', target: '', kind: 'other', aliases: [], reviewStatus: 'suggested' });
-  persistenceMessage.value = '已添加空白映射：填写原文名称和统一译名，再点击“确认并应用”';
+  persistenceMessage.value = '已添加空白映射：填写原文名称和统一译名后会自动生效';
 }
 function removeEntity(index: number) {
   literaryMemory.value.entities.splice(index, 1);
@@ -2773,7 +2735,9 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       source, target, kind, aliases,
       evidence: typeof node.evidence[0]?.quote === 'string' ? node.evidence[0].quote : '',
       ...(evidenceRefs.length ? { evidenceRefs } : {}),
-      reviewStatus: node.status === 'confirmed' ? 'confirmed' : 'suggested',
+      // Context Graph nodes carry source-validated evidence; their name mappings are automatically
+      // active even when the graph row itself remains a candidate for non-name review.
+      reviewStatus: node.status === 'confirmed' || evidenceRefs.length > 0 ? 'confirmed' : 'suggested',
     }];
   });
   const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
@@ -2817,10 +2781,10 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     const confirmed = matching.find((item) => item.reviewStatus === 'confirmed');
     const priorCanonical = matching[0];
     const canonicalSource = confirmed?.source || priorCanonical?.source || candidate.source;
-    // Existing suggested translations may come from earlier translation waves. A later Context
-    // Graph proposal is not allowed to replace that first canonical target silently; keep the
-    // earlier target and let source-ordered audit/review expose disagreements.
-    const target = confirmed?.target || priorCanonical?.target || candidate.target;
+    // A source-evidenced full-book Context Graph mapping is the best canonical default. Preserve
+    // a target only when it was already active; otherwise replace an older unconfirmed draft
+    // (which may itself have been an inconsistent LLM translation) with the preprocessing target.
+    const target = confirmed?.target || candidate.target || priorCanonical?.target;
     const kind = confirmed?.kind || priorCanonical?.kind || candidate.kind;
     const aliases = Array.from(new Set([
       ...matching.flatMap((item) => [item.source, ...(item.aliases || [])]),
@@ -2842,7 +2806,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       source: canonicalSource, target, kind, aliases: aliases.slice(0, 12),
       ...(evidence ? { evidence } : {}),
       ...(evidenceRefs.length ? { evidenceRefs } : {}),
-      reviewStatus: confirmed ? 'confirmed' : 'suggested',
+      reviewStatus: confirmed || candidate.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
     };
     for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
   }
@@ -2957,7 +2921,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     };
     next.styleGuideStatus = 'candidate';
   }
-  return next;
+  return autoConfirmLiteraryMemory(next);
 }
 async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
   // Context Graph analysis may finish after several translation waves. Always merge against the
