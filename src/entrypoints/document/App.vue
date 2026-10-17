@@ -3407,7 +3407,7 @@ async function followWorkspaceRun(project: any, initialRun: any) {
     );
     workspaceProject.value = latest.project;
     workspaceActiveRun.value = (latest.runs || []).find((item) => item.runId === runId) || run;
-    if (literaryMode.value) {
+    if (effectiveDocumentTranslationMode.value === 'literary') {
       await refreshWorkspaceLiteraryMemory(
         project.projectId,
         readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
