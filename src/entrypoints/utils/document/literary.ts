@@ -13,6 +13,8 @@ export interface LiteraryEntity {
   aliases?: string[];
   description?: string;
   evidence?: string;
+  /** 服务端动态上下文候选的来源定位；用于防止后文证据泄漏到前文。 */
+  evidenceRefs?: Array<{ segmentId: string; sourceQuote: string }>;
   reviewStatus?: 'suggested' | 'confirmed';
 }
 export interface LiteraryRelationship {
@@ -20,6 +22,7 @@ export interface LiteraryRelationship {
   predicate: string;
   object: string;
   evidence?: string;
+  evidenceRefs?: Array<{ segmentId: string; sourceQuote: string }>;
   reviewStatus?: 'suggested' | 'confirmed';
 }
 export interface LiteraryStyleGuide {
@@ -213,10 +216,19 @@ function mergeEntityRecord(prior: LiteraryEntity, candidate: LiteraryEntity): Li
     if (key && key !== canonicalKey && !aliasMap.has(key)) aliasMap.set(key, alias);
   }
   const sameTarget = normalizedEntityName(prior.target) === normalizedEntityName(candidate.target);
+  const canMergeEvidenceRefs = prior.reviewStatus !== 'confirmed' ||
+    (Array.isArray(prior.evidenceRefs) && prior.evidenceRefs.length > 0);
+  const evidenceRefs = canMergeEvidenceRefs
+    ? [...(prior.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
+        .filter((item, index, all) => all.findIndex((other) =>
+          other.segmentId === item.segmentId && normalizedEntityName(other.sourceQuote) === normalizedEntityName(item.sourceQuote)) === index)
+        .slice(0, 8)
+    : [];
   return {
     ...prior,
     // Earlier canonical translation wins. A conflicting later target is never silently adopted.
     aliases: Array.from(aliasMap.values()).slice(0, 8),
+    ...(evidenceRefs.length ? { evidenceRefs } : {}),
     ...(sameTarget && prior.reviewStatus !== 'confirmed' && candidate.reviewStatus === 'confirmed'
       ? { reviewStatus: 'confirmed' as const }
       : {}),
@@ -280,11 +292,19 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       const aliases = Array.isArray(entity.aliases)
         ? Array.from(new Set(entity.aliases.map((alias) => safeText(alias, 80)).filter(Boolean))).slice(0, 8)
         : [];
+      const evidenceRefs = Array.isArray(entity.evidenceRefs) ? entity.evidenceRefs.slice(0, 8).flatMap((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const ref = item as Record<string, unknown>;
+        const segmentId = safeText(ref.segmentId, 160);
+        const sourceQuote = safeText(ref.sourceQuote, 240);
+        return segmentId && sourceQuote ? [{ segmentId, sourceQuote }] : [];
+      }) : [];
       entities.push({
         source, target, kind: entityKind(entity.kind),
         ...(aliases.length ? { aliases } : {}),
         ...(safeText(entity.description, 200) ? { description: safeText(entity.description, 200) } : {}),
         ...(safeText(entity.evidence, 160) ? { evidence: safeText(entity.evidence, 160) } : {}),
+        ...(evidenceRefs.length ? { evidenceRefs } : {}),
         reviewStatus: entity.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
       });
     }
@@ -298,9 +318,17 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       const predicate = safeText(rel.predicate, 100);
       const object = safeText(rel.object, 120);
       if (!subject || !predicate || !object) continue;
+      const evidenceRefs = Array.isArray(rel.evidenceRefs) ? rel.evidenceRefs.slice(0, 8).flatMap((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const ref = item as Record<string, unknown>;
+        const segmentId = safeText(ref.segmentId, 160);
+        const sourceQuote = safeText(ref.sourceQuote, 240);
+        return segmentId && sourceQuote ? [{ segmentId, sourceQuote }] : [];
+      }) : [];
       relationships.push({
         subject, predicate, object,
         ...(safeText(rel.evidence, 160) ? { evidence: safeText(rel.evidence, 160) } : {}),
+        ...(evidenceRefs.length ? { evidenceRefs } : {}),
         reviewStatus: rel.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
       });
     }
