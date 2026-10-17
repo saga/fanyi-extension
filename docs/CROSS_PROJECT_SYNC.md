@@ -43,7 +43,7 @@
 | service/japanese-natural-zh-prompt | `src/entrypoints/service/japanese-natural-zh-prompt.ts` | `lib/translate/service/japanese-natural-zh-prompt.ts` |
 | rules/ | `src/rules/` | `lib/translate/rules/` |
 | **文档解析** | `src/entrypoints/utils/document/` | `lib/translate/document/` |
-| 文档翻译责任边界 | 扩展负责解析、批次调度、状态与导出；本机 Agent 负责长文档工作流 | Worker 仅暴露无状态 `/api/translate/document/segments` 单次翻译 |
+| 文档翻译责任边界 | 扩展负责解析、阅读器 UI、范围选择和结果呈现；Local Agent 模式下 Run 调度/上下文/审校/持久化统一交给本机服务 | Worker 仅暴露无状态 `/api/translate/document/segments` 单次翻译 |
 | 测试 | `src/__tests__/*.test.ts` | `tests/*.test.ts` |
 
 > **文档解析模块（2026-09-09 新增）**
@@ -148,7 +148,7 @@
   - `htmlLang` 仅作辅助证据，不单独定案。
   - **用户手工选择的风格永远优先**：仅当配置为 `default`/未设置、检测为 `ja`、且目标语言非日语时才升级。
 - **检测粒度：每页/每文档一次**（不是每 chunk）。保持 DeepSeek prompt 前缀稳定以命中 KV 缓存，并避免同页内文风割裂。
-- **接线**：网页翻译使用服务端 `pipeline.ts`；结构化文档由扩展 `document/useDocumentTranslation.ts` 管理解析、分批、进度、重试和导出，云端只用 `lib/app.ts` 的 `/api/translate/document/segments` 对单次请求做无状态翻译；长文档项目、书籍记忆与独立审校只走 `local-agent-service`。解析出的风格经 `TranslateChunkMessage.promptStyle` 传到 background，`handleTranslateChunk` / `handleTranslateChunkStream` 用 `message.promptStyle ?? config.promptStyle`，**同一值同时喂给缓存 key 与 service**（否则 ja-source-natural 产物会落进 default 缓存桶）。
+- **接线**：网页翻译使用服务端 pipeline.ts；结构化文档先由扩展解析。非 Local Agent 的轻量文档路径可由 document/useDocumentTranslation.ts 管理扩展侧分批、进度、重试和导出，云端只用 lib/app.ts 的 /api/translate/document/segments 对单次请求做无状态翻译。只要 documentUseLocalAgent=true，阅读页的继续翻译/下一页/下几页/强制重译/失败重试与 Agent Workspace 必须统一使用 /api/documents/projects/:projectId/runs，由 local-agent-service 的 executeRun 执行，不能再进入 useDocumentTranslation.ts 的本地 Provider 循环。长文档项目、人物记忆、初译 context_delta、审校、恢复与全书审计只能由 local-agent-service 维护。解析出的网页风格经 TranslateChunkMessage.promptStyle 传到 background，handleTranslateChunk / handleTranslateChunkStream 用 message.promptStyle ?? config.promptStyle，同一值同时喂给缓存 key 与 service（否则 ja-source-natural 产物会落进 default 缓存桶）。
 - **check-sync: ✅ 完全一致**（2026-09-11 验证）
 - **测试**：两端各有 `languageDetector` 测试（各 36 用例，互为镜像）：服务端 `tests/languageDetector.test.ts`、扩展端 `src/__tests__/languageDetector.test.ts`。含 `shouldUseJapaneseSource` 15 例真值表。
 
@@ -624,11 +624,20 @@ prepareHtmlForServer 时在 clone 上把 `link[rel=stylesheet]` 替换为
 
 ## 七、本机文档 Agent 的跨项目接口契约（2026-10-16）
 
+### 统一 Run Pipeline 规则（2026-10-17）
+
+Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方式，而是同一 project/run workflow 的两个操作界面：
+
+- 阅读页“继续翻译下一待译页”“翻译下一页/下三页”“强制重译当前页”“重试失败项”只将 segment ID 或 scope 传给 /api/documents/projects/:projectId/runs，后续轮询、自动保存、记忆同步与 Agent Workspace 共用相同 Run。
+- 扩展端不运行本地长任务的第二套 chunk/LLM/reviewer 循环；useDocumentTranslation.ts 的独立批次逻辑只用于明确的非 Local Agent 路径。
+- 初译 translations + context_delta、来源证据验证、来源顺序 wave、候选记忆合并、质量审计和恢复边界仅由 vocal-saga/local-agent-service 实现。扩展可编辑和确认候选，但不得复制服务端合并算法。
+- 服务端 SQLite 是 Local Agent 项目人物/上下文记忆的唯一事实来源。普通 Prompt 更新与 Run 请求不得重发客户端缓存记忆；只有项目初始化或显式人工编辑才写入 /literary-memory。Run 完成后阅读页重新读取当前服务端记忆 revision。
+
 本节记录的是**接口和业务语义同步**，不是要求把服务端代码复制到扩展仓库。Web page translation 与 project-based EPUB/PDF Agent 是两条不同路径，不能用一个“并行度”或一组缓存配置概括。
 
 ### 执行边界
 
-- `fanyi-extension/src/entrypoints/utils/document/` 负责浏览器文件选择、EPUB/PDF/Office 解析、片段元数据和阅读器 UI；`src/entrypoints/document/useDocumentTranslation.ts` 还保留浏览器侧的文学分析/批次请求路径。
+- fanyi-extension/src/entrypoints/utils/document/ 负责浏览器文件选择、EPUB/PDF/Office 解析、片段元数据和阅读器 UI。src/entrypoints/document/useDocumentTranslation.ts 仍保留给非 Local Agent/轻量服务模式使用的客户端批次路径；Local Agent 模式下 App.vue 所有阅读器翻译动作都必须委托 runWorkspaceTranslation，不得触发该旧路径。
 - `vocal-saga/local-agent-service/src/documents/translationAgent.ts` 是 project-based Agent 的服务端编排入口，拥有批次调度、Session scope、候选译文/审校 finding 的持久化、运行状态与事件。它是本机 Express 服务的一部分，不部署在 Cloudflare Worker 上，也不应被加入纯网页翻译模块的字节级同步清单。
 - `fanyi-extension` 的 `DocumentAgentWorkspace.vue` / `documentWorkspaceClient.ts` 通过 `/api/documents/projects/...` 使用该服务端 workflow。修改路由、JSON 字段或事件名时，客户端消费逻辑和 `local-agent-service` 的路由/测试必须一起更新。
 
