@@ -62,6 +62,15 @@ export interface Config {
   documentLocalAgentModel: string;
   documentLocalAgentToken: string;
 
+  /** Local Agent document translation strategy; all limits are validated again by the service. */
+  documentBatchMaxSegments: number;
+  documentBatchMaxSourceChars: number;
+  documentTranslationConcurrency: number;
+  documentReviewConcurrency: number;
+  documentPrecedingContextSegments: number;
+  documentContextBudgetChars: number;
+  documentMaxModelAttempts: number;
+
   /** Document reader typography; English and Chinese can be adjusted independently. */
   documentEnglishFontFamily: string;
   documentChineseFontFamily: string;
@@ -109,6 +118,14 @@ const defaultConfig: Config = {
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
   documentLocalAgentToken: '',
+
+  documentBatchMaxSegments: 16,
+  documentBatchMaxSourceChars: 8000,
+  documentTranslationConcurrency: 4,
+  documentReviewConcurrency: 2,
+  documentPrecedingContextSegments: 4,
+  documentContextBudgetChars: 18000,
+  documentMaxModelAttempts: 2,
 
   documentEnglishFontFamily: 'Georgia',
   documentChineseFontFamily: 'Noto Serif CJK SC',
