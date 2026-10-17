@@ -2747,14 +2747,18 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     const canonicalIndex = matchingIndices[0]!;
     const matching = matchingIndices.map((index) => existing[index]!);
     const confirmed = matching.find((item) => item.reviewStatus === 'confirmed');
-    const canonicalSource = confirmed?.source || candidate.source;
-    const target = confirmed?.target || candidate.target;
-    const kind = confirmed?.kind || candidate.kind;
+    const priorCanonical = matching[0];
+    const canonicalSource = confirmed?.source || priorCanonical?.source || candidate.source;
+    // Existing suggested translations may come from earlier translation waves. A later Context
+    // Graph proposal is not allowed to replace that first canonical target silently; keep the
+    // earlier target and let source-ordered audit/review expose disagreements.
+    const target = confirmed?.target || priorCanonical?.target || candidate.target;
+    const kind = confirmed?.kind || priorCanonical?.kind || candidate.kind;
     const aliases = Array.from(new Set([
       ...matching.flatMap((item) => [item.source, ...(item.aliases || [])]),
       candidate.source, ...(candidate.aliases || []),
     ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSource))));
-    const evidence = confirmed?.evidence || candidate.evidence || matching.find((item) => item.evidence)?.evidence || '';
+    const evidence = confirmed?.evidence || matching.find((item) => item.evidence)?.evidence || candidate.evidence || '';
     // Keep the source locations used by the server's temporal memory filter. A legacy
     // confirmed mapping with no citations remains protected and does not acquire unreviewed
     // later evidence merely because a Context Graph node shares its name.
