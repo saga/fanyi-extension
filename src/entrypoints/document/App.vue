@@ -2547,6 +2547,20 @@ async function syncWorkspaceTranslations(items: Array<{ id: string; text: string
   await replaceCurrentTranslations(items);
 }
 
+async function refreshWorkspaceLiteraryMemory(projectId: string, baseUrl?: string, token?: string): Promise<void> {
+  if (!projectId) return;
+  const config = readerConfig.value || await getConfig();
+  const response = await workspaceApi<{ current?: { memory?: unknown } }>(
+    baseUrl || config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+    token ?? config.documentLocalAgentToken ?? '',
+    '/api/documents/projects/' + encodeURIComponent(projectId) + '/literary-memory',
+  );
+  literaryMemory.value = sanitizeLiteraryMemory(response.current?.memory);
+  await persistCurrentSession();
+}
+
+
+
 function clearContextGraphPoll() {
   if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
   contextGraphPollTimer = null;
@@ -3227,6 +3241,13 @@ async function followWorkspaceRun(project: any, initialRun: any) {
     );
     workspaceProject.value = latest.project;
     workspaceActiveRun.value = (latest.runs || []).find((item) => item.runId === runId) || run;
+    if (literaryMode.value) {
+      await refreshWorkspaceLiteraryMemory(
+        project.projectId,
+        readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+        readerConfig.value?.documentLocalAgentToken || '',
+      );
+    }
     const accepted = await loadWorkspaceAcceptedTranslations(
       readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
       readerConfig.value?.documentLocalAgentToken || '',
@@ -3284,6 +3305,7 @@ async function runWorkspaceTranslation(options: {
       const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
       const accepted = await loadWorkspaceAcceptedTranslations(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0);
       workspaceProject.value = refreshed.project;
+      if (literaryMode.value) await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
       // Keep interrupted/failed remainder visible; only clear a fully resolved legacy run.
       workspaceActiveRun.value = (refreshed.runs || []).find((run) => run.runId === activeRun.runId && ['paused', 'partial', 'failed'].includes(run.status)) || null;
       workspaceCandidateTranslations.value = new Map();
@@ -3353,6 +3375,7 @@ async function runWorkspaceTranslation(options: {
       workspaceActiveRun.value = terminalRun;
       const finalProject = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId));
       workspaceProject.value = finalProject.project;
+      if (literaryMode.value) await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
       const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, finalProject.project.segmentCount || doc.value.segments.length);
       await replaceCurrentTranslations(accepted);
       if (terminalRun.counts?.failed || terminalRun.status === 'partial' || terminalRun.status === 'failed' || terminalRun.status === 'paused') {
