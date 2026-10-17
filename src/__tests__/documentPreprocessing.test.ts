@@ -1,0 +1,107 @@
+import { describe, expect, it } from 'vitest';
+import {
+  CONTEXT_GRAPH_ANALYSIS_VERSION,
+  assessContextGraphReadiness,
+  contextGraphSnapshotFromResponse,
+} from '../entrypoints/document/documentPreprocessing';
+
+const baseInput = {
+  required: true,
+  expectedProjectId: 'project-1',
+  expectedSourceRevisionId: 'source-2',
+  sourceLang: 'en',
+  targetLang: 'zh',
+};
+const completedSnapshot = {
+  projectId: 'project-1',
+  sourceRevisionId: 'source-2',
+  status: 'completed',
+  phase: 'completed',
+  runId: 'preprocess-run',
+  progress: {
+    analysisVersion: CONTEXT_GRAPH_ANALYSIS_VERSION,
+    sourceLang: 'en',
+    targetLang: 'zh',
+  },
+};
+
+describe('literary preprocessing readiness', () => {
+  it('does not block non-literary or non-local translation', () => {
+    expect(assessContextGraphReadiness({ ...baseInput, required: false }).ready).toBe(true);
+  });
+
+  it('fails closed while project/revision state is unknown', () => {
+    const result = assessContextGraphReadiness({
+      ...baseInput, expectedProjectId: null, snapshot: null,
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe('checking');
+  });
+
+  it.each(['queued', 'running'] as const)('blocks translation while preprocessing is %s', (status) => {
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, status, phase: status },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe(status);
+    expect(result.message).toContain('预处理');
+  });
+
+  it('blocks failed preprocessing and preserves the actionable failure state', () => {
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, status: 'failed', error: 'model quota' },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe('failed');
+  });
+
+  it('blocks an index from another source revision', () => {
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, sourceRevisionId: 'source-1' },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe('source-revision');
+  });
+
+  it('blocks an obsolete preprocessing version or a language mismatch', () => {
+    const oldVersion = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, progress: { ...completedSnapshot.progress, analysisVersion: 'old-version' } },
+    });
+    expect(oldVersion.reason).toBe('version');
+
+    const languageMismatch = assessContextGraphReadiness({
+      ...baseInput,
+      targetLang: 'ja',
+      snapshot: completedSnapshot,
+    });
+    expect(languageMismatch.reason).toBe('language');
+  });
+
+  it('allows translation only when revision, analysis version and languages all match', () => {
+    const result = assessContextGraphReadiness({ ...baseInput, snapshot: completedSnapshot });
+    expect(result.ready).toBe(true);
+  });
+
+  it('normalizes the API response into the same snapshot shape for both UI entry points', () => {
+    const snapshot = contextGraphSnapshotFromResponse('project-1', {
+      sourceRevisionId: 'source-2',
+      runs: [{
+        runId: 'preprocess-run',
+        status: 'running',
+        phase: 'model-analysis',
+        progress: { sampleCount: 72 },
+      }],
+    });
+    expect(snapshot).toMatchObject({
+      projectId: 'project-1',
+      sourceRevisionId: 'source-2',
+      runId: 'preprocess-run',
+      status: 'running',
+      phase: 'model-analysis',
+    });
+  });
+});
