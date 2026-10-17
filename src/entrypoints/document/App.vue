@@ -108,7 +108,7 @@
           </strong>
           <p>{{ translationPreprocessingReadiness.message }}</p>
           <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
-            预处理任务 {{ contextGraphState.runId.slice(0, 8) }}
+            预处理任务 {{ contextGraphState.runId }}
             <span v-if="contextGraphPhaseLabel"> · {{ contextGraphPhaseLabel }}</span>
           </p>
           <div v-if="translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running'" class="preprocessing-gate-progress" role="progressbar" :aria-valuenow="contextGraphProgressPercent" aria-valuemin="0" aria-valuemax="100">
