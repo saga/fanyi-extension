@@ -3342,6 +3342,8 @@ async function runWorkspaceTranslation(options: {
   if (!config.documentUseLocalAgent) return;
   const project = await ensureDocumentWorkspace();
   if (!project) return;
+  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
   const activeRun = workspaceActiveRun.value;
   if (activeRun && ['queued', 'running'].includes(activeRun.status)) {
     await followWorkspaceRun(project, activeRun);
@@ -3373,8 +3375,6 @@ async function runWorkspaceTranslation(options: {
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
-  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
-  const token = config.documentLocalAgentToken || '';
   const response = await workspaceApi<{ run: any; started: boolean }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs',
     { method: 'POST', body: JSON.stringify({ scope, prompt: workspacePromptInput() }) },
