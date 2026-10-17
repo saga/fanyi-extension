@@ -1111,7 +1111,7 @@ const contextGraphProgressPercent = computed(() => {
 });
 
 const effectiveDocumentTranslationMode = computed(() =>
-  literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
+  effectiveDocumentTranslationMode.value,
 );
 const translationPreprocessingRequired = computed(() =>
   readerConfig.value?.documentUseLocalAgent === true && effectiveDocumentTranslationMode.value === 'literary',
@@ -1167,12 +1167,12 @@ const builtInDocumentSystemPrompt = computed(() => {
   const base = buildStyledSystemContent(
     sourceLang.value,
     targetLang.value,
-    literaryMode.value ? undefined : glossary.value,
+    effectiveDocumentTranslationMode.value === 'literary' ? undefined : glossary.value,
     readerConfig.value?.documentPromptStyle || 'default',
     literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
   );
   // Include the static book workflow instructions shown to the model, not just the generic profile.
-  return literaryMode.value ? base + '\n\n' + buildLiteraryTranslationContextPrompt() : base;
+  return effectiveDocumentTranslationMode.value === 'literary' ? base + '\n\n' + buildLiteraryTranslationContextPrompt() : base;
 });
 const documentStyleVars = computed(() => ({
   '--document-font-en': englishFontFamily.value,
@@ -2616,7 +2616,7 @@ function workspacePromptInput(includeLiteraryMemory = false) {
     targetLang: targetLang.value,
     provider: config?.documentLocalAgentProvider || 'workbuddy',
     model: config?.documentLocalAgentModel || 'auto',
-    translationMode: (literaryMode.value ? 'literary' : (config?.documentTranslationMode || 'technical')) as 'technical' | 'literary',
+    translationMode: effectiveDocumentTranslationMode.value as 'technical' | 'literary',
     literaryReview: (literaryMode.value || config?.documentTranslationMode === 'literary') && literaryReview.value,
     glossary: glossary.value,
     ...(includeLiteraryMemory ? { literaryMemory: literaryMemory.value } : {}),
@@ -2732,7 +2732,7 @@ async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = t
   try {
     const graph = await loadContextGraph(project, schedulePoll);
     const latestRun = Array.isArray(graph?.runs) ? graph.runs[0] : null;
-    if (literaryMode.value && latestRun?.status === 'completed' &&
+    if (effectiveDocumentTranslationMode.value === 'literary' && latestRun?.status === 'completed' &&
         latestRun?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION &&
         graph?.sourceRevisionId === contextGraphState.value.sourceRevisionId) {
       // Also bridge completed analyses created by CLI or another UI session into the editable
@@ -3061,7 +3061,7 @@ async function setStyleGuideStatus(status: 'candidate' | 'confirmed') {
 }
 
 async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
-  if (!project?.projectId || !literaryMode.value || readerConfig.value?.documentUseLocalAgent !== true) return;
+  if (!project?.projectId || effectiveDocumentTranslationMode.value !== 'literary' || readerConfig.value?.documentUseLocalAgent !== true) return;
   const base = readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = readerConfig.value.documentLocalAgentToken || '';
   const latestTranslationStatus = workspaceActiveRun.value?.status;
@@ -3316,7 +3316,7 @@ async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
   workspaceActiveRun.value = (refreshed.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
   const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length);
   await replaceCurrentTranslations(accepted);
-  if (literaryMode.value && config.documentUseLocalAgent) {
+  if (effectiveDocumentTranslationMode.value === 'literary' && config.documentUseLocalAgent) {
     // Do not block workspace initialization on a potentially long full-book model analysis.
     // The trajectory tab must be able to poll and show each preprocessing phase while it runs.
     void ensureContextGraphPreprocessing(refreshed.project, { force: false });
@@ -3475,7 +3475,7 @@ async function runWorkspaceTranslation(options: {
       const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', '/api/documents/projects/' + encodeURIComponent(project.projectId));
       const accepted = await loadWorkspaceAcceptedTranslations(config.documentLocalAgentUrl || 'http://127.0.0.1:8789', config.documentLocalAgentToken || '', project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0);
       workspaceProject.value = refreshed.project;
-      if (literaryMode.value) await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
+      if (effectiveDocumentTranslationMode.value === 'literary') await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
       // Keep interrupted/failed remainder visible; only clear a fully resolved legacy run.
       workspaceActiveRun.value = (refreshed.runs || []).find((run) => run.runId === activeRun.runId && ['paused', 'partial', 'failed'].includes(run.status)) || null;
       workspaceCandidateTranslations.value = new Map();
@@ -3551,7 +3551,7 @@ async function runWorkspaceTranslation(options: {
       workspaceActiveRun.value = terminalRun;
       const finalProject = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId));
       workspaceProject.value = finalProject.project;
-      if (literaryMode.value) await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
+      if (effectiveDocumentTranslationMode.value === 'literary') await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
       const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, finalProject.project.segmentCount || doc.value.segments.length);
       await replaceCurrentTranslations(accepted);
       if (terminalRun.counts?.failed || terminalRun.status === 'partial' || terminalRun.status === 'failed' || terminalRun.status === 'paused') {
