@@ -2183,10 +2183,10 @@ function characterName(characterId: string): string {
 async function persistVoiceMemoryChange(message: string) {
   persistenceMessage.value = message;
   await persistCurrentSession();
-  // Local Agent 模式下同步到这个文档的项目记忆 revision；不会创建新 Prompt revision。
+  // 人物声音审核属于显式记忆编辑：直接保存文学记忆 revision，不借助 Prompt 保存的副作用。
   if (readerConfig.value?.documentUseLocalAgent && doc.value) {
     try {
-      await ensureDocumentWorkspace();
+      await persistLiteraryMemoryToWorkspace();
     } catch (error) {
       persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
     }
@@ -2822,35 +2822,63 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   return next;
 }
 async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
+  // Context Graph analysis may finish after several translation waves. Always merge against the
+  // newest SQLite memory revision, not the reader's possibly stale IndexedDB snapshot.
+  const config = readerConfig.value || await getConfig();
+  const serverMemory = await workspaceApi<{ current?: { memory?: unknown } }>(
+    config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+    config.documentLocalAgentToken || '',
+    '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+  );
+  literaryMemory.value = sanitizeLiteraryMemory(serverMemory.current?.memory);
   const next = mergeContextGraphEntitySuggestions(graph);
   if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities) &&
       JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices) &&
       JSON.stringify(next.styleGuide) === JSON.stringify(literaryMemory.value.styleGuide) &&
-      next.styleGuideStatus === literaryMemory.value.styleGuideStatus) return;
+      next.styleGuideStatus === literaryMemory.value.styleGuideStatus) {
+    await persistCurrentSession();
+    return;
+  }
   literaryMemory.value = next;
-  await persistCurrentSession();
-  const config = readerConfig.value || await getConfig();
-  await workspaceApi(
-    config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-    config.documentLocalAgentToken || '',
-    '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-    { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
-  );
+  await persistLiteraryMemoryToWorkspace();
 }
 
-async function persistLiteraryMemoryToWorkspace() {
-  await persistCurrentSession();
-  const config = readerConfig.value || await getConfig();
-  readerConfig.value = config;
-  if (!config.documentUseLocalAgent) return;
-  const project = workspaceProject.value || await ensureDocumentWorkspace();
-  if (!project?.projectId) return;
-  await workspaceApi(
-    config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-    config.documentLocalAgentToken || '',
-    '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-    { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
-  );
+let literaryMemorySaveQueue: Promise<void> = Promise.resolve();
+let literaryMemoryEditSequence = 0;
+
+/**
+ * Only explicit memory-edit actions call this method. Writes are serialized so rapid edit/confirm
+ * actions cannot arrive out of order and restore an older memory revision.
+ */
+async function persistLiteraryMemoryToWorkspace(): Promise<void> {
+  const snapshot = sanitizeLiteraryMemory(JSON.parse(JSON.stringify(literaryMemory.value)));
+  const sequence = ++literaryMemoryEditSequence;
+  const write = async () => {
+    await persistCurrentSession();
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    if (!config.documentUseLocalAgent) return;
+    let project = workspaceProject.value;
+    if (!project?.projectId) {
+      await ensureDocumentWorkspace();
+      project = workspaceProject.value;
+    }
+    if (!project?.projectId) return;
+    const result = await workspaceApi<{ current?: { memory?: unknown } }>(
+      config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+      config.documentLocalAgentToken || '',
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+      { method: 'POST', body: JSON.stringify({ memory: snapshot }) },
+    );
+    // A newer edit may already be queued; don't replace its visible draft with this response.
+    if (sequence === literaryMemoryEditSequence) {
+      literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? snapshot);
+      await persistCurrentSession();
+    }
+  };
+  const pending = literaryMemorySaveQueue.catch(() => undefined).then(write);
+  literaryMemorySaveQueue = pending;
+  return pending;
 }
 
 function markStyleGuideCandidate() {
