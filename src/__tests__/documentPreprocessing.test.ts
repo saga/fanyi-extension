@@ -86,6 +86,16 @@ describe('literary preprocessing readiness', () => {
     expect(result.ready).toBe(true);
   });
 
+  it('fails closed when the last status refresh failed even if a previous snapshot looked completed', () => {
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, error: '本机服务暂时不可用' },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe('checking');
+    expect(result.message).toContain('本机服务暂时不可用');
+  });
+
   it('normalizes the API response into the same snapshot shape for both UI entry points', () => {
     const snapshot = contextGraphSnapshotFromResponse('project-1', {
       sourceRevisionId: 'source-2',
