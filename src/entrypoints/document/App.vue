@@ -1615,7 +1615,7 @@ async function toggleAgentTrajectoryFailureDetails(event: any): Promise<void> {
         attempts: Number(row?.attempts || 0),
         error: typeof row?.error === 'string' ? row.error : '',
         contextPath: String(source?.contextPath || source?.chapter || ''),
-        sourceExcerpt: String(source?.text || '').replace(/\\s+/g, ' ').trim().slice(0, 220),
+        sourceExcerpt: String(source?.text || '').replace(/\s+/g, ' ').trim().slice(0, 220),
       };
     });
     agentTrajectoryFailureDetails.value = { ...agentTrajectoryFailureDetails.value, [runId]: details };
