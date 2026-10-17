@@ -414,7 +414,7 @@ function eventSummary(event: any): string {
   return rows.join(' · ').slice(0, 900);
 }
 
-function promptInput(): PromptInput {
+function promptInput(includeLiteraryMemory = false): PromptInput {
   return {
     systemPrompt: props.systemPrompt,
     userPromptTemplate: props.userPromptTemplate,
@@ -424,7 +424,7 @@ function promptInput(): PromptInput {
     model: props.localAgentModel || 'auto',
     translationMode: props.translationMode,
     literaryReview: props.translationMode === 'literary' && props.literaryReview,
-    literaryMemory: props.literaryMemory,
+    ...(includeLiteraryMemory ? { literaryMemory: props.literaryMemory } : {}),
     glossary: props.glossary,
   };
 }
@@ -445,7 +445,7 @@ async function createProject() {
       body: JSON.stringify({
         title: props.title, sourceFileName: props.sourceFileName, format: props.format,
         segments: props.segments,
-        prompt: promptInput(),
+        prompt: promptInput(true),
       }),
     });
     project.value = response.project;
