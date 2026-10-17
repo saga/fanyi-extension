@@ -426,7 +426,7 @@ const failedRunSegments = computed(() => {
     return {
       ...segment,
       contextPath: String(source?.contextPath || source?.chapter || ''),
-      sourceExcerpt: String(source?.text || '').replace(/\\s+/g, ' ').trim().slice(0, 220),
+      sourceExcerpt: String(source?.text || '').replace(/\s+/g, ' ').trim().slice(0, 220),
     };
   });
 });
