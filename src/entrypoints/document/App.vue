@@ -144,7 +144,7 @@
           <button
             v-if="!state.running"
             class="btn primary"
-            :disabled="!hasPendingDocument"
+            :disabled="!hasPendingDocument || translationBlockedByPreprocessing"
             @click="startTranslate">
             {{ startLabel }}
           </button>
@@ -917,8 +917,12 @@
         :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
         :literary-memory="literaryMemory"
         :glossary="glossary"
+        :preprocessing-state="translationPreprocessingUiState"
         @accepted-translations="applyAgentTranslations"
         @workspace-sync="syncWorkspaceTranslations"
+        @project-updated="handleAgentWorkspaceProjectUpdated"
+        @open-preprocessing="openPreprocessingAndEnsure"
+        @preprocessing-status-refresh-requested="handlePreprocessingStatusRefreshRequested"
       />
     </template>
   </div>
@@ -3152,6 +3156,26 @@ watch([sourceLang, targetLang, literaryMode], async (
   }
 });
 
+async function handleAgentWorkspaceProjectUpdated(project: any) {
+  if (!project?.projectId) return;
+  workspaceProject.value = project;
+  workspaceSourceChanged.value = false;
+  try {
+    if (translationPreprocessingRequired.value) {
+      await ensureContextGraphPreprocessing(project, { force: false });
+    } else {
+      await refreshContextGraphStatus(project, true);
+    }
+  } catch (error) {
+    persistenceMessage.value = '同步文档预处理状态失败：' + (error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function handlePreprocessingStatusRefreshRequested(project?: any) {
+  if (project?.projectId) workspaceProject.value = project;
+  await refreshContextGraphStatus(project || workspaceProject.value || undefined, true);
+}
+
 async function openPreprocessingAndEnsure() {
   activeTab.value = 'characters';
   if (!translationPreprocessingRequired.value) {
@@ -3462,6 +3486,14 @@ async function runWorkspaceTranslation(options: {
       return;
     }
   }
+  if (effectiveDocumentTranslationMode.value === 'literary') {
+    // UI disablement is only a convenience; re-read the authoritative project state before POST /runs.
+    await refreshContextGraphStatus(project, true);
+    if (translationBlockedByPreprocessing.value) {
+      state.value.error = translationPreprocessingReadiness.value.message;
+      return;
+    }
+  }
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
@@ -3581,7 +3613,7 @@ function displayTranslation(segmentId: string): string {
  * “下三页”= 当前页 + 后 3 页。当前页已译完时，仍只预翻译后续 N 页。
  */
 async function translatePages(pageCount: number) {
-  if (!doc.value || state.value.running || pageCount < 1) return;
+  if (!doc.value || state.value.running || translationBlockedByPreprocessing.value || pageCount < 1) return;
 
   // 当前页存在任何待译片段时，必须先把当前页纳入范围，不能直接跳到下一页。
   // pageCount 表示按钮要求的后续页数，因此当前页待译时总范围是 1 + pageCount 页。
@@ -3618,6 +3650,7 @@ async function translatePages(pageCount: number) {
 
 async function startTranslate() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  if (translationBlockedByPreprocessing.value) { state.value.error = translationPreprocessingReadiness.value.message; return; }
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (config.documentUseLocalAgent) {
@@ -3698,6 +3731,7 @@ async function startTranslate() {
 
 async function forceTranslateCurrentPage() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
+  if (translationBlockedByPreprocessing.value) { state.value.error = translationPreprocessingReadiness.value.message; return; }
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (config.documentUseLocalAgent) {
@@ -3716,6 +3750,7 @@ async function forceTranslateCurrentPage() {
 
 async function retry() {
   if (!doc.value) return;
+  if (translationBlockedByPreprocessing.value) { state.value.error = translationPreprocessingReadiness.value.message; return; }
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (config.documentUseLocalAgent) {
