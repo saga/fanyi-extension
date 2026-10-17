@@ -3317,6 +3317,8 @@ async function runWorkspaceTranslation(options: {
   chapterTitle?: string;
 }) {
   if (!doc.value || state.value.running) return;
+  // 显式修改 Voice Bible 后立即翻译时，先等待排队中的 SQLite 记忆写入完成。
+  await literaryMemorySaveQueue.catch(() => undefined);
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (!config.documentUseLocalAgent) return;
