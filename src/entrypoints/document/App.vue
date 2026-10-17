@@ -1334,8 +1334,16 @@ function agentTrajectoryDetail(event: any): string {
   }
   if (type === 'translation-brief.ready') {
     details.push('上下文 ' + (p.contextChars ?? 0) + ' 字符');
-    details.push('实体 ' + (p.entityCount ?? 0) + '，关系 ' + (p.relationshipCount ?? 0) +
-      '，人物声音 ' + (p.characterVoiceCount ?? 0) + '，规范译名 ' + (p.nameMappingCount ?? 0));
+    // Older persisted events use the detailed summary field names; newer events also carry
+    // the UI aliases. Fall back for counts so historical traces don't falsely render zero.
+    const entityCount = p.entityCount ??
+      (Number(p.graphCharacters || 0) + Number(p.graphEntities || 0));
+    const relationshipCount = p.relationshipCount ?? p.graphRelationships ?? 0;
+    const characterVoiceCount = p.characterVoiceCount ?? p.characterVoices ?? 0;
+    const nameMappingCount = p.nameMappingCount ?? p.graphNameMappingCount;
+    details.push('实体 ' + entityCount + '，关系 ' + relationshipCount +
+      '，人物声音 ' + characterVoiceCount + '，规范译名 ' +
+      (nameMappingCount ?? '见后续模型请求明细'));
     if (p.contextHash) details.push('Context hash ' + String(p.contextHash).slice(0, 12));
   }
   if (type === 'batch.prompt.ready') {
