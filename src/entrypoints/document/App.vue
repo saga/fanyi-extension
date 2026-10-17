@@ -1110,7 +1110,7 @@ const contextGraphProgressPercent = computed(() => {
 });
 
 const effectiveDocumentTranslationMode = computed(() =>
-  literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
+  effectiveDocumentTranslationMode.value,
 );
 const translationPreprocessingRequired = computed(() =>
   readerConfig.value?.documentUseLocalAgent === true && effectiveDocumentTranslationMode.value === 'literary',
@@ -1571,7 +1571,7 @@ watch([currentPageIndex, sourceLang, targetLang, viewMode, literaryMode], () => 
 });
 
 watch(literaryMemory, () => {
-  if (literaryMode.value) void persistCurrentSession();
+  if (effectiveDocumentTranslationMode.value === 'literary') void persistCurrentSession();
 }, { deep: true });
 
 watch([doc, effectiveDocumentTranslationMode, () => readerConfig.value?.documentUseLocalAgent], ([currentDoc, translationMode, useLocalAgent]) => {
@@ -2554,7 +2554,7 @@ async function buildTranslationOptions() {
     targetLang: targetLang.value,
     glossary: glossary.value,
     promptStyle: config.documentPromptStyle,
-    translationMode: config.documentTranslationMode || 'technical',
+    translationMode: effectiveDocumentTranslationMode.value,
     // Send exactly the prompt shown in this editor even when the user is using built-in defaults.
     // This keeps local Agent and direct server/provider request formats consistent and editable.
     documentSystemPromptOverride: config.documentSystemPromptOverride?.trim() || builtInDocumentSystemPrompt.value,
@@ -2568,8 +2568,7 @@ async function buildTranslationOptions() {
     localAgentToken: config.documentLocalAgentToken,
     // Global literary profile enables entity/style memory for any structured document;
     // the EPUB/PDF checkbox remains an opt-in for users on the technical profile.
-    literaryMode: literaryMode.value &&
-      (config.documentTranslationMode === 'literary' || doc.value.format === 'epub' || doc.value.format === 'pdf'),
+    literaryMode: effectiveDocumentTranslationMode.value === 'literary',
     skipReview: !literaryReview.value,
     // 本地与 vocal-saga 服务端翻译都按批执行，先提交当前阅读页的译文。
     prioritySegmentIds: currentPage.value?.segments.map((segment) => segment.id) ?? [],
