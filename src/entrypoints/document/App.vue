@@ -2696,9 +2696,15 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     const aliases = Array.isArray(node.attributes?.aliases)
       ? Array.from(new Set(node.attributes.aliases.filter((item: unknown): item is string => typeof item === 'string' && item.trim())))
       : [];
+    const evidenceRefs = node.evidence.slice(0, 8).flatMap((item: any) =>
+      typeof item?.segmentId === 'string' && item.segmentId.trim() &&
+      typeof item?.quote === 'string' && item.quote.trim()
+        ? [{ segmentId: item.segmentId, sourceQuote: item.quote.slice(0, 240) }]
+        : []);
     return [{
       source, target, kind, aliases,
       evidence: typeof node.evidence[0]?.quote === 'string' ? node.evidence[0].quote : '',
+      ...(evidenceRefs.length ? { evidenceRefs } : {}),
       reviewStatus: node.status === 'confirmed' ? 'confirmed' : 'suggested',
     }];
   });
@@ -2749,9 +2755,21 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       candidate.source, ...(candidate.aliases || []),
     ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSource))));
     const evidence = confirmed?.evidence || candidate.evidence || matching.find((item) => item.evidence)?.evidence || '';
+    // Keep the source locations used by the server's temporal memory filter. A legacy
+    // confirmed mapping with no citations remains protected and does not acquire unreviewed
+    // later evidence merely because a Context Graph node shares its name.
+    const canMergeEvidenceRefs = !confirmed ||
+      matching.some((item) => Array.isArray(item.evidenceRefs) && item.evidenceRefs.length > 0);
+    const evidenceRefs = canMergeEvidenceRefs
+      ? [...matching.flatMap((item) => item.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
+          .filter((item, index, all) => all.findIndex((other) =>
+            other.segmentId === item.segmentId && normalizeName(other.sourceQuote) === normalizeName(item.sourceQuote)) === index)
+          .slice(0, 8)
+      : [];
     existing[canonicalIndex] = {
       source: canonicalSource, target, kind, aliases: aliases.slice(0, 12),
       ...(evidence ? { evidence } : {}),
+      ...(evidenceRefs.length ? { evidenceRefs } : {}),
       reviewStatus: confirmed ? 'confirmed' : 'suggested',
     };
     for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
