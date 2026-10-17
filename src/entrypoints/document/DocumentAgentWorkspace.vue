@@ -519,6 +519,7 @@ async function createProject() {
       }),
     });
     project.value = response.project;
+    emit('projectUpdated', project.value);
     await rememberWorkspaceProject(projectInput(), project.value.projectId);
     // 先迁移普通阅读页中已有的译文，再开始新的 Agent 运行。
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
@@ -554,6 +555,7 @@ async function loadExistingProject() {
     const result = await api('/api/documents/projects/' + encodeURIComponent(mapping.projectId));
     // 一旦服务确认项目存在，就立即保留项目句柄。后续 Prompt/译文同步失败不能把项目误判为不存在。
     project.value = result.project;
+    emit('projectUpdated', project.value);
     sourceChanged.value = mapping.sourceChanged;
     verification.value = result.verification;
     runs.value = result.runs || [];
@@ -656,6 +658,7 @@ async function updateSourceRevision() {
     await rememberWorkspaceProject(projectInput(), project.value.projectId);
     sourceChanged.value = false;
     await refreshProject();
+    emit('projectUpdated', project.value);
     await emitWorkspaceSnapshot();
     message.value = (message.value ? message.value + ' ' : '') + '新来源版本已保存；未变化片段保留有效译文，变化片段等待重译。';
   } catch (e) {
@@ -675,12 +678,46 @@ async function createSeparateProject() {
   await createProject();
 }
 
+async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
+  if (!props.preprocessingState.required) return true;
+  if (!project.value?.projectId) {
+    error.value = props.preprocessingState.message || '需要先建立文档项目并完成全书预处理。';
+    emit('openPreprocessing');
+    return false;
+  }
+  try {
+    const response = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/context-graph');
+    const snapshot: ContextGraphPreprocessingSnapshot = contextGraphSnapshotFromResponse(
+      project.value.projectId, response.contextGraph || {},
+    );
+    const readiness: PreprocessingReadiness = assessContextGraphReadiness({
+      required: true,
+      snapshot,
+      expectedProjectId: project.value.projectId,
+      expectedSourceRevisionId: project.value.currentSourceRevisionId || '',
+      sourceLang: props.sourceLang,
+      targetLang: props.targetLang,
+    });
+    if (!readiness.ready) {
+      error.value = readiness.message;
+      emit('preprocessingStatusRefreshRequested', project.value);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    error.value = '无法验证全书预处理状态，已阻止启动文学翻译：' + (e instanceof Error ? e.message : String(e));
+    emit('preprocessingStatusRefreshRequested', project.value);
+    return false;
+  }
+}
+
 async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
   if (sourceChanged.value) { error.value = '请先确认是否导入新的来源版本。'; return; }
   busy.value = true; error.value = ''; message.value = '';
   try {
     if (!project.value) await createProject();
     if (!project.value) return;
+    if (!(await verifyPreprocessingBeforeTranslation())) return;
     const runScope = scope === 'visible'
       ? { type: 'ids', ids: props.visibleSegments.map((segment) => segment.id) }
       : { type: scope };
@@ -746,6 +783,7 @@ async function resumeRun() {
   if (!activeRun.value || !project.value) return;
   busy.value = true; error.value = '';
   try {
+    if (!(await verifyPreprocessingBeforeTranslation())) return;
     const response = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + activeRun.value.runId + '/resume', {
       method: 'POST', body: '{}',
     });
