@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
 
 describe('literary memory source evidence', () => {
   it('preserves source-positioned evidence references for entities and relationships', () => {
@@ -58,5 +58,34 @@ describe('literary memory source evidence', () => {
       { segmentId: 'segment-10', sourceQuote: 'The King looked at Max.' },
       { segmentId: 'segment-40', sourceQuote: 'The King addressed the men.' },
     ]);
+  });
+});
+
+
+describe('automatic canonical entity activation', () => {
+  it('automatically activates evidence-backed name mappings and leaves unsupported entries pending', () => {
+    const memory = autoConfirmLiteraryMemory({
+      entities: [
+        {
+          source: 'the King',
+          target: '国王',
+          kind: 'person',
+          aliases: ['King'],
+          evidence: 'But Timsen was much too clever to allow the King to see through him.',
+          reviewStatus: 'suggested',
+        },
+        {
+          source: 'Unknown title',
+          target: '神秘称号',
+          kind: 'other',
+          aliases: [],
+          evidence: '',
+          reviewStatus: 'suggested',
+        },
+      ],
+    });
+
+    expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.reviewStatus).toBe('suggested');
   });
 });
