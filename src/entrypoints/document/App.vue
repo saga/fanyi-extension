@@ -1179,9 +1179,6 @@ const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
 const pendingEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus !== 'confirmed').length);
 const confirmedEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus === 'confirmed').length);
-const confirmableEntityCount = computed(() => literaryMemory.value.entities.filter((entity) =>
-  entity.reviewStatus !== 'confirmed' && !!entity.source.trim() && !!entity.target.trim(),
-).length);
 const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
 const pendingCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'candidate').length +
   literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'candidate').length);
