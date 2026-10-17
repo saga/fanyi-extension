@@ -1325,6 +1325,13 @@ function agentTrajectoryDetail(event: any): string {
   if (type === 'plan.ready') {
     details.push('原文片段 ' + (p.segmentCount ?? '?') + ' 段，规划 ' + (p.batchCount ?? '?') + ' 批');
     details.push('初译并发 ' + (p.translationConcurrency ?? '?') + '，审校并发 ' + (p.reviewConcurrency ?? 0));
+    if (p.maxBatchSegments != null || p.maxBatchSourceChars != null) {
+      details.push('每批上限 ' + (p.maxBatchSegments ?? '?') + ' 段 / ' + (p.maxBatchSourceChars ?? '?') + ' 原文字符');
+    }
+    if (p.contextBudgetChars != null || p.precedingContextSegments != null || p.maxModelAttempts != null) {
+      details.push('前文参考 ' + (p.precedingContextSegments ?? '?') + ' 段 · 上下文预算 ' +
+        (p.contextBudgetChars ?? '?') + ' 字符 · 单批最多尝试 ' + (p.maxModelAttempts ?? '?') + ' 次');
+    }
   }
   if (type === 'run.context.ready') {
     details.push('模型 ' + (p.provider || '?') + '/' + (p.model || '运行时默认'));
@@ -1523,6 +1530,7 @@ onMounted(async () => {
   readerConfig.value = config;
   sourceLang.value = config.documentSourceLang || 'auto';
   targetLang.value = config.documentTargetLang || 'zh';
+  literaryReview.value = config.documentLiteraryReviewEnabled !== false;
   englishFontFamily.value = config.documentEnglishFontFamily || 'Georgia';
   chineseFontFamily.value = config.documentChineseFontFamily || 'Noto Serif CJK SC';
   englishFontSize.value = Number.isFinite(config.documentEnglishFontSize) ? config.documentEnglishFontSize : 17;
@@ -1677,6 +1685,9 @@ function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Conf
   if (changedFields.includes('documentTargetLang')) targetLang.value = config.documentTargetLang;
   if (changedFields.includes('documentTranslationMode')) {
     literaryMode.value = config.documentTranslationMode === 'literary';
+  }
+  if (changedFields.includes('documentLiteraryReviewEnabled')) {
+    literaryReview.value = config.documentLiteraryReviewEnabled;
   }
   if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
   if (!documentUserPromptTemplate.value) documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
