@@ -3413,30 +3413,46 @@ async function ensureContextGraphPreprocessing(project: any, options: { force?: 
   }
 }
 
-watch([sourceLang, targetLang, effectiveDocumentTranslationMode], async (
-  [nextSource, nextTarget, nextTranslationMode],
-  [previousSource, previousTarget, previousTranslationMode],
-) => {
-  if (nextSource === previousSource && nextTarget === previousTarget &&
-      nextTranslationMode === previousTranslationMode) return;
+watch([
+  sourceLang,
+  targetLang,
+  effectiveDocumentTranslationMode,
+  literaryReview,
+  () => JSON.stringify(glossary.value),
+  () => readerConfig.value?.documentLocalAgentProvider,
+  () => readerConfig.value?.documentLocalAgentModel,
+  () => readerConfig.value?.documentBatchMaxSegments,
+  () => readerConfig.value?.documentBatchMaxSourceChars,
+  () => readerConfig.value?.documentTranslationConcurrency,
+  () => readerConfig.value?.documentReviewConcurrency,
+  () => readerConfig.value?.documentPrecedingContextSegments,
+  () => readerConfig.value?.documentContextBudgetChars,
+  () => readerConfig.value?.documentMaxModelAttempts,
+], async (next, previous) => {
+  if (next.every((value, index) => value === previous[index])) return;
+  const nextTranslationMode = next[2];
   if (suppressWorkspacePromptSync || !activeSessionReady.value ||
       readerConfig.value?.documentUseLocalAgent !== true || !workspaceProject.value?.projectId) return;
   const config = readerConfig.value;
+  const projectId = workspaceProject.value.projectId as string;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = config.documentLocalAgentToken || '';
   try {
-    // Language and mode changes are explicit UI changes. Keep the persisted project Prompt in
-    // sync for both technical and literary work; do not run this watcher during server hydration.
+    // Explicit settings edits update the persisted Prompt used by future Runs. Run creation itself
+    // submits only scope, so stale UI config must not silently replace the service's current Prompt.
     await workspaceApi(
       base, token,
-      '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/prompts',
+      '/api/documents/projects/' + encodeURIComponent(projectId) + '/prompts',
       { method: 'POST', body: JSON.stringify(workspacePromptInput()) },
     );
+    if (workspaceProject.value?.projectId !== projectId) return;
     if (nextTranslationMode === 'literary') {
       await ensureContextGraphPreprocessing(workspaceProject.value, { force: false });
     }
   } catch (error) {
-    persistenceMessage.value = '更新文档项目 Prompt 失败：' + (error instanceof Error ? error.message : String(error));
+    if (workspaceProject.value?.projectId === projectId) {
+      persistenceMessage.value = '更新文档项目 Prompt 失败：' + (error instanceof Error ? error.message : String(error));
+    }
   }
 });
 
