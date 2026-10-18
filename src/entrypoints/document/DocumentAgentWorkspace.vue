@@ -550,61 +550,76 @@ async function recreateMissingProject() {
 async function createProject(forceNew = false, explicitRebuild = false) {
   if (!props.useLocalAgent) { error.value = '请先启用本机 Agent。'; return; }
   if (!props.segments.length) return;
+  const initialGeneration = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(initialGeneration);
 
   // Another part of the UI may have initialized the durable project after this panel rendered.
   // Re-resolve immediately before create instead of trusting a stale empty local map.
   if (!forceNew && !explicitRebuild && !restorationProjectMissing.value && !project.value) {
     await loadExistingProject();
+    if (!isCurrent()) return;
     if (project.value || sourceChanged.value || restorationError.value || restorationProjectMissing.value) return;
   }
 
+  if (!isCurrent()) return;
+  const input = projectInput();
+  const legacyTranslations = new Map(props.translations);
+  const legacyMemory = JSON.parse(JSON.stringify(props.literaryMemory));
+  const sourceFileAtStart = props.sourceFile;
+  const promptAtStart = promptInput(true);
   busy.value = true; error.value = ''; message.value = '';
   restorationError.value = '';
   restorationProjectMissing.value = false;
   try {
     const response = await api('/api/documents/projects', {
       method: 'POST',
-      body: JSON.stringify({
-        title: props.title, sourceFileName: props.sourceFileName, format: props.format,
-        segments: props.segments,
-        prompt: promptInput(true),
-        allowDuplicate: forceNew,
-      }),
+      body: JSON.stringify({ ...input, prompt: promptAtStart, allowDuplicate: forceNew }),
     });
 
     if (response.reusedExisting === true) {
-      // Server-side deduplication won a concurrent create race. Reopen the project through the
-      // read-only path; do not migrate the extension snapshot into the now-existing project.
-      await rememberWorkspaceProject(projectInput(), response.project.projectId);
+      // Server-side deduplication won a concurrent create race. Repair only this source's map.
+      await rememberWorkspaceProject(input, response.project.projectId);
+      if (!isCurrent()) return;
       project.value = null;
       await loadExistingProject();
+      if (!isCurrent()) return;
       if (!project.value) throw new Error('本机服务已找到相同来源项目，但刷新项目状态失败。');
       message.value = '已恢复本机服务中已有的相同来源项目，没有新建重复项目。';
       return;
     }
 
-    project.value = response.project;
-    await rememberWorkspaceProject(projectInput(), project.value.projectId);
-    // Only a confirmed new project may receive one-time migration of legacy extension data.
-    await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
-    await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/literary-memory', {
+    await rememberWorkspaceProject(input, response.project.projectId);
+    // Finish one-time migration from the snapshot captured for the request. If the user switches
+    // documents during these writes, complete the old project durably but never bind it to the
+    // newly opened document's reader state.
+    await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, response.project.projectId, legacyTranslations);
+    await api('/api/documents/projects/' + encodeURIComponent(response.project.projectId) + '/literary-memory', {
       method: 'POST',
-      body: JSON.stringify({ memory: props.literaryMemory }),
+      body: JSON.stringify({ memory: legacyMemory }),
     });
-    if (props.sourceFile) {
+    if (sourceFileAtStart) {
       try {
-        await uploadCurrentSourceFile();
+        await backupWorkspaceSourceFile(props.localAgentUrl, props.localAgentToken, response.project.projectId, sourceFileAtStart);
       } catch (uploadError) {
-        message.value = '项目已创建，但原始文件备份失败：' + (uploadError instanceof Error ? uploadError.message : String(uploadError)) + '。可点击“备份原始文件”重试。';
+        if (isCurrent()) {
+          message.value = '项目已创建，但原始文件备份失败：' +
+            (uploadError instanceof Error ? uploadError.message : String(uploadError)) + '。可点击“备份原始文件”重试。';
+        }
       }
     }
+    if (!isCurrent()) return;
+    project.value = response.project;
     await refreshProject();
+    if (!isCurrent()) return;
     emit('projectUpdated', project.value, false);
     await emitWorkspaceSnapshot();
+    if (!isCurrent()) return;
     message.value = '文档 workspace 已创建；原始文件、SQLite、译文版本、Prompt 和运行记录共用同一份项目状态。';
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-  } finally { busy.value = false; }
+    if (isCurrent()) error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    if (isCurrent()) busy.value = false;
+  }
 }
 
 async function loadExistingProject() {
