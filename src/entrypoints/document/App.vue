@@ -3389,6 +3389,9 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     persistenceMessage.value = '本机服务中的项目原文版本与当前文档不同；旧译文不会自动应用。请明确更新来源版本或另建项目。';
     return;
   }
+
+  suppressSessionPersistence = true;
+  let stateHydrated = false;
   try {
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
@@ -3411,6 +3414,7 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
       base, token, project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0,
     );
     await replaceCurrentTranslations(accepted);
+    stateHydrated = true;
 
     if (translationPreprocessingRequired.value) {
       await ensureContextGraphPreprocessing(refreshed.project, { force: false });
@@ -3419,6 +3423,9 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     }
   } catch (error) {
     persistenceMessage.value = '同步本机项目状态失败：' + (error instanceof Error ? error.message : String(error));
+  } finally {
+    suppressSessionPersistence = false;
+    if (stateHydrated) await persistCurrentSession();
   }
 }
 
