@@ -54,9 +54,9 @@ export interface CharacterVoiceProfile {
   characterId: string;
   canonicalSourceName: string;
   targetName?: string;
-  /** 简短角色定位；只在画像确认后注入 prompt。 */
+  /** 简短角色定位；已启用候选以弱提示注入，确认后作为较稳定参考。 */
   role?: string;
-  /** 原文支持的人物特征；候选阶段仅显示给人工核对。 */
+  /** 原文支持的人物特征；已启用候选以弱提示注入，确认后作为较稳定参考。 */
   traits?: string[];
   aliases: string[];
   status: 'candidate' | 'confirmed' | 'rejected';
