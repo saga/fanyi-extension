@@ -3347,22 +3347,24 @@ watch([sourceLang, targetLang, effectiveDocumentTranslationMode], async (
 ) => {
   if (nextSource === previousSource && nextTarget === previousTarget &&
       nextTranslationMode === previousTranslationMode) return;
-  if (suppressWorkspacePromptSync || !activeSessionReady.value || nextTranslationMode !== 'literary' ||
+  if (suppressWorkspacePromptSync || !activeSessionReady.value ||
       readerConfig.value?.documentUseLocalAgent !== true || !workspaceProject.value?.projectId) return;
   const config = readerConfig.value;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = config.documentLocalAgentToken || '';
   try {
-    // Context Graph language metadata and the active Prompt must move together. Save the new
-    // language first, then let the existing preprocessing state machine rebuild stale analysis.
+    // Language and mode changes are explicit UI changes. Keep the persisted project Prompt in
+    // sync for both technical and literary work; do not run this watcher during server hydration.
     await workspaceApi(
       base, token,
       '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/prompts',
       { method: 'POST', body: JSON.stringify(workspacePromptInput()) },
     );
-    await ensureContextGraphPreprocessing(workspaceProject.value, { force: false });
+    if (nextTranslationMode === 'literary') {
+      await ensureContextGraphPreprocessing(workspaceProject.value, { force: false });
+    }
   } catch (error) {
-    persistenceMessage.value = '更新预处理语言失败：' + (error instanceof Error ? error.message : String(error));
+    persistenceMessage.value = '更新文档项目 Prompt 失败：' + (error instanceof Error ? error.message : String(error));
   }
 });
 
@@ -3421,6 +3423,51 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
     return await pending;
   } finally {
     if (ensureWorkspacePromise === pending) ensureWorkspacePromise = null;
+  }
+}
+
+/**
+ * Hydrate the current reader controls from the latest persisted project Prompt.
+ * These values are project/session scoped: do not write them into global extension configuration.
+ */
+async function hydrateWorkspacePrompt(baseUrl: string, token: string, projectId: string): Promise<void> {
+  const response = await workspaceApi<{ prompts?: any[] }>(
+    baseUrl, token,
+    '/api/documents/projects/' + encodeURIComponent(projectId) + '/prompts',
+  );
+  const prompt = response.prompts?.[0];
+  if (!prompt) return;
+  const promptConfig = prompt.config && typeof prompt.config === 'object' ? prompt.config : {};
+  const strategy = promptConfig.translationStrategy && typeof promptConfig.translationStrategy === 'object'
+    ? promptConfig.translationStrategy : {};
+
+  suppressWorkspacePromptSync = true;
+  try {
+    sourceLang.value = typeof promptConfig.sourceLang === 'string' ? promptConfig.sourceLang : sourceLang.value;
+    targetLang.value = typeof promptConfig.targetLang === 'string' ? promptConfig.targetLang : targetLang.value;
+    literaryMode.value = promptConfig.translationMode === 'literary';
+    literaryReview.value = promptConfig.literaryReview === true;
+    if (promptConfig.glossary) glossary.value = promptConfig.glossary as Glossary;
+    readerConfig.value = {
+      ...(readerConfig.value || await getConfig()),
+      documentTranslationMode: promptConfig.translationMode === 'literary' ? 'literary' : 'technical',
+      documentLocalAgentProvider: promptConfig.provider === 'opencode' ? 'opencode' : 'workbuddy',
+      documentLocalAgentModel: typeof promptConfig.model === 'string' ? promptConfig.model : 'auto',
+      documentBatchMaxSegments: Number.isFinite(strategy.maxBatchSegments) ? strategy.maxBatchSegments : readerConfig.value?.documentBatchMaxSegments,
+      documentBatchMaxSourceChars: Number.isFinite(strategy.maxBatchSourceChars) ? strategy.maxBatchSourceChars : readerConfig.value?.documentBatchMaxSourceChars,
+      documentTranslationConcurrency: Number.isFinite(strategy.translationConcurrency) ? strategy.translationConcurrency : readerConfig.value?.documentTranslationConcurrency,
+      documentReviewConcurrency: Number.isFinite(strategy.reviewConcurrency) ? strategy.reviewConcurrency : readerConfig.value?.documentReviewConcurrency,
+      documentPrecedingContextSegments: Number.isFinite(strategy.precedingContextSegments) ? strategy.precedingContextSegments : readerConfig.value?.documentPrecedingContextSegments,
+      documentContextBudgetChars: Number.isFinite(strategy.contextBudgetChars) ? strategy.contextBudgetChars : readerConfig.value?.documentContextBudgetChars,
+      documentMaxModelAttempts: Number.isFinite(strategy.maxModelAttempts) ? strategy.maxModelAttempts : readerConfig.value?.documentMaxModelAttempts,
+    };
+    documentSystemPromptOverride.value = typeof prompt.systemPrompt === 'string' ? prompt.systemPrompt : '';
+    documentUserPromptTemplate.value = typeof prompt.userPromptTemplate === 'string' ? prompt.userPromptTemplate : '';
+    await nextTick();
+    documentSystemPromptEditor.value = documentSystemPromptOverride.value || builtInDocumentSystemPrompt.value;
+    documentUserPromptEditor.value = documentUserPromptTemplate.value || BUILT_IN_USER_PROMPT_TEMPLATE;
+  } finally {
+    suppressWorkspacePromptSync = false;
   }
 }
 
@@ -3526,6 +3573,7 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
     );
   }
 
+  await hydrateWorkspacePrompt(base, token, project.projectId);
   const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
   const currentMemory = await workspaceApi<{ current?: { memoryRevisionId?: string | null; memory?: unknown } }>(
     base, token, memoryPath,
