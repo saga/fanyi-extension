@@ -2716,7 +2716,8 @@ async function loadFile(file: File) {
       savedSessionSummary.value = await getActiveDocumentSessionSummary();
       persistenceMessage.value = '已恢复这份文档上次的阅读位置、译文和书籍记忆。需要重新生成译文时，点击“强制重译当前页”。';
       try {
-        await refreshExistingWorkspaceFromService();
+          await refreshExistingWorkspaceFromService();
+        savedSessionSummary.value = await getActiveDocumentSessionSummary();
       } catch (error) {
         persistenceMessage.value = '已恢复扩展本地副本；本机服务暂不可用，恢复连接后将重新同步。' +
           (error instanceof Error ? ' ' + error.message : '');
@@ -2741,28 +2742,33 @@ async function loadFile(file: File) {
       });
       activeSessionIndexedDbWritable = true;
       activeSessionReady.value = true;
-      await persistCurrentSession();
-      savedSessionSummary.value = await getActiveDocumentSessionSummary();
+      let synchronizedFromService = false;
       try {
-        await refreshExistingWorkspaceFromService();
+        synchronizedFromService = !!(await refreshExistingWorkspaceFromService());
       } catch (error) {
+        // The service is unavailable, so preserve this parsed document as an offline backup.
         persistenceMessage.value = '文档已打开并保留扩展副本；本机服务暂不可用，恢复连接后将重新同步。' +
           (error instanceof Error ? ' ' + error.message : '');
       }
+      // Do not persist the initial empty snapshot before a matching service project has been
+      // checked. If no project exists or the service is offline, this becomes the backup copy.
+      if (!synchronizedFromService) await persistCurrentSession();
+      savedSessionSummary.value = await getActiveDocumentSessionSummary();
     } catch (storageError) {
       // 文件已在内存解析完成。即使 IndexedDB 无法创建，也尝试先建立 SQLite 恢复副本。
       activeSessionIndexedDbWritable = false;
       activeSessionReady.value = true;
       persistenceMessage.value = '扩展本地会话创建失败，正在尝试保存到本机 SQLite。' +
         (storageError instanceof Error ? ' ' + storageError.message : '');
-      await persistCurrentSession();
-      await refreshLocalSessionSummary();
+      let synchronizedFromService = false;
       try {
-        await refreshExistingWorkspaceFromService();
+        synchronizedFromService = !!(await refreshExistingWorkspaceFromService());
       } catch (error) {
-        persistenceMessage.value = '文档已打开并保留扩展副本；本机服务暂不可用，恢复连接后将重新同步。' +
+        persistenceMessage.value = '本机服务暂不可用，继续保留当前内存文档；服务恢复后重新同步。' +
           (error instanceof Error ? ' ' + error.message : '');
       }
+      if (!synchronizedFromService) await persistCurrentSession();
+      await refreshLocalSessionSummary();
     }
   } catch (err) {
     parseError.value = (err as Error).message;
