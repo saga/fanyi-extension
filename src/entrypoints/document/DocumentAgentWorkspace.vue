@@ -71,7 +71,7 @@
       <p>{{ restorationError }}</p>
       <div class="agent-inline-actions">
         <button class="agent-button agent-button-secondary" :disabled="restoringProject || busy" @click="loadExistingProject">重试</button>
-        <button v-if="restorationProjectMissing" class="agent-button agent-button-primary" :disabled="restoringProject || busy" @click="createProject(true)">重建项目</button>
+        <button v-if="restorationProjectMissing" class="agent-button agent-button-primary" :disabled="restoringProject || busy" @click="recreateMissingProject">重建项目</button>
       </div>
     </section>
 
@@ -527,6 +527,21 @@ function promptInput(includeLiteraryMemory = false): PromptInput {
 
 async function api(path: string, init: RequestInit = {}): Promise<any> {
   return workspaceApi(props.localAgentUrl, props.localAgentToken, path, init);
+}
+
+async function recreateMissingProject() {
+  // Retry authoritative discovery after explicit user confirmation. A project created by another
+  // initializer since the error appeared must be reused instead of creating a second project.
+  restorationProjectMissing.value = false;
+  await loadExistingProject();
+  if (project.value || sourceChanged.value || restorationError.value) return;
+  if (!restorationProjectMissing.value) {
+    await createProject();
+    return;
+  }
+  // The stale mapping is still missing after a fresh service lookup; create with normal
+  // server-side idempotency rather than force-new semantics.
+  await createProject();
 }
 
 async function createProject(forceNew = false) {
