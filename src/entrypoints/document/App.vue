@@ -110,6 +110,7 @@
           <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
             预处理任务 {{ contextGraphState.runId }}
             <span v-if="contextGraphPhaseLabel"> · {{ contextGraphPhaseLabel }}</span>
+            <span v-if="preprocessingElapsedLabel"> · {{ preprocessingElapsedLabel }}</span>
           </p>
           <div v-if="translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running'" class="preprocessing-gate-progress" role="progressbar" :aria-valuenow="contextGraphProgressPercent" aria-valuemin="0" aria-valuemax="100">
             <div :style="{ width: contextGraphProgressPercent + '%' }"></div>
@@ -401,7 +402,7 @@
           <span class="chip">其他实体 {{ contextGraphState.counts.entities }}</span>
           <span class="chip">关系 {{ contextGraphState.counts.relationships }}</span>
         </div>
-        <p>{{ contextGraphPhaseLabel }}<template v-if="contextGraphState.runId"> · Run {{ contextGraphState.runId.slice(0, 8) }}</template></p>
+        <p>{{ contextGraphPhaseLabel }}<template v-if="contextGraphState.runId"> · Run {{ contextGraphState.runId.slice(0, 8) }}</template><template v-if="preprocessingElapsedLabel"> · {{ preprocessingElapsedLabel }}</template></p>
         <p v-if="readerConfig?.documentUseLocalAgent !== true" class="muted small">
           全书实体预处理需要使用本机 Agent。启用后，已有小说也会自动检查并补做分析；不会删除已有译文。
         </p>
@@ -1314,8 +1315,38 @@ const isTranslatingCurrentChapter = computed(() => {
   ) || (currentPage.value?.title || '').includes(work) || (currentPage.value?.sectionTitle || '') === work;
 });
 
-function jumpToWorkChapter() {
-  const work = state.value.workChapter;
+/**
+ * 预处理耗时展示：全书分析要跑几分钟到十几分钟，界面只写「进行中」时，
+ * 用户无法区分「在跑」和「卡死」。时钟只在运行期间按秒推进，结束后立即停，避免空转。
+ */
+const preprocessingClock = ref(Date.now());
+let preprocessingClockTimer: number | null = null;
+const preprocessingElapsedLabel = computed(() => {
+  const status = contextGraphState.value.status;
+  if (status !== 'queued' && status !== 'running') return '';
+  const startedAt = Date.parse(String(contextGraphState.value.startedAt || ''));
+  if (!Number.isFinite(startedAt)) return '';
+  const seconds = Math.max(0, Math.floor((preprocessingClock.value - startedAt) / 1000));
+  if (seconds < 60) return '已进行 ' + seconds + ' 秒';
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return '已进行 ' + minutes + ' 分' + (rest ? ' ' + rest + ' 秒' : '');
+});
+watch(
+  () => [contextGraphState.value.status, contextGraphState.value.startedAt] as const,
+  ([status]) => {
+    const active = status === 'queued' || status === 'running';
+    if (active && preprocessingClockTimer === null) {
+      preprocessingClockTimer = window.setInterval(() => { preprocessingClock.value = Date.now(); }, 1000);
+    } else if (!active && preprocessingClockTimer !== null) {
+      window.clearInterval(preprocessingClockTimer);
+      preprocessingClockTimer = null;
+    }
+  },
+  { immediate: true },
+);
+
+function jumpToWorkChapter() {  const work = state.value.workChapter;
   if (!work || !pages.value.length) return;
   let target = pages.value.findIndex((page) =>
     page.segments.some((segment) => (segment.contextPath?.trim() || '') === work),
@@ -1410,6 +1441,10 @@ watch([doc, effectiveDocumentTranslationMode, () => readerConfig.value?.document
 onUnmounted(() => {
   clearContextGraphPoll();
   stopAgentTrajectoryPolling();
+  if (preprocessingClockTimer !== null) {
+    window.clearInterval(preprocessingClockTimer);
+    preprocessingClockTimer = null;
+  }
 });
 
 onMounted(async () => {
