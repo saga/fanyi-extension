@@ -597,41 +597,54 @@ async function loadExistingProject() {
   try {
     const input = projectInput();
     const mapping = await lookupWorkspaceProject(input);
-    let projectId = mapping.projectId;
-    let hasSourceChanged = mapping.sourceChanged;
-    let result: any = null;
+    let mappedResult: any = null;
 
-    if (projectId) {
+    if (mapping.projectId) {
       try {
-        result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+        mappedResult = await api('/api/documents/projects/' + encodeURIComponent(mapping.projectId));
       } catch (e) {
-        // A stale extension map is recoverable only by resolving against the service catalog.
-        // Connection/auth errors must never be interpreted as a missing project.
+        // A missing mapped project can be repaired from the service catalog; connectivity/auth
+        // failures must remain errors, never be mistaken for a missing project.
         if (!(e instanceof WorkspaceApiError) || e.status !== 404) throw e;
-        projectId = null;
-        hasSourceChanged = false;
       }
     }
 
-    if (!result) {
-      const resolution = await resolveWorkspaceProject(props.localAgentUrl, props.localAgentToken, input);
-      if (resolution.exactProject?.projectId) {
-        projectId = resolution.exactProject.projectId;
-        hasSourceChanged = false;
-        await rememberWorkspaceProject(input, projectId);
-      } else if (resolution.relatedProject?.projectId) {
-        projectId = resolution.relatedProject.projectId;
-        hasSourceChanged = true;
+    // Validate the actual current source against the service on every open. A local mapping can
+    // still point to a live project whose source revision changed elsewhere.
+    const resolution = await resolveWorkspaceProject(props.localAgentUrl, props.localAgentToken, input);
+    let projectId: string | null = null;
+    let hasSourceChanged = false;
+    let result: any = null;
+
+    if (resolution.exactProject?.projectId) {
+      // Preserve a user's explicit project choice when duplicate projects share the same source.
+      // A mapped project is reusable only if the service says its current fingerprint is exact.
+      if (mappedResult?.project?.sourceFingerprint === resolution.exactProject.sourceFingerprint) {
+        projectId = mapping.projectId!;
+        result = mappedResult;
       } else {
-        // No server-side match is a normal first-open case. Do not create until the user starts
-        // the workflow; importantly, don't re-upload stale local session data to "discover" it.
-        if (mapping.projectId) {
-          restorationProjectMissing.value = true;
-          restorationError.value = '原有关联的项目已不在本机服务中，服务目录也未找到同一原文版本。确认后可以新建项目；本地译文备份仍会保留。';
-        }
-        return;
+        projectId = resolution.exactProject.projectId;
+        if (mapping.projectId !== projectId) await rememberWorkspaceProject(input, projectId);
+        result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
       }
+    } else if (mappedResult) {
+      // The old project still exists, but it no longer represents this document's source.
+      // Surface the mismatch rather than loading its translations into the current reader.
+      projectId = mapping.projectId!;
+      hasSourceChanged = true;
+      result = mappedResult;
+    } else if (resolution.relatedProject?.projectId) {
+      projectId = resolution.relatedProject.projectId;
+      hasSourceChanged = true;
       result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+    } else {
+      // No server-side match is a normal first-open case. Do not create until the user starts
+      // the workflow; importantly, don't re-upload stale local session data to "discover" it.
+      if (mapping.projectId) {
+        restorationProjectMissing.value = true;
+        restorationError.value = '原有关联的项目已不在本机服务中，服务目录也未找到同一原文版本。确认后可以新建项目；本地译文备份仍会保留。';
+      }
+      return;
     }
 
     // Once a project is found, preserve its handle immediately; later refresh failures must not
@@ -641,7 +654,6 @@ async function loadExistingProject() {
     emit('projectUpdated', project.value, sourceChanged.value);
     verification.value = result.verification;
     runs.value = result.runs || [];
-    // A related but non-identical source is never hydrated into the current reader.
     if (sourceChanged.value) return;
 
     // Existing service projects are read-only during discovery. Do not push cached Prompt,
@@ -664,7 +676,6 @@ async function loadExistingProject() {
   } finally {
     restoringProject.value = false;
   }
-}
 
 async function refreshProject() {
   if (!project.value) return;
