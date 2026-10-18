@@ -391,7 +391,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   acceptedTranslations: [items: Array<{ id: string; text: string }>];
   workspaceSync: [items: Array<{ id: string; text: string }>];
-  projectUpdated: [project: any];
+  projectUpdated: [project: any, sourceChanged?: boolean];
   openPreprocessing: [];
   preprocessingStatusRefreshRequested: [project?: any];
 }>();
@@ -545,7 +545,6 @@ async function createProject() {
       }),
     });
     project.value = response.project;
-    emit('projectUpdated', project.value);
     await rememberWorkspaceProject(projectInput(), project.value.projectId);
     // 先迁移普通阅读页中已有的译文，再开始新的 Agent 运行。
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
@@ -562,6 +561,7 @@ async function createProject() {
       }
     }
     await refreshProject();
+    emit('projectUpdated', project.value, false);
     await emitWorkspaceSnapshot();
     message.value = '文档 workspace 已创建；原始文件、SQLite、译文版本、Prompt 和运行记录共用同一份项目状态。';
   } catch (e) {
@@ -617,8 +617,8 @@ async function loadExistingProject() {
     // Once a project is found, preserve its handle immediately; later refresh failures must not
     // make the component forget which durable project was discovered.
     project.value = result.project;
-    emit('projectUpdated', project.value);
     sourceChanged.value = hasSourceChanged;
+    emit('projectUpdated', project.value, sourceChanged.value);
     verification.value = result.verification;
     runs.value = result.runs || [];
     // A related but non-identical source is never hydrated into the current reader.
@@ -716,7 +716,7 @@ async function updateSourceRevision() {
     await rememberWorkspaceProject(projectInput(), project.value.projectId);
     sourceChanged.value = false;
     await refreshProject();
-    emit('projectUpdated', project.value);
+    emit('projectUpdated', project.value, false);
     await emitWorkspaceSnapshot();
     message.value = (message.value ? message.value + ' ' : '') + '新来源版本已保存；未变化片段保留有效译文，变化片段等待重译。';
   } catch (e) {
