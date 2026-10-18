@@ -140,6 +140,17 @@ function describeWorkspaceFailure(payload: any, status: number): string {
   return '本机服务返回 HTTP ' + status;
 }
 
+/**
+ * fetch 抛 TypeError 说明请求根本没拿到 HTTP 响应（连接被拒、服务刚被重启、
+ * 地址/端口写错、被浏览器拦下）。浏览器只会给一句 "Failed to fetch"，
+ * 直接把它当错误文案显示，用户既不知道找谁、也不知道该看哪个地址。
+ * 这里补上实际请求的 base 和原始错误，保留可排查性。
+ */
+function describeNetworkFailure(base: string, error: unknown): string {
+  const detail = error instanceof Error && error.message ? '（原始错误：' + error.message + '）' : '';
+  return '无法连接本机服务 ' + base + '：服务可能未启动或正在重启，请确认服务运行后重试' + detail;
+}
+
 export async function workspaceApi<T = any>(
   baseUrl: string,
   token: string,
@@ -151,7 +162,9 @@ export async function workspaceApi<T = any>(
   const headers = new Headers(init.headers || {});
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', 'Bearer ' + token);
-  const response = await fetch(url.toString(), { ...init, headers });
+  // status 0 表示传输层失败（没有 HTTP 响应），不会和 404/401 这些真实状态码混淆。
+  const response = await fetch(url.toString(), { ...init, headers })
+    .catch((error: unknown) => { throw new WorkspaceApiError(describeNetworkFailure(base, error), 0); });
   const payload = await response.json().catch(() => ({})) as any;
   if (!response.ok) throw new WorkspaceApiError(describeWorkspaceFailure(payload, response.status), response.status);
   return payload as T;

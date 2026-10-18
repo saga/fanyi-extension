@@ -108,6 +108,36 @@ describe('workspaceApi 错误文案', () => {
   });
 });
 
+describe('workspaceApi 传输层失败', () => {
+  /**
+   * 回归背景：本机服务被重启（或没启动）时，进行中的 fetch 被切断，浏览器只抛
+   * TypeError: Failed to fetch。旧实现把 error.message 原样显示，阅读页顶部就
+   * 只剩一句 "Failed to fetch"，看不出是哪个服务、什么原因。
+   */
+  it('把 Failed to fetch 换成带地址的可读文案', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    const error = await workspaceApi('http://127.0.0.1:8789', '', '/api/documents/projects')
+      .catch((e: unknown) => e as WorkspaceApiError);
+
+    expect(error).toBeInstanceOf(WorkspaceApiError);
+    expect(error.status).toBe(0);
+    expect(error.message).toContain('http://127.0.0.1:8789');
+    expect(error.message).toContain('服务可能未启动或正在重启');
+    // 原始错误保留，便于排查是连接被拒还是被拦截
+    expect(error.message).toContain('Failed to fetch');
+  });
+
+  it('传输层失败不会被当成 404 而触发“新建项目”', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    const error = await workspaceApi('http://127.0.0.1:8789', '', '/api/documents/projects/gone')
+      .catch((e: unknown) => e as WorkspaceApiError);
+
+    expect(error.status).not.toBe(404);
+  });
+});
+
 describe('WorkspaceApiError 携带 HTTP 状态', () => {
   /**
    * 回归背景：App.vue 曾用 /HTTP 404/ 匹配错误文案来判断「项目已不存在」。
