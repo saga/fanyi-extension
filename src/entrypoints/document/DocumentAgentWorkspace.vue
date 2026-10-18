@@ -802,8 +802,12 @@ async function emitWorkspaceSnapshot() {
 
 async function uploadCurrentSourceFile() {
   if (!project.value || !props.sourceFile) throw new Error('当前没有可上传的原始文件');
-  await backupWorkspaceSourceFile(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.sourceFile);
-  project.value = { ...project.value, sourceFileSaved: true, sourceFileSize: props.sourceFile.size };
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  const sourceFile = props.sourceFile;
+  await backupWorkspaceSourceFile(props.localAgentUrl, props.localAgentToken, projectId, sourceFile);
+  if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+  project.value = { ...project.value, sourceFileSaved: true, sourceFileSize: sourceFile.size };
   await refreshProject();
 }
 
@@ -869,24 +873,32 @@ async function createSeparateProject() {
 }
 
 async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
-  if (!props.preprocessingState.required) return true;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const preprocessingState = props.preprocessingState;
+  if (!preprocessingState.required) return true;
   if (!project.value?.projectId) {
-    error.value = props.preprocessingState.message || '需要先建立文档项目并完成全书预处理。';
+    error.value = preprocessingState.message || '需要先建立文档项目并完成全书预处理。';
     emit('openPreprocessing');
     return false;
   }
+  const projectId = project.value.projectId as string;
+  const sourceRevisionId = project.value.currentSourceRevisionId || '';
+  const sourceLang = props.sourceLang;
+  const targetLang = props.targetLang;
   try {
-    const response = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/context-graph');
+    const response = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph');
+    if (!isCurrent() || project.value?.projectId !== projectId) return false;
     const snapshot: ContextGraphPreprocessingSnapshot = contextGraphSnapshotFromResponse(
-      project.value.projectId, response.contextGraph || {},
+      projectId, response.contextGraph || {},
     );
     const readiness: PreprocessingReadiness = assessContextGraphReadiness({
       required: true,
       snapshot,
-      expectedProjectId: project.value.projectId,
-      expectedSourceRevisionId: project.value.currentSourceRevisionId || '',
-      sourceLang: props.sourceLang,
-      targetLang: props.targetLang,
+      expectedProjectId: projectId,
+      expectedSourceRevisionId: sourceRevisionId,
+      sourceLang,
+      targetLang,
     });
     if (!readiness.ready) {
       error.value = readiness.message;
@@ -895,6 +907,7 @@ async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
     }
     return true;
   } catch (e) {
+    if (!isCurrent()) return false;
     error.value = '无法验证全书预处理状态，已阻止启动文学翻译：' + (e instanceof Error ? e.message : String(e));
     emit('preprocessingStatusRefreshRequested', project.value);
     return false;
