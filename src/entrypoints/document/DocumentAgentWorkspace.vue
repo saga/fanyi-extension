@@ -726,7 +726,10 @@ async function loadExistingProject() {
 
 async function refreshProject() {
   if (!project.value) return;
-  const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId));
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  const result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+  if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
   project.value = result.project;
   verification.value = result.verification;
   runs.value = result.runs || [];
@@ -735,9 +738,13 @@ async function refreshProject() {
 
 async function refreshRunEvents(runId: string): Promise<void> {
   if (!project.value || !runId) return;
-  const endpoint = '/api/documents/projects/' + encodeURIComponent(project.value.projectId) +
-    '/events?runId=' + encodeURIComponent(runId) + '&after=' + eventCursor + '&limit=1000';
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  const cursor = eventCursor;
+  const endpoint = '/api/documents/projects/' + encodeURIComponent(projectId) +
+    '/events?runId=' + encodeURIComponent(runId) + '&after=' + cursor + '&limit=1000';
   const result = await api(endpoint);
+  if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
   const incoming = Array.isArray(result.events) ? result.events : [];
   if (!incoming.length) return;
   runEvents.value = [...runEvents.value, ...incoming].slice(-1000);
@@ -783,9 +790,13 @@ function resetProjectStateForSourceChange(): void {
 
 async function emitWorkspaceSnapshot() {
   if (!project.value) return;
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  const segmentCount = project.value.segmentCount || props.segments.length;
   const accepted = await loadWorkspaceAcceptedTranslations(
-    props.localAgentUrl, props.localAgentToken, project.value.projectId, project.value.segmentCount || props.segments.length,
+    props.localAgentUrl, props.localAgentToken, projectId, segmentCount,
   );
+  if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
   emit('workspaceSync', accepted);
 }
 
@@ -901,43 +912,55 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
 }
 
 async function selectRun(runId: string) {
+  const generation = workspaceSourceGeneration;
   try {
     runEvents.value = [];
     eventCursor = 0;
     await refreshRun(runId);
+    if (!isCurrentWorkspaceGeneration(generation)) return;
     if (isRunning.value) schedulePoll(runId);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (isCurrentWorkspaceGeneration(generation)) error.value = e instanceof Error ? e.message : String(e);
   }
 }
 
 async function refreshRun(runId: string) {
   if (!project.value) return;
-  const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/runs/' + encodeURIComponent(runId));
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  const result = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/runs/' + encodeURIComponent(runId));
+  if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
   activeRun.value = result.run;
   await refreshRunEvents(runId);
 }
 
 function schedulePoll(runId: string) {
   if (pollTimer) clearTimeout(pollTimer);
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value?.projectId as string | undefined;
   pollTimer = setTimeout(async () => {
-    if (disposed) return;
+    if (!isCurrentWorkspaceGeneration(generation) || !projectId || project.value?.projectId !== projectId) return;
     try {
       await refreshRun(runId);
+      if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
       if (isRunning.value) schedulePoll(runId);
       else {
         await refreshProjectWithoutRun();
+        if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
         await autoAcceptReadyCandidates();
       }
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      if (isCurrentWorkspaceGeneration(generation)) error.value = e instanceof Error ? e.message : String(e);
     }
   }, 1200);
 }
 
 async function refreshProjectWithoutRun() {
   if (!project.value) return;
-  const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId));
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  const result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+  if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
   project.value = result.project;
   verification.value = result.verification;
   runs.value = result.runs || [];
