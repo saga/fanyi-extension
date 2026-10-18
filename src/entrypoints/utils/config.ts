@@ -136,9 +136,11 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
     const effort = ['low', 'medium', 'high', 'xhigh'].includes(value.effort)
       ? value.effort as DocumentCodeBuddyEffort : defaults.effort;
     const rawBudget = Number(value.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens);
+    const model = typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model;
+    const fallbackModel = typeof value.fallbackModel === 'string' ? value.fallbackModel.trim().slice(0, 200) : defaults.fallbackModel;
     result[task] = {
-      model: typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model,
-      fallbackModel: typeof value.fallbackModel === 'string' ? value.fallbackModel.trim().slice(0, 200) : defaults.fallbackModel,
+      model: model.toLowerCase() === 'auto' ? '' : model,
+      fallbackModel: fallbackModel.toLowerCase() === 'auto' ? '' : fallbackModel,
       thinkingMode,
       thinkingBudgetTokens: Number.isFinite(rawBudget) ? Math.max(1024, Math.min(65536, Math.round(rawBudget))) : defaults.thinkingBudgetTokens,
       effort,
