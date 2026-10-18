@@ -122,6 +122,7 @@
                 <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].model"
                   placeholder="留空继承上面的模型覆盖"
                   @change="saveConfig('documentCodeBuddyTaskProfiles')" />
+                <small class="muted">填写 CodeBuddy 模型 ID（如 hy3 或 deepseek-v4-pro），不要加 workbuddy: 前缀。</small>
               </label>
               <label class="setting-field">
                 <span>Fallback Model（可选）</span>
