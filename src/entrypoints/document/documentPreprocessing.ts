@@ -1,5 +1,20 @@
 export const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v5-language-pinned';
 
+export type DocumentTranslationMode = 'literary' | 'technical';
+
+/**
+ * Resolve the one translation mode shared by the reader, Agent workspace,
+ * preprocessing gate and persisted Prompt. Per-document literary mode takes
+ * precedence; otherwise the global mode applies, with technical as the safe default.
+ */
+export function resolveDocumentTranslationMode(
+  perDocumentLiteraryMode: boolean,
+  configuredMode?: string | null,
+): DocumentTranslationMode {
+  if (perDocumentLiteraryMode || configuredMode === 'literary') return 'literary';
+  return 'technical';
+}
+
 export interface ContextGraphPreprocessingSnapshot {
   projectId?: string;
   sourceRevisionId?: string;
