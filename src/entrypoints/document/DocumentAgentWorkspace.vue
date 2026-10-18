@@ -1081,6 +1081,9 @@ async function dismissStyleFinding(finding: any) {
 
 async function acceptCandidates(segmentIds?: string[], automatic = false): Promise<boolean> {
   if (!activeRun.value || !project.value) return false;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
   const runId = activeRun.value.runId as string;
   // Snapshot candidates before the response changes their run-segment status.
   const candidates = (activeRun.value.segments || [])
@@ -1091,8 +1094,8 @@ async function acceptCandidates(segmentIds?: string[], automatic = false): Promi
     error.value = '运行记录显示有候选数量，但没有读取到对应的候选片段。正在重新读取运行详情，请稍后重试。';
     if (automatic) {
       try {
-        const latest = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/runs/' + encodeURIComponent(runId));
-        if (activeRun.value?.runId === runId) activeRun.value = latest.run;
+        const latest = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/runs/' + encodeURIComponent(runId));
+        if (isCurrent() && project.value?.projectId === projectId && activeRun.value?.runId === runId) activeRun.value = latest.run;
       } catch (e) {
         error.value += '读取运行详情失败：' + (e instanceof Error ? e.message : String(e));
       }
@@ -1101,13 +1104,15 @@ async function acceptCandidates(segmentIds?: string[], automatic = false): Promi
   }
   busy.value = true; error.value = '';
   try {
-    const response = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/runs/' + encodeURIComponent(runId) + '/accept', {
+    const response = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/runs/' + encodeURIComponent(runId) + '/accept', {
       method: 'POST', body: JSON.stringify({ segmentIds: Array.from(requested) }),
     });
+    if (!isCurrent() || project.value?.projectId !== projectId) return false;
     if (activeRun.value?.runId === runId) activeRun.value = response.run;
     // Only sync the authoritative accepted versions from SQLite. The store may have preserved
     // a human edit instead of accepting a model candidate for one or more segments.
     await emitWorkspaceSnapshot();
+    if (!isCurrent() || project.value?.projectId !== projectId) return false;
     message.value = automatic
       ? '翻译结果已自动保存，并同步到阅读器。'
       : segmentIds?.length
@@ -1115,14 +1120,15 @@ async function acceptCandidates(segmentIds?: string[], automatic = false): Promi
         : '已采纳本次候选并同步到阅读器；历史运行仍可查看。';
     autoAcceptError.value = '';
     await refreshProjectWithoutRun();
+    if (!isCurrent() || project.value?.projectId !== projectId) return false;
     return true;
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    error.value = detail;
-    if (automatic) autoAcceptError.value = '自动保存失败：' + detail;
+    if (isCurrent()) error.value = detail;
+    if (isCurrent() && automatic) autoAcceptError.value = '自动保存失败：' + detail;
     return false;
   } finally {
-    busy.value = false;
+    if (isCurrent()) busy.value = false;
   }
 }
 
@@ -1132,16 +1138,22 @@ function loadSelectedTranslation() {
 }
 async function saveManualEdit() {
   if (!project.value || !selectedSegmentId.value || !manualText.value.trim()) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
+  const segmentId = selectedSegmentId.value;
+  const text = manualText.value;
   busy.value = true; error.value = '';
   try {
-    await api('/api/documents/projects/' + project.value.projectId + '/segments/' + encodeURIComponent(selectedSegmentId.value) + '/translation', {
-      method: 'PUT', body: JSON.stringify({ text: manualText.value }),
+    await api('/api/documents/projects/' + projectId + '/segments/' + encodeURIComponent(segmentId) + '/translation', {
+      method: 'PUT', body: JSON.stringify({ text }),
     });
-    emit('acceptedTranslations', [{ id: selectedSegmentId.value, text: manualText.value }]);
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
+    emit('acceptedTranslations', [{ id: segmentId, text }]);
     message.value = '人工修订已单独存档，并已更新阅读器当前译文。';
     await refreshProject();
-  } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
-  finally { busy.value = false; }
+  } catch (e) { if (isCurrent()) error.value = e instanceof Error ? e.message : String(e); }
+  finally { if (isCurrent()) busy.value = false; }
 }
 
 watch(() => props.visibleSegments.map((segment) => segment.id).join('|'), () => {
