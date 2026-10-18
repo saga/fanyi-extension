@@ -1957,7 +1957,13 @@ async function saveDocumentPromptSettings() {
     documentSystemPromptOverride: systemOverride,
     documentUserPromptTemplate: userTemplate,
   });
-  readerConfig.value = await getConfig();
+  // Prompt edits are global defaults, but the selected project's model/provider/strategy remain
+  // hydrated from its server Prompt and must not be reset from the global config here.
+  readerConfig.value = {
+    ...(readerConfig.value || await getConfig()),
+    documentSystemPromptOverride: systemOverride,
+    documentUserPromptTemplate: userTemplate,
+  };
   documentSystemPromptOverride.value = systemOverride;
   documentUserPromptTemplate.value = userTemplate;
   if (readerConfig.value.documentUseLocalAgent && workspaceProject.value?.projectId) {
@@ -1975,12 +1981,24 @@ async function saveDocumentPromptSettings() {
 
 async function restoreBuiltInDocumentPrompts() {
   await setConfig({ documentSystemPromptOverride: '', documentUserPromptTemplate: '' });
-  readerConfig.value = await getConfig();
+  readerConfig.value = {
+    ...(readerConfig.value || await getConfig()),
+    documentSystemPromptOverride: '',
+    documentUserPromptTemplate: '',
+  };
   documentSystemPromptOverride.value = '';
   documentUserPromptTemplate.value = '';
   documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
   documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
-  persistenceMessage.value = '已恢复内置文档翻译 Prompt。';
+  if (readerConfig.value.documentUseLocalAgent && workspaceProject.value?.projectId) {
+    await workspaceApi(
+      readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+      readerConfig.value.documentLocalAgentToken || '',
+      '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/prompts',
+      { method: 'POST', body: JSON.stringify(workspacePromptInput()) },
+    );
+  }
+  persistenceMessage.value = '已恢复内置文档翻译 Prompt，并同步到当前本机项目。';
 }
 
 async function refreshSavedSessionSummary() {
