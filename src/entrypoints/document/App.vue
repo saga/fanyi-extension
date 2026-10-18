@@ -2588,6 +2588,127 @@ function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource
   }
 }
 
+const managedPersonSourceBeforeEdit = new WeakMap<object, string>();
+
+function managedPersonSource(item: ManagedPersonItem): string {
+  return item.entity?.source || item.profile?.canonicalSourceName || '';
+}
+function managedPersonTarget(item: ManagedPersonItem): string {
+  return item.entity?.target || item.profile?.targetName || '';
+}
+function managedPersonAliases(item: ManagedPersonItem): string[] {
+  const canonical = normalizeManagedPersonName(managedPersonSource(item));
+  return Array.from(new Set([
+    ...(item.entity?.aliases || []),
+    ...(item.profile?.aliases || []),
+  ].map((value) => value.trim()).filter((value) => value && normalizeManagedPersonName(value) !== canonical)));
+}
+function rememberManagedPersonSource(item: ManagedPersonItem) {
+  const source = managedPersonSource(item);
+  if (item.entity) rememberEntitySource(item.entity);
+  if (item.profile) managedPersonSourceBeforeEdit.set(item.profile, source);
+}
+function findManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
+  if (item.entity && literaryMemory.value.entities.includes(item.entity)) return item.entity;
+  const names = new Set([
+    managedPersonSource(item),
+    ...(item.profile?.aliases || []),
+    ...(item.entity?.aliases || []),
+  ].map(normalizeManagedPersonName).filter(Boolean));
+  if (!names.size) return undefined;
+  return literaryMemory.value.entities.find((entity) => entity.kind === 'person' &&
+    [entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).some((name) => names.has(name)));
+}
+function ensureManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
+  const existing = findManagedPersonEntity(item);
+  if (existing) return existing;
+  const profile = item.profile;
+  const source = managedPersonSource(item).trim();
+  const target = managedPersonTarget(item).trim();
+  if (!source || !target) return undefined;
+  const evidenceRefs = (profile?.evidence || []).slice(0, 8).map((evidence) => ({
+    segmentId: evidence.segmentId, sourceQuote: evidence.sourceQuote,
+  }));
+  const entity: LiteraryEntity = {
+    source, target, kind: 'person',
+    aliases: managedPersonAliases(item).slice(0, 12),
+    ...(evidenceRefs[0]?.sourceQuote ? { evidence: evidenceRefs[0].sourceQuote } : {}),
+    ...(evidenceRefs.length ? { evidenceRefs } : {}),
+    reviewStatus: evidenceRefs.length ? 'confirmed' : 'suggested',
+  };
+  literaryMemory.value.entities.push(entity);
+  return entity;
+}
+function updateManagedPerson(item: ManagedPersonItem, field: 'source' | 'target' | 'aliases', event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  const value = (input?.value || '').trim();
+  const oldSource = managedPersonSource(item);
+  let entity = findManagedPersonEntity(item);
+  const profile = item.profile;
+  if (field === 'source') {
+    if (entity) entity.source = value;
+    else if (profile) {
+      if (oldSource && normalizeManagedPersonName(oldSource) !== normalizeManagedPersonName(value)) {
+        profile.aliases = Array.from(new Set([...profile.aliases, oldSource])).filter((name) =>
+          normalizeManagedPersonName(name) !== normalizeManagedPersonName(value)).slice(0, 12);
+      }
+      profile.canonicalSourceName = value;
+    }
+  } else if (field === 'target') {
+    if (entity) entity.target = value;
+    if (profile) {
+      if (value) profile.targetName = value;
+      else delete profile.targetName;
+    }
+  } else {
+    const aliases = Array.from(new Set((input?.value || '').split(',').map((name) => name.trim()).filter(Boolean)))
+      .filter((name) => normalizeManagedPersonName(name) !== normalizeManagedPersonName(oldSource)).slice(0, 12);
+    if (entity) entity.aliases = aliases;
+    if (profile) profile.aliases = aliases;
+  }
+
+  entity = entity || ensureManagedPersonEntity(item);
+  if (entity) {
+    entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
+    syncEntityMappingToVoiceProfiles(entity, field === 'source' ? oldSource : '');
+  } else if (profile && field === 'source') {
+    managedPersonSourceBeforeEdit.delete(profile);
+  }
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存人物资料失败：' + (error instanceof Error ? error.message : String(error));
+  });
+}
+function addManagedPerson() {
+  literaryMemory.value.entities.push({
+    source: '', target: '', kind: 'person', aliases: [], reviewStatus: 'suggested',
+  });
+  persistenceMessage.value = '已添加人物：填写规范原文名和统一译名后会保存；角色与声音信息可随后合并进来。';
+}
+function removeManagedPerson(item: ManagedPersonItem) {
+  const names = new Set([
+    managedPersonSource(item), ...(item.entity?.aliases || []), ...(item.profile?.aliases || []),
+  ].map(normalizeManagedPersonName).filter(Boolean));
+  const entity = findManagedPersonEntity(item);
+  if (entity) {
+    const entityIndex = literaryMemory.value.entities.indexOf(entity);
+    if (entityIndex >= 0) literaryMemory.value.entities.splice(entityIndex, 1);
+  }
+  const characterId = item.profile?.characterId;
+  if (characterId) {
+    literaryMemory.value.characterVoices = literaryMemory.value.characterVoices.filter((profile) => profile.characterId !== characterId)
+      .map((profile) => ({ ...profile, contrastRules: profile.contrastRules.filter((rule) => rule.otherCharacterId !== characterId) }));
+    literaryMemory.value.relationshipVoiceRules = literaryMemory.value.relationshipVoiceRules.filter((rule) =>
+      rule.speakerId !== characterId && rule.addresseeId !== characterId);
+    literaryMemory.value.voiceAnchors = literaryMemory.value.voiceAnchors.filter((anchor) => anchor.speakerId !== characterId);
+  }
+  literaryMemory.value.relationships = literaryMemory.value.relationships.filter((relation) =>
+    !names.has(normalizeManagedPersonName(relation.subject)) &&
+    !names.has(normalizeManagedPersonName(relation.object)));
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '移除人物资料失败：' + (error instanceof Error ? error.message : String(error));
+  });
+}
+
 function markEntitySuggested(entity: LiteraryEntity) {
   const previousSource = entitySourceBeforeEdit.get(entity) || '';
   entitySourceBeforeEdit.delete(entity);
