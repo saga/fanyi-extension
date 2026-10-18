@@ -3653,6 +3653,7 @@ async function ensureDocumentWorkspaceInternal(
       if (!isCurrent()) return null;
       mappedProject = mappedDetails.project;
     } catch (error) {
+      if (!isCurrent()) return null;
       // Only a definitive 404 permits discovery recovery. Network/auth failures must preserve the
       // local backup and must never be reinterpreted as a nonexistent project.
       if (!(error instanceof WorkspaceApiError) || error.status !== 404) throw error;
@@ -3754,8 +3755,10 @@ async function ensureDocumentWorkspaceInternal(
       try {
         await backupWorkspaceSourceFile(base, token, project.projectId, sourceFileAtStart);
       } catch (error) {
-        persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' +
-          (error instanceof Error ? error.message : String(error));
+        if (isCurrent()) {
+          persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' +
+            (error instanceof Error ? error.message : String(error));
+        }
       }
     }
 
@@ -3770,6 +3773,7 @@ async function ensureDocumentWorkspaceInternal(
     const accepted = await loadWorkspaceAcceptedTranslations(
       base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length,
     );
+    if (!isCurrent()) return null;
     await replaceCurrentTranslations(accepted);
   } finally {
     sessionPersistenceSuppressionCount = Math.max(0, sessionPersistenceSuppressionCount - 1);
