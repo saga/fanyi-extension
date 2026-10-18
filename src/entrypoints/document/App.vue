@@ -1285,11 +1285,69 @@ const documentStyleVars = computed(() => ({
 const userPromptPreview = computed(() => documentUserPromptEditor.value
   .split('{'.repeat(2) + 'CONTENT' + '}'.repeat(2))
   .join('[当前页片段 JSON 在发送时插入]'));
+interface ManagedPersonItem {
+  key: string;
+  entity?: LiteraryEntity;
+  entityIndex?: number;
+  profile?: LiteraryBookMemory['characterVoices'][number];
+}
 const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
+const personSearch = ref('');
 const nonPersonEntities = computed(() => literaryMemory.value.entities.filter((entity) => entity.kind !== 'person'));
 const pendingEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus !== 'confirmed').length);
 const confirmedEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus === 'confirmed').length);
+function normalizeManagedPersonName(value: unknown): string {
+  return String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\\s._'’-]+/g, ' ').trim();
+}
+const managedPeople = computed<ManagedPersonItem[]>(() => {
+  const items: ManagedPersonItem[] = [];
+  const profiles = literaryMemory.value.characterVoices;
+  const usedProfileIds = new Set<string>();
+  for (const [entityIndex, entity] of literaryMemory.value.entities.entries()) {
+    if (entity.kind !== 'person') continue;
+    const entityNames = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
+    const profile = profiles.find((candidate) => !usedProfileIds.has(candidate.characterId) &&
+      [candidate.canonicalSourceName, ...candidate.aliases].map(normalizeManagedPersonName).some((name) => entityNames.has(name)));
+    if (profile) usedProfileIds.add(profile.characterId);
+    items.push({
+      key: profile?.characterId || 'person-entity-' + entityIndex,
+      entity, entityIndex, profile,
+    });
+  }
+  for (const profile of profiles) {
+    if (usedProfileIds.has(profile.characterId)) continue;
+    const profileNames = new Set([profile.canonicalSourceName, ...profile.aliases].map(normalizeManagedPersonName).filter(Boolean));
+    const entityMatch = literaryMemory.value.entities
+      .map((entity, entityIndex) => ({ entity, entityIndex }))
+      .find(({ entity }) => entity.kind === 'person' &&
+        [entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).some((name) => profileNames.has(name)));
+    if (entityMatch) {
+      const priorItem = items.find((item) => item.entity === entityMatch.entity);
+      if (priorItem) priorItem.profile = profile;
+      else items.push({ key: profile.characterId, entity: entityMatch.entity, entityIndex: entityMatch.entityIndex, profile });
+    } else {
+      items.push({ key: profile.characterId, profile });
+    }
+  }
+  return items;
+});
+const filteredManagedPeople = computed(() => {
+  const query = personSearch.value.trim().toLocaleLowerCase();
+  if (!query) return managedPeople.value;
+  return managedPeople.value.filter((item) => {
+    const profile = item.profile;
+    const searchable = [
+      item.entity?.source, item.entity?.target, ...(item.entity?.aliases || []),
+      profile?.canonicalSourceName, profile?.targetName, ...(profile?.aliases || []),
+      profile?.role, ...(profile?.traits || []),
+      profile?.voiceCore.register, ...(profile?.voiceCore.syntaxRhythm || []),
+      ...(profile?.voiceCore.lexicalPreferences || []), ...(profile?.voiceCore.discourseHabits || []),
+      ...(profile?.evidence || []).map((evidence) => evidence.sourceQuote),
+    ].filter((value): value is string => typeof value === 'string');
+    return searchable.some((value) => value.toLocaleLowerCase().includes(query));
+  });
+});
 const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
 const pendingCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'candidate').length +
   literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'candidate').length);
