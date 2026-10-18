@@ -481,6 +481,7 @@ async function checkLocalService() {
 async function loadBuiltInTaskPrompts() {
   promptPreviewLoading.value = true;
   promptPreviewError.value = '';
+  builtInTaskPrompts.value = {};
   try {
     const url = new URL(config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     url.pathname = '/api/config/task-prompts';
