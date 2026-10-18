@@ -3597,12 +3597,12 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
 
   let createdNewProject = false;
   if (!project) {
-    const created = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects', {
+    const created = await workspaceApi<{ project: any; reusedExisting?: boolean }>(base, token, '/api/documents/projects', {
       method: 'POST',
       body: JSON.stringify({ ...input, prompt: workspacePromptInput(true) }),
     });
     project = created.project;
-    createdNewProject = true;
+    createdNewProject = created.reusedExisting !== true;
     await rememberWorkspaceProject(input, project.projectId);
   }
 
