@@ -71,7 +71,10 @@
       <nav class="tabs" aria-label="文档功能分区">
         <button class="tab" :class="{ active: activeTab === 'reading' }" @click="activeTab = 'reading'">阅读</button>
         <button class="tab" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">
-          设置与配置
+          设置
+        </button>
+        <button class="tab" :class="{ active: activeTab === 'prompt' }" @click="activeTab = 'prompt'">
+          提示词
         </button>
         <button class="tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
           人物与预处理
@@ -324,6 +327,21 @@
         </div>
       </section>
 
+
+      <section v-if="state.total > 0" class="panel progress-panel">
+        <div class="progress"><div class="bar"
+          :style="{ width: (state.done / state.total) * 100 + '%' }"></div></div>
+        <span class="muted small">
+          <template v-if="literaryMode && state.workTotal > 0">本章 {{ state.workDone }}/{{ state.workTotal }} 批 · 全书 {{ state.done }}/{{ state.total }} 批</template>
+          <template v-else>{{ state.done }}/{{ state.total }} 批</template>
+          <template v-if="state.running && state.workChapter"> · 正在翻译：{{ state.workChapter }}</template>
+          <template v-if="state.error"> · <span class="err-text">{{ state.error }}</span></template>
+        </span>
+      </section>
+
+      </template>
+
+      <template v-else-if="activeTab === 'prompt'">
       <section class="panel prompt-editor-panel">
         <div class="settings-heading">
           <div>
@@ -358,20 +376,8 @@
           <span class="muted small">Prompt 会保存在扩展配置中，重启后仍可恢复。</span>
         </div>
       </section>
-
-      <section v-if="state.total > 0" class="panel progress-panel">
-        <div class="progress"><div class="bar"
-          :style="{ width: (state.done / state.total) * 100 + '%' }"></div></div>
-        <span class="muted small">
-          <template v-if="literaryMode && state.workTotal > 0">本章 {{ state.workDone }}/{{ state.workTotal }} 批 · 全书 {{ state.done }}/{{ state.total }} 批</template>
-          <template v-else>{{ state.done }}/{{ state.total }} 批</template>
-          <template v-if="state.running && state.workChapter"> · 正在翻译：{{ state.workChapter }}</template>
-          <template v-if="state.error"> · <span class="err-text">{{ state.error }}</span></template>
-        </span>
-      </section>
-
+      <p class="muted small">准确性/术语、人物声音/文风、章节文学分析、全书预处理等任务的内置 Prompt 与覆盖项，见“设置”Tab 的“按任务配置 CodeBuddy 思考、推理强度与 Prompt”。</p>
       </template>
-
       <template v-else-if="activeTab === 'characters'">
       <section v-if="literaryStatus.enabled" class="panel literary-status">
         <div class="literary-status-title">
@@ -391,8 +397,20 @@
       </section>
 
       <section v-if="literaryMode" class="panel context-graph-status">
-        <div class="literary-status-title">
+        <div class="context-graph-toolbar">
           <strong>全书预处理与规范译名</strong>
+          <div class="context-graph-actions">
+            <button class="btn" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphState.loading" @click="refreshContextGraphStatus()">
+              {{ contextGraphState.loading ? '刷新中…' : '刷新预处理状态' }}
+            </button>
+            <button class="btn primary" type="button"
+              :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
+              @click="reanalyzeContextGraph">
+              {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
+            </button>
+          </div>
+        </div>
+        <div class="literary-status-title">
           <span class="chip" :class="'diagnostic-' + contextGraphState.status">{{ contextGraphStatusLabel }}</span>
           <span v-if="readerConfig?.documentUseLocalAgent !== true" class="chip">需要启用本机 Agent</span>
           <span class="chip">当前原文 {{ contextGraphState.segmentCount.toLocaleString() }} 段</span>
@@ -433,17 +451,7 @@
         <p class="muted small" v-else-if="contextGraphState.status === 'not-started'">
           这本书尚无当前原文版本的预处理记录。开启后会先扫描全书，再进行有原文证据的人物、专名、关系和章节分析；不会自动覆盖已确认译名。
         </p>
-        <div class="settings-actions context-graph-actions">
-          <button class="btn ghost" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphState.loading" @click="refreshContextGraphStatus()">
-            {{ contextGraphState.loading ? '刷新中…' : '刷新预处理状态' }}
-          </button>
-          <button class="btn" type="button"
-            :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
-            @click="reanalyzeContextGraph">
-            {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
-          </button>
-          <span class="muted small">图谱会约束后续翻译与审校；已有译文不会自动改写。确认规范译名后，可点击“强制重译当前页”修复旧译文中的专名漂移。</span>
-        </div>
+        <p class="muted small">图谱会约束后续翻译与审校；已有译文不会自动改写。确认规范译名后，可点击“强制重译当前页”修复旧译文中的专名漂移。</p>
       </section>
 
       <section v-if="literaryMode" class="panel literary-style-guide">
@@ -1861,7 +1869,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       total: Number.isFinite(snapshot.total) ? snapshot.total : 0,
       done: Number.isFinite(snapshot.done) ? snapshot.done : 0,
       currentPageIndex: Number.isFinite(payload.currentPageIndex) ? Math.max(0, Math.floor(payload.currentPageIndex)) : 0,
-      activeTab: (['reading', 'settings', 'characters', 'agent', 'trajectory'].includes(payload.activeTab) ? payload.activeTab : 'reading') as SavedDocumentTab,
+      activeTab: (['reading', 'settings', 'prompt', 'characters', 'agent', 'trajectory'].includes(payload.activeTab) ? payload.activeTab : 'reading') as SavedDocumentTab,
       literaryMode: payload.literaryMode === true,
       document,
       rawText: typeof payload.rawText === 'string' ? payload.rawText : '',

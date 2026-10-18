@@ -660,8 +660,15 @@ async function checkConfiguration() {
 .task-profile-card {
   display: grid;
   gap: .65rem;
-  padding: .8rem 0;
+  padding: .85rem .75rem;
   border-top: 1px solid #d8dee4;
+  border-radius: 8px;
+}
+.task-profile-card:nth-child(odd) {
+  background: #f6f8fa;
+}
+.task-profile-card:nth-child(even) {
+  background: #fff8f0;
 }
 .task-profile-heading h4, .task-profile-heading p { margin: 0; }
 .task-profile-heading p { margin-top: .2rem; }
