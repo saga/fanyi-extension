@@ -1297,7 +1297,7 @@ const nonPersonEntities = computed(() => literaryMemory.value.entities.filter((e
 const pendingEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus !== 'confirmed').length);
 const confirmedEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus === 'confirmed').length);
 function normalizeManagedPersonName(value: unknown): string {
-  return String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\\s._'’-]+/g, ' ').trim();
+  return String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
 }
 const managedPeople = computed<ManagedPersonItem[]>(() => {
   const items: ManagedPersonItem[] = [];
