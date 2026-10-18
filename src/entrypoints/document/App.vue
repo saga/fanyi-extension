@@ -2403,6 +2403,7 @@ watch([
   () => JSON.stringify(glossary.value),
   () => readerConfig.value?.documentLocalAgentProvider,
   () => readerConfig.value?.documentLocalAgentModel,
+  () => readerConfig.value?.documentUseLocalAgent,
   () => JSON.stringify(readerConfig.value?.documentCodeBuddyTaskProfiles),
   () => readerConfig.value?.documentBatchMaxSegments,
   () => readerConfig.value?.documentBatchMaxSourceChars,
