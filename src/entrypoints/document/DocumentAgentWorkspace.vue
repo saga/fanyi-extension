@@ -367,7 +367,7 @@ const props = defineProps<{
   localAgentUrl: string;
   localAgentModel: string;
   localAgentToken: string;
-  codeBuddyTaskProfiles: Record<string, unknown>;
+  codeBuddyTaskProfiles?: Record<string, unknown>;
   systemPrompt: string;
   userPromptTemplate: string;
   literaryMemory: unknown;
