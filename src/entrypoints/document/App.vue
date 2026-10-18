@@ -3181,8 +3181,8 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
   }
 
-  // Context Graph voice observations are grounded in sampled source quotes. Bridge them into
-  // the reader's existing candidate-review workflow, but do not auto-confirm voice profiles.
+  // Context Graph voice observations are grounded in sampled source quotes. Keep them as candidates,
+  // but default them to enabled weak hints so they do not require one-by-one confirmation.
   const voiceCandidates = nodes.flatMap((node: any) => {
     if (node?.kind !== 'character' || node?.status === 'rejected') return [];
     const canonicalSourceName = typeof node?.name === 'string' ? node.name.trim() : '';
@@ -3319,12 +3319,20 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
   // Context Graph already persisted evidenced relationship edges, but the reader memory bridge
   // previously copied only nodes. Bridge those edges into the visible relationship list as well.
   const graphNodesById = new Map(nodes.map((node: any) => [String(node?.id || ''), node]));
+  const canonicalPersonName = (node: any): string => {
+    const name = typeof node?.name === 'string' ? node.name.trim() : '';
+    const nodeNames = new Set([name, ...(Array.isArray(node?.attributes?.aliases) ? node.attributes.aliases : [])]
+      .map(normalizeName).filter(Boolean));
+    const entity = existing.find((item) => item.kind === 'person' &&
+      [item.source, ...(item.aliases || [])].map(normalizeName).some((candidateName) => nodeNames.has(candidateName)));
+    return entity?.source || name;
+  };
   const relationshipCandidates: LiteraryRelationship[] = (Array.isArray(graph?.edges) ? graph.edges : []).flatMap((edge: any) => {
     if (!edge || edge.status === 'rejected') return [];
     const fromNode = graphNodesById.get(String(edge.sourceNodeId || '')) as any;
     const toNode = graphNodesById.get(String(edge.targetNodeId || '')) as any;
-    const subject = typeof fromNode?.name === 'string' ? fromNode.name.trim() : '';
-    const object = typeof toNode?.name === 'string' ? toNode.name.trim() : '';
+    const subject = canonicalPersonName(fromNode);
+    const object = canonicalPersonName(toNode);
     const attributes = edge.attributes && typeof edge.attributes === 'object' ? edge.attributes : {};
     const predicate = typeof attributes.description === 'string' && attributes.description.trim()
       ? attributes.description.trim()
