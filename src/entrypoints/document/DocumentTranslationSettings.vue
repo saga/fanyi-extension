@@ -101,6 +101,89 @@
         <span v-else-if="localStatus === 'fail'" class="connection-fail">本机服务不可用，请检查地址和服务进程</span>
       </div>
 
+      <details class="strategy-settings task-profile-settings" open>
+        <summary>按任务配置 CodeBuddy 思考、推理强度与 Prompt</summary>
+        <p class="muted small">
+          初译、准确性/术语审校、人物声音/文风审校、文学分析、全书预处理分别保存。
+          思考模式与 effort 使用 CodeBuddy SDK 正式选项；预算只在“指定预算”模式生效。
+          修改后用于下一次任务，不会改变已创建运行的配置快照。
+        </p>
+        <article v-for="task in codeBuddyTaskOptions" :key="task.key" class="task-profile-card">
+          <div class="task-profile-heading">
+            <div>
+              <strong>{{ task.label }}</strong>
+              <p class="muted small">{{ task.description }}</p>
+            </div>
+          </div>
+          <template v-if="config.documentLocalAgentProvider === 'workbuddy'">
+            <div class="settings-grid">
+              <label class="setting-field">
+                <span>本任务模型覆盖（可选）</span>
+                <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].model"
+                  placeholder="留空继承上面的模型覆盖"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')" />
+              </label>
+              <label class="setting-field">
+                <span>Fallback Model（可选）</span>
+                <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].fallbackModel"
+                  placeholder="模型不可用时尝试的备用模型"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')" />
+              </label>
+              <label class="setting-field">
+                <span>Thinking 模式</span>
+                <select v-model="config.documentCodeBuddyTaskProfiles[task.key].thinkingMode"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
+                  <option value="disabled">关闭思考</option>
+                  <option value="adaptive">自适应思考</option>
+                  <option value="enabled">指定思考预算</option>
+                </select>
+              </label>
+              <label v-if="config.documentCodeBuddyTaskProfiles[task.key].thinkingMode === 'enabled'" class="setting-field">
+                <span>Thinking Budget Tokens</span>
+                <select v-model.number="config.documentCodeBuddyTaskProfiles[task.key].thinkingBudgetTokens"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
+                  <option :value="2048">2,048</option>
+                  <option :value="4096">4,096</option>
+                  <option :value="8192">8,192（默认）</option>
+                  <option :value="16384">16,384</option>
+                  <option :value="32768">32,768</option>
+                  <option :value="65536">65,536</option>
+                </select>
+              </label>
+              <label class="setting-field">
+                <span>Effort（推理强度）</span>
+                <select v-model="config.documentCodeBuddyTaskProfiles[task.key].effort"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
+                  <option value="low">Low · 较快</option>
+                  <option value="medium">Medium · 均衡</option>
+                  <option value="high">High · 深入</option>
+                  <option value="xhigh">Extra High · 最深入</option>
+                </select>
+              </label>
+            </div>
+          </template>
+          <label class="setting-field task-prompt-field">
+            <span>本任务附加 System Prompt</span>
+            <textarea v-model="config.documentCodeBuddyTaskProfiles[task.key].systemPromptAppendix"
+              rows="3" spellcheck="false"
+              placeholder="可选：补充本任务特有的指令；系统内置的证据、JSON 和安全约束仍会保留。"
+              @change="saveConfig('documentCodeBuddyTaskProfiles')" />
+            <small class="muted">附加指令放在内置任务契约之前，不会替换服务端必须保留的约束。</small>
+          </label>
+          <label v-if="task.key !== 'translation'" class="setting-field task-prompt-field">
+            <span>本任务 User Prompt 模板（可选）</span>
+            <textarea v-model="config.documentCodeBuddyTaskProfiles[task.key].userPromptTemplate"
+              rows="3" spellcheck="false"
+              placeholder="可用 {{CONTENT}} 插入系统构造的完整任务输入；留空使用内置模板。"
+              @change="saveConfig('documentCodeBuddyTaskProfiles')" />
+            <small class="muted">未填写占位符时，服务端会把完整内置任务输入追加到模板后，避免漏掉原文或 JSON 数据。</small>
+          </label>
+          <p v-if="task.key === 'translation'" class="muted small">
+            完整初译 System/User Prompt 仍在本页下方的“文档翻译 Prompt”编辑器中；此处只配置推理选项与附加指令。
+          </p>
+        </article>
+      </details>
+
       <details class="strategy-settings" open>
         <summary>高级运行策略</summary>
         <label class="switch-line">
@@ -226,7 +309,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue';
-import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
+import { DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES, getConfig, setConfig, type Config, type DocumentCodeBuddyTaskKey } from '@/entrypoints/utils/config';
 import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 
 const props = defineProps<{
@@ -271,6 +354,7 @@ const config = ref<Config>({
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
   documentLocalAgentToken: '',
+  documentCodeBuddyTaskProfiles: DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES,
   documentBatchMaxSegments: 16,
   documentBatchMaxSourceChars: 8000,
   documentTranslationConcurrency: 4,
@@ -280,6 +364,13 @@ const config = ref<Config>({
   documentMaxModelAttempts: 2,
   documentLiteraryReviewEnabled: true,
 });
+const codeBuddyTaskOptions: Array<{ key: DocumentCodeBuddyTaskKey; label: string; description: string }> = [
+  { key: 'translation', label: '文档初译', description: '优先忠实原文与规范输出；默认关闭思考，以低 effort 提高批量吞吐。' },
+  { key: 'accuracyReview', label: '准确性 / 术语审校', description: '核对意义、事实、漏译、增译、否定、指代和专名一致性。' },
+  { key: 'styleReview', label: '人物声音 / 文风审校', description: '检查人物语气、叙述声音、语域、节奏与翻译腔。' },
+  { key: 'literaryAnalysis', label: '章节文学分析', description: '分析当前章节的人物画像、关系语言、锚点与书籍记忆。' },
+  { key: 'contextGraph', label: '全书预处理 / Context Graph', description: '跨章节抽样，建立人物、实体、关系和叙述风格图谱。' },
+];
 const initialized = ref(false);
 const saving = ref(false);
 const saveMessage = ref('');
@@ -315,7 +406,7 @@ const documentConfigFields: (keyof Config)[] = [
   'documentSourceLang', 'documentTargetLang', 'documentDeepseekApiKey', 'documentProvider',
   'documentPromptStyle', 'documentTranslationMode', 'documentUseServerTranslation', 'documentServerUrl',
   'documentUseLocalAgent', 'documentAutoSelectLocalAgent', 'documentLocalAgentProvider', 'documentLocalAgentUrl',
-  'documentLocalAgentModel', 'documentLocalAgentToken',
+  'documentLocalAgentModel', 'documentLocalAgentToken', 'documentCodeBuddyTaskProfiles',
   'documentBatchMaxSegments', 'documentBatchMaxSourceChars', 'documentTranslationConcurrency',
   'documentReviewConcurrency', 'documentPrecedingContextSegments', 'documentContextBudgetChars',
   'documentMaxModelAttempts', 'documentLiteraryReviewEnabled',
@@ -481,6 +572,27 @@ async function checkConfiguration() {
   color: #57606a;
   font-size: .82rem;
   margin-bottom: .25rem;
+}
+.task-profile-settings { margin-top: .2rem; }
+.task-profile-card {
+  display: grid;
+  gap: .65rem;
+  padding: .8rem 0;
+  border-top: 1px solid #d8dee4;
+}
+.task-profile-heading h4, .task-profile-heading p { margin: 0; }
+.task-profile-heading p { margin-top: .2rem; }
+.task-prompt-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: .5rem .6rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+  font-size: .88rem;
+  resize: vertical;
 }
 .strategy-settings {
   display: grid;
