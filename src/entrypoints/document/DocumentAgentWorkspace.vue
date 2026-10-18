@@ -413,6 +413,8 @@ const selectedSegmentId = ref('');
 const manualText = ref('');
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
+/** Invalidates async responses when the parent switches the currently open document. */
+let workspaceSourceGeneration = 0;
 const autoAcceptingRunId = ref('');
 const queuedAutoAcceptRunId = ref('');
 const autoAcceptError = ref('');
@@ -607,18 +609,23 @@ async function createProject(forceNew = false, explicitRebuild = false) {
 
 async function loadExistingProject() {
   if (!props.useLocalAgent || !props.segments.length || project.value || restoringProject.value) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
   restoringProject.value = true;
   restorationError.value = '';
   restorationProjectMissing.value = false;
   try {
     const input = projectInput();
     const mapping = await lookupWorkspaceProject(input);
+    if (!isCurrent()) return;
     let mappedResult: any = null;
 
     if (mapping.projectId) {
       try {
         mappedResult = await api('/api/documents/projects/' + encodeURIComponent(mapping.projectId));
+        if (!isCurrent()) return;
       } catch (e) {
+        if (!isCurrent()) return;
         // A missing mapped project can be repaired from the service catalog; connectivity/auth
         // failures must remain errors, never be mistaken for a missing project.
         if (!(e instanceof WorkspaceApiError) || e.status !== 404) throw e;
@@ -628,6 +635,7 @@ async function loadExistingProject() {
     // Validate the actual current source against the service on every open. A local mapping can
     // still point to a live project whose source revision changed elsewhere.
     const resolution = await resolveWorkspaceProject(props.localAgentUrl, props.localAgentToken, input);
+    if (!isCurrent()) return;
     let projectId: string | null = null;
     let hasSourceChanged = false;
     let result: any = null;
@@ -641,7 +649,9 @@ async function loadExistingProject() {
       } else {
         projectId = resolution.exactProject.projectId;
         if (mapping.projectId !== projectId) await rememberWorkspaceProject(input, projectId);
+        if (!isCurrent()) return;
         result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+        if (!isCurrent()) return;
       }
     } else if (mappedResult) {
       // The old project still exists, but it no longer represents this document's source.
@@ -653,6 +663,7 @@ async function loadExistingProject() {
       projectId = resolution.relatedProject.projectId;
       hasSourceChanged = true;
       result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+      if (!isCurrent()) return;
     } else {
       // No server-side match is a normal first-open case. Do not create until the user starts
       // the workflow; importantly, don't re-upload stale local session data to "discover" it.
@@ -663,6 +674,7 @@ async function loadExistingProject() {
       return;
     }
 
+    if (!isCurrent()) return;
     // Once a project is found, preserve its handle immediately; later refresh failures must not
     // make the component forget which durable project was discovered.
     project.value = result.project;
@@ -676,10 +688,13 @@ async function loadExistingProject() {
     // accepted translations or literary-memory snapshots over the authoritative SQLite state.
     const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status)) || runs.value[0];
     if (active) await selectRun(active.runId);
+    if (!isCurrent()) return;
     // A previous session may have ended after candidates were saved but before they were applied.
     // Complete that server-side finalization step; it does not import extension-side state.
     await autoAcceptReadyCandidates();
+    if (!isCurrent()) return;
     await emitWorkspaceSnapshot();
+    if (!isCurrent()) return;
     loadSelectedTranslation();
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
@@ -690,7 +705,7 @@ async function loadExistingProject() {
       restorationError.value = '读取本机文档项目失败：' + detail + '。系统不会自动新建重复项目，请检查本机 Agent 服务后重试。';
     }
   } finally {
-    restoringProject.value = false;
+    if (isCurrent()) restoringProject.value = false;
   }
 }
 
@@ -721,6 +736,34 @@ function projectInput() {
     sourceFileName: props.sourceFileName,
     segments: props.segments,
   };
+}
+
+function isCurrentWorkspaceGeneration(generation: number): boolean {
+  return generation === workspaceSourceGeneration && !disposed;
+}
+
+function resetProjectStateForSourceChange(): void {
+  workspaceSourceGeneration++;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = undefined;
+  project.value = null;
+  sourceChanged.value = false;
+  restoringProject.value = false;
+  restorationError.value = '';
+  restorationProjectMissing.value = false;
+  verification.value = null;
+  activeRun.value = null;
+  runs.value = [];
+  runEvents.value = [];
+  eventCursor = 0;
+  autoAcceptingRunId.value = '';
+  queuedAutoAcceptRunId.value = '';
+  autoAcceptError.value = '';
+  selectedSegmentId.value = props.visibleSegments[0]?.id || '';
+  manualText.value = '';
+  busy.value = false;
+  error.value = '';
+  message.value = '';
 }
 
 async function emitWorkspaceSnapshot() {
@@ -1060,6 +1103,17 @@ watch(busy, (isBusy) => {
     void autoAcceptReadyCandidates();
   }
 });
+
+// The component instance can survive while the reader opens another file. A project ref
+// must never outlive the source document it was resolved for.
+watch(
+  () => [props.title, props.format, props.sourceFileName, props.segments] as const,
+  () => {
+    resetProjectStateForSourceChange();
+    if (props.active && props.useLocalAgent) void loadExistingProject();
+  },
+  { flush: 'sync' },
+);
 
 // 只在 Agent Tab 激活且本机 Agent 可用时查找关联。切回 Tab 时仅在当前组件尚无项目状态时恢复。
 watch(
