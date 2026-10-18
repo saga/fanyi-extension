@@ -5125,7 +5125,7 @@ async function resetAll() {
 .literary-style-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
 .literary-style-grid .field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
 .literary-style-grid textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #d0d7de; border-radius: 6px; padding: .55rem; color: #1f2328; background: #fff; line-height: 1.5; }
-.character-voice-bible { display: flex; flex-direction: column; gap: .9rem; }
+.character-management { display: flex; flex-direction: column; gap: .9rem; }
 .voice-counts { display: flex; flex-wrap: wrap; gap: .35rem; }
 .voice-profile-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: .85rem; display: flex; flex-direction: column; gap: .55rem; }
 .voice-profile-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
