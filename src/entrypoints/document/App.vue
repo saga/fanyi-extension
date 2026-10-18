@@ -973,6 +973,7 @@ import {
   loadWorkspaceAcceptedTranslations,
   lookupWorkspaceProject,
   rememberWorkspaceProject,
+  resolveWorkspaceProject,
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
@@ -1061,6 +1062,10 @@ const contextGraphAnalyzing = ref(false);
 const contextGraphOverview = ref<{ narrativeStyle: string; styleRules: string[] }>({ narrativeStyle: '', styleRules: [] });
 let contextGraphPollTimer: number | null = null;
 let ensureWorkspacePromise: Promise<any | null> | null = null;
+/** Session hydration must not be mistaken for explicit user changes that update the service Prompt. */
+let suppressWorkspacePromptSync = false;
+/** Avoid creating a new service project before the existing browser/session snapshot has been compared. */
+let suppressWorkspaceAutoEnsure = false;
 /** Agent 候选在运行结束时自动采纳；此 Map 仅用于运行中的临时预览或保存失败时提示。 */
 const workspaceCandidateTranslations = ref(new Map<string, string>());
 const englishFontFamily = ref('Georgia');
@@ -1733,7 +1738,7 @@ watch(literaryMemory, () => {
 }, { deep: true });
 
 watch([doc, effectiveDocumentTranslationMode, () => readerConfig.value?.documentUseLocalAgent], ([currentDoc, translationMode, useLocalAgent]) => {
-  if (!currentDoc || translationMode !== 'literary' || useLocalAgent !== true) return;
+  if (suppressWorkspaceAutoEnsure || !currentDoc || translationMode !== 'literary' || useLocalAgent !== true) return;
   // Existing documents must receive preprocessing too; opening an old reading snapshot must not
   // be mistaken for a completed whole-book analysis.
   void ensureDocumentWorkspace().catch((error) => {
@@ -1955,6 +1960,14 @@ async function saveDocumentPromptSettings() {
   readerConfig.value = await getConfig();
   documentSystemPromptOverride.value = systemOverride;
   documentUserPromptTemplate.value = userTemplate;
+  if (readerConfig.value.documentUseLocalAgent && workspaceProject.value?.projectId) {
+    await workspaceApi(
+      readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+      readerConfig.value.documentLocalAgentToken || '',
+      '/api/documents/projects/' + encodeURIComponent(workspaceProject.value.projectId) + '/prompts',
+      { method: 'POST', body: JSON.stringify(workspacePromptInput()) },
+    );
+  }
   documentSystemPromptEditor.value = systemOverride || builtInDocumentSystemPrompt.value;
   documentUserPromptEditor.value = userTemplate || BUILT_IN_USER_PROMPT_TEMPLATE;
   persistenceMessage.value = '文档翻译 Prompt 已保存；新请求和强制重译会使用新设置，已有译文不会自动改写。';
@@ -2234,6 +2247,8 @@ async function restoreLastSession() {
       return;
     }
 
+    suppressWorkspacePromptSync = true;
+    suppressWorkspaceAutoEnsure = true;
     resetTranslation();
     activeSessionReady.value = false;
     activeSessionIndexedDbWritable = false;
@@ -2295,26 +2310,42 @@ async function restoreLastSession() {
 
     activeSessionReady.value = true;
     await nextTick();
-    await persistCurrentSession();
-    // A refresh must reconstruct both the EPUB reader and its durable local-agent run.
-    if (readerConfig.value?.documentUseLocalAgent && doc.value) {
-      try {
-        const project = await ensureDocumentWorkspace();
-        const activeRun = workspaceActiveRun.value;
-        if (project && activeRun && ['queued', 'running', 'awaiting_acceptance', 'partial'].includes(activeRun.status)) {
-          void followWorkspaceRun(project, activeRun);
-        }
-        if (activeTab.value === 'trajectory') void startAgentTrajectoryPolling();
-      } catch (error) {
-        persistenceMessage.value = '阅读会话已恢复，但同步本机翻译运行状态失败：' +
-          (error instanceof Error ? error.message : String(error));
+
+    // First hydrate from the service, then use IndexedDB / the SQLite session checkpoint as a
+    // local cache. If the service is offline, keep the restored local snapshot without pushing it
+    // back into a project when connectivity returns.
+    try {
+      let project = await refreshExistingWorkspaceFromService();
+      if (readerConfig.value?.documentUseLocalAgent && doc.value) {
+        project = await ensureDocumentWorkspace() || project;
       }
+      const activeRun = workspaceActiveRun.value;
+      if (readerConfig.value?.documentUseLocalAgent && project && activeRun &&
+          ['queued', 'running', 'awaiting_acceptance', 'partial'].includes(activeRun.status)) {
+        void followWorkspaceRun(project, activeRun);
+      }
+      if (readerConfig.value?.documentUseLocalAgent && activeTab.value === 'trajectory') {
+        void startAgentTrajectoryPolling();
+      }
+    } catch (error) {
+      persistenceMessage.value = '阅读会话已恢复，Local Agent 暂不可用；当前显示扩展保存的备份副本。恢复服务后会重新同步。' +
+        (error instanceof Error ? ' ' + error.message : '');
     }
+    await persistCurrentSession();
   } catch (error) {
     parseError.value = '恢复上次阅读失败：' +
       (error instanceof Error ? error.message : String(error));
   } finally {
+    suppressWorkspacePromptSync = false;
+    suppressWorkspaceAutoEnsure = false;
     parsing.value = false;
+    if (doc.value && readerConfig.value?.documentUseLocalAgent === true &&
+        effectiveDocumentTranslationMode.value === 'literary') {
+      void ensureDocumentWorkspace().catch((error) => {
+        persistenceMessage.value = '无法准备本机文学翻译项目：' +
+          (error instanceof Error ? error.message : String(error));
+      });
+    }
   }
 }
 
@@ -2539,6 +2570,8 @@ function onDrop(event: DragEvent) {
 }
 
 async function loadFile(file: File) {
+  suppressWorkspacePromptSync = true;
+  suppressWorkspaceAutoEnsure = true;
   loadedSourceFile.value = file;
   // 先落盘上一册的最新状态，再开始解析新文件。
   await persistCurrentSession();
@@ -2624,6 +2657,12 @@ async function loadFile(file: File) {
       activeSessionReady.value = true;
       savedSessionSummary.value = await getActiveDocumentSessionSummary();
       persistenceMessage.value = '已恢复这份文档上次的阅读位置、译文和书籍记忆。需要重新生成译文时，点击“强制重译当前页”。';
+      try {
+        await refreshExistingWorkspaceFromService();
+      } catch (error) {
+        persistenceMessage.value = '已恢复扩展本地副本；本机服务暂不可用，恢复连接后将重新同步。' +
+          (error instanceof Error ? ' ' + error.message : '');
+      }
       return;
     }
 
@@ -2646,6 +2685,12 @@ async function loadFile(file: File) {
       activeSessionReady.value = true;
       await persistCurrentSession();
       savedSessionSummary.value = await getActiveDocumentSessionSummary();
+      try {
+        await refreshExistingWorkspaceFromService();
+      } catch (error) {
+        persistenceMessage.value = '文档已打开并保留扩展副本；本机服务暂不可用，恢复连接后将重新同步。' +
+          (error instanceof Error ? ' ' + error.message : '');
+      }
     } catch (storageError) {
       // 文件已在内存解析完成。即使 IndexedDB 无法创建，也尝试先建立 SQLite 恢复副本。
       activeSessionIndexedDbWritable = false;
@@ -2654,11 +2699,26 @@ async function loadFile(file: File) {
         (storageError instanceof Error ? ' ' + storageError.message : '');
       await persistCurrentSession();
       await refreshLocalSessionSummary();
+      try {
+        await refreshExistingWorkspaceFromService();
+      } catch (error) {
+        persistenceMessage.value = '文档已打开并保留扩展副本；本机服务暂不可用，恢复连接后将重新同步。' +
+          (error instanceof Error ? ' ' + error.message : '');
+      }
     }
   } catch (err) {
     parseError.value = (err as Error).message;
   } finally {
+    suppressWorkspacePromptSync = false;
+    suppressWorkspaceAutoEnsure = false;
     parsing.value = false;
+    if (doc.value && readerConfig.value?.documentUseLocalAgent === true &&
+        effectiveDocumentTranslationMode.value === 'literary') {
+      void ensureDocumentWorkspace().catch((error) => {
+        persistenceMessage.value = '无法准备本机文学翻译项目：' +
+          (error instanceof Error ? error.message : String(error));
+      });
+    }
   }
 }
 
@@ -3287,7 +3347,7 @@ watch([sourceLang, targetLang, effectiveDocumentTranslationMode], async (
 ) => {
   if (nextSource === previousSource && nextTarget === previousTarget &&
       nextTranslationMode === previousTranslationMode) return;
-  if (!activeSessionReady.value || nextTranslationMode !== 'literary' ||
+  if (suppressWorkspacePromptSync || !activeSessionReady.value || nextTranslationMode !== 'literary' ||
       readerConfig.value?.documentUseLocalAgent !== true || !workspaceProject.value?.projectId) return;
   const config = readerConfig.value;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
@@ -3364,40 +3424,84 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
   }
 }
 
+/**
+ * Refresh an existing service-backed project on document open/restore, without creating a new one.
+ * A failed service request leaves the last local snapshot intact as an offline backup.
+ */
+async function refreshExistingWorkspaceFromService(): Promise<any | null> {
+  if (ensureWorkspacePromise) return ensureWorkspacePromise;
+  const pending = ensureDocumentWorkspaceInternal(false);
+  ensureWorkspacePromise = pending;
+  try {
+    return await pending;
+  } finally {
+    if (ensureWorkspacePromise === pending) ensureWorkspacePromise = null;
+  }
+}
+
 /** 保证只有一份本机项目：导入旧阅读记录、刷新 SQLite 的当前版本，并备份原件。 */
-async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
+async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<any | null> {
   if (!doc.value) return null;
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
-  if (!config.documentUseLocalAgent) return null;
+  if (!config.documentUseLocalAgent && createIfMissing) return null;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = config.documentLocalAgentToken || '';
   const input = workspaceInput();
-  const prompt = workspacePromptInput();
+
+  // The extension mapping is only a lookup optimization. If it is missing or stale, ask the
+  // service catalog to resolve the current source fingerprint before considering project creation.
   const mapping = await lookupWorkspaceProject(input);
   let project: any = null;
+  let projectDetails: { project: any; runs?: any[] } | null = null;
   if (mapping.projectId) {
     try {
-      const current = await workspaceApi<{ project: any; runs?: any[] }>(
+      projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
         base, token, '/api/documents/projects/' + encodeURIComponent(mapping.projectId),
       );
-      project = current.project;
-      workspaceActiveRun.value = (current.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+      project = projectDetails.project;
     } catch (error) {
-      // 映射可能指向已归档/清理的项目：只有服务端明确回 404 才视为“项目不存在”，
-      // 由下面的创建分支重建。按 status 判断而不是匹配 message 文本 —— 404 的
-      // 文案是中文说明，不含状态码。
+      // Only a definitive 404 allows recovery through the service catalog. Network/auth failures
+      // must not be treated as a missing project, otherwise duplicate projects can be created.
       if (!(error instanceof WorkspaceApiError) || error.status !== 404) throw error;
     }
   }
+
   if (project && mapping.sourceChanged) {
     workspaceProject.value = project;
+    workspaceActiveRun.value = (projectDetails?.runs || []).find((run) =>
+      ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
     workspaceSourceChanged.value = true;
     persistenceMessage.value = '同名文档的原文内容已变化。请切换到“翻译 Agent”，明确选择导入新来源版本或另建项目后再继续翻译。';
     activeTab.value = 'agent';
     return null;
   }
-  workspaceSourceChanged.value = false;
+
+  if (!project) {
+    const resolution = await resolveWorkspaceProject(base, token, input);
+    if (resolution.exactProject?.projectId) {
+      projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
+        base, token, '/api/documents/projects/' + encodeURIComponent(resolution.exactProject.projectId),
+      );
+      project = projectDetails.project;
+      await rememberWorkspaceProject(input, project.projectId);
+    } else if (resolution.relatedProject?.projectId) {
+      projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
+        base, token, '/api/documents/projects/' + encodeURIComponent(resolution.relatedProject.projectId),
+      );
+      project = projectDetails.project;
+      workspaceProject.value = project;
+      workspaceActiveRun.value = (projectDetails.runs || []).find((run) =>
+        ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+      workspaceSourceChanged.value = true;
+      persistenceMessage.value = '已在本机服务中找到同名/同文件文档，但原文指纹不同。请在“翻译 Agent”中选择更新来源版本或另建项目；不会把旧译文套用到新原文。';
+      activeTab.value = 'agent';
+      return null;
+    }
+  }
+
+  if (!project && !createIfMissing) return null;
+
   let createdNewProject = false;
   if (!project) {
     const created = await workspaceApi<{ project: any }>(base, token, '/api/documents/projects', {
@@ -3407,70 +3511,52 @@ async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
     project = created.project;
     createdNewProject = true;
     await rememberWorkspaceProject(input, project.projectId);
-  } else {
-    // 保存同一份 Prompt 配置；两个 Tab 的下一次运行会拿到同一个版本指纹。
-    await workspaceApi(base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/prompts', {
-      method: 'POST',
-      body: JSON.stringify(prompt),
-    });
   }
-  // 首次切换时迁移 IndexedDB 已有译文；只填数据库中没有当前来源版本的片段。
-  await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
-  // 只有首次创建项目时才迁移扩展会话中的 Voice Bible。已有项目的记忆以服务端 SQLite 为准；
-  // 不能在每次翻页/启动 Run 时把旧的 IndexedDB 快照重新写成 current revision。
-  const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
+
+  workspaceSourceChanged.value = false;
+
+  // Migrate legacy data once, and only when the service project itself has just been created.
+  // On an existing service project, cached translations, Prompt and literary memory are never
+  // pushed back during open/restore; the next block hydrates the extension from SQLite instead.
   if (createdNewProject) {
-    // 创建时保存的 Voice Bible 可能早于旧译文导入；导入后再提交一次，以便服务端重新核验锚点。
-    await workspaceApi(base, token, memoryPath, {
-      method: 'POST',
-      body: JSON.stringify({ memory: literaryMemory.value }),
-    });
-  }
-  let currentMemory = await workspaceApi<{ current: { memoryRevisionId: string | null; memory: unknown } }>(
-    base, token, memoryPath,
-  );
-  const cachedMemory = literaryMemory.value;
-  const hasLegacyMemory = cachedMemory.entities.length > 0 ||
-    cachedMemory.relationships.length > 0 ||
-    cachedMemory.chapterSummaries.length > 0 ||
-    cachedMemory.recentExamples.length > 0 ||
-    cachedMemory.characterVoices.length > 0 ||
-    cachedMemory.relationshipVoiceRules.length > 0 ||
-    cachedMemory.voiceAnchors.length > 0 ||
-    !!cachedMemory.styleGuideStatus &&
-      ([cachedMemory.styleGuide.narrativeVoice, cachedMemory.styleGuide.register, cachedMemory.styleGuide.rhythm,
-        cachedMemory.styleGuide.dialogue, cachedMemory.styleGuide.diction].some((value) => !!value?.trim()) ||
-       (cachedMemory.styleGuide.rules || []).length > 0 || (cachedMemory.styleGuide.avoid || []).length > 0);
-  // 兼容早期建立的项目：仅当 SQLite 从未拥有记忆 revision 时迁移本地会话，不覆盖已有服务端状态。
-  if (!createdNewProject && !currentMemory.current?.memoryRevisionId && hasLegacyMemory) {
-    await workspaceApi(base, token, memoryPath, {
-      method: 'POST',
-      body: JSON.stringify({ memory: cachedMemory }),
-    });
-    currentMemory = await workspaceApi<{ current: { memoryRevisionId: string | null; memory: unknown } }>(
-      base, token, memoryPath,
+    await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
+    await workspaceApi(base, token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+      { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
     );
   }
+
+  const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
+  const currentMemory = await workspaceApi<{ current?: { memoryRevisionId?: string | null; memory?: unknown } }>(
+    base, token, memoryPath,
+  );
   literaryMemory.value = sanitizeLiteraryMemory(currentMemory.current?.memory);
-  await persistCurrentSession();
+
+  // Original bytes are a backup concern, not project-state authority. Upload only when the
+  // exact source project has no saved original file yet; this does not alter translations/runs.
   if (!project.sourceFileSaved && loadedSourceFile.value) {
     try {
       await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
     } catch (error) {
-      // 原文备份是 workspace 的重要能力，但失败不应丢失已有译文或阻断可恢复运行。
-      persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' + (error instanceof Error ? error.message : String(error));
+      persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' +
+        (error instanceof Error ? error.message : String(error));
     }
   }
+
   const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
   );
   workspaceProject.value = refreshed.project;
-  workspaceActiveRun.value = (refreshed.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
-  const accepted = await loadWorkspaceAcceptedTranslations(base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length);
+  workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
+    ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+  const accepted = await loadWorkspaceAcceptedTranslations(
+    base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length,
+  );
   await replaceCurrentTranslations(accepted);
+
+  // Project details, translations and memory are now hydrated from the service; only session UI
+  // state is persisted locally. Long preprocessing remains conditional on the local-Agent setting.
   if (effectiveDocumentTranslationMode.value === 'literary' && config.documentUseLocalAgent) {
-    // Do not block workspace initialization on a potentially long full-book model analysis.
-    // The trajectory tab must be able to poll and show each preprocessing phase while it runs.
     void ensureContextGraphPreprocessing(refreshed.project, { force: false });
   }
   return refreshed.project;
@@ -3651,7 +3737,7 @@ async function runWorkspaceTranslation(options: {
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
   const response = await workspaceApi<{ run: any; started: boolean }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs',
-    { method: 'POST', body: JSON.stringify({ scope, prompt: workspacePromptInput() }) },
+    { method: 'POST', body: JSON.stringify({ scope }) },
   );
   const runId = response.run.runId as string;
   const generation = ++workspaceRunGeneration.value;
