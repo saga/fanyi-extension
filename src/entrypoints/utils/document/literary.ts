@@ -499,8 +499,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const target = safeText(value.target, 500);
     if (!speakerId || !segmentId || !source || !target) continue;
     const attributionEvidence = safeText(value.attributionEvidence, 240);
-    const attributionConfidence = typeof value.attributionConfidence === 'number' && Number.isFinite(value.attributionConfidence)
-      ? safeConfidence(value.attributionConfidence) : 0;
+    const attributionConfidence = safeConfidence(value.attributionConfidence) ?? 0;
     const claimedStatus = reviewState(value.status, ['candidate', 'approved', 'rejected']) as CharacterVoiceAnchor['status'];
     const status = claimedStatus === 'approved' && (!attributionEvidence || attributionConfidence < 0.7)
       ? 'candidate' : claimedStatus;
