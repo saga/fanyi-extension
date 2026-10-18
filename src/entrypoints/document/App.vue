@@ -2587,7 +2587,7 @@ function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource
   }
 }
 
-remove unused profile source cachefunction managedPersonSource(item: ManagedPersonItem): string {
+function managedPersonSource(item: ManagedPersonItem): string {
   return item.entity?.source || item.profile?.canonicalSourceName || '';
 }
 function managedPersonTarget(item: ManagedPersonItem): string {
