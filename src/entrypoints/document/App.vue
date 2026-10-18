@@ -644,7 +644,7 @@
           <div class="voice-profile-heading">
             <div>
               <strong>{{ profile.canonicalSourceName }}<template v-if="profile.targetName"> → {{ profile.targetName }}</template></strong>
-              <p class="muted small">{{ profile.characterId }} · 置信度 {{ Math.round(profile.confidence * 100) }}% · {{ profile.aliases.join('、') || '暂无别名' }}</p>
+              <p class="muted small">{{ profile.characterId }} · {{ profile.confidenceSource === 'model_self_report' && profile.confidence !== null ? '模型自报 ' + Math.round(profile.confidence * 100) + '%' : '置信度未评估' }} · {{ profile.aliases.join('、') || '暂无别名' }}</p>
             </div>
             <span class="entity-status" :class="profile.status === 'confirmed' ? 'is-confirmed' : profile.status === 'rejected' ? 'is-rejected' : 'is-pending'">
               {{ profile.status === 'confirmed' ? '已确认' : profile.status === 'rejected' ? '已拒绝' : '候选' }}
@@ -665,7 +665,7 @@
           <details>
             <summary>原文证据（{{ profile.evidence.length }}）与人物对比（{{ profile.contrastRules.length }}）</summary>
             <div v-for="(evidence, index) in profile.evidence" :key="profile.characterId + '-ev-' + index" class="voice-evidence">
-              <p><strong>{{ evidence.dimension === 'role_traits' ? '人物角色/特征' : evidence.dimension }} · {{ Math.round(evidence.confidence * 100) }}%</strong> · {{ evidence.observation }}</p>
+              <p><strong>{{ evidence.dimension === 'role_traits' ? '人物角色/特征' : evidence.dimension }} · {{ evidence.confidenceSource === 'model_self_report' && evidence.confidence !== null ? '模型自报 ' + Math.round(evidence.confidence * 100) + '%' : '置信度未评估' }}</strong> · {{ evidence.observation }}</p>
               <blockquote>{{ evidence.sourceQuote }}</blockquote>
               <button class="btn ghost" @click="showReviewSegment(evidence.segmentId)">定位证据片段 {{ evidence.segmentId }}</button>
             </div>
@@ -1006,7 +1006,7 @@ import {
   type SavedDocumentTab,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { autoConfirmLiteraryMemory, buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, mergeCharacterVoiceConfidence, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const FORMAT_LABEL: Record<string, string> = {
   txt: '纯文本',
@@ -3166,7 +3166,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       ...(role ? { role } : {}),
       ...(traits.length ? { traits } : {}),
       status: 'candidate' as const,
-      confidence: 0.55,
+      confidence: null,
       voiceCore: voices.length ? { register: observation } : {},
       contrastRules: [],
       evidence: evidenceRows.map((item: any) => ({
@@ -3174,7 +3174,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
         sourceQuote: item.quote.slice(0, 240),
         observation,
         dimension: evidenceDimension,
-        confidence: 0.55,
+        confidence: null,
       })),
       openQuestions: ['全书预分析生成的候选角色/声音信息；请结合完整对白与原文证据核对后再确认。'],
     }];
@@ -3199,6 +3199,9 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       ...matching.flatMap((profile) => [profile.canonicalSourceName, ...profile.aliases]),
       candidate.canonicalSourceName, ...candidate.aliases,
     ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSourceName)))).slice(0, 12);
+    const confidencePrior = matching.find((profile) =>
+      profile.confidenceSource === 'model_self_report' && profile.confidence !== null) || matching[0]!;
+    const confidenceFields = mergeCharacterVoiceConfidence(confidencePrior, candidate);
     const evidence = [
       ...(protectedProfile?.evidence || matching[0]!.evidence),
       ...candidate.evidence,
@@ -3212,7 +3215,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       ...(protectedProfile?.targetName ? { targetName: protectedProfile.targetName } : candidate.targetName ? { targetName: candidate.targetName } : {}),
       aliases,
       status: protectedProfile?.status || 'candidate',
-      confidence: Math.max(...matching.map((profile) => profile.confidence), candidate.confidence),
+      ...confidenceFields,
       voiceCore: protectedProfile ? protectedProfile.voiceCore : candidate.voiceCore,
       ...(!protectedProfile && candidate.role ? { role: candidate.role } : protectedProfile?.role ? { role: protectedProfile.role } : {}),
       ...(!protectedProfile && candidate.traits?.length ? { traits: candidate.traits } : protectedProfile?.traits?.length ? { traits: protectedProfile.traits } : {}),
