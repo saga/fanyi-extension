@@ -20,6 +20,7 @@ const SESSIONS_STORE = 'sessions';
 const TRANSLATIONS_STORE = 'translations';
 
 export type SavedViewMode = 'bilingual' | 'translation' | 'original';
+export type SavedDocumentTab = 'reading' | 'settings' | 'characters' | 'agent' | 'trajectory';
 
 export interface DocumentTranslationSnapshot {
   translations: Array<[string, string]>;
@@ -60,6 +61,7 @@ export interface CreateActiveDocumentSessionInput {
   viewMode: SavedViewMode;
   literaryMode: boolean;
   currentPageIndex: number;
+  activeTab: SavedDocumentTab;
 }
 
 export interface SaveActiveDocumentProgressInput {
@@ -68,6 +70,7 @@ export interface SaveActiveDocumentProgressInput {
   viewMode: SavedViewMode;
   literaryMode: boolean;
   currentPageIndex: number;
+  activeTab: SavedDocumentTab;
   snapshot: DocumentTranslationSnapshot;
   /** 只写入本次新增或变更的译文；不会重复写入整本书的译文。 */
   translationDelta: Array<[string, string]>;
@@ -97,6 +100,7 @@ interface StoredSession {
   viewMode: SavedViewMode;
   literaryMode: boolean;
   currentPageIndex: number;
+  activeTab?: SavedDocumentTab;
   translatedSegmentCount: number;
   total: number;
   done: number;
@@ -125,6 +129,7 @@ export interface ActiveDocumentSessionSummary {
   total: number;
   done: number;
   currentPageIndex: number;
+  activeTab: SavedDocumentTab;
   literaryMode: boolean;
 }
 
@@ -224,6 +229,7 @@ function sessionFromCreate(input: CreateActiveDocumentSessionInput, now: number)
     viewMode: input.viewMode,
     literaryMode: input.literaryMode,
     currentPageIndex: Math.max(0, Math.floor(input.currentPageIndex)),
+    activeTab: input.activeTab,
     translatedSegmentCount: 0,
     total: 0,
     done: 0,
@@ -300,6 +306,7 @@ export async function saveActiveDocumentProgress(
     viewMode: input.viewMode,
     literaryMode: input.literaryMode,
     currentPageIndex: Math.max(0, Math.floor(input.currentPageIndex)),
+    activeTab: input.activeTab,
     translatedSegmentCount: input.translatedSegmentCount,
     total: input.snapshot.total,
     done: input.snapshot.done,
@@ -355,6 +362,7 @@ export async function getActiveDocumentSessionSummary(): Promise<ActiveDocumentS
     total: row.total,
     done: row.done,
     currentPageIndex: row.currentPageIndex,
+    activeTab: row.activeTab || 'reading',
     literaryMode: row.literaryMode,
   };
 }
@@ -394,6 +402,7 @@ export async function loadActiveDocumentSession(): Promise<LoadedActiveDocumentS
     total: row.total,
     done: row.done,
     currentPageIndex: row.currentPageIndex,
+    activeTab: row.activeTab || 'reading',
     literaryMode: row.literaryMode,
     document: documentRecord.document,
     rawText: documentRecord.rawText,
