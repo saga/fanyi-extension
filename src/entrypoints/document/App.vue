@@ -2667,8 +2667,6 @@ function updateManagedPerson(item: ManagedPersonItem, field: 'source' | 'target'
   if (entity) {
     entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
     syncEntityMappingToVoiceProfiles(entity, field === 'source' ? oldSource : '');
-  } else if (profile && field === 'source') {
-    managedPersonSourceBeforeEdit.delete(profile);
   }
   // A hand-added person mapping requires both names before the sanitizer can persist it.
   // Keep a partial row locally while the user fills the second field; profiles with source evidence
