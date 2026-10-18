@@ -568,7 +568,7 @@
               <label>
                 <span>原文名称 / 写法</span>
                 <input v-model.trim="entity.source" placeholder="例如：Snowflake"
-                  @change="markEntitySuggested(entity)" />
+                  @focus="rememberEntitySource(entity)" @change="markEntitySuggested(entity)" />
               </label>
               <div class="entity-arrow" aria-hidden="true">→</div>
               <label>
@@ -628,7 +628,7 @@
         <div class="dictionary-heading">
           <div>
             <h3>人物角色与声音档案</h3>
-            <p class="muted small">预处理提取的角色定位、人物特征和声音观察先作为候选。请核对下方原文证据；确认后，角色定位与人物特征才会进入翻译上下文。</p>
+            <p class="muted small">有原文证据的角色档案默认用于翻译，候选内容只作为弱提示，不需要逐个确认。可随时停用或拒绝；标记为已核实后才作为较稳定参考。</p>
           </div>
           <div class="voice-counts">
             <span class="chip">人物 {{ literaryMemory.characterVoices.length }}</span>
@@ -647,7 +647,10 @@
               <p class="muted small">{{ profile.characterId }} · {{ profile.confidenceSource === 'model_self_report' && profile.confidence !== null ? '模型自报 ' + Math.round(profile.confidence * 100) + '%' : '置信度未评估' }} · {{ profile.aliases.join('、') || '暂无别名' }}</p>
             </div>
             <span class="entity-status" :class="profile.status === 'confirmed' ? 'is-confirmed' : profile.status === 'rejected' ? 'is-rejected' : 'is-pending'">
-              {{ profile.status === 'confirmed' ? '已确认' : profile.status === 'rejected' ? '已拒绝' : '候选' }}
+              {{ profile.status === 'confirmed' ? '已核实' : profile.status === 'rejected' ? '已拒绝' : '候选' }}
+            </span>
+            <span class="entity-status" :class="profile.useForTranslation ? 'is-confirmed' : 'is-pending'">
+              {{ profile.useForTranslation ? '默认用于翻译' : '已停用' }}
             </span>
           </div>
           <div class="voice-profile-fields">
@@ -675,9 +678,10 @@
             <p v-for="(question, index) in profile.openQuestions" :key="profile.characterId + '-q-' + index" class="warn small">待确认：{{ question }}</p>
           </details>
           <div class="voice-profile-actions">
-            <button class="btn primary" :disabled="profile.status === 'confirmed' || !profile.evidence.length" @click="setCharacterVoiceStatus(profile, 'confirmed')">确认并用于翻译</button>
+            <button class="btn primary" :disabled="profile.status === 'confirmed' || !profile.evidence.length" @click="setCharacterVoiceStatus(profile, 'confirmed')">标记已核实</button>
+            <button class="btn" :disabled="!profile.evidence.length" @click="setCharacterVoiceUse(profile, !profile.useForTranslation)">{{ profile.useForTranslation ? '停用用于翻译' : '启用用于翻译' }}</button>
             <button class="btn" :disabled="profile.status === 'rejected'" @click="setCharacterVoiceStatus(profile, 'rejected')">拒绝此画像</button>
-            <button class="btn ghost" :disabled="profile.status === 'candidate'" @click="setCharacterVoiceStatus(profile, 'candidate')">恢复为候选</button>
+            <button class="btn ghost" :disabled="profile.status === 'candidate' && profile.useForTranslation" @click="setCharacterVoiceStatus(profile, 'candidate')">恢复为候选并启用</button>
           </div>
         </article>
 
@@ -2446,8 +2450,40 @@ async function clearSavedSession() {
   }
 }
 
+const entitySourceBeforeEdit = new WeakMap<LiteraryEntity, string>();
+function rememberEntitySource(entity: LiteraryEntity) {
+  entitySourceBeforeEdit.set(entity, entity.source);
+}
+
+function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource = '') {
+  const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/[\\s._'’\\-]+/g, ' ').trim();
+  const canonicalSource = entity.source.trim();
+  const aliases = Array.from(new Set([
+    ...(entity.aliases || []),
+    ...(previousSource && normalize(previousSource) !== normalize(canonicalSource) ? [previousSource] : []),
+  ].map((name) => name.trim()).filter((name) => name && normalize(name) !== normalize(canonicalSource)))).slice(0, 12);
+  if (previousSource && normalize(previousSource) !== normalize(canonicalSource)) entity.aliases = aliases;
+  const names = new Set([canonicalSource, ...aliases].map(normalize).filter(Boolean));
+  if (!names.size) return;
+  for (const profile of literaryMemory.value.characterVoices) {
+    const profileNames = [profile.canonicalSourceName, ...profile.aliases].map(normalize).filter(Boolean);
+    if (!profileNames.some((name) => names.has(name))) continue;
+    const oldCanonical = profile.canonicalSourceName;
+    profile.canonicalSourceName = canonicalSource || oldCanonical;
+    profile.aliases = Array.from(new Set([
+      ...aliases,
+      ...(oldCanonical && normalize(oldCanonical) !== normalize(canonicalSource || oldCanonical) ? [oldCanonical] : []),
+    ].filter((name) => normalize(name) !== normalize(canonicalSource || oldCanonical)))).slice(0, 12);
+    if (entity.target.trim()) profile.targetName = entity.target.trim();
+    else delete profile.targetName;
+  }
+}
+
 function markEntitySuggested(entity: LiteraryEntity) {
-  // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认。
+  const previousSource = entitySourceBeforeEdit.get(entity) || '';
+  entitySourceBeforeEdit.delete(entity);
+  syncEntityMappingToVoiceProfiles(entity, previousSource);
+  // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认.
   entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
   if (entity.source.trim() && entity.target.trim()) {
     void persistLiteraryMemoryToWorkspace().catch((error) => {
@@ -2465,6 +2501,7 @@ function entityKindLabel(kind: LiteraryEntity['kind']) {
 function setEntityAliases(entity: LiteraryEntity, event: Event) {
   const value = (event.target as HTMLInputElement | null)?.value ?? '';
   entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
+  syncEntityMappingToVoiceProfiles(entity);
   entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
   if (entity.source.trim() && entity.target.trim()) void persistLiteraryMemoryToWorkspace().catch((error) => {
     persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
@@ -2547,12 +2584,26 @@ async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoi
     }
   }
   profile.status = status;
+  profile.useForTranslation = status !== 'rejected';
   await persistVoiceMemoryChange(
     status === 'confirmed' ? '已确认人物声音：' + profile.canonicalSourceName + '。后续相关对白会参考这份画像。'
       : status === 'rejected' ? '已拒绝人物声音画像：' + profile.canonicalSourceName + '。'
         : '已将人物声音画像移回候选：' + profile.canonicalSourceName + '。',
   );
 }
+async function setCharacterVoiceUse(profile: LiteraryBookMemory['characterVoices'][number], enabled: boolean) {
+  if (enabled && !profile.evidence.length) {
+    persistenceMessage.value = '没有原文证据的角色画像不能启用。';
+    return;
+  }
+  if (enabled && profile.status === 'rejected') profile.status = 'candidate';
+  profile.useForTranslation = enabled;
+  await persistVoiceMemoryChange(
+    enabled ? '已启用人物画像用于翻译：' + profile.canonicalSourceName + '。候选画像只作为弱提示。'
+      : '已停用人物画像：' + profile.canonicalSourceName + '。后续翻译不再注入此画像。',
+  );
+}
+
 async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationshipVoiceRules'][number], status: 'candidate' | 'confirmed' | 'rejected') {
   if (status === 'confirmed' && !rule.evidenceSegmentIds.length) {
     persistenceMessage.value = '没有原文证据片段，不能确认人物对的说话规则。';
