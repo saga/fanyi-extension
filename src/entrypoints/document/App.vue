@@ -2299,7 +2299,7 @@ async function restoreLastSession() {
       try {
         const project = await ensureDocumentWorkspace();
         const activeRun = workspaceActiveRun.value;
-        if (project && activeRun && ['queued', 'running'].includes(activeRun.status)) {
+        if (project && activeRun && ['queued', 'running', 'awaiting_acceptance', 'partial'].includes(activeRun.status)) {
           void followWorkspaceRun(project, activeRun);
         }
         if (activeTab.value === 'trajectory') void startAgentTrajectoryPolling();
