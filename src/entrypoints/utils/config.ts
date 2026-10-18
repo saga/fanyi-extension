@@ -10,6 +10,23 @@ export interface ShortcutConfig {
 
 export type Provider = 'deepseek' | 'cloudflare' | 'openrouter' | 'nvidia' | 'gemini' | 'opencode';
 export type LocalAgentProvider = 'workbuddy' | 'opencode';
+export type DocumentCodeBuddyTaskKey = 'translation' | 'accuracyReview' | 'styleReview' | 'literaryAnalysis' | 'contextGraph';
+export type DocumentCodeBuddyThinkingMode = 'disabled' | 'adaptive' | 'enabled';
+export type DocumentCodeBuddyEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
+export interface DocumentCodeBuddyTaskProfile {
+  /** Empty means inherit the local Agent's project/provider model. */
+  model: string;
+  fallbackModel: string;
+  thinkingMode: DocumentCodeBuddyThinkingMode;
+  thinkingBudgetTokens: number;
+  effort: DocumentCodeBuddyEffort;
+  /** Supplemental instructions; built-in task contracts are retained. */
+  systemPromptAppendix: string;
+  /** Optional task-specific wrapper. {{CONTENT}} receives the built-in task input. */
+  userPromptTemplate: string;
+}
+export type DocumentCodeBuddyTaskProfiles = Record<DocumentCodeBuddyTaskKey, DocumentCodeBuddyTaskProfile>;
 
 export interface Config {
   sourceLang: string;
@@ -61,6 +78,8 @@ export interface Config {
   documentLocalAgentUrl: string;
   documentLocalAgentModel: string;
   documentLocalAgentToken: string;
+  /** Separate CodeBuddy reasoning/prompt profile for each local document task. */
+  documentCodeBuddyTaskProfiles: DocumentCodeBuddyTaskProfiles;
 
   /** Local Agent document translation strategy; all limits are validated again by the service. */
   documentBatchMaxSegments: number;
@@ -81,6 +100,53 @@ export interface Config {
   documentSystemPromptOverride: string;
   /** Empty means use the built-in user-message wrapper; {{CONTENT}} receives this batch's JSON. */
   documentUserPromptTemplate: string;
+}
+
+export const DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES: DocumentCodeBuddyTaskProfiles = {
+  translation: {
+    model: '', fallbackModel: '', thinkingMode: 'disabled', thinkingBudgetTokens: 8192, effort: 'low',
+    systemPromptAppendix: '', userPromptTemplate: '',
+  },
+  accuracyReview: {
+    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'medium',
+    systemPromptAppendix: '', userPromptTemplate: '',
+  },
+  styleReview: {
+    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    systemPromptAppendix: '', userPromptTemplate: '',
+  },
+  literaryAnalysis: {
+    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    systemPromptAppendix: '', userPromptTemplate: '',
+  },
+  contextGraph: {
+    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    systemPromptAppendix: '', userPromptTemplate: '',
+  },
+};
+
+function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBuddyTaskProfiles {
+  const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, any> : {};
+  const result = {} as DocumentCodeBuddyTaskProfiles;
+  for (const task of Object.keys(DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES) as DocumentCodeBuddyTaskKey[]) {
+    const value = raw[task] && typeof raw[task] === 'object' && !Array.isArray(raw[task]) ? raw[task] : {};
+    const defaults = DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES[task];
+    const thinkingMode = ['disabled', 'adaptive', 'enabled'].includes(value.thinkingMode)
+      ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
+    const effort = ['low', 'medium', 'high', 'xhigh'].includes(value.effort)
+      ? value.effort as DocumentCodeBuddyEffort : defaults.effort;
+    const rawBudget = Number(value.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens);
+    result[task] = {
+      model: typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model,
+      fallbackModel: typeof value.fallbackModel === 'string' ? value.fallbackModel.trim().slice(0, 200) : defaults.fallbackModel,
+      thinkingMode,
+      thinkingBudgetTokens: Number.isFinite(rawBudget) ? Math.max(1024, Math.min(65536, Math.round(rawBudget))) : defaults.thinkingBudgetTokens,
+      effort,
+      systemPromptAppendix: typeof value.systemPromptAppendix === 'string' ? value.systemPromptAppendix.slice(0, 12000) : defaults.systemPromptAppendix,
+      userPromptTemplate: typeof value.userPromptTemplate === 'string' ? value.userPromptTemplate.slice(0, 30000) : defaults.userPromptTemplate,
+    };
+  }
+  return result;
 }
 
 const defaultConfig: Config = {
@@ -119,6 +185,7 @@ const defaultConfig: Config = {
   documentLocalAgentUrl: 'http://127.0.0.1:8789',
   documentLocalAgentModel: 'auto',
   documentLocalAgentToken: '',
+  documentCodeBuddyTaskProfiles: DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES,
 
   documentBatchMaxSegments: 16,
   documentBatchMaxSourceChars: 8000,
@@ -174,14 +241,27 @@ export async function getConfig(): Promise<Config> {
   }
   merged.translationMode = merged.translationMode === 'literary' ? 'literary' : 'technical';
   merged.documentTranslationMode = merged.documentTranslationMode === 'literary' ? 'literary' : 'technical';
+  merged.documentCodeBuddyTaskProfiles = normalizeDocumentCodeBuddyTaskProfiles(merged.documentCodeBuddyTaskProfiles);
   return merged;
 }
 
 /** Save a patch on top of the current profile after the one-time document-profile migration. */
 export async function setConfig(config: Partial<Config>): Promise<void> {
   const currentConfig = await getConfig();
+  // Preserve unspecified subfields when a caller patches one task profile only.
+  const incomingProfiles = config.documentCodeBuddyTaskProfiles;
+  const mergedProfiles = incomingProfiles
+    ? normalizeDocumentCodeBuddyTaskProfiles(Object.fromEntries(
+        (Object.keys(DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES) as DocumentCodeBuddyTaskKey[]).map((task) => [
+          task,
+          { ...currentConfig.documentCodeBuddyTaskProfiles[task], ...(incomingProfiles as any)[task] },
+        ]),
+      ))
+    : currentConfig.documentCodeBuddyTaskProfiles;
   // Use JSON serialization to strip Proxy/reactive wrappers from Vue refs.
-  const cleanConfig = JSON.parse(JSON.stringify({ ...currentConfig, ...config }));
+  const cleanConfig = JSON.parse(JSON.stringify({
+    ...currentConfig, ...config, documentCodeBuddyTaskProfiles: mergedProfiles,
+  }));
   await storage.setItem('local:config', cleanConfig);
 }
 

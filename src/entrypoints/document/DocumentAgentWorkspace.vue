@@ -346,6 +346,7 @@ interface PromptInput {
   literaryReview: boolean;
   literaryMemory: unknown;
   glossary: unknown;
+  taskProfiles: unknown;
 }
 const props = defineProps<{
   /** 父级 Agent Tab 当前是否可见；用于显示时恢复关联，但不因切换 Tab 销毁本组件。 */
@@ -366,6 +367,7 @@ const props = defineProps<{
   localAgentUrl: string;
   localAgentModel: string;
   localAgentToken: string;
+  codeBuddyTaskProfiles: Record<string, unknown>;
   systemPrompt: string;
   userPromptTemplate: string;
   literaryMemory: unknown;
@@ -521,6 +523,7 @@ function promptInput(includeLiteraryMemory = false): PromptInput {
     targetLang: props.targetLang,
     provider: props.localAgentProvider,
     model: props.localAgentModel || 'auto',
+    taskProfiles: props.codeBuddyTaskProfiles,
     translationMode: props.translationMode,
     literaryReview: props.translationMode === 'literary' && props.literaryReview,
     ...(includeLiteraryMemory ? { literaryMemory: props.literaryMemory } : {}),
