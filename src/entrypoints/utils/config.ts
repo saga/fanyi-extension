@@ -104,23 +104,23 @@ export interface Config {
 
 export const DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES: DocumentCodeBuddyTaskProfiles = {
   translation: {
-    model: '', fallbackModel: '', thinkingMode: 'disabled', thinkingBudgetTokens: 8192, effort: 'low',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'disabled', thinkingBudgetTokens: 8192, effort: 'low',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   accuracyReview: {
-    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'medium',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'medium',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   styleReview: {
-    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   literaryAnalysis: {
-    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   contextGraph: {
-    model: '', fallbackModel: '', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
 };
