@@ -651,7 +651,7 @@
               <label>
                 <span>规范原文名</span>
                 <input :value="managedPersonSource(item)" placeholder="人物原文名"
-                  @focus="rememberManagedPersonSource(item)" @change="updateManagedPerson(item, 'source', $event)" />
+                  @change="updateManagedPerson(item, 'source', $event)" />
               </label>
               <div class="entity-arrow" aria-hidden="true">→</div>
               <label>
@@ -2599,9 +2599,6 @@ function managedPersonAliases(item: ManagedPersonItem): string[] {
     ...(item.entity?.aliases || []),
     ...(item.profile?.aliases || []),
   ].map((value) => value.trim()).filter((value) => value && normalizeManagedPersonName(value) !== canonical)));
-}
-function rememberManagedPersonSource(item: ManagedPersonItem) {
-  if (item.entity) rememberEntitySource(item.entity);
 }
 function findManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
   if (item.entity && literaryMemory.value.entities.includes(item.entity)) return item.entity;
