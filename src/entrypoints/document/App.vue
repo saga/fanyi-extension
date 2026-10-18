@@ -940,7 +940,7 @@
         :translations="state.translations"
         :source-lang="sourceLang"
         :target-lang="targetLang"
-        :translation-mode="literaryMode ? 'literary' : (readerConfig?.documentTranslationMode || 'technical')"
+        :translation-mode="effectiveDocumentTranslationMode"
         :literary-review="literaryReview"
         :use-local-agent="readerConfig?.documentUseLocalAgent === true"
         :local-agent-provider="readerConfig?.documentLocalAgentProvider || 'workbuddy'"
@@ -978,6 +978,7 @@ import {
 } from './documentWorkspaceClient';
 import {
   assessContextGraphReadiness,
+  resolveDocumentTranslationMode,
   CONTEXT_GRAPH_ANALYSIS_VERSION,
 } from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
@@ -1150,7 +1151,7 @@ const contextGraphProgressPercent = computed(() => {
 });
 
 const effectiveDocumentTranslationMode = computed(() =>
-  effectiveDocumentTranslationMode.value,
+  resolveDocumentTranslationMode(literaryMode.value, readerConfig.value?.documentTranslationMode),
 );
 const translationPreprocessingRequired = computed(() =>
   readerConfig.value?.documentUseLocalAgent === true && effectiveDocumentTranslationMode.value === 'literary',
@@ -1208,7 +1209,7 @@ const builtInDocumentSystemPrompt = computed(() => {
     targetLang.value,
     effectiveDocumentTranslationMode.value === 'literary' ? undefined : glossary.value,
     readerConfig.value?.documentPromptStyle || 'default',
-    literaryMode.value ? 'literary' : (readerConfig.value?.documentTranslationMode || 'technical'),
+    effectiveDocumentTranslationMode.value,
   );
   // Include the static book workflow instructions shown to the model, not just the generic profile.
   return effectiveDocumentTranslationMode.value === 'literary' ? base + '\n\n' + buildLiteraryTranslationContextPrompt() : base;
