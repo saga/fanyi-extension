@@ -1018,6 +1018,30 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
+import { useAgentTrajectory } from './useAgentTrajectory';
+import { mergeContextGraphEntitySuggestions } from './documentLiteraryBridge';
+import { useLiteraryMemoryEditor } from './useLiteraryMemoryEditor';
+import { useContextGraph } from './useContextGraph';
+import {
+  BUILT_IN_USER_PROMPT_TEMPLATE,
+  FORMAT_LABEL,
+  languageFontClass,
+} from './documentReaderFormat';
+import { buildDocumentAgentSessionId } from './documentSessionId';
+import {
+  agentTrajectoryDetail,
+  agentTrajectoryFailureCount,
+  agentTrajectoryHasFailureDetails,
+  agentTrajectoryRelatedFailureEvents as agentTrajectoryRelatedFailureEventsOf,
+  agentTrajectoryRole,
+  agentTrajectoryStatus,
+  agentTrajectoryStatusLabel,
+  agentTrajectoryTitle,
+  computeAgentTrajectoryActiveTasks,
+  filterAgentTrajectoryEvents,
+  formatAgentDuration,
+  type AgentTrajectoryFilter,
+} from './documentAgentTrajectory';
 import {
   backupWorkspaceSourceFile,
   importWorkspaceTranslations,
@@ -1028,11 +1052,7 @@ import {
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
-import {
-  assessContextGraphReadiness,
-  resolveDocumentTranslationMode,
-  CONTEXT_GRAPH_ANALYSIS_VERSION,
-} from './documentPreprocessing';
+import { resolveDocumentTranslationMode } from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
@@ -1057,19 +1077,7 @@ import {
   type SavedDocumentTab,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
-import { autoConfirmLiteraryMemory, buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, mergeCharacterVoiceConfidence, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
-
-const FORMAT_LABEL: Record<string, string> = {
-  txt: '纯文本',
-  md: 'Markdown',
-  html: 'HTML',
-  srt: 'SRT 字幕',
-  vtt: 'VTT 字幕',
-  json: 'JSON',
-  pdf: 'PDF',
-  docx: 'Word',
-  epub: 'EPUB',
-};
+import { buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const dragover = ref(false);
@@ -1092,26 +1100,6 @@ const workspaceRunId = ref('');
 const workspaceSourceChanged = ref(false);
 const workspaceTranslationActive = ref(false);
 const workspaceRunGeneration = ref(0);
-const agentTrajectoryEvents = ref<any[]>([]);
-const agentTrajectoryCursor = ref(0);
-const agentTrajectoryLoading = ref(false);
-const agentTrajectoryError = ref('');
-const agentTrajectoryFilter = ref<'all' | 'model' | 'issues'>('all');
-const expandedAgentFailureEventId = ref<number | string | null>(null);
-const agentTrajectoryFailureDetails = ref<Record<string, any[]>>({});
-const agentTrajectoryFailureLoading = ref<Record<string, boolean>>({});
-const agentTrajectoryFailureErrors = ref<Record<string, string>>({});
-let agentTrajectoryPollTimer: number | null = null;
-let agentTrajectoryRequestGeneration = 0;
-const contextGraphState = ref<any>({
-  projectId: '', sourceRevisionId: '', segmentCount: 0,
-  counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
-  status: 'not-started', phase: 'not-started', progress: {}, runId: '',
-  startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
-});
-const contextGraphAnalyzing = ref(false);
-const contextGraphOverview = ref<{ narrativeStyle: string; styleRules: string[] }>({ narrativeStyle: '', styleRules: [] });
-let contextGraphPollTimer: number | null = null;
 let ensureWorkspacePromise: Promise<any | null> | null = null;
 let ensureWorkspacePromiseKey: string | null = null;
 /** Invalidates asynchronous work when the reader switches to another document. */
@@ -1132,11 +1120,6 @@ const documentSystemPromptOverride = ref('');
 const documentSystemPromptEditor = ref('');
 const documentUserPromptTemplate = ref('');
 const documentUserPromptEditor = ref('');
-const BUILT_IN_USER_PROMPT_TEMPLATE = [
-  '请翻译以下 JSON 数组中的每个对象。只翻译 text 字段，必须保留 id、顺序、段落边界和结构信息。',
-  'contextPath、kind、level、marker 等字段是只读元数据，不能写入译文。只返回与输入 ID 一一对应的 JSON 译文，不要增加解释或额外字段。',
-  '', 'JSON:', '', '{{CONTENT}}',
-].join(String.fromCharCode(10));
 const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
 /** 当 IndexedDB 不可用时，仅凭 SQLite 的轻量摘要也要显示恢复入口。 */
 const localSessionSummary = ref<{ title: string; format: string; updatedAt: string } | null>(null);
@@ -1181,67 +1164,6 @@ const {
 } = useDocumentTranslation();
 
 /** 页级分页不改变原始片段顺序，导出仍以完整文档为准。 */
-const contextGraphStatusLabel = computed(() => ({
-  'not-started': '尚未运行', queued: '等待执行', running: '运行中',
-  completed: '已完成', failed: '失败',
-}[contextGraphState.value.status] || contextGraphState.value.status || '未知'));
-const contextGraphPhaseLabel = computed(() => {
-  const run = contextGraphState.value;
-  const phase = run.phase;
-  const labels: Record<string, string> = {
-    'not-started': '尚未预处理当前原文版本。',
-    queued: '预处理已排队，等待开始。',
-    sample: '阶段 1/2：扫描全书结构、对话密度和名称线索，规划代表性样本。',
-    'model-analysis': '阶段 2/2：模型正在分析人物、规范译名、实体、关系、文风与章节摘要。',
-    completed: '全书预处理完成。翻译批次会注入与当前原文匹配的规范专名和有时间边界的上下文。',
-    failed: '预处理失败。错误详情已记录；修复配置后可以重新分析。',
-  };
-  return labels[phase] || labels[run.status] || '读取预处理状态中。';
-});
-const contextGraphProgressPercent = computed(() => {
-  const { status, phase, progress } = contextGraphState.value;
-  if (status === 'completed' || status === 'failed') return 100;
-  if (status === 'queued') return 4;
-  if (phase === 'sample') return 32;
-  if (phase === 'model-analysis') {
-    const sampleCount = Number(progress?.sampleCount || progress?.scan?.samplePlan?.length || 0);
-    return sampleCount > 0 ? 68 : 55;
-  }
-  if (status === 'running') return 12;
-  return 0;
-});
-
-const effectiveDocumentTranslationMode = computed(() =>
-  resolveDocumentTranslationMode(literaryMode.value, readerConfig.value?.documentTranslationMode),
-);
-const translationPreprocessingRequired = computed(() =>
-  readerConfig.value?.documentUseLocalAgent === true && effectiveDocumentTranslationMode.value === 'literary',
-);
-const translationPreprocessingReadiness = computed(() => assessContextGraphReadiness({
-  required: translationPreprocessingRequired.value,
-  loading: contextGraphState.value.loading || contextGraphAnalyzing.value,
-  snapshot: contextGraphState.value,
-  expectedProjectId: workspaceProject.value?.projectId || null,
-  expectedSourceRevisionId: workspaceProject.value?.currentSourceRevisionId || null,
-  sourceLang: sourceLang.value,
-  targetLang: targetLang.value,
-}));
-const translationBlockedByPreprocessing = computed(() =>
-  translationPreprocessingRequired.value && !translationPreprocessingReadiness.value.ready,
-);
-const translationPreprocessingUiState = computed(() => ({
-  ...contextGraphState.value,
-  required: translationPreprocessingRequired.value,
-  ready: translationPreprocessingReadiness.value.ready,
-  reason: translationPreprocessingReadiness.value.reason,
-  message: translationPreprocessingReadiness.value.message,
-  progressPercent: contextGraphProgressPercent.value,
-  expectedProjectId: workspaceProject.value?.projectId || '',
-  expectedSourceRevisionId: workspaceProject.value?.currentSourceRevisionId || '',
-  sourceLang: sourceLang.value,
-  targetLang: targetLang.value,
-}));
-
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
@@ -1250,20 +1172,6 @@ const hasPendingDocument = computed(() =>
   doc.value?.segments.some((segment) => !state.value.translations.get(segment.id)?.trim()) ?? false,
 );
 
-function languageFontClass(language: string, text: string): 'font-en' | 'font-zh' {
-  const normalized = (language || 'auto').toLowerCase();
-  if (normalized.startsWith('zh')) return 'font-zh';
-  if (normalized.startsWith('en')) return 'font-en';
-  if (normalized === 'auto') {
-    // Use the Chinese font when CJK is a meaningful part of the segment, not for a lone
-    // Chinese name embedded in an otherwise English paragraph.
-    const cjk = (text.match(/[\u3400-\u9fff]/g) || []).length;
-    const latin = (text.match(/[A-Za-z]/g) || []).length;
-    return cjk > 0 && cjk >= latin * 0.25 ? 'font-zh' : 'font-en';
-  }
-  // This reader exposes separate English/Chinese typography; other scripts use the English fallback.
-  return 'font-en';
-}
 const builtInDocumentSystemPrompt = computed(() => {
   const base = buildStyledSystemContent(
     sourceLang.value,
@@ -1284,96 +1192,103 @@ const documentStyleVars = computed(() => ({
 const userPromptPreview = computed(() => documentUserPromptEditor.value
   .split('{'.repeat(2) + 'CONTENT' + '}'.repeat(2))
   .join('[当前页片段 JSON 在发送时插入]'));
-interface ManagedPersonItem {
-  key: string;
-  entity?: LiteraryEntity;
-  entityIndex?: number;
-  profile?: LiteraryBookMemory['characterVoices'][number];
-}
-const entitySearch = ref('');
-const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
-const personSearch = ref('');
-const nonPersonEntities = computed(() => literaryMemory.value.entities.filter((entity) => entity.kind !== 'person'));
-const pendingEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus !== 'confirmed').length);
-const confirmedEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus === 'confirmed').length);
-function normalizeManagedPersonName(value: unknown): string {
-  return String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
-}
-const managedPeople = computed<ManagedPersonItem[]>(() => {
-  const items: ManagedPersonItem[] = [];
-  const profiles = literaryMemory.value.characterVoices;
-  const usedProfileIds = new Set<string>();
-  for (const [entityIndex, entity] of literaryMemory.value.entities.entries()) {
-    if (entity.kind !== 'person') continue;
-    const entityNames = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
-    const profile = profiles.find((candidate) => !usedProfileIds.has(candidate.characterId) &&
-      [candidate.canonicalSourceName, ...candidate.aliases].map(normalizeManagedPersonName).some((name) => entityNames.has(name)));
-    if (profile) usedProfileIds.add(profile.characterId);
-    items.push({
-      key: profile?.characterId || 'person-entity-' + entityIndex,
-      entity, entityIndex, profile,
-    });
-  }
-  for (const profile of profiles) {
-    if (usedProfileIds.has(profile.characterId)) continue;
-    const profileNames = new Set([profile.canonicalSourceName, ...profile.aliases].map(normalizeManagedPersonName).filter(Boolean));
-    const entityMatch = literaryMemory.value.entities
-      .map((entity, entityIndex) => ({ entity, entityIndex }))
-      .find(({ entity }) => entity.kind === 'person' &&
-        [entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).some((name) => profileNames.has(name)));
-    if (entityMatch) {
-      const priorItem = items.find((item) => item.entity === entityMatch.entity);
-      if (priorItem) priorItem.profile = profile;
-      else items.push({ key: profile.characterId, entity: entityMatch.entity, entityIndex: entityMatch.entityIndex, profile });
-    } else {
-      items.push({ key: profile.characterId, profile });
-    }
-  }
-  return items;
+const effectiveDocumentTranslationMode = computed(() =>
+  resolveDocumentTranslationMode(literaryMode.value, readerConfig.value?.documentTranslationMode),
+);
+
+/** 阅读、配置、人物/预处理、Agent 工作区和轨迹分区相互独立。 */
+const activeTab = ref<SavedDocumentTab>('reading');
+
+const {
+  entitySearch,
+  entityFilter,
+  personSearch,
+  nonPersonEntities,
+  pendingEntityCount,
+  confirmedEntityCount,
+  managedPeople,
+  filteredManagedPeople,
+  pendingRelationshipCount,
+  pendingCharacterVoiceCount,
+  confirmedCharacterVoiceCount,
+  confirmableRelationshipCount,
+  hasStyleGuideContent,
+  filteredLiteraryEntities,
+  rememberEntitySource,
+  managedPersonSource,
+  managedPersonTarget,
+  managedPersonAliases,
+  updateManagedPerson,
+  addManagedPerson,
+  removeManagedPerson,
+  markEntitySuggested,
+  entityKindLabel,
+  setEntityAliases,
+  addEntity,
+  removeEntity,
+  markRelationshipSuggested,
+  confirmRelationship,
+  confirmAllRelationships,
+  characterName,
+  setCharacterVoiceStatus,
+  setCharacterVoiceUse,
+  setRelationshipVoiceStatus,
+  editVoiceAnchor,
+  setVoiceAnchorStatus,
+  addRelationship,
+  removeRelationship,
+  persistLiteraryMemoryToWorkspace,
+  awaitLiteraryMemoryWrites,
+  markStyleGuideCandidate,
+  setStyleGuideLines,
+  importContextGraphStyleGuide,
+  setStyleGuideStatus,
+} = useLiteraryMemoryEditor({
+  literaryMemory,
+  doc,
+  state,
+  readerConfig,
+  workspaceProject,
+  ensureWorkspace: ensureDocumentWorkspace,
+  persistenceMessage,
+  persistSession: persistCurrentSession,
+  getContextGraphOverview: () => contextGraphOverview.value,
 });
-const filteredManagedPeople = computed(() => {
-  const query = personSearch.value.trim().toLocaleLowerCase();
-  if (!query) return managedPeople.value;
-  return managedPeople.value.filter((item) => {
-    const profile = item.profile;
-    const searchable = [
-      item.entity?.source, item.entity?.target, ...(item.entity?.aliases || []),
-      profile?.canonicalSourceName, profile?.targetName, ...(profile?.aliases || []),
-      profile?.role, ...(profile?.traits || []),
-      profile?.voiceCore.register, ...(profile?.voiceCore.syntaxRhythm || []),
-      ...(profile?.voiceCore.lexicalPreferences || []), ...(profile?.voiceCore.discourseHabits || []),
-      ...(profile?.evidence || []).map((evidence) => evidence.sourceQuote),
-    ].filter((value): value is string => typeof value === 'string');
-    return searchable.some((value) => value.toLocaleLowerCase().includes(query));
-  });
-});
-const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
-const pendingCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'candidate').length +
-  literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'candidate').length);
-const confirmedCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'confirmed').length +
-  literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'confirmed').length);
-const confirmableRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) =>
-  relation.reviewStatus !== 'confirmed' && !!relation.subject.trim() && !!relation.predicate.trim() && !!relation.object.trim(),
-).length);
-const hasStyleGuideContent = computed(() => {
-  const style = literaryMemory.value.styleGuide || {};
-  return [style.narrativeVoice, style.register, style.rhythm, style.dialogue, style.diction]
-    .some((value) => typeof value === 'string' && value.trim()) ||
-    (style.rules || []).some((value) => value.trim()) ||
-    (style.avoid || []).some((value) => value.trim());
-});
-const filteredLiteraryEntities = computed(() => {
-  const query = entitySearch.value.toLocaleLowerCase();
-  return literaryMemory.value.entities
-    .map((entity, index) => ({ entity, index }))
-    .filter(({ entity }) => entity.kind !== 'person')
-    .filter(({ entity }) => {
-      if (entityFilter.value === 'pending' && entity.reviewStatus === 'confirmed') return false;
-      if (entityFilter.value === 'confirmed' && entity.reviewStatus !== 'confirmed') return false;
-      if (!query) return true;
-      return [entity.source, entity.target, ...(entity.aliases ?? [])]
-        .some((value) => value.toLocaleLowerCase().includes(query));
-    });
+
+const {
+  contextGraphState,
+  contextGraphAnalyzing,
+  contextGraphOverview,
+  contextGraphStatusLabel,
+  contextGraphPhaseLabel,
+  contextGraphProgressPercent,
+  translationPreprocessingRequired,
+  translationPreprocessingReadiness,
+  translationBlockedByPreprocessing,
+  translationPreprocessingUiState,
+  clearContextGraphPoll,
+  loadContextGraph,
+  refreshContextGraphStatus,
+  syncContextGraphEntitiesToMemory,
+  ensureContextGraphPreprocessing,
+  handlePreprocessingStatusRefreshRequested,
+  openPreprocessingAndEnsure,
+  reanalyzeContextGraph,
+  resetContextGraph,
+} = useContextGraph({
+  readerConfig,
+  workspaceProject,
+  workspaceActiveRun,
+  doc,
+  sourceLang,
+  targetLang,
+  effectiveDocumentTranslationMode,
+  literaryMemory,
+  persistenceMessage,
+  activeTab,
+  ensureWorkspace: ensureDocumentWorkspace,
+  persistSession: persistCurrentSession,
+  persistLiteraryMemoryToWorkspace,
 });
 
 const currentPageTranslatedCount = computed(() =>
@@ -1382,8 +1297,6 @@ const currentPageTranslatedCount = computed(() =>
 const translatedSegmentCount = computed(() =>
   doc.value?.segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length ?? 0,
 );
-/** 阅读、配置、人物/预处理、Agent 工作区和轨迹分区相互独立。 */
-const activeTab = ref<SavedDocumentTab>('reading');
 /** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
 const startLabel = computed(() => currentPagePending.value
   ? '翻译当前页'
@@ -1414,405 +1327,29 @@ function jumpToWorkChapter() {
   }
 }
 
-function stopAgentTrajectoryPolling() {
-  if (agentTrajectoryPollTimer !== null) window.clearTimeout(agentTrajectoryPollTimer);
-  agentTrajectoryPollTimer = null;
-  agentTrajectoryRequestGeneration++;
-}
-
-function formatAgentDuration(value: unknown): string {
-  const ms = Number(value);
-  if (!Number.isFinite(ms) || ms < 0) return '—';
-  return ms >= 60000
-    ? Math.floor(ms / 60000) + ' 分 ' + Math.round((ms % 60000) / 1000) + ' 秒'
-    : (ms / 1000).toFixed(1) + ' 秒';
-}
-
-async function refreshAgentTrajectory(reset = false): Promise<void> {
-  if (reset) agentTrajectoryRequestGeneration++;
-  const config = readerConfig.value || await getConfig();
-  readerConfig.value = config;
-  if (!config.documentUseLocalAgent) {
-    agentTrajectoryError.value = '请先启用本机 Local Agent，才能读取持久化 Agent 轨迹。';
-    return;
-  }
-  let project = workspaceProject.value;
-  if (!project?.projectId) project = await ensureDocumentWorkspace();
-  if (!project?.projectId) {
-    agentTrajectoryError.value = '尚未建立当前文档的本机项目，暂时无法读取事件。';
-    return;
-  }
-  const generation = agentTrajectoryRequestGeneration;
-  if (reset) {
-    agentTrajectoryCursor.value = 0;
-    agentTrajectoryEvents.value = [];
-  }
-  agentTrajectoryLoading.value = true;
-  try {
-    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
-    const token = config.documentLocalAgentToken || '';
-    const query = reset || agentTrajectoryCursor.value <= 0
-      ? '?latest=true&limit=500'
-      : '?after=' + agentTrajectoryCursor.value + '&limit=500';
-    const response = await workspaceApi<{ events: any[] }>(
-      base, token,
-      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events' + query,
-    );
-    if (generation !== agentTrajectoryRequestGeneration || activeTab.value !== 'trajectory') return;
-    const incoming = Array.isArray(response.events) ? response.events : [];
-    if (reset || agentTrajectoryCursor.value <= 0) {
-      agentTrajectoryEvents.value = incoming.slice(-600);
-    } else if (incoming.length) {
-      const seen = new Set(agentTrajectoryEvents.value.map((item) => item.eventId));
-      agentTrajectoryEvents.value = [...agentTrajectoryEvents.value, ...incoming.filter((item) => !seen.has(item.eventId))].slice(-600);
-    }
-    agentTrajectoryCursor.value = agentTrajectoryEvents.value.reduce(
-      (max, item) => Math.max(max, Number(item.eventId) || 0), agentTrajectoryCursor.value,
-    );
-    agentTrajectoryError.value = '';
-  } catch (error) {
-    if (generation === agentTrajectoryRequestGeneration) {
-      agentTrajectoryError.value = '读取 Agent 轨迹失败：' + (error instanceof Error ? error.message : String(error));
-    }
-  } finally {
-    if (generation === agentTrajectoryRequestGeneration) agentTrajectoryLoading.value = false;
-  }
-}
-
-function scheduleAgentTrajectoryPoll(): void {
-  if (activeTab.value !== 'trajectory') return;
-  if (agentTrajectoryPollTimer !== null) window.clearTimeout(agentTrajectoryPollTimer);
-  agentTrajectoryPollTimer = window.setTimeout(async () => {
-    agentTrajectoryPollTimer = null;
-    await refreshAgentTrajectory(false);
-    scheduleAgentTrajectoryPoll();
-  }, 1200);
-}
-
-async function startAgentTrajectoryPolling(): Promise<void> {
-  stopAgentTrajectoryPolling();
-  if (activeTab.value !== 'trajectory') return;
-  await refreshAgentTrajectory(true);
-  scheduleAgentTrajectoryPoll();
-}
-
-function agentTrajectoryRole(event: any): string {
-  const type = String(event?.type || '');
-  const stage = String(event?.payload?.stage || '');
-  if (type.startsWith('context-graph.')) return '全书预处理';
-  if (stage === 'style-review' || (type === 'stage.started' && /文风|声音/.test(String(event?.payload?.label || '')))) return '人物声音 / 文风 Agent';
-  if (stage === 'review' || type === 'review.context.ready') return '准确性 / 术语 Reviewer';
-  if (stage === 'translate' || type.startsWith('batch.') || type === 'translation-brief.ready') return '翻译 Agent';
-  if (type.startsWith('run.') || type === 'plan.ready') return '任务编排';
-  return 'Agent 工作流';
-}
-
-function agentTrajectoryTitle(event: any): string {
-  const type = String(event?.type || '');
-  const p = event?.payload || {};
-  const stage = String(p.stage || '');
-  const withSuffix = (label: unknown, suffix: string) => {
-    const value = String(label || '');
-    return value.endsWith(suffix) ? value : value + suffix;
-  };
-  const payload = event?.payload || {};
-  if (type === 'run.finished' && Number(payload.counts?.failed || 0) > 0) {
-    return '运行结束（' + Number(payload.counts.failed) + ' 个片段失败）';
-  }
-  if (type === 'batch.completed' && Array.isArray(payload.failedIds) && payload.failedIds.length) {
-    return '批次流程结束（' + payload.failedIds.length + ' 个片段失败）';
-  }
-  if (type === 'batch.translation.completed' && Array.isArray(payload.failedIds) && payload.failedIds.length) {
-    return '初译完成（' + payload.failedIds.length + ' 个片段失败）';
-  }
-  const labels: Record<string, string> = {
-    'run.planned': '翻译运行已创建',
-    'plan.ready': '批次计划已生成',
-    'run.context.ready': '运行上下文已固定',
-    'batch.started': '开始翻译批次',
-    'translation-brief.ready': 'TranslationBrief 已组装',
-    'batch.prompt.ready': '向模型提交请求',
-    'batch.model.response': '模型已返回结果',
-    'batch.translation.completed': '初译候选已保存',
-    'batch.partial': '模型返回不完整，正在重试',
-    'batch.output.validation': '模型输出校验告警',
-    'batch.completed': '批次与审校流程结束',
-    'batch.discarded': '批次结果已丢弃',
-    'stage.started': withSuffix(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'translate' ? '初译阶段' : '工作流阶段'), '开始'),
-    'stage.completed': withSuffix(p.label || (stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : stage === 'validate' ? '结果校验' : '工作流阶段'), '完成'),
-    'stage.warning': String(stage === 'style-review' ? '人物声音与文风审校' : stage === 'review' ? '准确性与术语审校' : '工作流阶段') + '告警',
-    'model.call.failed': '模型调用失败',
-    'review.context.ready': 'Reviewer 上下文已准备',
-    'review.discarded': '审校结果已丢弃',
-    'run.failed': '运行失败',
-    'run.finished': p.status === 'failed' ? '运行结束但存在失败' : p.status === 'partial' ? '运行部分完成' : '运行结束',
-    'context-graph.phase': p.phase === 'model-analysis' ? '开始分析人物、实体与规范译名' : '开始扫描全书原文',
-    'context-graph.scan.completed': '全书扫描与样本规划完成',
-    'context-graph.completed': '全书预处理完成',
-    'context-graph.failed': '全书预处理失败',
-    'context-graph.reviewed': '人工修改图谱状态',
-  };
-  return labels[type] || type.replace(/[.-]/g, ' ');
-}
-
-function agentTrajectoryDetail(event: any): string {
-  const p = event?.payload || {};
-  const type = String(event?.type || '');
-  const details: string[] = [];
-  if (p.chapter) details.push('章节：' + p.chapter);
-  if (type === 'plan.ready') {
-    details.push('原文片段 ' + (p.segmentCount ?? '?') + ' 段，规划 ' + (p.batchCount ?? '?') + ' 批');
-    details.push('初译并发 ' + (p.translationConcurrency ?? '?') + '，审校并发 ' + (p.reviewConcurrency ?? 0));
-    if (p.maxBatchSegments != null || p.maxBatchSourceChars != null) {
-      details.push('每批上限 ' + (p.maxBatchSegments ?? '?') + ' 段 / ' + (p.maxBatchSourceChars ?? '?') + ' 原文字符');
-    }
-    if (p.contextBudgetChars != null || p.precedingContextSegments != null || p.maxModelAttempts != null) {
-      details.push('前文参考 ' + (p.precedingContextSegments ?? '?') + ' 段 · 上下文预算 ' +
-        (p.contextBudgetChars ?? '?') + ' 字符 · 单批最多尝试 ' + (p.maxModelAttempts ?? '?') + ' 次');
-    }
-  }
-  if (type === 'run.context.ready') {
-    details.push('模型 ' + (p.provider || '?') + '/' + (p.model || '运行时默认'));
-    details.push('语言方向 ' + (p.sourceLang || '?') + ' → ' + (p.targetLang || '?'));
-    details.push('实体 ' + (p.memoryEntities ?? 0) + '，人物声音 ' + (p.characterVoices ?? 0) + '，术语 ' + (p.glossaryTerms ?? 0));
-  }
-  if (type === 'batch.started') {
-    details.push('片段 ' + (Array.isArray(p.segmentIds) ? p.segmentIds.length : '?') + ' 段');
-    details.push('前文上下文 ' + (p.precedingContextCount ?? 0) + ' 段');
-    details.push('会话策略：' + (p.sessionStrategy || '独立批次'));
-  }
-  if (type === 'translation-brief.ready') {
-    details.push('上下文 ' + (p.contextChars ?? 0) + ' 字符');
-    // Older persisted events use the detailed summary field names; newer events also carry
-    // the UI aliases. Fall back for counts so historical traces don't falsely render zero.
-    const entityCount = p.entityCount ??
-      (Number(p.graphCharacters || 0) + Number(p.graphEntities || 0));
-    const relationshipCount = p.relationshipCount ?? p.graphRelationships ?? 0;
-    const characterVoiceCount = p.characterVoiceCount ?? p.characterVoices ?? 0;
-    const nameMappingCount = p.nameMappingCount ?? p.graphNameMappingCount;
-    details.push('实体 ' + entityCount + '，关系 ' + relationshipCount +
-      '，人物声音 ' + characterVoiceCount + '，规范译名 ' +
-      (nameMappingCount ?? '见后续模型请求明细'));
-    if (p.contextHash) details.push('Context hash ' + String(p.contextHash).slice(0, 12));
-  }
-  if (type === 'batch.prompt.ready') {
-    details.push('模型 ' + (p.provider || '?') + '/' + (p.model || '运行时默认'));
-    details.push('原文 ' + (p.sourceChars ?? '?') + ' 字符，系统指令 ' + (p.systemPromptChars ?? '?') + ' 字符，用户提示 ' + (p.userPromptChars ?? '?') + ' 字符');
-    details.push('前文 ' + (p.precedingSegmentCount ?? 0) + ' 段，规范译名 ' + (p.contextGraphNameMappingCount ?? 0));
-    if (Array.isArray(p.contextGraphNameMappingPreview) && p.contextGraphNameMappingPreview.length) {
-      details.push('译名映射：' + p.contextGraphNameMappingPreview.slice(0, 8).map((item: any) => item.source + ' → ' + item.target).join('；'));
-    }
-  }
-  if (type === 'batch.model.response') {
-    details.push('返回 ' + (p.returnedSegments ?? 0) + '/' + (p.requestedSegments ?? 0) + ' 段');
-    if (p.missingCount) details.push('缺少 ' + p.missingCount + ' 段：' + (p.missingIds || []).slice(0, 8).join(', '));
-  }
-  if (type === 'batch.translation.completed') {
-    details.push('候选 ' + (p.candidateCount ?? 0) + ' 段，审校 ' + (p.reviewScheduled ? '已排队' : '关闭'));
-  }
-  if (type === 'batch.completed' || type === 'batch.translation.completed') {
-    if (Array.isArray(p.failedIds) && p.failedIds.length) {
-      details.push('失败片段 ' + p.failedIds.length + ' 个：' + p.failedIds.slice(0, 8).join(', ') +
-        (p.failedIds.length > 8 ? ' 等' : ''));
-    }
-  }
-  if (type === 'batch.partial') {
-    if (Array.isArray(p.missingIds) && p.missingIds.length) {
-      details.push('重试后仍缺少或曾缺少 ' + p.missingIds.length + ' 个片段：' + p.missingIds.slice(0, 8).join(', ') +
-        (p.missingIds.length > 8 ? ' 等' : ''));
-    }
-  }
-  if (type === 'batch.output.validation') {
-    details.push('重复 ID ' + (p.duplicateCount ?? 0) + '，未知 ID ' + (p.unexpectedCount ?? 0) + '，格式异常 ' + (p.malformedRowCount ?? 0));
-  }
-  if (type === 'review.context.ready') {
-    details.push('注入实体 ' + (p.injectedEntities ?? 0) + '，关系 ' + (p.injectedRelationships ?? 0) +
-      '，章节摘要 ' + (p.injectedChapterSummaries ?? 0));
-    details.push('人物声音 ' + (p.injectedCharacterVoices ?? 0) + '，声音规则 ' + (p.injectedRelationshipVoiceRules ?? 0) +
-      '，已批准锚点 ' + (p.injectedVoiceAnchors ?? 0));
-  }
-  if (type === 'run.finished') {
-    const counts = p.counts || {};
-    details.push('候选 ' + (counts.candidate ?? 0) + ' 段，已接受 ' + (counts.accepted ?? 0) + ' 段，失败 ' + (counts.failed ?? 0) + ' 段');
-    if (p.error) details.push('状态信息：' + p.error);
-  }
-  if (type === 'stage.completed') {
-    if (p.reviewedIds) details.push('审校片段 ' + p.reviewedIds.length + ' 段');
-    if (p.findingCount != null) details.push('发现 ' + p.findingCount + ' 项');
-    if (p.accuracyFindingCount != null) details.push('准确性问题 ' + p.accuracyFindingCount + ' 项');
-    if (p.terminologyFindingCount != null) details.push('术语问题 ' + p.terminologyFindingCount + ' 项');
-    if (p.styleFindingCount != null) details.push('文风问题 ' + p.styleFindingCount + ' 项');
-    if (p.revisedCount != null) details.push('新修订候选 ' + p.revisedCount + ' 段');
-  }
-  if (type === 'context-graph.phase') {
-    details.push('来源扫描 ' + (p.segmentCount ?? '?') + ' 段');
-    if (p.sampleCount != null) details.push('本轮样本 ' + p.sampleCount + ' 段');
-    if (p.sourceLang) details.push('语言方向 ' + p.sourceLang + ' → ' + (p.targetLang || '?'));
-    if (p.model) details.push('模型 ' + p.provider + '/' + p.model);
-  }
-  if (type === 'context-graph.scan.completed') {
-    details.push('扫描 ' + (p.segmentCount ?? '?') + ' 段 / ' + (p.chapterCount ?? '?') + ' 章');
-    details.push('名称候选 ' + (p.nameCandidateCount ?? 0) + '，重复短语 ' + (p.repeatedPhraseCandidateCount ?? 0));
-    details.push('对话片段 ' + (p.dialogueSegmentCount ?? 0) + '，抽样 ' + (p.sampleCount ?? 0) + ' 段');
-  }
-  if (type === 'context-graph.completed') {
-    details.push('人物 ' + (p.characterCount ?? 0) + '，其他实体 ' + (p.entityCount ?? 0) + '，关系 ' + (p.relationshipCount ?? 0));
-    details.push('规范译名 ' + (p.canonicalNameMappingCount ?? 0) + ' · 无效证据 ' + (p.invalidEvidenceCount ?? 0));
-  }
-  const error = p.error || p.warning;
-  if (error) details.push('错误：' + String(error));
-  if (p.reason) details.push('原因：' + String(p.reason));
-  return details.join(' · ') || (p.label ? String(p.label) : '已记录持久化事件。');
-}
-
-function agentTrajectoryStatus(event: any): string {
-  const type = String(event?.type || '');
-  const payload = event?.payload || {};
-  const runStatus = String(payload.status || '');
-  if (type === 'run.finished' && runStatus === 'failed') return 'failed';
-  if (type === 'run.finished' && runStatus === 'partial') return 'warning';
-  if (type.endsWith('.failed') || type === 'model.call.failed' || type === 'run.failed') return 'failed';
-  if (type === 'run.finished' && Number(payload.counts?.failed || 0) > 0) return 'warning';
-  if (['batch.completed', 'batch.translation.completed'].includes(type) &&
-      Array.isArray(payload.failedIds) && payload.failedIds.length > 0) return 'warning';
-  if (type === 'stage.warning' || type === 'batch.partial' || type === 'batch.output.validation') return 'warning';
-  if (type === 'batch.started' || type === 'stage.started' || type === 'context-graph.phase' || type === 'batch.prompt.ready') return 'running';
-  return 'completed';
-}
-
-function agentTrajectoryHasFailureDetails(event: any): boolean {
-  const payload = event?.payload || {};
-  return (Array.isArray(payload.failedIds) && payload.failedIds.length > 0) ||
-    Number(payload.counts?.failed || 0) > 0;
-}
-
-function agentTrajectoryFailureCount(event: any): number {
-  const payload = event?.payload || {};
-  return Array.isArray(payload.failedIds) && payload.failedIds.length
-    ? payload.failedIds.length
-    : Number(payload.counts?.failed || 0);
-}
-
-async function toggleAgentTrajectoryFailureDetails(event: any): Promise<void> {
-  if (expandedAgentFailureEventId.value === event?.eventId) {
-    expandedAgentFailureEventId.value = null;
-    return;
-  }
-  const runId = String(event?.runId || '');
-  if (!runId) return;
-  expandedAgentFailureEventId.value = event.eventId;
-  if (Object.prototype.hasOwnProperty.call(agentTrajectoryFailureDetails.value, runId)) return;
-
-  agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: true };
-  agentTrajectoryFailureErrors.value = { ...agentTrajectoryFailureErrors.value, [runId]: '' };
-  try {
-    const config = readerConfig.value || await getConfig();
-    readerConfig.value = config;
-    if (!config.documentUseLocalAgent) throw new Error('请先启用本机 Local Agent，才能读取失败片段详情。');
-    const project = workspaceProject.value || await ensureDocumentWorkspace();
-    if (!project?.projectId) throw new Error('尚未建立当前文档的本机项目。');
-    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
-    const token = config.documentLocalAgentToken || '';
-    const response = await workspaceApi<{ run: any }>(
-      base, token,
-      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
-    );
-    const run = response.run || {};
-    const runSegments = Array.isArray(run.segments) ? run.segments : [];
-    const failedRows = runSegments.filter((item: any) => item.status === 'failed');
-    const reportedIds = agentTrajectoryEvents.value
-      .filter((item) => String(item.runId || '') === runId)
-      .flatMap((item) => Array.isArray(item.payload?.failedIds) ? item.payload.failedIds.map(String) : []);
-    const ids = Array.from(new Set([
-      ...failedRows.map((item: any) => String(item.id)),
-      ...reportedIds,
-    ]));
-    const sourceById = new Map<string, any>(
-      (doc.value?.segments || []).map((item: any): [string, any] => [String(item.id), item]),
-    );
-    const details = ids.map((id) => {
-      const row = runSegments.find((item: any) => String(item.id) === id);
-      const source = sourceById.get(id);
-      return {
-        id,
-        status: String(row?.status || 'failed'),
-        attempts: Number(row?.attempts || 0),
-        error: typeof row?.error === 'string' ? row.error : '',
-        contextPath: String(source?.contextPath || source?.chapter || ''),
-        sourceExcerpt: String(source?.text || '').replace(/\s+/g, ' ').trim().slice(0, 220),
-      };
-    });
-    agentTrajectoryFailureDetails.value = { ...agentTrajectoryFailureDetails.value, [runId]: details };
-  } catch (error) {
-    agentTrajectoryFailureErrors.value = {
-      ...agentTrajectoryFailureErrors.value,
-      [runId]: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: false };
-  }
-}
-
-function agentTrajectoryRelatedFailureEvents(event: any): any[] {
-  const runId = String(event?.runId || '');
-  if (!runId) return [];
-  const batchIndex = event?.payload?.batchIndex;
-  const relatedTypes = new Set([
-    'model.call.failed', 'batch.partial', 'batch.output.validation', 'stage.warning', 'batch.completed',
-  ]);
-  return agentTrajectoryEvents.value.filter((item) => {
-    if (String(item.runId || '') !== runId || !relatedTypes.has(String(item.type || ''))) return false;
-    if (batchIndex != null && item.payload?.batchIndex != null && item.payload.batchIndex !== batchIndex) return false;
-    return true;
-  }).slice(-8);
-}
-
-function agentTrajectoryStatusLabel(event: any): string {
-  const status = agentTrajectoryStatus(event);
-  return status === 'failed' ? '失败' : status === 'warning' ? '告警' : status === 'running' ? '进行中' : '已记录';
-}
-
-const agentTrajectoryVisibleEvents = computed(() => {
-  const events = agentTrajectoryEvents.value;
-  if (agentTrajectoryFilter.value === 'issues') return events.filter((event) => ['failed', 'warning'].includes(agentTrajectoryStatus(event)));
-  if (agentTrajectoryFilter.value === 'model') return events.filter((event) =>
-    ['batch.started', 'batch.prompt.ready', 'batch.model.response', 'batch.translation.completed',
-      'stage.started', 'stage.completed', 'stage.warning', 'model.call.failed', 'context-graph.phase',
-      'context-graph.scan.completed', 'context-graph.completed', 'context-graph.failed'].includes(event.type));
-  return events;
-});
-
-const agentTrajectoryActiveTasks = computed(() => {
-  const tasks = new Map<string, any>();
-  for (const event of agentTrajectoryEvents.value) {
-    const type = String(event.type || '');
-    const p = event.payload || {};
-    const runId = String(event.runId || '');
-    if (type === 'context-graph.phase') {
-      const key = runId + ':context-graph';
-      tasks.set(key, { key, runId, role: '全书预处理 Agent', title: p.phase === 'model-analysis' ? '正在分析人物、实体与规范译名' : '正在扫描原文并选择样本' });
-    } else if (type === 'context-graph.completed' || type === 'context-graph.failed') {
-      tasks.delete(runId + ':context-graph');
-    } else if (type === 'batch.started') {
-      const key = runId + ':translate:' + p.batchIndex;
-      tasks.set(key, { key, runId, role: '翻译 Agent', title: '正在翻译本批原文', batchLabel: p.batchIndex ? '批次 ' + p.batchIndex + (p.batchCount ? '/' + p.batchCount : '') : '' });
-    } else if (type === 'batch.translation.completed') {
-      tasks.delete(runId + ':translate:' + p.batchIndex);
-    } else if (type === 'stage.started') {
-      const key = runId + ':' + p.stage + ':' + (p.batchIndex ?? 0);
-      tasks.set(key, { key, runId, role: agentTrajectoryRole(event), title: String(p.label || agentTrajectoryTitle(event)), batchLabel: p.batchIndex ? '批次 ' + p.batchIndex + (p.batchCount ? '/' + p.batchCount : '') : '' });
-    } else if (type === 'stage.completed' || type === 'stage.warning') {
-      tasks.delete(runId + ':' + p.stage + ':' + (p.batchIndex ?? 0));
-    } else if (type === 'batch.completed') {
-      const batchIndex = p.batchIndex ?? 0;
-      tasks.delete(runId + ':translate:' + batchIndex);
-      tasks.delete(runId + ':review:' + batchIndex);
-      tasks.delete(runId + ':style-review:' + batchIndex);
-    } else if (type === 'run.failed' || type === 'run.finished') {
-      for (const key of Array.from(tasks.keys())) if (key.startsWith(runId + ':')) tasks.delete(key);
-    }
-  }
-  return Array.from(tasks.values()).slice(-8).reverse();
+const {
+  agentTrajectoryEvents,
+  agentTrajectoryCursor,
+  agentTrajectoryLoading,
+  agentTrajectoryError,
+  agentTrajectoryFilter,
+  expandedAgentFailureEventId,
+  agentTrajectoryFailureDetails,
+  agentTrajectoryFailureLoading,
+  agentTrajectoryFailureErrors,
+  agentTrajectoryVisibleEvents,
+  agentTrajectoryActiveTasks,
+  stopAgentTrajectoryPolling,
+  refreshAgentTrajectory,
+  startAgentTrajectoryPolling,
+  toggleAgentTrajectoryFailureDetails,
+  agentTrajectoryRelatedFailureEvents,
+} = useAgentTrajectory({
+  activeTab,
+  readerConfig,
+  workspaceProject,
+  doc,
+  ensureWorkspace: ensureDocumentWorkspace,
 });
 
 watch(activeTab, (nextTab) => {
@@ -1867,8 +1404,7 @@ watch([doc, effectiveDocumentTranslationMode, () => readerConfig.value?.document
 }, { flush: 'post' });
 
 onUnmounted(() => {
-  if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
-  contextGraphPollTimer = null;
+  clearContextGraphPoll();
   stopAgentTrajectoryPolling();
 });
 
@@ -2384,16 +1920,7 @@ function resetWorkspaceBindingForDocument(): void {
   workspaceTranslationActive.value = false;
   workspaceRunGeneration.value++;
   workspaceCandidateTranslations.value = new Map();
-  contextGraphAnalyzing.value = false;
-  if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
-  contextGraphPollTimer = null;
-  contextGraphState.value = {
-    projectId: '', sourceRevisionId: '', segmentCount: 0,
-    counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
-    status: 'not-started', phase: 'not-started', progress: {}, runId: '',
-    startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
-  };
-  contextGraphOverview.value = { narrativeStyle: '', styleRules: [] };
+  resetContextGraph();
   stopAgentTrajectoryPolling();
   agentTrajectoryEvents.value = [];
   agentTrajectoryCursor.value = 0;
@@ -2555,335 +2082,6 @@ async function clearSavedSession() {
         (error instanceof Error ? error.message : String(error));
     }
   }
-}
-
-const entitySourceBeforeEdit = new WeakMap<LiteraryEntity, string>();
-function rememberEntitySource(entity: LiteraryEntity) {
-  entitySourceBeforeEdit.set(entity, entity.source);
-}
-
-function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource = '') {
-  const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
-  const canonicalSource = entity.source.trim();
-  const aliases = Array.from(new Set([
-    ...(entity.aliases || []),
-    ...(previousSource && normalize(previousSource) !== normalize(canonicalSource) ? [previousSource] : []),
-  ].map((name) => name.trim()).filter((name) => name && normalize(name) !== normalize(canonicalSource)))).slice(0, 12);
-  if (previousSource && normalize(previousSource) !== normalize(canonicalSource)) entity.aliases = aliases;
-  const names = new Set([canonicalSource, ...aliases].map(normalize).filter(Boolean));
-  if (!names.size) return;
-  for (const profile of literaryMemory.value.characterVoices) {
-    const profileNames = [profile.canonicalSourceName, ...profile.aliases].map(normalize).filter(Boolean);
-    if (!profileNames.some((name) => names.has(name))) continue;
-    const oldCanonical = profile.canonicalSourceName;
-    profile.canonicalSourceName = canonicalSource || oldCanonical;
-    profile.aliases = Array.from(new Set([
-      ...aliases,
-      ...(oldCanonical && normalize(oldCanonical) !== normalize(canonicalSource || oldCanonical) ? [oldCanonical] : []),
-    ].filter((name) => normalize(name) !== normalize(canonicalSource || oldCanonical)))).slice(0, 12);
-    entity.aliases = profile.aliases;
-    if (entity.target.trim()) profile.targetName = entity.target.trim();
-    else delete profile.targetName;
-  }
-}
-
-function managedPersonSource(item: ManagedPersonItem): string {
-  return item.entity?.source || item.profile?.canonicalSourceName || '';
-}
-function managedPersonTarget(item: ManagedPersonItem): string {
-  return item.entity?.target || item.profile?.targetName || '';
-}
-function managedPersonAliases(item: ManagedPersonItem): string[] {
-  const canonical = normalizeManagedPersonName(managedPersonSource(item));
-  return Array.from(new Set([
-    ...(item.entity?.aliases || []),
-    ...(item.profile?.aliases || []),
-  ].map((value) => value.trim()).filter((value) => value && normalizeManagedPersonName(value) !== canonical)));
-}
-function findManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
-  if (item.entity && literaryMemory.value.entities.includes(item.entity)) return item.entity;
-  const names = new Set([
-    managedPersonSource(item),
-    ...(item.profile?.aliases || []),
-    ...(item.entity?.aliases || []),
-  ].map(normalizeManagedPersonName).filter(Boolean));
-  if (!names.size) return undefined;
-  return literaryMemory.value.entities.find((entity) => entity.kind === 'person' &&
-    [entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).some((name) => names.has(name)));
-}
-function ensureManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
-  const existing = findManagedPersonEntity(item);
-  if (existing) return existing;
-  const profile = item.profile;
-  const source = managedPersonSource(item).trim();
-  const target = managedPersonTarget(item).trim();
-  if (!source || !target) return undefined;
-  const evidenceRefs = (profile?.evidence || []).slice(0, 8).map((evidence) => ({
-    segmentId: evidence.segmentId, sourceQuote: evidence.sourceQuote,
-  }));
-  const entity: LiteraryEntity = {
-    source, target, kind: 'person',
-    aliases: managedPersonAliases(item).slice(0, 12),
-    ...(evidenceRefs[0]?.sourceQuote ? { evidence: evidenceRefs[0].sourceQuote } : {}),
-    ...(evidenceRefs.length ? { evidenceRefs } : {}),
-    reviewStatus: evidenceRefs.length ? 'confirmed' : 'suggested',
-  };
-  literaryMemory.value.entities.push(entity);
-  return entity;
-}
-function updateManagedPerson(item: ManagedPersonItem, field: 'source' | 'target' | 'aliases', event: Event) {
-  const input = event.target as HTMLInputElement | null;
-  const value = (input?.value || '').trim();
-  const oldSource = managedPersonSource(item);
-  let entity = findManagedPersonEntity(item);
-  const profile = item.profile;
-  if (field === 'source') {
-    if (entity) entity.source = value;
-    else if (profile) {
-      if (oldSource && normalizeManagedPersonName(oldSource) !== normalizeManagedPersonName(value)) {
-        profile.aliases = Array.from(new Set([...profile.aliases, oldSource])).filter((name) =>
-          normalizeManagedPersonName(name) !== normalizeManagedPersonName(value)).slice(0, 12);
-      }
-      profile.canonicalSourceName = value;
-    }
-  } else if (field === 'target') {
-    if (entity) entity.target = value;
-    if (profile) {
-      if (value) profile.targetName = value;
-      else delete profile.targetName;
-    }
-  } else {
-    const aliases = Array.from(new Set((input?.value || '').split(',').map((name) => name.trim()).filter(Boolean)))
-      .filter((name) => normalizeManagedPersonName(name) !== normalizeManagedPersonName(oldSource)).slice(0, 12);
-    if (entity) entity.aliases = aliases;
-    if (profile) profile.aliases = aliases;
-  }
-
-  entity = entity || ensureManagedPersonEntity(item);
-  if (entity) {
-    entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-    syncEntityMappingToVoiceProfiles(entity, field === 'source' ? oldSource : '');
-  }
-  // A hand-added person mapping requires both names before the sanitizer can persist it.
-  // Keep a partial row locally while the user fills the second field; profiles with source evidence
-  // can still be persisted independently before a translation name has been assigned.
-  if (entity && (!entity.source.trim() || !entity.target.trim()) && !profile) {
-    persistenceMessage.value = '请补全规范原文名和统一译名后保存人物映射。';
-    return;
-  }
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存人物资料失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function addManagedPerson() {
-  literaryMemory.value.entities.push({
-    source: '', target: '', kind: 'person', aliases: [], reviewStatus: 'suggested',
-  });
-  persistenceMessage.value = '已添加人物：填写规范原文名和统一译名后会保存；角色与声音信息可随后合并进来。';
-}
-function removeManagedPerson(item: ManagedPersonItem) {
-  const names = new Set([
-    managedPersonSource(item), ...(item.entity?.aliases || []), ...(item.profile?.aliases || []),
-  ].map(normalizeManagedPersonName).filter(Boolean));
-  const entity = findManagedPersonEntity(item);
-  if (entity) {
-    const entityIndex = literaryMemory.value.entities.indexOf(entity);
-    if (entityIndex >= 0) literaryMemory.value.entities.splice(entityIndex, 1);
-  }
-  const characterId = item.profile?.characterId;
-  if (characterId) {
-    literaryMemory.value.characterVoices = literaryMemory.value.characterVoices.filter((profile) => profile.characterId !== characterId)
-      .map((profile) => ({ ...profile, contrastRules: profile.contrastRules.filter((rule) => rule.otherCharacterId !== characterId) }));
-    literaryMemory.value.relationshipVoiceRules = literaryMemory.value.relationshipVoiceRules.filter((rule) =>
-      rule.speakerId !== characterId && rule.addresseeId !== characterId);
-    literaryMemory.value.voiceAnchors = literaryMemory.value.voiceAnchors.filter((anchor) => anchor.speakerId !== characterId);
-  }
-  literaryMemory.value.relationships = literaryMemory.value.relationships.filter((relation) =>
-    !names.has(normalizeManagedPersonName(relation.subject)) &&
-    !names.has(normalizeManagedPersonName(relation.object)));
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '移除人物资料失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-
-function markEntitySuggested(entity: LiteraryEntity) {
-  const previousSource = entitySourceBeforeEdit.get(entity) || '';
-  entitySourceBeforeEdit.delete(entity);
-  syncEntityMappingToVoiceProfiles(entity, previousSource);
-  // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认.
-  entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function entityKindLabel(kind: LiteraryEntity['kind']) {
-  const labels: Record<LiteraryEntity['kind'], string> = {
-    person: '人物', place: '地点', object: '物品', organization: '组织', concept: '概念', other: '其他实体',
-  };
-  return labels[kind] || '其他实体';
-}
-
-function setEntityAliases(entity: LiteraryEntity, event: Event) {
-  const value = (event.target as HTMLInputElement | null)?.value ?? '';
-  entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
-  syncEntityMappingToVoiceProfiles(entity);
-  entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function addEntity() {
-  entitySearch.value = '';
-  entityFilter.value = 'all';
-  literaryMemory.value.entities.push({ source: '', target: '', kind: 'other', aliases: [], reviewStatus: 'suggested' });
-  persistenceMessage.value = '已添加空白映射：填写原文名称和统一译名后会自动生效';
-}
-function removeEntity(index: number) {
-  literaryMemory.value.entities.splice(index, 1);
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '移除实体映射失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function markRelationshipSuggested(relation: LiteraryRelationship) {
-  relation.reviewStatus = 'suggested';
-  if (relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
-    });
-  }
-}
-function confirmRelationship(relation: LiteraryRelationship) {
-  if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) return;
-  relation.reviewStatus = 'confirmed';
-  persistenceMessage.value = '已确认关系：' + relation.subject + ' — ' + relation.predicate + ' → ' + relation.object;
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function confirmAllRelationships() {
-  let count = 0;
-  for (const relation of literaryMemory.value.relationships) {
-    if (relation.reviewStatus !== 'confirmed' && relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
-      relation.reviewStatus = 'confirmed';
-      count++;
-    }
-  }
-  persistenceMessage.value = count > 0 ? '已确认剩余关系 ' + count + ' 项' : '没有待确认的关系';
-  if (count > 0) void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-function characterName(characterId: string): string {
-  const profile = literaryMemory.value.characterVoices.find((item) => item.characterId === characterId);
-  return profile?.targetName || profile?.canonicalSourceName || characterId;
-}
-
-/** 人物画像/人物对规则/锚点的状态变化是记忆数据，不是 Prompt 文本修改。 */
-async function persistVoiceMemoryChange(message: string) {
-  persistenceMessage.value = message;
-  await persistCurrentSession();
-  // 人物声音审核属于显式记忆编辑：直接保存文学记忆 revision，不借助 Prompt 保存的副作用。
-  if (readerConfig.value?.documentUseLocalAgent && doc.value) {
-    try {
-      await persistLiteraryMemoryToWorkspace();
-    } catch (error) {
-      persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
-    }
-  }
-}
-
-function normalizeVoiceEvidence(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-}
-
-async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-  if (status === 'confirmed') {
-    const grounded = profile.evidence.some((evidence) => {
-      const source = doc.value?.segments.find((segment) => segment.id === evidence.segmentId)?.text;
-      return !!source && !!evidence.sourceQuote.trim() &&
-        normalizeVoiceEvidence(source).includes(normalizeVoiceEvidence(evidence.sourceQuote));
-    });
-    if (!grounded) {
-      persistenceMessage.value = '人物声音画像没有匹配到当前文档中的原文证据，不能确认。';
-      return;
-    }
-  }
-  profile.status = status;
-  profile.useForTranslation = status !== 'rejected';
-  await persistVoiceMemoryChange(
-    status === 'confirmed' ? '已确认人物声音：' + profile.canonicalSourceName + '。后续相关对白会参考这份画像。'
-      : status === 'rejected' ? '已拒绝人物声音画像：' + profile.canonicalSourceName + '。'
-        : '已将人物声音画像移回候选：' + profile.canonicalSourceName + '。',
-  );
-}
-async function setCharacterVoiceUse(profile: LiteraryBookMemory['characterVoices'][number], enabled: boolean) {
-  if (enabled && !profile.evidence.length) {
-    persistenceMessage.value = '没有原文证据的角色画像不能启用。';
-    return;
-  }
-  if (enabled && profile.status === 'rejected') profile.status = 'candidate';
-  profile.useForTranslation = enabled;
-  await persistVoiceMemoryChange(
-    enabled ? '已启用人物画像用于翻译：' + profile.canonicalSourceName + '。候选画像只作为弱提示。'
-      : '已停用人物画像：' + profile.canonicalSourceName + '。后续翻译不再注入此画像。',
-  );
-}
-
-async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationshipVoiceRules'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-  if (status === 'confirmed' && !rule.evidenceSegmentIds.length) {
-    persistenceMessage.value = '没有原文证据片段，不能确认人物对的说话规则。';
-    return;
-  }
-  rule.status = status;
-  await persistVoiceMemoryChange(
-    status === 'confirmed' ? '已确认有方向的人物对话规则：' + characterName(rule.speakerId) + ' → ' + characterName(rule.addresseeId) + '。'
-      : status === 'rejected' ? '已拒绝该人物对话规则。' : '已将该人物对话规则移回候选。',
-  );
-}
-async function editVoiceAnchor(anchor: LiteraryBookMemory['voiceAnchors'][number]) {
-  anchor.status = 'candidate';
-  anchor.approvedBy = 'reviewer';
-  await persistVoiceMemoryChange('声音锚点译文已修改，需要重新批准。');
-}
-
-async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'candidate' | 'approved' | 'rejected') {
-  const sourceSegment = doc.value?.segments.find((segment) => segment.id === anchor.segmentId);
-  if (status === 'approved' && (!anchor.attributionEvidence || (anchor.attributionConfidence ?? 0) < 0.7 ||
-    !sourceSegment || !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.attributionEvidence)))) {
-    persistenceMessage.value = '缺少与当前原文匹配的说话人归属证据（置信度至少 70%），不能批准声音锚点。';
-    return;
-  }
-  if (status === 'approved' && (!sourceSegment ||
-    !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.source)))) {
-    persistenceMessage.value = '锚点原文片段与当前文档不一致，不能批准。';
-    return;
-  }
-  if (status === 'approved') {
-    const acceptedTranslation = state.value.translations.get(anchor.segmentId) || '';
-    if (!acceptedTranslation.trim() || !normalizeVoiceEvidence(acceptedTranslation).includes(normalizeVoiceEvidence(anchor.target))) {
-      persistenceMessage.value = '锚点译文必须能在该段当前已采纳译文中找到。请先修改锚点译文，再批准。';
-      return;
-    }
-  }
-  if (status === 'approved' && !literaryMemory.value.characterVoices.some((profile) => profile.characterId === anchor.speakerId && profile.status === 'confirmed')) {
-    persistenceMessage.value = '请先确认该说话人的声音画像，再批准此声音锚点。';
-    return;
-  }
-  anchor.status = status;
-  await persistVoiceMemoryChange(
-    status === 'approved' ? '已批准声音锚点；后续相关场景可复用这组原文—译文示例。'
-      : status === 'rejected' ? '已拒绝该声音锚点。' : '已将声音锚点移回候选。',
-  );
-}
-
-function addRelationship() {
-  literaryMemory.value.relationships.push({ subject: '', predicate: '', object: '', reviewStatus: 'suggested' });
-}
-function removeRelationship(index: number) {
-  literaryMemory.value.relationships.splice(index, 1);
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '移除人物关系失败：' + (error instanceof Error ? error.message : String(error));
-  });
 }
 
 function pickFile() {
@@ -3067,33 +2265,6 @@ async function loadFile(file: File) {
  * session scope after page reload/SQLite restore, while different books do not share SDK history.
  * This fingerprint never sends raw document text as an ID; only the hash leaves the extension.
  */
-function buildDocumentAgentSessionId(document: ParsedDocument, fileName: string): string {
-  let firstHash = 0x811c9dc5;
-  let secondHash = 0x9e3779b9;
-  const feed = (value: string) => {
-    // Feed fields incrementally instead of joining an entire PDF/EPUB into another large string.
-    for (let index = 0; index < value.length; index++) {
-      const code = value.charCodeAt(index);
-      firstHash = Math.imul(firstHash ^ code, 0x01000193);
-      secondHash = Math.imul(secondHash ^ code, 0x85ebca6b);
-    }
-    // Field boundary prevents ambiguity between concatenations such as ["ab", "c"] and ["a", "bc"].
-    firstHash = Math.imul(firstHash ^ 0, 0x01000193);
-    secondHash = Math.imul(secondHash ^ 0, 0x85ebca6b);
-  };
-  for (const value of [
-    fileName, document.title, document.format,
-    String(document.meta.segmentCount), String(document.meta.charCount),
-  ]) feed(value);
-  // Hash all source segments so edits anywhere in the same-length book start a clean session.
-  for (const segment of document.segments) {
-    feed(segment.id);
-    feed(segment.text);
-  }
-  const hex = (value: number) => (value >>> 0).toString(16).padStart(8, '0');
-  return 'doc-' + hex(firstHash) + hex(secondHash);
-}
-
 /** 所有翻译入口共用同一份设置，重试时保持 provider、术语表和服务端模式不变。 */
 async function buildTranslationOptions() {
   if (!doc.value) throw new Error('尚未打开文档');
@@ -3221,575 +2392,6 @@ async function refreshWorkspaceLiteraryMemory(
 
 
 
-function clearContextGraphPoll() {
-  if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
-  contextGraphPollTimer = null;
-}
-
-function scheduleContextGraphPoll(projectId: string) {
-  clearContextGraphPoll();
-  contextGraphPollTimer = window.setTimeout(() => {
-    contextGraphPollTimer = null;
-    if (workspaceProject.value?.projectId !== projectId) return;
-    void refreshContextGraphStatus(workspaceProject.value, true);
-  }, 1200);
-}
-
-async function loadContextGraph(project: any, schedulePoll = true): Promise<any> {
-  const config = readerConfig.value || await getConfig();
-  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
-  const token = config.documentLocalAgentToken || '';
-  const projectId = String(project?.projectId || '');
-  if (!projectId) throw new Error('无法查询预处理状态：缺少文档 projectId。');
-  const result = await workspaceApi<{ contextGraph: any }>(
-    base, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph',
-  );
-  const graph = result.contextGraph || {};
-  contextGraphOverview.value = {
-    narrativeStyle: typeof graph.overview?.narrativeStyle === 'string' ? graph.overview.narrativeStyle : '',
-    styleRules: Array.isArray(graph.overview?.styleRules) ? graph.overview.styleRules.filter((item: unknown): item is string => typeof item === 'string') : [],
-  };
-  const run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-  const status = run?.status || 'not-started';
-  contextGraphState.value = {
-    projectId,
-    sourceRevisionId: graph.sourceRevisionId || '',
-    segmentCount: Number(graph.segmentCount || 0),
-    counts: {
-      characters: Number(graph.counts?.characters || 0),
-      entities: Number(graph.counts?.entities || 0),
-      relationships: Number(graph.counts?.relationships || 0),
-      chapters: Number(graph.counts?.chapters || 0),
-      evidencedNodes: Number(graph.counts?.evidencedNodes || 0),
-    },
-    status,
-    phase: run?.phase || 'not-started',
-    progress: run?.progress || {},
-    runId: run?.runId || '',
-    startedAt: run?.startedAt || null,
-    finishedAt: run?.finishedAt || null,
-    error: run?.error || '',
-    loading: false,
-    checkedAt: new Date().toISOString(),
-  };
-  if (schedulePoll && ['queued', 'running'].includes(status)) scheduleContextGraphPoll(projectId);
-  else if (!['queued', 'running'].includes(status)) clearContextGraphPoll();
-  return graph;
-}
-
-async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = true) {
-  const config = readerConfig.value || await getConfig();
-  readerConfig.value = config;
-  if (!config.documentUseLocalAgent) return;
-  let project = projectOverride || workspaceProject.value;
-  if (!project?.projectId && doc.value) project = await ensureDocumentWorkspace();
-  if (!project?.projectId) return;
-  contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
-  try {
-    const graph = await loadContextGraph(project, schedulePoll);
-    const latestRun = Array.isArray(graph?.runs) ? graph.runs[0] : null;
-    if (effectiveDocumentTranslationMode.value === 'literary' && latestRun?.status === 'completed' &&
-        latestRun?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION &&
-        graph?.sourceRevisionId === contextGraphState.value.sourceRevisionId) {
-      // Also bridge completed analyses created by CLI or another UI session into the editable
-      // character-memory workflow. The merge preserves human-confirmed names and voice profiles.
-      await syncContextGraphEntitiesToMemory(project, graph);
-    }
-  } catch (error) {
-    contextGraphState.value = {
-      ...contextGraphState.value,
-      projectId: project.projectId,
-      loading: false,
-      checkedAt: new Date().toISOString(),
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
-  const next = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
-  let existing = [...(next.entities || [])];
-  let existingVoices = [...(next.characterVoices || [])];
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
-  const candidates: LiteraryEntity[] = nodes.flatMap((node: any) => {
-    if (node?.status === 'rejected') return [];
-    const target = typeof node?.attributes?.suggestedTranslation === 'string'
-      ? node.attributes.suggestedTranslation.trim() : '';
-    const source = typeof node?.name === 'string' ? node.name.trim() : '';
-    if (!source || !target || !Array.isArray(node.evidence) || !node.evidence.length) return [];
-    const rawKind = node.kind === 'character' ? 'person' : node.attributes?.entityKind;
-    const kind = ['person', 'place', 'object', 'organization', 'concept', 'other'].includes(rawKind) ? rawKind : 'other';
-    const aliases = Array.isArray(node.attributes?.aliases)
-      ? Array.from(new Set(node.attributes.aliases.filter((item: unknown): item is string => typeof item === 'string' && item.trim())))
-      : [];
-    const evidenceRefs = node.evidence.slice(0, 8).flatMap((item: any) =>
-      typeof item?.segmentId === 'string' && item.segmentId.trim() &&
-      typeof item?.quote === 'string' && item.quote.trim()
-        ? [{ segmentId: item.segmentId, sourceQuote: item.quote.slice(0, 240) }]
-        : []);
-    return [{
-      source, target, kind, aliases,
-      evidence: typeof node.evidence[0]?.quote === 'string' ? node.evidence[0].quote : '',
-      ...(evidenceRefs.length ? { evidenceRefs } : {}),
-      // Context Graph nodes carry source-validated evidence; their name mappings are automatically
-      // active even when the graph row itself remains a candidate for non-name review.
-      reviewStatus: node.status === 'confirmed' || evidenceRefs.length > 0 ? 'confirmed' : 'suggested',
-    }];
-  });
-  const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
-    .toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
-  const rejectedGraphNames = new Set(nodes
-    .filter((node: any) => node?.status === 'rejected')
-    .flatMap((node: any) => [
-      node?.name,
-      ...(Array.isArray(node?.attributes?.aliases) ? node.attributes.aliases : []),
-    ])
-    .map(normalizeName)
-    .filter(Boolean));
-  if (rejectedGraphNames.size) {
-    existing = existing.filter((entity) => entity.reviewStatus === 'confirmed' ||
-      ![entity.source, ...(entity.aliases || [])].some((name) => rejectedGraphNames.has(normalizeName(name))));
-    existingVoices = existingVoices.filter((profile) =>
-      profile.status === 'confirmed' || profile.status === 'rejected' ||
-      !profile.characterId.startsWith('context-graph-') ||
-      ![profile.canonicalSourceName, ...profile.aliases].some((name) => rejectedGraphNames.has(normalizeName(name))));
-  }
-  const entityNames = (entity: LiteraryEntity) =>
-    new Set([entity.source, ...(entity.aliases || [])].map(normalizeName).filter(Boolean));
-  const overlaps = (a: LiteraryEntity, b: LiteraryEntity) => {
-    const namesA = entityNames(a);
-    return Array.from(entityNames(b)).some((name) => namesA.has(name));
-  };
-
-  for (const candidate of candidates) {
-    // A new alias can bridge multiple old rows; collapse the connected group instead of
-    // leaving conflicting translations for the same character in the visible glossary.
-    const matchingIndices: number[] = [];
-    existing.forEach((prior, index) => {
-      if (overlaps(prior, candidate)) matchingIndices.push(index);
-    });
-    if (!matchingIndices.length) {
-      existing.push(candidate);
-      continue;
-    }
-    const canonicalIndex = matchingIndices[0]!;
-    const matching = matchingIndices.map((index) => existing[index]!);
-    const confirmed = matching.find((item) => item.reviewStatus === 'confirmed');
-    const priorCanonical = matching[0];
-    const canonicalSource = confirmed?.source || priorCanonical?.source || candidate.source;
-    // A source-evidenced full-book Context Graph mapping is the best canonical default. Preserve
-    // a target only when it was already active; otherwise replace an older unconfirmed draft
-    // (which may itself have been an inconsistent LLM translation) with the preprocessing target.
-    const target = confirmed?.target || candidate.target || priorCanonical?.target;
-    const kind = confirmed?.kind || priorCanonical?.kind || candidate.kind;
-    const aliases = Array.from(new Set([
-      ...matching.flatMap((item) => [item.source, ...(item.aliases || [])]),
-      candidate.source, ...(candidate.aliases || []),
-    ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSource))));
-    const evidence = confirmed?.evidence || matching.find((item) => item.evidence)?.evidence || candidate.evidence || '';
-    // Keep the source locations used by the server's temporal memory filter. A legacy
-    // confirmed mapping with no citations remains protected and does not acquire unreviewed
-    // later evidence merely because a Context Graph node shares its name.
-    const canMergeEvidenceRefs = !confirmed ||
-      matching.some((item) => Array.isArray(item.evidenceRefs) && item.evidenceRefs.length > 0);
-    const evidenceRefs = canMergeEvidenceRefs
-      ? [...matching.flatMap((item) => item.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
-          .filter((item, index, all) => all.findIndex((other) =>
-            other.segmentId === item.segmentId && normalizeName(other.sourceQuote) === normalizeName(item.sourceQuote)) === index)
-          .slice(0, 8)
-      : [];
-    existing[canonicalIndex] = {
-      source: canonicalSource, target, kind, aliases: aliases.slice(0, 12),
-      ...(evidence ? { evidence } : {}),
-      ...(evidenceRefs.length ? { evidenceRefs } : {}),
-      reviewStatus: confirmed || candidate.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
-    };
-    for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
-  }
-
-  // Context Graph voice observations are grounded in sampled source quotes. Keep them as candidates,
-  // but default them to enabled weak hints so they do not require one-by-one confirmation.
-  const voiceCandidates = nodes.flatMap((node: any) => {
-    if (node?.kind !== 'character' || node?.status === 'rejected') return [];
-    const canonicalSourceName = typeof node?.name === 'string' ? node.name.trim() : '';
-    const targetName = typeof node?.attributes?.suggestedTranslation === 'string'
-      ? node.attributes.suggestedTranslation.trim() : '';
-    const voices = Array.isArray(node?.attributes?.voice)
-      ? Array.from(new Set(node.attributes.voice.filter((item: unknown): item is string =>
-          typeof item === 'string' && item.trim()))).slice(0, 8)
-      : [];
-    const aliases = Array.isArray(node?.attributes?.aliases)
-      ? Array.from(new Set(node.attributes.aliases.filter((item: unknown): item is string =>
-          typeof item === 'string' && item.trim()))).slice(0, 12)
-      : [];
-    const role = typeof node?.attributes?.role === 'string' ? node.attributes.role.trim().slice(0, 360) : '';
-    const traits = Array.isArray(node?.attributes?.traits)
-      ? Array.from(new Set(node.attributes.traits.filter((item: unknown): item is string =>
-          typeof item === 'string' && item.trim()))).slice(0, 10).map((item) => item.slice(0, 160))
-      : [];
-    const evidenceRows = Array.isArray(node?.evidence) ? node.evidence.filter((item: any) =>
-      typeof item?.segmentId === 'string' && typeof item?.quote === 'string' && item.quote.trim()).slice(0, 6) : [];
-    if (!canonicalSourceName || (!voices.length && !role && !traits.length) || !evidenceRows.length) return [];
-    const observation = voices.length
-      ? voices.join('；').slice(0, 240)
-      : '角色定位/人物特征候选；请核对下列原文证据后再确认。';
-    const evidenceDimension = voices.length ? 'register' as const : 'role_traits' as const;
-    return [{
-      characterId: 'context-graph-' + String(node.id || normalizeName(canonicalSourceName)).slice(0, 80),
-      canonicalSourceName,
-      ...(targetName ? { targetName } : {}),
-      aliases,
-      ...(role ? { role } : {}),
-      ...(traits.length ? { traits } : {}),
-      status: 'candidate' as const,
-      useForTranslation: true,
-      confidence: null,
-      voiceCore: voices.length ? { register: observation } : {},
-      contrastRules: [],
-      evidence: evidenceRows.map((item: any) => ({
-        segmentId: item.segmentId,
-        sourceQuote: item.quote.slice(0, 240),
-        observation,
-        dimension: evidenceDimension,
-        confidence: null,
-      })),
-      openQuestions: ['全书预分析生成的候选角色/声音信息；请结合完整对白与原文证据核对后再确认。'],
-    }];
-  });
-  for (const candidate of voiceCandidates) {
-    const candidateNames = new Set([candidate.canonicalSourceName, ...candidate.aliases].map(normalizeName).filter(Boolean));
-    const matchingIndices: number[] = [];
-    existingVoices.forEach((prior, index) => {
-      if ([prior.canonicalSourceName, ...prior.aliases].map(normalizeName).some((name) => candidateNames.has(name))) {
-        matchingIndices.push(index);
-      }
-    });
-    if (!matchingIndices.length) {
-      existingVoices.push(candidate);
-      continue;
-    }
-    const canonicalIndex = matchingIndices[0]!;
-    const matching = matchingIndices.map((index) => existingVoices[index]!);
-    const protectedProfile = matching.find((profile) => profile.status === 'confirmed' || profile.status === 'rejected');
-    const canonicalSourceName = protectedProfile?.canonicalSourceName || candidate.canonicalSourceName;
-    const aliases = Array.from(new Set([
-      ...matching.flatMap((profile) => [profile.canonicalSourceName, ...profile.aliases]),
-      candidate.canonicalSourceName, ...candidate.aliases,
-    ].filter((name) => normalizeName(name) && normalizeName(name) !== normalizeName(canonicalSourceName)))).slice(0, 12);
-    const confidencePrior = matching.find((profile) =>
-      profile.confidenceSource === 'model_self_report' && profile.confidence !== null) || matching[0]!;
-    const confidenceFields = mergeCharacterVoiceConfidence(confidencePrior, candidate);
-    const activationPrior = matching.find((profile) => profile.useForTranslation === false) || matching[0]!;
-    const useForTranslation = protectedProfile?.useForTranslation ?? activationPrior.useForTranslation ?? candidate.useForTranslation;
-    const evidence = [
-      ...(protectedProfile?.evidence || matching[0]!.evidence),
-      ...candidate.evidence,
-    ].filter((item, index, all) =>
-      all.findIndex((other) => other.segmentId === item.segmentId && other.sourceQuote === item.sourceQuote) === index,
-    ).slice(0, 12);
-    existingVoices[canonicalIndex] = {
-      ...(protectedProfile || candidate),
-      characterId: protectedProfile?.characterId || candidate.characterId,
-      canonicalSourceName,
-      ...(protectedProfile?.targetName ? { targetName: protectedProfile.targetName } : candidate.targetName ? { targetName: candidate.targetName } : {}),
-      aliases,
-      status: protectedProfile?.status || 'candidate',
-      useForTranslation: protectedProfile?.status === 'rejected' ? false : useForTranslation,
-      ...confidenceFields,
-      voiceCore: protectedProfile ? protectedProfile.voiceCore : candidate.voiceCore,
-      ...(!protectedProfile && candidate.role ? { role: candidate.role } : protectedProfile?.role ? { role: protectedProfile.role } : {}),
-      ...(!protectedProfile && candidate.traits?.length ? { traits: candidate.traits } : protectedProfile?.traits?.length ? { traits: protectedProfile.traits } : {}),
-      contrastRules: protectedProfile?.contrastRules || [],
-      evidence,
-      openQuestions: Array.from(new Set([...matching.flatMap((profile) => profile.openQuestions), ...candidate.openQuestions])).slice(0, 8),
-    };
-    for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existingVoices.splice(index, 1);
-  }
-  // Use one canonical person identity across the entity glossary and the voice profile.
-  // Name, aliases and translation edits in the glossary are therefore reflected in the profile.
-  const sameName = (a: unknown, b: unknown) => normalizeName(a) === normalizeName(b);
-  for (const profile of existingVoices) {
-    const profileNames = new Set([profile.canonicalSourceName, ...(profile.aliases || [])].map(normalizeName).filter(Boolean));
-    let entity = existing.find((item) =>
-      item.kind === 'person' &&
-      [item.source, ...(item.aliases || [])].map(normalizeName).some((name) => profileNames.has(name)),
-    );
-    if (!entity && profile.targetName && profile.evidence.length) {
-      const evidenceRefs = profile.evidence.slice(0, 8).map((item) => ({
-        segmentId: item.segmentId, sourceQuote: item.sourceQuote,
-      }));
-      entity = {
-        source: profile.canonicalSourceName, target: profile.targetName, kind: 'person',
-        aliases: profile.aliases.slice(0, 12),
-        evidence: profile.evidence[0]?.sourceQuote || '',
-        ...(evidenceRefs.length ? { evidenceRefs } : {}),
-        reviewStatus: evidenceRefs.length ? 'confirmed' : 'suggested',
-      };
-      existing.push(entity);
-    }
-    if (!entity) continue;
-    const canonicalSource = entity.source.trim() || profile.canonicalSourceName;
-    const aliases = Array.from(new Set([
-      ...(entity.aliases || []),
-      ...(profile.aliases || []),
-      ...(profile.canonicalSourceName && !sameName(profile.canonicalSourceName, canonicalSource) ? [profile.canonicalSourceName] : []),
-    ].map((name) => String(name || '').trim()).filter((name) => name && !sameName(name, canonicalSource)))).slice(0, 12);
-    entity.aliases = aliases;
-    profile.canonicalSourceName = canonicalSource;
-    profile.aliases = aliases;
-    if (entity.target.trim()) profile.targetName = entity.target.trim();
-    else if (!profile.targetName) delete profile.targetName;
-    else entity.target = profile.targetName;
-  }
-
-  // Context Graph already persisted evidenced relationship edges, but the reader memory bridge
-  // previously copied only nodes. Bridge those edges into the visible relationship list as well.
-  const graphNodesById = new Map(nodes.map((node: any) => [String(node?.id || ''), node] as [string, any]));
-  const canonicalPersonName = (node: any): string => {
-    const name = typeof node?.name === 'string' ? node.name.trim() : '';
-    const nodeNames = new Set([name, ...(Array.isArray(node?.attributes?.aliases) ? node.attributes.aliases : [])]
-      .map(normalizeName).filter(Boolean));
-    const entity = existing.find((item) => item.kind === 'person' &&
-      [item.source, ...(item.aliases || [])].map(normalizeName).some((candidateName) => nodeNames.has(candidateName)));
-    return entity?.source || name;
-  };
-  const relationshipCandidates: LiteraryRelationship[] = (Array.isArray(graph?.edges) ? graph.edges : []).flatMap((edge: any) => {
-    if (!edge || edge.status === 'rejected') return [];
-    const fromNode = graphNodesById.get(String(edge.sourceNodeId || '')) as any;
-    const toNode = graphNodesById.get(String(edge.targetNodeId || '')) as any;
-    const subject = canonicalPersonName(fromNode);
-    const object = canonicalPersonName(toNode);
-    const attributes = edge.attributes && typeof edge.attributes === 'object' ? edge.attributes : {};
-    const predicate = typeof attributes.description === 'string' && attributes.description.trim()
-      ? attributes.description.trim()
-      : typeof edge.kind === 'string' ? edge.kind.trim() : '';
-    const evidenceRows = Array.isArray(edge.evidence) ? edge.evidence.filter((item: any) =>
-      typeof item?.segmentId === 'string' && item.segmentId.trim() &&
-      typeof item?.quote === 'string' && item.quote.trim()).slice(0, 8) : [];
-    if (!subject || !predicate || !object || !evidenceRows.length) return [];
-    return [{
-      subject, predicate, object,
-      evidence: evidenceRows[0].quote.slice(0, 240),
-      evidenceRefs: evidenceRows.map((item: any) => ({
-        segmentId: item.segmentId, sourceQuote: item.quote.slice(0, 240),
-      })),
-      reviewStatus: 'suggested' as const,
-    }];
-  });
-  const relationshipKey = (relation: LiteraryRelationship) =>
-    [relation.subject, relation.predicate, relation.object].map(normalizeName).join('|');
-  for (const candidate of relationshipCandidates) {
-    const key = relationshipKey(candidate);
-    const index = next.relationships.findIndex((relation) => relationshipKey(relation) === key);
-    if (index < 0) {
-      next.relationships.push(candidate);
-      continue;
-    }
-    const prior = next.relationships[index]!;
-    const evidenceRefs = [...(prior.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
-      .filter((item, i, all) => all.findIndex((other) =>
-        other.segmentId === item.segmentId && normalizeName(other.sourceQuote) === normalizeName(item.sourceQuote)) === i)
-      .slice(0, 8);
-    next.relationships[index] = {
-      ...prior,
-      evidence: prior.evidence || candidate.evidence,
-      ...(evidenceRefs.length ? { evidenceRefs } : {}),
-      reviewStatus: prior.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
-    };
-  }
-
-  next.entities = existing.slice(0, 120);
-  next.characterVoices = existingVoices.slice(0, 80);
-  const currentStyle = next.styleGuide || {};
-  const currentStyleHasContent = [currentStyle.narrativeVoice, currentStyle.register, currentStyle.rhythm, currentStyle.dialogue, currentStyle.diction]
-    .some((value) => typeof value === 'string' && value.trim()) ||
-    (currentStyle.rules || []).some((value) => value.trim()) ||
-    (currentStyle.avoid || []).some((value) => value.trim());
-  const suggestedNarrative = typeof graph?.overview?.narrativeStyle === 'string' ? graph.overview.narrativeStyle.trim() : '';
-  const suggestedRules = Array.isArray(graph?.overview?.styleRules)
-    ? Array.from(new Set(graph.overview.styleRules.filter((value: unknown): value is string => typeof value === 'string' && value.trim()))).slice(0, 16)
-    : [];
-  if (next.styleGuideStatus !== 'confirmed' && !currentStyleHasContent && (suggestedNarrative || suggestedRules.length)) {
-    next.styleGuide = {
-      ...currentStyle,
-      ...(suggestedNarrative ? { narrativeVoice: suggestedNarrative } : {}),
-      ...(suggestedRules.length ? { rules: suggestedRules } : {}),
-    };
-    next.styleGuideStatus = 'candidate';
-  }
-  return autoConfirmLiteraryMemory(next);
-}
-async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
-  // Context Graph analysis may finish after several translation waves. Always merge against the
-  // newest SQLite memory revision, not the reader's possibly stale IndexedDB snapshot.
-  const config = readerConfig.value || await getConfig();
-  const serverMemory = await workspaceApi<{ current?: { memory?: unknown } }>(
-    config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-    config.documentLocalAgentToken || '',
-    '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-  );
-  literaryMemory.value = sanitizeLiteraryMemory(serverMemory.current?.memory);
-  const next = mergeContextGraphEntitySuggestions(graph);
-  if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities) &&
-      JSON.stringify(next.relationships) === JSON.stringify(literaryMemory.value.relationships) &&
-      JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices) &&
-      JSON.stringify(next.styleGuide) === JSON.stringify(literaryMemory.value.styleGuide) &&
-      next.styleGuideStatus === literaryMemory.value.styleGuideStatus) {
-    await persistCurrentSession();
-    return;
-  }
-  literaryMemory.value = next;
-  await persistLiteraryMemoryToWorkspace();
-}
-
-let literaryMemorySaveQueue: Promise<void> = Promise.resolve();
-let literaryMemoryEditSequence = 0;
-
-/**
- * Only explicit memory-edit actions call this method. Writes are serialized so rapid edit/confirm
- * actions cannot arrive out of order and restore an older memory revision.
- */
-async function persistLiteraryMemoryToWorkspace(): Promise<void> {
-  const snapshot = sanitizeLiteraryMemory(JSON.parse(JSON.stringify(literaryMemory.value)));
-  const sequence = ++literaryMemoryEditSequence;
-  const write = async () => {
-    await persistCurrentSession();
-    const config = readerConfig.value || await getConfig();
-    readerConfig.value = config;
-    if (!config.documentUseLocalAgent) return;
-    let project = workspaceProject.value;
-    if (!project?.projectId) {
-      await ensureDocumentWorkspace();
-      project = workspaceProject.value;
-    }
-    if (!project?.projectId) return;
-    const result = await workspaceApi<{ current?: { memory?: unknown } }>(
-      config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-      config.documentLocalAgentToken || '',
-      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-      { method: 'POST', body: JSON.stringify({ memory: snapshot }) },
-    );
-    // A newer edit may already be queued; don't replace its visible draft with this response.
-    if (sequence === literaryMemoryEditSequence) {
-      literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? snapshot);
-      await persistCurrentSession();
-    }
-  };
-  const pending = literaryMemorySaveQueue.catch(() => undefined).then(write);
-  literaryMemorySaveQueue = pending;
-  return pending;
-}
-
-function markStyleGuideCandidate() {
-  literaryMemory.value.styleGuideStatus = 'candidate';
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存全书文风基准失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-
-function setStyleGuideLines(field: 'rules' | 'avoid', event: Event) {
-  const raw = (event.target as HTMLTextAreaElement | null)?.value || '';
-  literaryMemory.value.styleGuide[field] = Array.from(new Set(
-    raw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
-  )).slice(0, field === 'rules' ? 16 : 12);
-  markStyleGuideCandidate();
-}
-
-function importContextGraphStyleGuide() {
-  const style = literaryMemory.value.styleGuide || {};
-  const narrativeVoice = contextGraphOverview.value.narrativeStyle.trim();
-  const rules = contextGraphOverview.value.styleRules.slice(0, 16);
-  literaryMemory.value.styleGuide = {
-    ...style,
-    ...(narrativeVoice ? { narrativeVoice } : {}),
-    ...(rules.length ? { rules } : {}),
-  };
-  literaryMemory.value.styleGuideStatus = 'candidate';
-  void persistLiteraryMemoryToWorkspace().catch((error) => {
-    persistenceMessage.value = '保存预处理文风候选失败：' + (error instanceof Error ? error.message : String(error));
-  });
-}
-
-async function setStyleGuideStatus(status: 'candidate' | 'confirmed') {
-  if (status === 'confirmed' && !hasStyleGuideContent.value) return;
-  literaryMemory.value.styleGuideStatus = status;
-  await persistLiteraryMemoryToWorkspace();
-  persistenceMessage.value = status === 'confirmed'
-    ? '全书文风基准已确认，后续文学翻译与 Reviewer 会注入这组风格规则。'
-    : '全书文风基准已恢复为候选，不再注入后续翻译。';
-}
-
-async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
-  if (!project?.projectId || effectiveDocumentTranslationMode.value !== 'literary' || readerConfig.value?.documentUseLocalAgent !== true) return;
-  const base = readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789';
-  const token = readerConfig.value.documentLocalAgentToken || '';
-  const latestTranslationStatus = workspaceActiveRun.value?.status;
-  const translationAlreadyActive = ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(latestTranslationStatus);
-  contextGraphAnalyzing.value = true;
-  try {
-    let graph = await loadContextGraph(project, false);
-    let status = contextGraphState.value.status;
-    let run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-    const needsVersionUpgrade = status === 'completed' &&
-      run?.progress?.analysisVersion !== CONTEXT_GRAPH_ANALYSIS_VERSION;
-    const needsLanguageRefresh = status === 'completed' &&
-      (run?.progress?.sourceLang !== sourceLang.value || run?.progress?.targetLang !== targetLang.value);
-    const shouldStart = options.force === true || status === 'not-started' || status === 'failed' ||
-      needsVersionUpgrade || needsLanguageRefresh;
-    if (translationAlreadyActive && shouldStart) {
-      contextGraphState.value = {
-        ...contextGraphState.value,
-        error: '当前项目已有翻译任务运行，服务会保护本轮上下文不被修改。翻译结束后再启动预处理。',
-      };
-      return;
-    }
-    if (shouldStart) {
-      await workspaceApi(
-        base, token,
-        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/analyze',
-        { method: 'POST', body: JSON.stringify({}) },
-      );
-      graph = await loadContextGraph(project, false);
-      const deadline = Date.now() + 45 * 60 * 1000;
-      while (['queued', 'running'].includes(contextGraphState.value.status) && Date.now() < deadline) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1200));
-        graph = await loadContextGraph(project, false);
-      }
-      status = contextGraphState.value.status;
-      run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-      if (['queued', 'running'].includes(status)) {
-        contextGraphState.value = {
-          ...contextGraphState.value,
-          error: '预处理仍在运行；页面会继续显示当前状态。稍后刷新即可查看结果。',
-        };
-        scheduleContextGraphPoll(project.projectId);
-        return;
-      }
-    } else if (['queued', 'running'].includes(status)) {
-      const deadline = Date.now() + 45 * 60 * 1000;
-      while (['queued', 'running'].includes(contextGraphState.value.status) && Date.now() < deadline) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1200));
-        graph = await loadContextGraph(project, false);
-      }
-      status = contextGraphState.value.status;
-      run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-    }
-    if (status === 'completed' && run?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION) {
-      await syncContextGraphEntitiesToMemory(project, graph);
-    }
-  } catch (error) {
-    contextGraphState.value = {
-      ...contextGraphState.value,
-      status: 'failed',
-      loading: false,
-      error: error instanceof Error ? error.message : String(error),
-      checkedAt: new Date().toISOString(),
-    };
-  } finally {
-    contextGraphAnalyzing.value = false;
-  }
-}
-
 watch([
   sourceLang,
   targetLang,
@@ -3890,37 +2492,6 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     sessionPersistenceSuppressionCount = Math.max(0, sessionPersistenceSuppressionCount - 1);
     if (stateHydrated && isCurrent()) await persistCurrentSession();
   }
-}
-
-async function handlePreprocessingStatusRefreshRequested(project?: any) {
-  if (project?.projectId) workspaceProject.value = project;
-  await refreshContextGraphStatus(project || workspaceProject.value || undefined, true);
-}
-
-async function openPreprocessingAndEnsure() {
-  activeTab.value = 'characters';
-  if (!translationPreprocessingRequired.value) {
-    await refreshContextGraphStatus(workspaceProject.value || undefined, true);
-    return;
-  }
-  try {
-    const project = workspaceProject.value || await ensureDocumentWorkspace();
-    if (!project?.projectId) return;
-    await refreshContextGraphStatus(project, true);
-    const readiness = translationPreprocessingReadiness.value;
-    if (readiness.ready) return;
-    if (!['queued', 'running'].includes(String(contextGraphState.value.status || ''))) {
-      await ensureContextGraphPreprocessing(project, { force: false });
-    }
-  } catch (error) {
-    persistenceMessage.value = '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function reanalyzeContextGraph() {
-  const project = workspaceProject.value || await ensureDocumentWorkspace();
-  if (!project?.projectId) return;
-  await ensureContextGraphPreprocessing(project, { force: true });
 }
 
 /** 合并并发的阅读器初始化，防止自动预处理与用户点击翻译同时创建同一本书的项目。 */
@@ -4314,7 +2885,7 @@ async function runWorkspaceTranslation(options: {
 }) {
   if (!doc.value || state.value.running) return;
   // 显式修改 Voice Bible 后立即翻译时，先等待排队中的 SQLite 记忆写入完成。
-  await literaryMemorySaveQueue.catch(() => undefined);
+  await awaitLiteraryMemoryWrites();
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (!config.documentUseLocalAgent) return;
@@ -4668,713 +3239,4 @@ async function resetAll() {
 }
 </script>
 
-<style scoped>
-.doc-page {
-  max-width: 52rem;
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 4rem;
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  color: #1f2328;
-}
-.doc-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1rem;
-}
-.doc-header h1 { font-size: 1.25rem; margin: 0; }
-
-.tabs {
-  display: flex;
-  gap: .5rem;
-  margin-bottom: .75rem;
-}
-.tab {
-  border: 1px solid #d0d7de;
-  background: #f6f8fa;
-  border-radius: 999px;
-  padding: .4rem 1rem;
-  cursor: pointer;
-  font-size: .85rem;
-  color: #57606a;
-}
-.tab.active {
-  background: #0969da;
-  border-color: #0969da;
-  color: #fff;
-}
-.tab-badge {
-  font-size: .72rem;
-  opacity: .85;
-  margin-left: .35rem;
-}
-.translating-hint { display: block; margin-top: .2rem; }
-.preprocessing-gate-banner {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  border: 1px solid #f0d7a4;
-  background: #fffbf2;
-}
-.preprocessing-gate-copy { min-width: 0; flex: 1; }
-.preprocessing-gate-copy strong { display: block; color: #7d4e00; font-size: .9rem; }
-.preprocessing-gate-copy p { margin: .35rem 0 0; line-height: 1.55; overflow-wrap: anywhere; }
-.preprocessing-gate-meta { color: #825d28; font-size: .78rem; }
-.preprocessing-gate-progress {
-  height: 6px;
-  margin-top: .7rem;
-  overflow: hidden;
-  border-radius: 99px;
-  background: #f1e3c8;
-}
-.preprocessing-gate-progress > div {
-  height: 100%;
-  border-radius: inherit;
-  background: #b78125;
-  transition: width .25s ease;
-}
-.preprocessing-gate-failed { border-color: #f1c8c5; background: #fff8f7; }
-.preprocessing-gate-failed .preprocessing-gate-copy strong { color: #a61d24; }
-@media (max-width: 640px) {
-  .preprocessing-gate-banner { flex-direction: column; align-items: stretch; }
-}
-.action-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  flex-wrap: wrap;
-}
-.action-title {
-  display: flex;
-  flex-direction: column;
-  gap: .2rem;
-  min-width: 10rem;
-  flex: 1;
-}
-.action-title strong {
-  font-size: .95rem;
-  overflow-wrap: anywhere;
-}
-.action-controls {
-  display: flex;
-  align-items: flex-end;
-  gap: .5rem;
-  flex-wrap: wrap;
-}
-.field.inline { flex-direction: row; align-items: center; }
-.field.inline select { padding: .35rem .5rem; }
-.link-btn {
-  border: none;
-  background: none;
-  color: #0969da;
-  cursor: pointer;
-  font-size: .78rem;
-  padding: 0;
-  text-decoration: underline;
-}
-.tr-idle { color: #8b949e; font-size: .8rem; }
-
-.saved-session {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  border-color: #c9d8ea;
-}
-.saved-session-copy {
-  display: flex;
-  flex-direction: column;
-  gap: .3rem;
-  min-width: 12rem;
-  flex: 1;
-}
-.saved-session-copy strong { font-size: .95rem; }
-.saved-session-copy > span:nth-child(2) { overflow-wrap: anywhere; }
-.saved-session-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
-.persistence-notice {
-  background: #f6f8fa;
-  color: #57606a;
-  font-size: .8rem;
-  overflow-wrap: anywhere;
-}
-
-.dropzone {
-  border: 2px dashed #d0d7de;
-  border-radius: 12px;
-  padding: 3rem 1rem;
-  text-align: center;
-  background: #fafbfc;
-}
-.dropzone.dragover { border-color: #0969da; background: #eaf3ff; }
-.dz-title { margin: 0 0 .75rem; color: #57606a; }
-.dz-hint { margin: .75rem 0 0; font-size: .8rem; color: #8b949e; }
-.hidden-input { display: none; }
-
-.panel {
-  border: 1px solid #d0d7de;
-  border-radius: 10px;
-  padding: .75rem .875rem;
-  margin-bottom: .75rem;
-  background: #fff;
-}
-.meta-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.doc-title { font-size: 1rem; }
-.chip {
-  font-size: .75rem; color: #57606a; background: #f0f3f6;
-  border-radius: 999px; padding: .1rem .55rem;
-}
-.warn { margin: .4rem 0 0; font-size: .8rem; color: #9a6700; }
-.error-box { border-color: #f0c1c1; background: #fff5f5; color: #a40e26; }
-
-.controls { display: flex; align-items: flex-end; gap: .75rem; flex-wrap: wrap; }
-.controls .grow { flex: 1; }
-.field { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; color: #57606a; }
-.field select { padding: .35rem .5rem; border: 1px solid #d0d7de; border-radius: 6px; }
-
-.btn {
-  border: 1px solid #d0d7de; background: #fff; border-radius: 6px;
-  padding: .4rem .85rem; cursor: pointer; font-size: .85rem; color: #1f2328;
-}
-.btn:hover { background: #f3f4f6; }
-.btn.primary { background: #0969da; border-color: #0969da; color: #fff; }
-.btn.primary:hover { background: #0860ca; }
-.btn.ghost { background: transparent; }
-.btn.warn { border-color: #d4a72c; color: #7d4e00; }
-
-.progress-panel { display: flex; align-items: center; gap: .75rem; }
-.progress { flex: 1; height: 6px; background: #eaeef2; border-radius: 999px; overflow: hidden; }
-.bar { height: 100%; background: #0969da; transition: width .2s ease; }
-.muted { color: #57606a; }
-.small { font-size: .78rem; }
-.err-text { color: #a40e26; }
-
-.literary-toggle-control {
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-  color: #1f2328;
-  white-space: nowrap;
-}
-.literary-toggle-control input { accent-color: #6b4e9b; }
-.literary-status-title {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .5rem;
-}
-.literary-status-title strong { font-size: .9rem; }
-.literary-status .warn { overflow-wrap: anywhere; }
-
-.reader-font-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: .7rem;
-  margin-top: .8rem;
-}
-.reader-appearance-settings .settings-heading h3,
-.prompt-editor-panel .settings-heading h3,
-.review-workspace-heading h3 {
-  margin: 0;
-  font-size: 1rem;
-}
-.reader-appearance-settings .settings-heading p,
-.prompt-editor-panel .settings-heading p,
-.review-workspace-heading p {
-  margin: .3rem 0 0;
-  line-height: 1.55;
-}
-.settings-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .55rem;
-  margin-top: .75rem;
-}
-.prompt-editor-panel { display: grid; gap: .85rem; }
-.prompt-editor-label {
-  display: flex;
-  flex-direction: column;
-  gap: .35rem;
-  min-width: 0;
-  color: #24292f;
-}
-.prompt-editor-label textarea {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-  padding: .7rem;
-  border: 1px solid #c8d1dc;
-  border-radius: 8px;
-  background: #fbfcfe;
-  color: #1f2328;
-  font: .82rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  tab-size: 2;
-}
-.prompt-editor-label textarea:focus {
-  outline: 2px solid rgba(9, 105, 218, .22);
-  border-color: #0969da;
-}
-.built-in-prompt-preview {
-  border: 1px solid #e1e6ec;
-  border-radius: 7px;
-  padding: .55rem .7rem;
-  background: #f8fafc;
-}
-.built-in-prompt-preview summary { cursor: pointer; color: #57606a; font-size: .82rem; }
-.built-in-prompt-preview pre {
-  max-height: 22rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  margin: .65rem 0 0;
-  color: #24292f;
-  font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.review-workspace-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: .7rem;
-}
-.review-empty {
-  margin-top: .8rem;
-  padding: 1rem;
-  border: 1px dashed #cbd4df;
-  border-radius: 8px;
-  background: #fafbfc;
-}
-.review-empty p { margin: .3rem 0 0; }
-.review-proposal {
-  margin-top: .75rem;
-  padding: .8rem;
-  border: 1px solid #b6d6fb;
-  border-radius: 8px;
-  background: #f5f9ff;
-}
-.review-proposal > p { margin: .45rem 0 .7rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.review-proposal-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .45rem;
-  margin-top: .55rem;
-}
-.review-legacy-note, .review-auto-note { line-height: 1.55; }
-.review-category { display: inline-flex; border-radius: 999px; padding: .2rem .55rem; font-size: .74rem; font-weight: 650; }
-.category-style { color: #6e40c9; background: #fbefff; }
-.category-accuracy { color: #9a3412; background: #fff1e5; }
-.category-terminology { color: #0550ae; background: #ddf4ff; }
-.review-status { margin-left: auto; border-radius: 999px; padding: .2rem .5rem; font-size: .72rem; background: #f0f3f6; color: #57606a; }
-.status-pending { color: #7d4e00; background: #fff1c2; }
-.status-applied { color: #1a7f37; background: #dafbe1; }
-.status-dismissed { color: #57606a; background: #f0f3f6; }
-
-.reader-navigation {
-  position: sticky;
-  top: .5rem;
-  z-index: 5;
-  background: rgba(255, 255, 255, .97);
-  backdrop-filter: blur(10px);
-}
-.reader-navigation-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.reader-location {
-  display: flex;
-  flex-direction: column;
-  gap: .3rem;
-  min-width: 10rem;
-  flex: 1;
-}
-.reader-location strong {
-  font-size: .98rem;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.reader-navigation-controls {
-  display: flex;
-  align-items: center;
-  gap: .45rem;
-}
-.page-select {
-  max-width: min(42vw, 21rem);
-  min-width: 8rem;
-  padding: .4rem .5rem;
-  border: 1px solid #d0d7de;
-  border-radius: 6px;
-  background: #fff;
-  color: #1f2328;
-}
-.reader-progress {
-  margin-top: .75rem;
-  height: 3px;
-  background: #eaeef2;
-  border-radius: 999px;
-  overflow: hidden;
-}
-.reader-progress-bar {
-  height: 100%;
-  background: #0969da;
-  transition: width .2s ease;
-}
-.reader-quick-actions {
-  position: fixed;
-  z-index: 30;
-  right: max(1rem, env(safe-area-inset-right));
-  bottom: max(1rem, env(safe-area-inset-bottom));
-  display: flex;
-  align-items: center;
-  gap: .35rem;
-  padding: .4rem;
-  border: 1px solid rgba(208, 215, 222, .72);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, .78);
-  box-shadow: 0 5px 22px rgba(31, 35, 40, .12);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-.quick-action {
-  border: 0;
-  border-radius: 8px;
-  padding: .52rem .65rem;
-  background: transparent;
-  color: #24292f;
-  font: inherit;
-  font-size: .78rem;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.quick-action:hover:not(:disabled) { background: rgba(9, 105, 218, .09); }
-.quick-action:disabled { opacity: .42; cursor: not-allowed; }
-.quick-action-stop { color: #b42318; }
-@media (max-width: 520px) {
-  .reader-quick-actions { right: .55rem; bottom: .55rem; gap: .15rem; padding: .28rem; }
-  .quick-action { padding: .48rem .42rem; font-size: .7rem; }
-}
-.reader {
-  max-width: 56rem;
-  min-height: 55vh;
-  margin: 1rem auto;
-  padding: clamp(1.1rem, 4vw, 3rem);
-  background: #fff;
-  border: 1px solid #e6e9ed;
-  border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(31, 35, 40, .035);
-}
-.seg {
-  padding: .8rem .25rem;
-  border-bottom: 0;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 5rem;
-  /* 正文基准字号：PDF 解析出的段落默认偏小，0.98rem 太小、1.06rem 接近书页阅读密度。 */
-  font-size: 1.06rem;
-  line-height: 1.75;
-}
-/* 正在翻译的段：左侧色条 + 淡底，让当前焦点可见；排队的段保持无占位。 */
-.seg.is-active {
-  border-left: 2px solid #0969da;
-  background: linear-gradient(90deg, rgba(9, 105, 218, .045), transparent 40%);
-  padding-left: .85rem;
-}
-.seg .or { color: #1f2328; white-space: pre-wrap; transition: color .18s ease, font-size .18s ease; }
-.seg .or.is-translated { color: #8b9098; font-size: calc(1em - 1px); }
-.seg .tr { color: #0a5fb4; white-space: pre-wrap; margin-top: .2em; }
-.workspace-candidate-label {
-  display: block;
-  width: fit-content;
-  margin: 0 0 .4rem;
-  padding: .12rem .4rem;
-  border-radius: 4px;
-  background: #fff7e6;
-  color: #ad6800;
-  border: 1px solid #ffe7ba;
-  font-size: .72rem;
-  line-height: 1.4;
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-}
-.seg .tr.is-workspace-candidate { border-left: 2px solid #d48806; padding-left: .7rem; }
-.seg .font-en { font-family: var(--document-font-en, Georgia), serif; font-size: var(--document-size-en, 17px); }
-.seg .font-zh { font-family: var(--document-font-zh, 'Noto Serif CJK SC'), serif; font-size: var(--document-size-zh, 18px); }
-.seg.kind-heading.level-1 .font-en, .seg.kind-heading.level-1 .font-zh { font-size: 1.7em; }
-.seg.kind-heading.level-2 .font-en, .seg.kind-heading.level-2 .font-zh { font-size: 1.4em; }
-.tr-pending { color: #b0b8c0; font-size: .92rem; }
-.seg.kind-heading .or, .seg.kind-heading .tr { font-weight: 650; }
-.seg.kind-heading { border-bottom: 0; padding-top: 1.35rem; }
-.seg.kind-heading.level-1 { font-size: 1.7rem; line-height: 1.45; }
-.seg.kind-heading.level-2 { font-size: 1.4rem; line-height: 1.55; }
-.seg.kind-quote { border-left: 3px solid #d0d7de; padding-left: .75rem; color: #57606a; }
-.seg.kind-quote.is-active { border-left-color: #0969da; }
-.seg.kind-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .96rem; background: #f6f8fa; }
-.timecode { font-size: .78rem; color: #8b949e; }
-
-.export { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-
-.literary-style-guide { display: flex; flex-direction: column; gap: .75rem; }
-.literary-style-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
-.literary-style-grid .field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
-.literary-style-grid textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #d0d7de; border-radius: 6px; padding: .55rem; color: #1f2328; background: #fff; line-height: 1.5; }
-.character-management { display: flex; flex-direction: column; gap: .9rem; }
-.voice-counts { display: flex; flex-wrap: wrap; gap: .35rem; }
-.voice-profile-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: .85rem; display: flex; flex-direction: column; gap: .55rem; }
-.voice-profile-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
-.voice-profile-heading p { margin: .2rem 0 0; }
-.voice-profile-fields p, .voice-profile-card > p { margin: .25rem 0; line-height: 1.55; }
-.voice-anchor-target { display: flex; flex-direction: column; gap: .3rem; }
-.voice-anchor-target textarea { width: 100%; border: 1px solid #d9d9d9; border-radius: 5px; padding: .5rem; background: white; color: inherit; }
-.voice-evidence { border-top: 1px solid #f0f0f0; padding: .5rem 0; }
-.voice-evidence p { margin: 0 0 .35rem; }
-.voice-evidence blockquote { margin: .3rem 0; padding: .4rem .7rem; border-left: 2px solid #d0d7de; background: #f6f8fa; white-space: pre-wrap; }
-.voice-profile-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
-.entity-status.is-rejected { background: #fff1f0; color: #a8071a; }
-.literary-dictionary details + details { margin-top: .65rem; }
-.literary-dictionary summary { cursor: pointer; padding: .35rem 0; }
-.literary-editor-list { display: grid; gap: .55rem; margin-top: .6rem; }
-.literary-editor-row {
-  display: grid;
-  grid-template-columns: minmax(7rem, 1fr) minmax(7rem, 1fr) minmax(7rem, 1fr) auto auto auto;
-  align-items: end;
-  gap: .45rem;
-  padding: .6rem 0;
-  border-bottom: 1px solid #eaeef2;
-}
-.literary-editor-row label { display: flex; flex-direction: column; gap: .2rem; min-width: 0; font-size: .75rem; color: #57606a; }
-.literary-editor-row input { min-width: 0; width: 100%; box-sizing: border-box; padding: .4rem .45rem; border: 1px solid #d0d7de; border-radius: 6px; color: #1f2328; }
-.literary-review-finding { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid #eaeef2; overflow-wrap: anywhere; }
-.literary-review-finding p { margin: .35rem 0 0; line-height: 1.5; }
-.literary-review-finding .chip { margin-right: .4rem; }
-
-.dictionary-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .8rem;
-}
-.dictionary-heading h3 { margin: 0; font-size: 1rem; }
-.dictionary-heading p { margin: .3rem 0 0; line-height: 1.55; }
-.dictionary-toolbar {
-  display: grid;
-  gap: .65rem;
-  margin: .85rem 0;
-  padding-bottom: .8rem;
-  border-bottom: 1px solid #eaeef2;
-}
-.entity-search {
-  width: 100%;
-  padding: .55rem .65rem;
-  border: 1px solid #d0d7de;
-  border-radius: 7px;
-  font: inherit;
-}
-.entity-filters, .dictionary-actions, .relationship-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .45rem;
-}
-.filter-chip {
-  padding: .28rem .65rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: #f0f3f6;
-  color: #57606a;
-  cursor: pointer;
-  font-size: .78rem;
-}
-.filter-chip.active {
-  border-color: #0969da;
-  background: #eaf3ff;
-  color: #0969da;
-}
-.dictionary-actions { margin-top: .1rem; }
-.entity-card-list { display: grid; gap: .7rem; }
-.entity-card {
-  min-width: 0;
-  padding: .8rem;
-  border: 1px solid #dce2e8;
-  border-radius: 9px;
-  background: #fff;
-}
-.entity-card.is-pending-card { border-left: 3px solid #bf8700; }
-.entity-card-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .45rem;
-}
-.entity-card-spacer { flex: 1; }
-.entity-status {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: .18rem .55rem;
-  font-size: .73rem;
-  font-weight: 600;
-}
-.entity-status.is-confirmed { color: #1a7f37; background: #dafbe1; }
-.entity-status.is-pending { color: #7d4e00; background: #fff1c2; }
-.entity-kind { color: #57606a; font-size: .75rem; }
-.entity-fields {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: end;
-  gap: .65rem;
-  margin-top: .75rem;
-}
-.entity-fields label, .entity-aliases label {
-  display: flex;
-  flex-direction: column;
-  gap: .3rem;
-  min-width: 0;
-  color: #57606a;
-  font-size: .77rem;
-}
-.entity-fields input, .entity-aliases input {
-  min-width: 0;
-  width: 100%;
-  padding: .48rem .55rem;
-  border: 1px solid #d0d7de;
-  border-radius: 6px;
-  color: #1f2328;
-  font: inherit;
-  font-size: .9rem;
-}
-.entity-arrow { color: #8c959f; padding-bottom: .5rem; }
-.entity-aliases { margin-top: .65rem; }
-.entity-aliases summary { font-size: .78rem; color: #57606a; }
-.entity-aliases label { margin-top: .5rem; }
-.entity-evidence {
-  margin: .55rem 0 0;
-  color: #57606a;
-  font-size: .76rem;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.entity-evidence strong { color: #1f2328; }
-.entity-empty {
-  display: grid;
-  justify-items: start;
-  gap: .4rem;
-  padding: 1.4rem .8rem;
-  border: 1px dashed #d0d7de;
-  border-radius: 8px;
-  background: #fafbfc;
-}
-.entity-empty p { margin: 0; }
-.relationship-section {
-  margin-top: 1rem;
-  padding-top: .8rem;
-  border-top: 1px solid #eaeef2;
-}
-.relationship-section summary { font-size: .9rem; }
-.relationship-help { margin: .35rem 0 .55rem; line-height: 1.5; }
-.relationship-actions { margin-top: .5rem; }
-.dictionary-footnote { margin: .9rem 0 0; padding-top: .7rem; border-top: 1px solid #eaeef2; line-height: 1.55; }
-.danger-text { color: #a40e26; }
-
-@media (max-width: 640px) {
-  .literary-style-grid { grid-template-columns: minmax(0, 1fr); }
-  .reader-font-grid { grid-template-columns: 1fr 1fr; }
-  .prompt-editor-label textarea { font-size: .76rem; }
-  .doc-page { padding: 1rem .75rem 3rem; }
-  .reader-navigation { position: static; }
-  .reader-navigation-controls { width: 100%; justify-content: space-between; }
-  .page-select { flex: 1; max-width: none; }
-  .reader { min-height: 50vh; padding: 1rem; border-radius: 8px; }
-  .literary-editor-row { grid-template-columns: 1fr 1fr; }
-  .literary-editor-row .chip { align-self: center; }
-  .entity-fields { grid-template-columns: 1fr; }
-  .entity-arrow { display: none; }
-  .entity-card-header { align-items: flex-start; }
-  .entity-card-spacer { display: none; }
-  .dictionary-actions { align-items: stretch; }
-}
-.literary-diagnostics { margin-top: .7rem; }
-.literary-diagnostics > summary {
-  cursor: pointer;
-  font-size: .9rem;
-  font-weight: 650;
-}
-.literary-diagnostics > p { line-height: 1.55; }
-.literary-diagnostic-row {
-  padding: .65rem .75rem;
-  margin-top: .55rem;
-  border: 1px solid #d8dee4;
-  border-radius: 8px;
-  background: #fafbfc;
-}
-.literary-diagnostic-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .35rem;
-}
-.literary-diagnostic-row > p { margin: .4rem 0 0; line-height: 1.5; overflow-wrap: anywhere; }
-.literary-diagnostic-details { white-space: normal; word-break: break-word; }
-.diagnostic-failed { color: #b42318 !important; background: #ffebe9 !important; }
-.diagnostic-warning { color: #7d4e00 !important; background: #fff1c2 !important; }
-.diagnostic-completed { color: #1a7f37 !important; background: #dafbe1 !important; }
-.diagnostic-started { color: #0969da !important; background: #ddf4ff !important; }
-
-.agent-trajectory-page { display: flex; flex-direction: column; gap: .85rem; min-height: 32rem; padding: .2rem 0 1rem; }
-.agent-trajectory-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
-.agent-trajectory-header h2 { margin: 0; font-size: 1.15rem; }
-.agent-trajectory-header p { max-width: 66rem; margin: .35rem 0 0; line-height: 1.55; }
-.agent-trajectory-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.agent-trajectory-controls select { min-height: 2.25rem; border: 1px solid var(--border, #d0d5dd); background: var(--panel, white); border-radius: .5rem; padding: .35rem .6rem; color: inherit; }
-.agent-trajectory-summary { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
-.agent-trajectory-error { white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-trajectory-current h3 { font-size: .95rem; margin: 0 0 .55rem; }
-.agent-trajectory-active-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .65rem; }
-.agent-task-card { display: flex; align-items: flex-start; gap: .6rem; border: 1px solid var(--border, #d0d5dd); border-radius: .7rem; padding: .8rem; background: var(--panel, white); }
-.agent-task-pulse { width: .55rem; height: .55rem; margin-top: .35rem; flex: 0 0 auto; border-radius: 999px; background: #16845b; box-shadow: 0 0 0 3px color-mix(in srgb, #16845b 15%, transparent); }
-.agent-task-main { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
-.agent-task-main strong { font-size: .9rem; }
-.agent-task-main span { font-size: .82rem; line-height: 1.45; }
-.agent-task-main small { overflow-wrap: anywhere; }
-.agent-trajectory-idle { padding: .7rem .85rem; border-radius: .6rem; color: var(--muted, #667085); background: var(--subtle, #f7f8fa); font-size: .83rem; line-height: 1.5; }
-.agent-trajectory-list { display: flex; flex-direction: column; gap: 0; }
-.agent-trace-row { display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: .65rem; min-width: 0; }
-.agent-trace-rail { display: flex; flex-direction: column; align-items: center; }
-.agent-trace-dot { width: .62rem; height: .62rem; flex: 0 0 auto; margin-top: .34rem; border-radius: 50%; border: 2px solid #98a2b3; background: var(--panel, white); }
-.agent-trace-line { width: 1px; flex: 1 1 auto; min-height: 1.2rem; background: var(--border, #d0d5dd); }
-.agent-trace-body { min-width: 0; padding: 0 0 .9rem; }
-.agent-trace-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; }
-.agent-trace-heading > strong { font-size: .88rem; font-weight: 650; margin-right: .2rem; }
-.agent-trace-heading time { margin-left: auto; white-space: nowrap; }
-.agent-trace-detail { white-space: normal; overflow-wrap: anywhere; margin: .35rem 0; color: var(--text, #344054); font-size: .82rem; line-height: 1.55; }
-.agent-trace-meta { display: flex; flex-wrap: wrap; gap: .35rem .85rem; color: var(--muted, #667085); font-size: .72rem; overflow-wrap: anywhere; }
-.agent-trace-row.trace-running .agent-trace-dot { border-color: #16845b; background: #16845b; }
-.agent-trace-row.trace-completed .agent-trace-dot { border-color: #98a2b3; background: #98a2b3; }
-.agent-trace-row.trace-warning .agent-trace-dot { border-color: #b7791f; background: #b7791f; }
-.agent-trace-row.trace-failed .agent-trace-dot { border-color: #c4320a; background: #c4320a; }
-@media (max-width: 640px) {
-  .agent-trajectory-header { flex-direction: column; }
-  .agent-trajectory-controls { width: 100%; }
-  .agent-trajectory-controls select { flex: 1; min-width: 0; }
-  .agent-trace-heading time { margin-left: 0; }
-  .agent-trace-meta { gap: .35rem .55rem; }
-}
-
-
-.agent-trace-failure-toggle { margin-top: .45rem; font-size: .78rem; }
-.agent-trace-failure-details { margin-top: .65rem; padding: .75rem; border: 1px solid #f1c8c5; border-radius: 10px; background: var(--surface, #fff8f7); }
-.agent-trace-failure-item { padding: .65rem 0; border-bottom: 1px solid var(--border, #ead8d5); }
-.agent-trace-failure-item:last-of-type { border-bottom: 0; }
-.agent-trace-failure-item-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .55rem; overflow-wrap: anywhere; }
-.agent-trace-failure-item-heading strong { font-size: .82rem; }
-.agent-trace-failure-reason { margin: .4rem 0; color: var(--danger, #b42318); font-size: .8rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-trace-failure-source { margin: .3rem 0 0; color: var(--muted, #667085); font-size: .76rem; line-height: 1.5; overflow-wrap: anywhere; }
-.agent-trace-failure-related { margin-top: .65rem; padding-top: .65rem; border-top: 1px dashed var(--border, #d0d5dd); }
-.agent-trace-failure-related > strong { font-size: .8rem; }
-.agent-trace-failure-related p { margin: .35rem 0; color: var(--text, #344054); font-size: .76rem; line-height: 1.5; overflow-wrap: anywhere; }
-
-</style>
+<style scoped src="./documentReaderStyles.css"></style>
