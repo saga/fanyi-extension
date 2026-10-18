@@ -1062,12 +1062,15 @@ const contextGraphAnalyzing = ref(false);
 const contextGraphOverview = ref<{ narrativeStyle: string; styleRules: string[] }>({ narrativeStyle: '', styleRules: [] });
 let contextGraphPollTimer: number | null = null;
 let ensureWorkspacePromise: Promise<any | null> | null = null;
+let ensureWorkspacePromiseKey: string | null = null;
+/** Invalidates asynchronous work when the reader switches to another document. */
+let workspaceDocumentGeneration = 0;
 /** Session hydration must not be mistaken for explicit user changes that update the service Prompt. */
 let suppressWorkspacePromptSync = false;
 /** Avoid creating a new service project before the existing browser/session snapshot has been compared. */
 let suppressWorkspaceAutoEnsure = false;
-/** Do not persist a half-hydrated local snapshot while authoritative server state is being applied. */
-let suppressSessionPersistence = false;
+/** Count overlapping hydration writes so one completed request cannot unsuppress another. */
+let sessionPersistenceSuppressionCount = 0;
 /** Agent 候选在运行结束时自动采纳；此 Map 仅用于运行中的临时预览或保存失败时提示。 */
 const workspaceCandidateTranslations = ref(new Map<string, string>());
 const englishFontFamily = ref('Georgia');
@@ -2194,7 +2197,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
 }
 
 async function persistCurrentSession() {
-  if (suppressSessionPersistence || !activeSessionReady.value || !doc.value) return;
+  if (sessionPersistenceSuppressionCount > 0 || !activeSessionReady.value || !doc.value) return;
   const snapshot = getSnapshot();
   const delta = snapshot.translations.filter(([id, text]) =>
     persistedTranslations.value.get(id) !== text,
@@ -2248,6 +2251,45 @@ async function persistCurrentSession() {
   }
 }
 
+function currentWorkspaceDocumentKey(): string {
+  return doc.value ? buildDocumentAgentSessionId(doc.value, documentFileName) : '';
+}
+
+function isWorkspaceDocumentCurrent(documentKey: string, generation: number): boolean {
+  return !!documentKey &&
+    workspaceDocumentGeneration === generation &&
+    currentWorkspaceDocumentKey() === documentKey;
+}
+
+/** Clear only ephemeral project bindings; durable service projects are never deleted here. */
+function resetWorkspaceBindingForDocument(): void {
+  workspaceDocumentGeneration++;
+  ensureWorkspacePromise = null;
+  ensureWorkspacePromiseKey = null;
+  workspaceProject.value = null;
+  workspaceActiveRun.value = null;
+  workspaceSourceChanged.value = false;
+  workspaceRunId.value = '';
+  workspaceTranslationActive.value = false;
+  workspaceRunGeneration.value++;
+  workspaceCandidateTranslations.value = new Map();
+  contextGraphAnalyzing.value = false;
+  if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
+  contextGraphPollTimer = null;
+  contextGraphState.value = {
+    projectId: '', sourceRevisionId: '', segmentCount: 0,
+    counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
+    status: 'not-started', phase: 'not-started', progress: {}, runId: '',
+    startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
+  };
+  contextGraphOverview.value = { narrativeStyle: '', styleRules: [] };
+  stopAgentTrajectoryPolling();
+  agentTrajectoryEvents.value = [];
+  agentTrajectoryCursor.value = 0;
+  agentTrajectoryLoading.value = false;
+  agentTrajectoryError.value = '';
+}
+
 async function restoreLastSession() {
   loadedSourceFile.value = null;
   parsing.value = true;
@@ -2267,6 +2309,7 @@ async function restoreLastSession() {
       return;
     }
 
+    resetWorkspaceBindingForDocument();
     suppressWorkspacePromptSync = true;
     suppressWorkspaceAutoEnsure = true;
     resetTranslation();
@@ -2586,10 +2629,11 @@ function onDrop(event: DragEvent) {
 async function loadFile(file: File) {
   suppressWorkspacePromptSync = true;
   suppressWorkspaceAutoEnsure = true;
-  loadedSourceFile.value = file;
-  // 先落盘上一册的最新状态，再开始解析新文件。
+  // 先落盘上一册的最新状态，再开始解析新文件；此时仍保留旧文档身份。
   await persistCurrentSession();
   await stopCurrentTranslation();
+  resetWorkspaceBindingForDocument();
+  loadedSourceFile.value = file;
   documentFileName = file.name;
   activeSessionReady.value = false;
   persistedTranslations.value = new Map();
@@ -3463,13 +3507,20 @@ async function reanalyzeContextGraph() {
 
 /** 合并并发的阅读器初始化，防止自动预处理与用户点击翻译同时创建同一本书的项目。 */
 async function ensureDocumentWorkspace(): Promise<any | null> {
-  if (ensureWorkspacePromise) return ensureWorkspacePromise;
-  const pending = ensureDocumentWorkspaceInternal();
+  const documentKey = currentWorkspaceDocumentKey();
+  const generation = workspaceDocumentGeneration;
+  if (!documentKey) return null;
+  if (ensureWorkspacePromise && ensureWorkspacePromiseKey === documentKey) return ensureWorkspacePromise;
+  const pending = ensureDocumentWorkspaceInternal(true, documentKey, generation);
   ensureWorkspacePromise = pending;
+  ensureWorkspacePromiseKey = documentKey;
   try {
     return await pending;
   } finally {
-    if (ensureWorkspacePromise === pending) ensureWorkspacePromise = null;
+    if (ensureWorkspacePromise === pending) {
+      ensureWorkspacePromise = null;
+      ensureWorkspacePromiseKey = null;
+    }
   }
 }
 
@@ -3523,13 +3574,20 @@ async function hydrateWorkspacePrompt(baseUrl: string, token: string, projectId:
  * A failed service request leaves the last local snapshot intact as an offline backup.
  */
 async function refreshExistingWorkspaceFromService(): Promise<any | null> {
-  if (ensureWorkspacePromise) return ensureWorkspacePromise;
-  const pending = ensureDocumentWorkspaceInternal(false);
+  const documentKey = currentWorkspaceDocumentKey();
+  const generation = workspaceDocumentGeneration;
+  if (!documentKey) return null;
+  if (ensureWorkspacePromise && ensureWorkspacePromiseKey === documentKey) return ensureWorkspacePromise;
+  const pending = ensureDocumentWorkspaceInternal(false, documentKey, generation);
   ensureWorkspacePromise = pending;
+  ensureWorkspacePromiseKey = documentKey;
   try {
     return await pending;
   } finally {
-    if (ensureWorkspacePromise === pending) ensureWorkspacePromise = null;
+    if (ensureWorkspacePromise === pending) {
+      ensureWorkspacePromise = null;
+      ensureWorkspacePromiseKey = null;
+    }
   }
 }
 
