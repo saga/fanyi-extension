@@ -2587,9 +2587,7 @@ function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource
   }
 }
 
-const managedPersonSourceBeforeEdit = new WeakMap<object, string>();
-
-function managedPersonSource(item: ManagedPersonItem): string {
+remove unused profile source cachefunction managedPersonSource(item: ManagedPersonItem): string {
   return item.entity?.source || item.profile?.canonicalSourceName || '';
 }
 function managedPersonTarget(item: ManagedPersonItem): string {
@@ -2605,7 +2603,6 @@ function managedPersonAliases(item: ManagedPersonItem): string[] {
 function rememberManagedPersonSource(item: ManagedPersonItem) {
   const source = managedPersonSource(item);
   if (item.entity) rememberEntitySource(item.entity);
-  if (item.profile) managedPersonSourceBeforeEdit.set(item.profile, source);
 }
 function findManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
   if (item.entity && literaryMemory.value.entities.includes(item.entity)) return item.entity;
@@ -2672,6 +2669,13 @@ function updateManagedPerson(item: ManagedPersonItem, field: 'source' | 'target'
     syncEntityMappingToVoiceProfiles(entity, field === 'source' ? oldSource : '');
   } else if (profile && field === 'source') {
     managedPersonSourceBeforeEdit.delete(profile);
+  }
+  // A hand-added person mapping requires both names before the sanitizer can persist it.
+  // Keep a partial row locally while the user fills the second field; profiles with source evidence
+  // can still be persisted independently before a translation name has been assigned.
+  if (entity && (!entity.source.trim() || !entity.target.trim()) && !profile) {
+    persistenceMessage.value = '请补全规范原文名和统一译名后保存人物映射。';
+    return;
   }
   void persistLiteraryMemoryToWorkspace().catch((error) => {
     persistenceMessage.value = '保存人物资料失败：' + (error instanceof Error ? error.message : String(error));
