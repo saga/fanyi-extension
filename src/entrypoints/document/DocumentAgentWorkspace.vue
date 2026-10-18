@@ -1223,7 +1223,7 @@ watch(
     resetProjectStateForSourceChange();
     if (props.active && props.useLocalAgent) void loadExistingProject();
   },
-  { flush: 'sync' },
+  { flush: 'post' },
 );
 
 // 只在 Agent Tab 激活且本机 Agent 可用时查找关联。切回 Tab 时仅在当前组件尚无项目状态时恢复。
