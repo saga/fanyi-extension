@@ -654,8 +654,8 @@
             </span>
           </div>
           <div class="voice-profile-fields">
-            <p v-if="profile.role"><strong>角色定位（候选/确认后使用）：</strong>{{ profile.role }}</p>
-            <p v-if="profile.traits?.length"><strong>人物特征（候选/确认后使用）：</strong>{{ profile.traits.join('；') }}</p>
+            <p v-if="profile.role"><strong>角色定位（默认弱提示；标记已核实后增强）：</strong>{{ profile.role }}</p>
+            <p v-if="profile.traits?.length"><strong>人物特征（默认弱提示；标记已核实后增强）：</strong>{{ profile.traits.join('；') }}</p>
             <p v-if="profile.voiceCore.register"><strong>语域：</strong>{{ profile.voiceCore.register }}</p>
             <p v-if="profile.voiceCore.syntaxRhythm?.length"><strong>句法 / 节奏：</strong>{{ profile.voiceCore.syntaxRhythm.join('；') }}</p>
             <p v-if="profile.voiceCore.lexicalPreferences?.length"><strong>词汇：</strong>{{ profile.voiceCore.lexicalPreferences.join('；') }}</p>
@@ -2474,6 +2474,7 @@ function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource
       ...aliases,
       ...(oldCanonical && normalize(oldCanonical) !== normalize(canonicalSource || oldCanonical) ? [oldCanonical] : []),
     ].filter((name) => normalize(name) !== normalize(canonicalSource || oldCanonical)))).slice(0, 12);
+    entity.aliases = profile.aliases;
     if (entity.target.trim()) profile.targetName = entity.target.trim();
     else delete profile.targetName;
   }
@@ -2485,11 +2486,9 @@ function markEntitySuggested(entity: LiteraryEntity) {
   syncEntityMappingToVoiceProfiles(entity, previousSource);
   // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认.
   entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-  if (entity.source.trim() && entity.target.trim()) {
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
-    });
-  }
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
+    persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
+  });
 }
 function entityKindLabel(kind: LiteraryEntity['kind']) {
   const labels: Record<LiteraryEntity['kind'], string> = {
@@ -2503,7 +2502,7 @@ function setEntityAliases(entity: LiteraryEntity, event: Event) {
   entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
   syncEntityMappingToVoiceProfiles(entity);
   entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-  if (entity.source.trim() && entity.target.trim()) void persistLiteraryMemoryToWorkspace().catch((error) => {
+  void persistLiteraryMemoryToWorkspace().catch((error) => {
     persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
   });
 }
@@ -3254,6 +3253,8 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     const confidencePrior = matching.find((profile) =>
       profile.confidenceSource === 'model_self_report' && profile.confidence !== null) || matching[0]!;
     const confidenceFields = mergeCharacterVoiceConfidence(confidencePrior, candidate);
+    const activationPrior = matching.find((profile) => profile.useForTranslation === false) || matching[0]!;
+    const useForTranslation = protectedProfile?.useForTranslation ?? activationPrior.useForTranslation ?? candidate.useForTranslation;
     const evidence = [
       ...(protectedProfile?.evidence || matching[0]!.evidence),
       ...candidate.evidence,
@@ -3267,6 +3268,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       ...(protectedProfile?.targetName ? { targetName: protectedProfile.targetName } : candidate.targetName ? { targetName: candidate.targetName } : {}),
       aliases,
       status: protectedProfile?.status || 'candidate',
+      useForTranslation: protectedProfile?.status === 'rejected' ? false : useForTranslation,
       ...confidenceFields,
       voiceCore: protectedProfile ? protectedProfile.voiceCore : candidate.voiceCore,
       ...(!protectedProfile && candidate.role ? { role: candidate.role } : protectedProfile?.role ? { role: protectedProfile.role } : {}),
@@ -3395,6 +3397,7 @@ async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
   literaryMemory.value = sanitizeLiteraryMemory(serverMemory.current?.memory);
   const next = mergeContextGraphEntitySuggestions(graph);
   if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities) &&
+      JSON.stringify(next.relationships) === JSON.stringify(literaryMemory.value.relationships) &&
       JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices) &&
       JSON.stringify(next.styleGuide) === JSON.stringify(literaryMemory.value.styleGuide) &&
       next.styleGuideStatus === literaryMemory.value.styleGuideStatus) {
