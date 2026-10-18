@@ -179,8 +179,15 @@
             <small class="muted">未填写占位符时，服务端会把完整内置任务输入追加到模板后，避免漏掉原文或 JSON 数据。</small>
           </label>
           <p v-if="task.key === 'translation'" class="muted small">
-            完整初译 System/User Prompt 仍在本页下方的“文档翻译 Prompt”编辑器中；此处只配置推理选项与附加指令。
+            完整初译 System/User Prompt 仍在文档页的“文档翻译 Prompt”编辑器中；此处配置翻译专属推理选项和附加指令。
           </p>
+          <details v-else class="built-in-prompt-preview">
+            <summary>查看服务端实际使用的内置 System Prompt（只读）</summary>
+            <pre v-if="builtInTaskPrompts[task.key]">{{ builtInTaskPrompts[task.key] }}</pre>
+            <p v-else-if="promptPreviewLoading" class="muted small">正在读取内置提示词…</p>
+            <p v-else-if="promptPreviewError" class="muted small">{{ promptPreviewError }}</p>
+            <p v-else class="muted small">请先启动并连接本机 Agent 服务，再读取内置提示词。</p>
+          </details>
         </article>
       </details>
 
@@ -378,6 +385,9 @@ const checking = ref(false);
 const localStatus = ref<'unknown' | 'ok' | 'fail'>('unknown');
 const configStatus = ref<'unknown' | 'ok' | 'fail'>('unknown');
 const configStatusDetail = ref('');
+const builtInTaskPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
+const promptPreviewLoading = ref(false);
+const promptPreviewError = ref('');
 
 onMounted(async () => {
   config.value = await getConfig();
@@ -454,6 +464,7 @@ async function checkLocalService() {
       config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789',
     );
     localStatus.value = available ? 'ok' : 'fail';
+    if (available) await loadBuiltInTaskPrompts();
     if (available && config.value.documentAutoSelectLocalAgent && !config.value.documentUseLocalAgent) {
       config.value.documentUseLocalAgent = true;
       config.value.documentUseServerTranslation = false;
@@ -463,6 +474,32 @@ async function checkLocalService() {
     localStatus.value = 'fail';
   } finally {
     checking.value = false;
+  }
+}
+
+async function loadBuiltInTaskPrompts() {
+  promptPreviewLoading.value = true;
+  promptPreviewError.value = '';
+  try {
+    const url = new URL(config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789');
+    url.pathname = '/api/config/task-prompts';
+    url.search = '';
+    url.hash = '';
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        ...(config.value.documentLocalAgentToken
+          ? { Authorization: 'Bearer ' + config.value.documentLocalAgentToken }
+          : {}),
+      },
+    });
+    if (!response.ok) throw new Error('读取内置 Prompt 失败（HTTP ' + response.status + '）');
+    const data = await response.json() as { prompts?: Partial<Record<DocumentCodeBuddyTaskKey, string>> };
+    builtInTaskPrompts.value = data.prompts && typeof data.prompts === 'object' ? data.prompts : {};
+  } catch (error) {
+    promptPreviewError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    promptPreviewLoading.value = false;
   }
 }
 
@@ -582,6 +619,19 @@ async function checkConfiguration() {
 }
 .task-profile-heading h4, .task-profile-heading p { margin: 0; }
 .task-profile-heading p { margin-top: .2rem; }
+.built-in-prompt-preview pre {
+  max-height: 300px;
+  overflow: auto;
+  margin: .55rem 0 0;
+  padding: .65rem;
+  border: 1px solid #d8dee4;
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: #24292f;
+  font: .76rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .task-prompt-field textarea {
   width: 100%;
   min-width: 0;
