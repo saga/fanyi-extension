@@ -80,6 +80,23 @@ export async function lookupWorkspaceProject(input: WorkspaceProjectMappingInput
   };
 }
 
+/**
+ * Resolve project identity from Local Agent's durable catalog. Local browser storage is only
+ * an index/cache; it must not be required to rediscover a service-backed document.
+ */
+export async function resolveWorkspaceProject(
+  baseUrl: string,
+  token: string,
+  input: WorkspaceProjectMappingInput,
+): Promise<{ exactProject: any | null; relatedProject: any | null }> {
+  return workspaceApi(
+    baseUrl,
+    token,
+    '/api/documents/projects/resolve',
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+}
+
 export async function rememberWorkspaceProject(input: WorkspaceProjectMappingInput, projectId: string): Promise<void> {
   const documentKey = workspaceDocumentKey(input);
   const exact = (await storage.getItem<ExactProjectMap>('local:documentAgentProjectMap')) || {};
