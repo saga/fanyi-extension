@@ -3448,9 +3448,11 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     await hydrateWorkspacePrompt(base, token, project.projectId);
     await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
 
-    const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
+    if (!isCurrent()) return null;
+    refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
       base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
     );
+    if (!isCurrent()) return null;
     workspaceProject.value = refreshed.project;
     workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
       ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
@@ -3528,11 +3530,18 @@ async function ensureDocumentWorkspace(): Promise<any | null> {
  * Hydrate the current reader controls from the latest persisted project Prompt.
  * These values are project/session scoped: do not write them into global extension configuration.
  */
-async function hydrateWorkspacePrompt(baseUrl: string, token: string, projectId: string): Promise<void> {
+async function hydrateWorkspacePrompt(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  expectedDocumentKey = currentWorkspaceDocumentKey(),
+  expectedGeneration = workspaceDocumentGeneration,
+): Promise<void> {
   const response = await workspaceApi<{ prompts?: any[] }>(
     baseUrl, token,
     '/api/documents/projects/' + encodeURIComponent(projectId) + '/prompts',
   );
+  if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return;
   const prompt = response.prompts?.[0];
   if (!prompt) return;
   const promptConfig = prompt.config && typeof prompt.config === 'object' ? prompt.config : {};
@@ -3592,19 +3601,30 @@ async function refreshExistingWorkspaceFromService(): Promise<any | null> {
 }
 
 /** 保证只有一份本机项目：导入旧阅读记录、刷新 SQLite 的当前版本，并备份原件。 */
-async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<any | null> {
-  if (!doc.value) return null;
-  const config = readerConfig.value || await getConfig();
+async function ensureDocumentWorkspaceInternal(
+  createIfMissing = true,
+  expectedDocumentKey = currentWorkspaceDocumentKey(),
+  expectedGeneration = workspaceDocumentGeneration,
+): Promise<any | null> {
+  if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return null;
+  const input = workspaceInput();
+  const initialPrompt = workspacePromptInput(true);
+  const legacyTranslations = new Map(state.value.translations);
+  const legacyMemory = sanitizeLiteraryMemory(JSON.parse(JSON.stringify(literaryMemory.value)));
+  const sourceFileAtStart = loadedSourceFile.value;
+  const isCurrent = () => isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration);
+  const config = await getConfig();
+  if (!isCurrent()) return null;
   readerConfig.value = config;
   if (!config.documentUseLocalAgent && createIfMissing) return null;
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = config.documentLocalAgentToken || '';
-  const input = workspaceInput();
 
   // The extension map is only a hint. Always ask the service to compare the current parsed
   // source against its authoritative fingerprint, even when a local mapping exists. The project
   // might have been updated from another UI since this extension snapshot was saved.
   const mapping = await lookupWorkspaceProject(input);
+  if (!isCurrent()) return null;
   let mappedProject: any = null;
   let mappedDetails: { project: any; runs?: any[] } | null = null;
   if (mapping.projectId) {
@@ -3612,6 +3632,7 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
       mappedDetails = await workspaceApi<{ project: any; runs?: any[] }>(
         base, token, '/api/documents/projects/' + encodeURIComponent(mapping.projectId),
       );
+      if (!isCurrent()) return null;
       mappedProject = mappedDetails.project;
     } catch (error) {
       // Only a definitive 404 permits discovery recovery. Network/auth failures must preserve the
@@ -3623,6 +3644,7 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
   // Resolve on every open/restore. If a mapped project still exists but no longer has the exact
   // current source fingerprint, it is a source-change candidate, not a valid translation source.
   const resolution = await resolveWorkspaceProject(base, token, input);
+  if (!isCurrent()) return null;
   let project: any = null;
   let projectDetails: { project: any; runs?: any[] } | null = null;
   let sourceChanged = false;
@@ -3637,6 +3659,7 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
       projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
         base, token, '/api/documents/projects/' + encodeURIComponent(resolution.exactProject.projectId),
       );
+      if (!isCurrent()) return null;
       project = projectDetails.project;
     }
     if (mapping.projectId !== project.projectId) await rememberWorkspaceProject(input, project.projectId);
@@ -3648,10 +3671,12 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
     projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
       base, token, '/api/documents/projects/' + encodeURIComponent(resolution.relatedProject.projectId),
     );
+    if (!isCurrent()) return null;
     project = projectDetails.project;
     sourceChanged = true;
   }
 
+  if (!isCurrent()) return null;
   if (sourceChanged && project) {
     workspaceProject.value = project;
     workspaceActiveRun.value = (projectDetails?.runs || []).find((run) =>
@@ -3666,42 +3691,49 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
 
   let createdNewProject = false;
   if (!project) {
+    if (!isCurrent()) return null;
     const created = await workspaceApi<{ project: any; reusedExisting?: boolean }>(base, token, '/api/documents/projects', {
       method: 'POST',
-      body: JSON.stringify({ ...input, prompt: workspacePromptInput(true) }),
+      body: JSON.stringify({ ...input, prompt: initialPrompt }),
     });
     project = created.project;
     createdNewProject = created.reusedExisting !== true;
     await rememberWorkspaceProject(input, project.projectId);
+    // A server project created just as the user switches documents still needs the one-time
+    // migration from the captured old session, but must not mutate the new document's UI.
   }
 
   workspaceSourceChanged.value = false;
 
-  suppressSessionPersistence = true;
+  sessionPersistenceSuppressionCount++;
+  let refreshed: { project: any; runs?: any[] } | null = null;
   try {
     // Migrate legacy data once, and only when the service project itself has just been created.
     // On an existing service project, cached translations, Prompt and literary memory are never
     // pushed back during open/restore; the next block hydrates the extension from SQLite instead.
     if (createdNewProject) {
-      await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
+      await importWorkspaceTranslations(base, token, project.projectId, legacyTranslations);
       await workspaceApi(base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-        { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
+        { method: 'POST', body: JSON.stringify({ memory: legacyMemory }) },
       );
     }
+    if (!isCurrent()) return null;
 
-    await hydrateWorkspacePrompt(base, token, project.projectId);
+    await hydrateWorkspacePrompt(base, token, project.projectId, expectedDocumentKey, expectedGeneration);
+    if (!isCurrent()) return null;
     const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
     const currentMemory = await workspaceApi<{ current?: { memoryRevisionId?: string | null; memory?: unknown } }>(
       base, token, memoryPath,
     );
+    if (!isCurrent()) return null;
     literaryMemory.value = sanitizeLiteraryMemory(currentMemory.current?.memory);
 
     // Original bytes are a backup concern, not project-state authority. Upload only when the
     // exact source project has no saved original file yet; this does not alter translations/runs.
-    if (!project.sourceFileSaved && loadedSourceFile.value) {
+    if (!project.sourceFileSaved && sourceFileAtStart) {
       try {
-        await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
+        await backupWorkspaceSourceFile(base, token, project.projectId, sourceFileAtStart);
       } catch (error) {
         persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' +
           (error instanceof Error ? error.message : String(error));
@@ -3719,8 +3751,9 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
     );
     await replaceCurrentTranslations(accepted);
   } finally {
-    suppressSessionPersistence = false;
+    sessionPersistenceSuppressionCount = Math.max(0, sessionPersistenceSuppressionCount - 1);
   }
+  if (!isCurrent() || !refreshed) return null;
   await persistCurrentSession();
 
   // Project details, translations and memory are now hydrated from the service; only session UI
