@@ -3588,6 +3588,7 @@ async function hydrateWorkspacePrompt(
     documentSystemPromptOverride.value = typeof prompt.systemPrompt === 'string' ? prompt.systemPrompt : '';
     documentUserPromptTemplate.value = typeof prompt.userPromptTemplate === 'string' ? prompt.userPromptTemplate : '';
     await nextTick();
+    if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return;
     documentSystemPromptEditor.value = documentSystemPromptOverride.value || builtInDocumentSystemPrompt.value;
     documentUserPromptEditor.value = documentUserPromptTemplate.value || BUILT_IN_USER_PROMPT_TEMPLATE;
   } finally {
@@ -3720,7 +3721,8 @@ async function ensureDocumentWorkspaceInternal(
     // migration from the captured old session, but must not mutate the new document's UI.
   }
 
-  workspaceSourceChanged.value = false;
+  if (!isCurrent() && !createdNewProject) return null;
+  if (isCurrent()) workspaceSourceChanged.value = false;
 
   sessionPersistenceSuppressionCount++;
   let refreshed: { project: any; runs?: any[] } | null = null;
@@ -3757,9 +3759,11 @@ async function ensureDocumentWorkspaceInternal(
       }
     }
 
-    const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
+    if (!isCurrent()) return null;
+    refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
       base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
     );
+    if (!isCurrent()) return null;
     workspaceProject.value = refreshed.project;
     workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
       ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
