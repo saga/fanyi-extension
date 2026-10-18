@@ -3436,6 +3436,9 @@ watch([sourceLang, targetLang, effectiveDocumentTranslationMode], async (
 
 async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = false) {
   if (!project?.projectId) return;
+  const expectedDocumentKey = currentWorkspaceDocumentKey();
+  const expectedGeneration = workspaceDocumentGeneration;
+  if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return;
   workspaceProject.value = project;
   workspaceSourceChanged.value = sourceChanged;
   if (sourceChanged) {
@@ -3443,24 +3446,27 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     return;
   }
 
-  suppressSessionPersistence = true;
+  sessionPersistenceSuppressionCount++;
   let stateHydrated = false;
+  const isCurrent = () => isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration);
   try {
     const config = readerConfig.value || await getConfig();
+    if (!isCurrent()) return;
     readerConfig.value = config;
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
 
     // Agent tab may be the first place that discovers a project. Hydrate Prompt and memory
     // from SQLite here too; never let the local props/session snapshot overwrite the project.
-    await hydrateWorkspacePrompt(base, token, project.projectId);
-    await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
+    await hydrateWorkspacePrompt(base, token, project.projectId, expectedDocumentKey, expectedGeneration);
+    if (!isCurrent()) return;
+    await refreshWorkspaceLiteraryMemory(project.projectId, base, token, expectedDocumentKey, expectedGeneration);
+    if (!isCurrent()) return;
 
-    if (!isCurrent()) return null;
-    refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
+    const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
       base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
     );
-    if (!isCurrent()) return null;
+    if (!isCurrent()) return;
     workspaceProject.value = refreshed.project;
     workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
       ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
@@ -3468,6 +3474,7 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     const accepted = await loadWorkspaceAcceptedTranslations(
       base, token, project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0,
     );
+    if (!isCurrent()) return;
     await replaceCurrentTranslations(accepted);
     stateHydrated = true;
 
@@ -3477,10 +3484,12 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
       await refreshContextGraphStatus(refreshed.project, true);
     }
   } catch (error) {
-    persistenceMessage.value = '同步本机项目状态失败：' + (error instanceof Error ? error.message : String(error));
+    if (isCurrent()) {
+      persistenceMessage.value = '同步本机项目状态失败：' + (error instanceof Error ? error.message : String(error));
+    }
   } finally {
-    suppressSessionPersistence = false;
-    if (stateHydrated) await persistCurrentSession();
+    sessionPersistenceSuppressionCount = Math.max(0, sessionPersistenceSuppressionCount - 1);
+    if (stateHydrated && isCurrent()) await persistCurrentSession();
   }
 }
 
