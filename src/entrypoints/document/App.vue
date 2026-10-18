@@ -3361,18 +3361,44 @@ watch([sourceLang, targetLang, effectiveDocumentTranslationMode], async (
   }
 });
 
-async function handleAgentWorkspaceProjectUpdated(project: any) {
+async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = false) {
   if (!project?.projectId) return;
   workspaceProject.value = project;
-  workspaceSourceChanged.value = false;
+  workspaceSourceChanged.value = sourceChanged;
+  if (sourceChanged) {
+    persistenceMessage.value = '本机服务中的项目原文版本与当前文档不同；旧译文不会自动应用。请明确更新来源版本或另建项目。';
+    return;
+  }
   try {
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+    const token = config.documentLocalAgentToken || '';
+
+    // Agent tab may be the first place that discovers a project. Hydrate Prompt and memory
+    // from SQLite here too; never let the local props/session snapshot overwrite the project.
+    await hydrateWorkspacePrompt(base, token, project.projectId);
+    await refreshWorkspaceLiteraryMemory(project.projectId, base, token);
+
+    const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
+      base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
+    );
+    workspaceProject.value = refreshed.project;
+    workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
+      ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+
+    const accepted = await loadWorkspaceAcceptedTranslations(
+      base, token, project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0,
+    );
+    await replaceCurrentTranslations(accepted);
+
     if (translationPreprocessingRequired.value) {
-      await ensureContextGraphPreprocessing(project, { force: false });
+      await ensureContextGraphPreprocessing(refreshed.project, { force: false });
     } else {
-      await refreshContextGraphStatus(project, true);
+      await refreshContextGraphStatus(refreshed.project, true);
     }
   } catch (error) {
-    persistenceMessage.value = '同步文档预处理状态失败：' + (error instanceof Error ? error.message : String(error));
+    persistenceMessage.value = '同步本机项目状态失败：' + (error instanceof Error ? error.message : String(error));
   }
 }
 
