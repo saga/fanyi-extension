@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import browser from 'webextension-polyfill';
 import type { TranslateChunkResponse } from '../../types/messages';
 import type { Glossary } from '../service/_service';
+import type { DocumentCodeBuddyTaskProfiles } from '../utils/config';
 import { MODEL_FETCH_TIMEOUT_MS } from '../service/_service';
 import type { PromptStyle, TranslationMode } from '../service/deepseek';
 import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
@@ -59,6 +60,7 @@ export interface TranslateOptions {
   localAgentUrl?: string;
   localAgentModel?: string;
   localAgentToken?: string;
+  codeBuddyTaskProfiles?: DocumentCodeBuddyTaskProfiles;
   serverUrl?: string;
   provider?: string;
   model?: string;
@@ -410,6 +412,7 @@ async function analyzeLiteraryChapterViaLocalAgent(
       promptStyle: options.promptStyle,
       translationMode: 'literary',
       documentSessionId: options.documentSessionId,
+      taskProfiles: options.codeBuddyTaskProfiles,
       provider,
       runtime: options.localAgentProvider || 'workbuddy',
       model: options.localAgentModel || 'auto',
@@ -476,6 +479,7 @@ async function reviewLiteraryBatchViaLocalAgent(
       promptStyle: options.promptStyle,
       translationMode: 'literary',
       documentSessionId: options.documentSessionId,
+      taskProfiles: options.codeBuddyTaskProfiles,
       provider,
       runtime: options.localAgentProvider || 'workbuddy',
       model: options.localAgentModel || 'auto',
@@ -893,6 +897,7 @@ export function useDocumentTranslation() {
         promptStyle: options.promptStyle,
         translationMode: options.translationMode === 'literary' || (options.literaryMode && bookMemory) ? 'literary' : 'technical',
         documentSessionId: options.documentSessionId,
+        codeBuddyTaskProfiles: options.codeBuddyTaskProfiles,
         documentSessionLane: resolveDocumentSessionLane(options, segments),
         forceRefresh: options.forceRefresh,
         documentSystemPromptOverride: options.documentSystemPromptOverride,
