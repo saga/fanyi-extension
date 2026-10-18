@@ -327,7 +327,7 @@ describe('文学书籍记忆', () => {
     expect(withoutEvidence.characterVoices).toEqual([]);
   });
 
-  it('声音上下文仅包含已确认相关画像与批准锚点，并保持合法完整 JSON', () => {
+  it('声音上下文仅包含已启用相关画像与批准锚点，并保持合法完整 JSON', () => {
     const memory = sanitizeLiteraryMemory({
       styleGuide: { narrativeVoice: '克制的第三人称' },
       entities: [
@@ -347,7 +347,7 @@ describe('文学书籍记忆', () => {
           evidence: [{ segmentId: 'b2', sourceQuote: 'The evidence is clear.', dimension: 'register', observation: '完整论证', confidence: 0.8 }],
         },
         {
-          characterId: 'char-candidate', canonicalSourceName: 'Unknown', status: 'candidate', confidence: 0.4,
+          characterId: 'char-candidate', canonicalSourceName: 'Unknown', status: 'candidate', useForTranslation: false, confidence: 0.4,
           voiceCore: { register: '猜测性的语域' },
           evidence: [{ segmentId: 'u1', sourceQuote: 'Maybe.', dimension: 'stance', observation: '证据不足', confidence: 0.4 }],
         },
@@ -374,6 +374,38 @@ describe('文学书籍记忆', () => {
     expect(parsed.voiceAnchors.map((item: any) => item.anchorId)).toEqual(['v1']);
     expect(serialized.length).toBeLessThan(10000);
     expect(parsed.constraints.join(' ')).toContain('不确定说话人');
+  });
+
+
+  it('有原文证据的候选人物画像默认用于翻译，停用项不会进入上下文', () => {
+    const memory = sanitizeLiteraryMemory({
+      entities: [
+        { source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'confirmed' },
+        { source: 'Bob', target: '鲍勃', kind: 'person', reviewStatus: 'confirmed' },
+      ],
+      characterVoices: [
+        {
+          characterId: 'char-alice', canonicalSourceName: 'Alice', status: 'candidate',
+          role: '营地里的年轻军官', traits: ['措辞克制'],
+          voiceCore: { register: '短句、语气克制' }, contrastRules: [], openQuestions: [],
+          evidence: [{ segmentId: 'alice-1', sourceQuote: 'Alice answered quietly.', dimension: 'register', observation: '简短回答', confidence: null }],
+        },
+        {
+          characterId: 'char-bob', canonicalSourceName: 'Bob', status: 'candidate', useForTranslation: false,
+          role: '停用角色', voiceCore: { register: '不用注入' }, contrastRules: [], openQuestions: [],
+          evidence: [{ segmentId: 'bob-1', sourceQuote: 'Bob shouted loudly.', dimension: 'register', observation: '大声回答', confidence: null }],
+        },
+      ],
+    });
+    expect(memory.characterVoices.find((profile) => profile.characterId === 'char-alice')?.useForTranslation).toBe(true);
+    const context = buildLiteraryContextForBatch({
+      memory,
+      segments: [{ id: 'current-1', text: 'Alice answered, then Bob shouted.', contextPath: 'Chapter 1' }],
+      chapterTitle: 'Chapter 1',
+    });
+    expect(context.characterVoices.map((profile) => profile.characterId)).toEqual(['char-alice']);
+    expect(context.characterVoices[0]?.role).toBe('营地里的年轻军官');
+    expect(context.characterVoices[0]?.traits).toEqual(['措辞克制']);
   });
 
   it('以前文消歧命中人物时，跨章节声音锚点无需原句重复也能检索', () => {
