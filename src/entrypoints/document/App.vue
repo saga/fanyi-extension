@@ -974,6 +974,7 @@ import {
   lookupWorkspaceProject,
   rememberWorkspaceProject,
   workspaceApi,
+  WorkspaceApiError,
 } from './documentWorkspaceClient';
 import {
   assessContextGraphReadiness,
@@ -3382,8 +3383,10 @@ async function ensureDocumentWorkspaceInternal(): Promise<any | null> {
       project = current.project;
       workspaceActiveRun.value = (current.runs || []).find((run) => ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
     } catch (error) {
-      // 映射可能指向已归档/清理的项目，只有确认服务真的返回 404 才创建新项目。
-      if (!(error instanceof Error) || !/HTTP 404/.test(error.message)) throw error;
+      // 映射可能指向已归档/清理的项目：只有服务端明确回 404 才视为“项目不存在”，
+      // 由下面的创建分支重建。按 status 判断而不是匹配 message 文本 —— 404 的
+      // 文案是中文说明，不含状态码。
+      if (!(error instanceof WorkspaceApiError) || error.status !== 404) throw error;
     }
   }
   if (project && mapping.sourceChanged) {

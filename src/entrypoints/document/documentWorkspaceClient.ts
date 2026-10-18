@@ -90,6 +90,39 @@ export async function rememberWorkspaceProject(input: WorkspaceProjectMappingInp
   await storage.setItem('local:documentAgentProjectIdentityMap', identities);
 }
 
+/**
+ * 带 HTTP 状态码的 workspace 调用错误。
+ *
+ * 调用方必须按 status 分支，不要靠 message 文本匹配：服务端的 404 文案是
+ * 「找不到文档项目或项目已归档」这类中文说明，不含任何状态码，用 /HTTP 404/
+ * 匹配会永远不命中，导致「项目已不存在」被当成未知故障，该新建的路径报错退出。
+ */
+export class WorkspaceApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'WorkspaceApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * 本机服务的错误体有两种形状，必须都解析出可读文案：
+ *   - 401 / 404 走 OpenAI 风格嵌套：{ error: { message, type } }
+ *   - 其余端点走扁平字符串：{ error: '...' }
+ * 直接把 payload.error 传给 Error 构造函数，嵌套对象会被字符串化成
+ * "[object Object]"，真实原因（例如 token 不对）就丢了。
+ */
+function describeWorkspaceFailure(payload: any, status: number): string {
+  const error = payload?.error;
+  if (error && typeof error === 'object' && typeof error.message === 'string' && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === 'string' && error.trim()) return error;
+  return '本机服务返回 HTTP ' + status;
+}
+
 export async function workspaceApi<T = any>(
   baseUrl: string,
   token: string,
@@ -103,7 +136,7 @@ export async function workspaceApi<T = any>(
   if (token) headers.set('Authorization', 'Bearer ' + token);
   const response = await fetch(url.toString(), { ...init, headers });
   const payload = await response.json().catch(() => ({})) as any;
-  if (!response.ok) throw new Error(payload.error || ('本机服务返回 HTTP ' + response.status));
+  if (!response.ok) throw new WorkspaceApiError(describeWorkspaceFailure(payload, response.status), response.status);
   return payload as T;
 }
 

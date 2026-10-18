@@ -319,6 +319,7 @@ import {
   lookupWorkspaceProject,
   rememberWorkspaceProject,
   workspaceApi,
+  WorkspaceApiError,
 } from './documentWorkspaceClient';
 
 interface Segment {
@@ -598,7 +599,8 @@ async function loadExistingProject() {
     loadSelectedTranslation();
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    if (!project.value && /HTTP 404/.test(detail)) {
+    // 按 status 判断，不匹配 message：404 的文案是中文说明，不含状态码。
+    if (!project.value && e instanceof WorkspaceApiError && e.status === 404) {
       restorationProjectMissing.value = true;
       restorationError.value = '找到本机项目关联记录，但本机 Agent 服务中已不存在该项目。确认旧项目无法恢复后，可以重建关联。';
     } else if (project.value) {
