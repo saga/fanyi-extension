@@ -2336,8 +2336,9 @@ async function restoreLastSession() {
     // back into a project when connectivity returns.
     try {
       let project = await refreshExistingWorkspaceFromService();
-      if (readerConfig.value?.documentUseLocalAgent && doc.value) {
-        project = await ensureDocumentWorkspace() || project;
+      if (readerConfig.value?.documentUseLocalAgent && doc.value &&
+          !project && !workspaceSourceChanged.value) {
+        project = await ensureDocumentWorkspace();
       }
       const activeRun = workspaceActiveRun.value;
       if (readerConfig.value?.documentUseLocalAgent && project && activeRun &&
