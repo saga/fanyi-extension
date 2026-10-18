@@ -2601,7 +2601,6 @@ function managedPersonAliases(item: ManagedPersonItem): string[] {
   ].map((value) => value.trim()).filter((value) => value && normalizeManagedPersonName(value) !== canonical)));
 }
 function rememberManagedPersonSource(item: ManagedPersonItem) {
-  const source = managedPersonSource(item);
   if (item.entity) rememberEntitySource(item.entity);
 }
 function findManagedPersonEntity(item: ManagedPersonItem): LiteraryEntity | undefined {
