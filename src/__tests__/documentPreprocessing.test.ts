@@ -3,6 +3,7 @@ import {
   CONTEXT_GRAPH_ANALYSIS_VERSION,
   assessContextGraphReadiness,
   contextGraphSnapshotFromResponse,
+  resolveDocumentTranslationMode,
 } from '../entrypoints/document/documentPreprocessing';
 
 const baseInput = {
@@ -113,5 +114,22 @@ describe('literary preprocessing readiness', () => {
       status: 'running',
       phase: 'model-analysis',
     });
+  });
+});
+
+
+describe('document translation mode resolution', () => {
+  it('keeps EPUB/PDF per-document literary mode enabled even when the global default is technical', () => {
+    expect(resolveDocumentTranslationMode(true, 'technical')).toBe('literary');
+  });
+
+  it('honors the global literary profile when per-document mode is not enabled', () => {
+    expect(resolveDocumentTranslationMode(false, 'literary')).toBe('literary');
+  });
+
+  it('uses technical mode as the safe default when neither setting enables literary translation', () => {
+    expect(resolveDocumentTranslationMode(false, 'technical')).toBe('technical');
+    expect(resolveDocumentTranslationMode(false, undefined)).toBe('technical');
+    expect(resolveDocumentTranslationMode(false, null)).toBe('technical');
   });
 });
