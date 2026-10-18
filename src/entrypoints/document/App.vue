@@ -2917,14 +2917,22 @@ async function syncWorkspaceTranslations(items: Array<{ id: string; text: string
   await replaceCurrentTranslations(items);
 }
 
-async function refreshWorkspaceLiteraryMemory(projectId: string, baseUrl?: string, token?: string): Promise<void> {
+async function refreshWorkspaceLiteraryMemory(
+  projectId: string,
+  baseUrl?: string,
+  token?: string,
+  expectedDocumentKey = currentWorkspaceDocumentKey(),
+  expectedGeneration = workspaceDocumentGeneration,
+): Promise<void> {
   if (!projectId) return;
   const config = readerConfig.value || await getConfig();
+  if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return;
   const response = await workspaceApi<{ current?: { memory?: unknown } }>(
     baseUrl || config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
     token ?? config.documentLocalAgentToken ?? '',
     '/api/documents/projects/' + encodeURIComponent(projectId) + '/literary-memory',
   );
+  if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return;
   literaryMemory.value = sanitizeLiteraryMemory(response.current?.memory);
   await persistCurrentSession();
 }
