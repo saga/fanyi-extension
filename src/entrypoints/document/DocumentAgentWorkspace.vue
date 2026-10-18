@@ -71,7 +71,7 @@
       <p>{{ restorationError }}</p>
       <div class="agent-inline-actions">
         <button class="agent-button agent-button-secondary" :disabled="restoringProject || busy" @click="loadExistingProject">重试</button>
-        <button v-if="restorationProjectMissing" class="agent-button agent-button-primary" :disabled="restoringProject || busy" @click="createProject">重建项目</button>
+        <button v-if="restorationProjectMissing" class="agent-button agent-button-primary" :disabled="restoringProject || busy" @click="createProject(true)">重建项目</button>
       </div>
     </section>
 
@@ -529,9 +529,17 @@ async function api(path: string, init: RequestInit = {}): Promise<any> {
   return workspaceApi(props.localAgentUrl, props.localAgentToken, path, init);
 }
 
-async function createProject() {
+async function createProject(forceNew = false) {
   if (!props.useLocalAgent) { error.value = '请先启用本机 Agent。'; return; }
   if (!props.segments.length) return;
+
+  // Another part of the UI may have initialized the durable project after this panel rendered.
+  // Re-resolve immediately before create instead of trusting a stale empty local map.
+  if (!forceNew && !restorationProjectMissing.value && !project.value) {
+    await loadExistingProject();
+    if (project.value || sourceChanged.value || restorationError.value || restorationProjectMissing.value) return;
+  }
+
   busy.value = true; error.value = ''; message.value = '';
   restorationError.value = '';
   restorationProjectMissing.value = false;
@@ -542,13 +550,25 @@ async function createProject() {
         title: props.title, sourceFileName: props.sourceFileName, format: props.format,
         segments: props.segments,
         prompt: promptInput(true),
+        allowDuplicate: forceNew,
       }),
     });
+
+    if (response.reusedExisting === true) {
+      // Server-side deduplication won a concurrent create race. Reopen the project through the
+      // read-only path; do not migrate the extension snapshot into the now-existing project.
+      await rememberWorkspaceProject(projectInput(), response.project.projectId);
+      project.value = null;
+      await loadExistingProject();
+      if (!project.value) throw new Error('本机服务已找到相同来源项目，但刷新项目状态失败。');
+      message.value = '已恢复本机服务中已有的相同来源项目，没有新建重复项目。';
+      return;
+    }
+
     project.value = response.project;
     await rememberWorkspaceProject(projectInput(), project.value.projectId);
-    // 先迁移普通阅读页中已有的译文，再开始新的 Agent 运行。
+    // Only a confirmed new project may receive one-time migration of legacy extension data.
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
-    // 旧阅读会话可能已有批准锚点；只有项目数据库也有其已采纳译文时才能保留批准状态。
     await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/literary-memory', {
       method: 'POST',
       body: JSON.stringify({ memory: props.literaryMemory }),
@@ -733,7 +753,7 @@ async function createSeparateProject() {
   verification.value = null;
   runs.value = [];
   sourceChanged.value = false;
-  await createProject();
+  await createProject(true);
 }
 
 async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
