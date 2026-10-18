@@ -755,6 +755,7 @@ export function buildLiteraryContextForBatch(input: {
     ...(profile.traits?.length && (profile.status === 'confirmed' || profile.useForTranslation) ? { traits: profile.traits } : {}),
     aliases: profile.aliases,
     status: profile.status,
+    useForTranslation: profile.useForTranslation,
     voiceCore: profile.voiceCore,
     contrastRules: profile.contrastRules.filter((rule) => characterIds.has(rule.otherCharacterId)),
     evidence: profile.evidence.slice(0, 4),
