@@ -1000,6 +1000,7 @@ import {
   type ActiveDocumentSessionSummary,
   type LoadedActiveDocumentSession,
   type SavedViewMode,
+  type SavedDocumentTab,
 } from '@/entrypoints/utils/document/sessionStore';
 import { useDocumentTranslation } from './useDocumentTranslation';
 import { autoConfirmLiteraryMemory, buildLiteraryTranslationContextPrompt, createEmptyLiteraryMemory, refreshLiteraryExampleTargets, sanitizeLiteraryMemory, type LiteraryBookMemory, type LiteraryEntity, type LiteraryRelationship, type LiteraryReviewFinding } from '@/entrypoints/utils/document/literary';
@@ -1259,7 +1260,7 @@ const translatedSegmentCount = computed(() =>
   doc.value?.segments.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length ?? 0,
 );
 /** 阅读、配置、人物/预处理、Agent 工作区和轨迹分区相互独立。 */
-const activeTab = ref<'reading' | 'settings' | 'characters' | 'agent' | 'trajectory'>('reading');
+const activeTab = ref<SavedDocumentTab>('reading');
 /** 当前页是否还有未译段落：决定按钮文案是"翻译本章"还是"继续翻译下一章"。 */
 const startLabel = computed(() => currentPagePending.value
   ? '翻译当前页'
@@ -1694,6 +1695,8 @@ const agentTrajectoryActiveTasks = computed(() => {
 watch(activeTab, (nextTab) => {
   if (nextTab === 'trajectory') void startAgentTrajectoryPolling();
   else stopAgentTrajectoryPolling();
+  // 当前工作 Tab 也是会话状态；保存它以便刷新后回到同一工作界面。
+  void persistCurrentSession();
 });
 
 watch(activeTab, async (nextTab, previousTab) => {
@@ -1763,6 +1766,10 @@ onMounted(async () => {
   documentUserPromptEditor.value = documentUserPromptTemplate.value || BUILT_IN_USER_PROMPT_TEMPLATE;
   if (config.documentTranslationMode === 'literary') literaryMode.value = true;
   await refreshSavedSessionSummary();
+  // 文档页是可继续的工作区：有已保存会话时，刷新后直接还原，不要求用户再点一次“恢复阅读”。
+  if (savedSessionSummary.value || localSessionSummary.value) {
+    await restoreLastSession();
+  }
 });
 
 /** 将当前轻量诊断轨迹导出为 JSON，便于复现问题；不包含整段原文、译文或完整 Prompt。 */
@@ -2130,6 +2137,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       total: Number.isFinite(snapshot.total) ? snapshot.total : 0,
       done: Number.isFinite(snapshot.done) ? snapshot.done : 0,
       currentPageIndex: Number.isFinite(payload.currentPageIndex) ? Math.max(0, Math.floor(payload.currentPageIndex)) : 0,
+      activeTab: (['reading', 'settings', 'characters', 'agent', 'trajectory'].includes(payload.activeTab) ? payload.activeTab : 'reading') as SavedDocumentTab,
       literaryMode: payload.literaryMode === true,
       document,
       rawText: typeof payload.rawText === 'string' ? payload.rawText : '',
@@ -2162,6 +2170,7 @@ async function persistCurrentSession() {
     viewMode: viewMode.value as SavedViewMode,
     literaryMode: literaryMode.value,
     currentPageIndex: currentPageIndex.value,
+    activeTab: activeTab.value,
     snapshot,
     translationDelta: delta,
     translatedSegmentCount: snapshot.translations.length,
@@ -2239,6 +2248,7 @@ async function restoreLastSession() {
     sourceLang.value = saved.sourceLang;
     targetLang.value = saved.targetLang;
     viewMode.value = saved.viewMode;
+    activeTab.value = saved.activeTab || 'reading';
     literaryMode.value = saved.literaryMode;
     currentPageIndex.value = Math.min(
       Math.max(0, saved.currentPageIndex),
@@ -2270,6 +2280,7 @@ async function restoreLastSession() {
           viewMode: viewMode.value,
           literaryMode: literaryMode.value,
           currentPageIndex: currentPageIndex.value,
+          activeTab: activeTab.value,
         });
         activeSessionIndexedDbWritable = true;
         persistedTranslations.value.clear(); // 新记录还没有译文，需要随后写回全部已完成译文
@@ -2283,6 +2294,20 @@ async function restoreLastSession() {
     activeSessionReady.value = true;
     await nextTick();
     await persistCurrentSession();
+    // A refresh must reconstruct both the EPUB reader and its durable local-agent run.
+    if (readerConfig.value?.documentUseLocalAgent && doc.value) {
+      try {
+        const project = await ensureDocumentWorkspace();
+        const activeRun = workspaceActiveRun.value;
+        if (project && activeRun && ['queued', 'running'].includes(activeRun.status)) {
+          void followWorkspaceRun(project, activeRun);
+        }
+        if (activeTab.value === 'trajectory') void startAgentTrajectoryPolling();
+      } catch (error) {
+        persistenceMessage.value = '阅读会话已恢复，但同步本机翻译运行状态失败：' +
+          (error instanceof Error ? error.message : String(error));
+      }
+    }
   } catch (error) {
     parseError.value = '恢复上次阅读失败：' +
       (error instanceof Error ? error.message : String(error));
@@ -2613,6 +2638,7 @@ async function loadFile(file: File) {
         viewMode: viewMode.value,
         literaryMode: literaryMode.value,
         currentPageIndex: currentPageIndex.value,
+        activeTab: activeTab.value,
       });
       activeSessionIndexedDbWritable = true;
       activeSessionReady.value = true;
