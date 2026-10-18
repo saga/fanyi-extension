@@ -1043,6 +1043,8 @@ async function cancelRun() {
 }
 
 async function autoAcceptReadyCandidates() {
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
   const run = activeRun.value;
   if (!run || !project.value || isRunning.value || Number(run.counts?.candidate || 0) <= 0) return;
   if (autoAcceptingRunId.value === run.runId) return;
@@ -1058,52 +1060,64 @@ async function autoAcceptReadyCandidates() {
   autoAcceptError.value = '';
   try {
     const succeeded = await acceptCandidates(undefined, true);
-    if (!succeeded && activeRun.value?.runId === runId && Number(activeRun.value.counts?.candidate || 0) > 0) {
+    if (isCurrent() && !succeeded && activeRun.value?.runId === runId && Number(activeRun.value.counts?.candidate || 0) > 0) {
       autoAcceptError.value = error.value || '保存接口未能确认候选已写入。请重试保存；原始模型结果仍保存在运行记录中。';
     }
   } finally {
-    if (autoAcceptingRunId.value === runId) autoAcceptingRunId.value = '';
+    if (isCurrent() && autoAcceptingRunId.value === runId) autoAcceptingRunId.value = '';
   }
 }
 
 async function applyStyleFinding(finding: any) {
   if (!project.value || !activeRun.value || !finding?.findingId) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
+  const runId = activeRun.value.runId as string;
   busy.value = true;
   error.value = '';
   message.value = '';
   try {
     const response = await api(
-      '/api/documents/projects/' + encodeURIComponent(project.value.projectId) +
-        '/runs/' + encodeURIComponent(activeRun.value.runId) + '/findings/' + encodeURIComponent(String(finding.findingId)),
+      '/api/documents/projects/' + encodeURIComponent(projectId) +
+        '/runs/' + encodeURIComponent(runId) + '/findings/' + encodeURIComponent(String(finding.findingId)),
       { method: 'POST', body: JSON.stringify({ action: 'apply' }) },
     );
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     activeRun.value = response.run;
     await emitWorkspaceSnapshot();
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     await refreshProjectWithoutRun();
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     message.value = '文风候选已作为人工译文保存，并同步到阅读器：' + finding.segmentId;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (isCurrent()) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    busy.value = false;
+    if (isCurrent()) busy.value = false;
   }
 }
 
 async function dismissStyleFinding(finding: any) {
   if (!project.value || !activeRun.value || !finding?.findingId) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
+  const runId = activeRun.value.runId as string;
   busy.value = true;
   error.value = '';
   try {
     const response = await api(
-      '/api/documents/projects/' + encodeURIComponent(project.value.projectId) +
-        '/runs/' + encodeURIComponent(activeRun.value.runId) + '/findings/' + encodeURIComponent(String(finding.findingId)),
+      '/api/documents/projects/' + encodeURIComponent(projectId) +
+        '/runs/' + encodeURIComponent(runId) + '/findings/' + encodeURIComponent(String(finding.findingId)),
       { method: 'POST', body: JSON.stringify({ action: 'dismiss' }) },
     );
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     activeRun.value = response.run;
     message.value = '已保留当前译文，并记录对文风建议的决定：' + finding.segmentId;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (isCurrent()) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    busy.value = false;
+    if (isCurrent()) busy.value = false;
   }
 }
 
