@@ -119,10 +119,14 @@
             <div class="settings-grid">
               <label class="setting-field">
                 <span>本任务模型覆盖（可选）</span>
-                <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].model"
-                  placeholder="留空继承上面的模型覆盖"
-                  @change="saveConfig('documentCodeBuddyTaskProfiles')" />
-                <small class="muted">填写 CodeBuddy SDK 可识别的模型 ID，不要加 workbuddy: 前缀。</small>
+                <select v-model="config.documentCodeBuddyTaskProfiles[task.key].model"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
+                  <option value="">留空继承上面的模型覆盖</option>
+                  <option v-for="model in codeBuddyModels" :key="model.id" :value="model.id">
+                    {{ model.id }}{{ model.credits != null ? '（' + model.credits + ' credits）' : '' }}
+                  </option>
+                </select>
+                <small class="muted">选择 CodeBuddy SDK 可识别的模型；列表来自本机服务 /api/codebuddy/models。</small>
               </label>
               <label class="setting-field">
                 <span>Fallback Model（可选）</span>
@@ -395,6 +399,7 @@ const configStatus = ref<'unknown' | 'ok' | 'fail'>('unknown');
 const configStatusDetail = ref('');
 const builtInTaskPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
 const builtInTaskUserPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
+const codeBuddyModels = ref<Array<{ id: string; credits?: number | null }>>([]);
 const promptPreviewLoading = ref(false);
 const promptPreviewError = ref('');
 
@@ -473,7 +478,10 @@ async function checkLocalService() {
       config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789',
     );
     localStatus.value = available ? 'ok' : 'fail';
-    if (available) await loadBuiltInTaskPrompts();
+    if (available) {
+      await loadBuiltInTaskPrompts();
+      await loadCodeBuddyModels();
+    }
     if (available && config.value.documentAutoSelectLocalAgent && !config.value.documentUseLocalAgent) {
       config.value.documentUseLocalAgent = true;
       config.value.documentUseServerTranslation = false;
@@ -516,6 +524,28 @@ async function loadBuiltInTaskPrompts() {
     promptPreviewError.value = error instanceof Error ? error.message : String(error);
   } finally {
     promptPreviewLoading.value = false;
+  }
+}
+
+async function loadCodeBuddyModels() {
+  try {
+    const url = new URL(config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789');
+    url.pathname = '/api/codebuddy/models';
+    url.search = '';
+    url.hash = '';
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        ...(config.value.documentLocalAgentToken
+          ? { Authorization: 'Bearer ' + config.value.documentLocalAgentToken }
+          : {}),
+      },
+    });
+    if (!response.ok) throw new Error('读取 CodeBuddy 模型列表失败（HTTP ' + response.status + '）');
+    const data = await response.json() as { data?: Array<{ id: string; credits?: number | null }> };
+    codeBuddyModels.value = Array.isArray(data.data) ? data.data.map((item) => ({ id: item.id, credits: item.credits ?? null })) : [];
+  } catch {
+    codeBuddyModels.value = [];
   }
 }
 
