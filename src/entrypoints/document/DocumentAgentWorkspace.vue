@@ -676,6 +676,7 @@ async function loadExistingProject() {
   } finally {
     restoringProject.value = false;
   }
+}
 
 async function refreshProject() {
   if (!project.value) return;
