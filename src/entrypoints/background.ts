@@ -393,7 +393,7 @@ export default defineBackground({
           return;
         }
 
-        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate, voiceContext, precedingSegments } = message;
+        const { jsonContent, sourceLang, targetLang, cacheKey: providedCacheKey, pageUrl, glossary, literaryContext, taskInstructions, forceRefresh, documentSystemPromptOverride, documentUserPromptTemplate, voiceContext, precedingSegments, codeBuddyTaskProfiles } = message;
         // A document may explicitly enter literary mode even when the global profile is technical.
         const translationMode: TranslationMode = message.translationMode === 'literary' || !!literaryContext
           ? 'literary'
@@ -435,6 +435,8 @@ export default defineBackground({
         // 必须与 cacheKey 用同一个值：否则 ja-source-natural 的译文会被写进 default 的
         // 缓存条目，后续同页面翻译命中脏缓存、文风来回跳。
         const promptStyle = message.promptStyle ?? config.promptStyle;
+        const translationProfileHash = config.useLocalAgent && codeBuddyTaskProfiles?.translation
+          ? String(simpleHash(JSON.stringify(codeBuddyTaskProfiles.translation))) : '';
 
         // 缓存 key 纳入 glossary + sitePrompt：改术语表/站点规则后不再命中旧脏缓存（分析报告 P0）。
         // glossary/sitePrompt 为空时 key 与改动前一致，旧缓存不无谓失效。
@@ -447,11 +449,12 @@ export default defineBackground({
               voiceContext: voiceContext ?? null,
               precedingSegments: (precedingSegments || []).slice(-4),
             })));
-        const cachePromptFingerprint = literaryContextHash
-          ? effectivePrompt + '|literary-context-v3:' + literaryContextHash
-          : effectivePrompt;
+        const cachePromptFingerprint = effectivePrompt +
+          (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : '') +
+          (translationProfileHash ? '|codebuddy-translation-v1:' + translationProfileHash : '');
         const cacheKey = providedCacheKey
-          ? providedCacheKey + '|mode:' + translationMode + (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : '')
+          ? providedCacheKey + '|mode:' + translationMode + (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : '') +
+            (translationProfileHash ? '|codebuddy-translation-v1:' + translationProfileHash : '')
           : generateTranslationCacheKey(
             jsonContent,
             sourceLang,
@@ -578,7 +581,7 @@ export default defineBackground({
               const translated = await service.translate(
                 jsonContent, sourceLang, targetLang, effectiveGlossary, effectivePrompt,
                 message.responseFormat,
-                message.documentSessionId || voiceContext !== undefined || !!documentSystemPromptOverride?.trim() || !!documentUserPromptTemplate?.trim() || !!taskInstructions?.trim()
+                message.documentSessionId || voiceContext !== undefined || !!documentSystemPromptOverride?.trim() || !!documentUserPromptTemplate?.trim() || !!taskInstructions?.trim() || codeBuddyTaskProfiles !== undefined
                   ? {
                       ...(message.documentSessionId ? { documentSessionId: message.documentSessionId } : {}),
                       sessionLane: message.documentSessionLane,
@@ -588,7 +591,9 @@ export default defineBackground({
                       promptStyle,
                       translationMode,
                       contextVersion: getDocumentPromptVersion(documentSystemPromptOverride, documentUserPromptTemplate) +
-                        (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : ''),
+                        (literaryContextHash ? '|literary-context-v3:' + literaryContextHash : '') +
+                        (translationProfileHash ? '|codebuddy-translation-v1:' + translationProfileHash : ''),
+                      taskProfiles: codeBuddyTaskProfiles,
                       systemPromptOverride: documentSystemPromptOverride,
                       userPromptTemplate: documentUserPromptTemplate,
                       ...(voiceContext !== undefined ? { voiceContext } : {}),
