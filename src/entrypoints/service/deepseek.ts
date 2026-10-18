@@ -334,6 +334,7 @@ export class DeepSeekTranslationService implements TranslationService {
         contextVersion: sessionContext.contextVersion || 'book-session-v4',
         systemPromptOverride: sessionContext.systemPromptOverride || '',
         userPromptTemplate: sessionContext.userPromptTemplate || '',
+        ...(sessionContext.taskProfiles ? { taskProfiles: sessionContext.taskProfiles } : {}),
       };
     }
 
