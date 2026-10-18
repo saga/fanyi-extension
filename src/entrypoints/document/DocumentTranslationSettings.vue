@@ -105,8 +105,8 @@
         <summary>按任务配置 CodeBuddy 思考、推理强度与 Prompt</summary>
         <p class="muted small">
           初译、准确性/术语审校、人物声音/文风审校、文学分析、全书预处理分别保存。
-          思考模式与 effort 使用 CodeBuddy SDK 正式选项；预算只在“指定预算”模式生效。
-          修改后用于下一次任务，不会改变已创建运行的配置快照。
+          思考模式、effort 和 fallback model 使用 CodeBuddy SDK 的 query() 正式选项；预算只在“指定预算”模式生效。
+          为确保参数生效，这些任务使用单次 query，而非复用 V2 Session；批量任务会有额外 CLI 启动开销，高 effort/大预算也会更慢。
         </p>
         <article v-for="task in codeBuddyTaskOptions" :key="task.key" class="task-profile-card">
           <div class="task-profile-heading">
