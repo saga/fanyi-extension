@@ -39,6 +39,8 @@ export interface TranslationSessionContext {
   systemPromptOverride?: string;
   /** Optional user-message template; {{CONTENT}} is replaced with the current batch JSON. */
   userPromptTemplate?: string;
+  /** Separate per-task CodeBuddy thinking/model/prompt settings forwarded only to the local Agent. */
+  taskProfiles?: unknown;
   /** 独立只读的角色声音上下文，放入 user message 而非 system prompt。 */
   voiceContext?: unknown;
   /** 前文文本单独传递，避免把结构化的 contextPath/voiceContext 混成原文。 */
