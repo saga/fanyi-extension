@@ -318,6 +318,7 @@ import {
   loadWorkspaceAcceptedTranslations,
   lookupWorkspaceProject,
   rememberWorkspaceProject,
+  resolveWorkspaceProject,
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
@@ -574,40 +575,71 @@ async function loadExistingProject() {
   restorationError.value = '';
   restorationProjectMissing.value = false;
   try {
-    const mapping = await lookupWorkspaceProject(projectInput());
-    if (!mapping.projectId) return;
+    const input = projectInput();
+    const mapping = await lookupWorkspaceProject(input);
+    let projectId = mapping.projectId;
+    let hasSourceChanged = mapping.sourceChanged;
+    let result: any = null;
 
-    const result = await api('/api/documents/projects/' + encodeURIComponent(mapping.projectId));
-    // 一旦服务确认项目存在，就立即保留项目句柄。后续 Prompt/译文同步失败不能把项目误判为不存在。
+    if (projectId) {
+      try {
+        result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+      } catch (e) {
+        // A stale extension map is recoverable only by resolving against the service catalog.
+        // Connection/auth errors must never be interpreted as a missing project.
+        if (!(e instanceof WorkspaceApiError) || e.status !== 404) throw e;
+        projectId = null;
+        hasSourceChanged = false;
+      }
+    }
+
+    if (!result) {
+      const resolution = await resolveWorkspaceProject(props.localAgentUrl, props.localAgentToken, input);
+      if (resolution.exactProject?.projectId) {
+        projectId = resolution.exactProject.projectId;
+        hasSourceChanged = false;
+        await rememberWorkspaceProject(input, projectId);
+      } else if (resolution.relatedProject?.projectId) {
+        projectId = resolution.relatedProject.projectId;
+        hasSourceChanged = true;
+      } else {
+        // No server-side match is a normal first-open case. Do not create until the user starts
+        // the workflow; importantly, don't re-upload stale local session data to "discover" it.
+        if (mapping.projectId) {
+          restorationProjectMissing.value = true;
+          restorationError.value = '原有关联的项目已不在本机服务中，服务目录也未找到同一原文版本。确认后可以新建项目；本地译文备份仍会保留。';
+        }
+        return;
+      }
+      result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+    }
+
+    // Once a project is found, preserve its handle immediately; later refresh failures must not
+    // make the component forget which durable project was discovered.
     project.value = result.project;
     emit('projectUpdated', project.value);
-    sourceChanged.value = mapping.sourceChanged;
+    sourceChanged.value = hasSourceChanged;
     verification.value = result.verification;
     runs.value = result.runs || [];
-    // 内容改变时必须由用户明确登记新来源版本，不能让旧译文映射到新原文。
+    // A related but non-identical source is never hydrated into the current reader.
     if (sourceChanged.value) return;
-    await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/prompts', {
-      method: 'POST', body: JSON.stringify(promptInput()),
-    });
-    await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, project.value.projectId, props.translations);
+
+    // Existing service projects are read-only during discovery. Do not push cached Prompt,
+    // accepted translations or literary-memory snapshots over the authoritative SQLite state.
     const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status)) || runs.value[0];
     if (active) await selectRun(active.runId);
     // A previous session may have ended after candidates were saved but before they were applied.
-    // Complete that final step automatically when restoring the project.
+    // Complete that server-side finalization step; it does not import extension-side state.
     await autoAcceptReadyCandidates();
     await emitWorkspaceSnapshot();
     loadSelectedTranslation();
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    // 按 status 判断，不匹配 message：404 的文案是中文说明，不含状态码。
-    if (!project.value && e instanceof WorkspaceApiError && e.status === 404) {
-      restorationProjectMissing.value = true;
-      restorationError.value = '找到本机项目关联记录，但本机 Agent 服务中已不存在该项目。确认旧项目无法恢复后，可以重建关联。';
-    } else if (project.value) {
-      error.value = '文档项目已找到，但恢复部分状态失败：' + detail + '。项目关联已保留，可点击“刷新状态”或重试。';
+    if (project.value) {
+      error.value = '文档项目已找到，但读取部分服务端状态失败：' + detail + '。项目关联已保留，可点击“刷新状态”或重试。';
     } else {
-      // 网络错误、鉴权错误等不能等同于“项目不存在”，否则会误导用户新建重复项目。
-      restorationError.value = '恢复本机文档项目失败：' + detail + '。系统不会自动新建项目，请检查本机 Agent 服务后重试。';
+      // Network/authentication errors are not equivalent to "not found"; never auto-create on them.
+      restorationError.value = '读取本机文档项目失败：' + detail + '。系统不会自动新建重复项目，请检查本机 Agent 服务后重试。';
     }
   } finally {
     restoringProject.value = false;
@@ -749,7 +781,7 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
       : { type: scope };
     const response = await api('/api/documents/projects/' + project.value.projectId + '/runs', {
       method: 'POST',
-      body: JSON.stringify({ scope: runScope, prompt: promptInput() }),
+      body: JSON.stringify({ scope: runScope }),
     });
     runEvents.value = [];
     eventCursor = 0;
