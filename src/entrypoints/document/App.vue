@@ -1066,6 +1066,8 @@ let ensureWorkspacePromise: Promise<any | null> | null = null;
 let suppressWorkspacePromptSync = false;
 /** Avoid creating a new service project before the existing browser/session snapshot has been compared. */
 let suppressWorkspaceAutoEnsure = false;
+/** Do not persist a half-hydrated local snapshot while authoritative server state is being applied. */
+let suppressSessionPersistence = false;
 /** Agent 候选在运行结束时自动采纳；此 Map 仅用于运行中的临时预览或保存失败时提示。 */
 const workspaceCandidateTranslations = ref(new Map<string, string>());
 const englishFontFamily = ref('Georgia');
@@ -2192,7 +2194,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
 }
 
 async function persistCurrentSession() {
-  if (!activeSessionReady.value || !doc.value) return;
+  if (suppressSessionPersistence || !activeSessionReady.value || !doc.value) return;
   const snapshot = getSnapshot();
   const delta = snapshot.translations.filter(([id, text]) =>
     persistedTranslations.value.get(id) !== text,
@@ -3599,45 +3601,51 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
 
   workspaceSourceChanged.value = false;
 
-  // Migrate legacy data once, and only when the service project itself has just been created.
-  // On an existing service project, cached translations, Prompt and literary memory are never
-  // pushed back during open/restore; the next block hydrates the extension from SQLite instead.
-  if (createdNewProject) {
-    await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
-    await workspaceApi(base, token,
-      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-      { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
-    );
-  }
-
-  await hydrateWorkspacePrompt(base, token, project.projectId);
-  const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
-  const currentMemory = await workspaceApi<{ current?: { memoryRevisionId?: string | null; memory?: unknown } }>(
-    base, token, memoryPath,
-  );
-  literaryMemory.value = sanitizeLiteraryMemory(currentMemory.current?.memory);
-
-  // Original bytes are a backup concern, not project-state authority. Upload only when the
-  // exact source project has no saved original file yet; this does not alter translations/runs.
-  if (!project.sourceFileSaved && loadedSourceFile.value) {
-    try {
-      await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
-    } catch (error) {
-      persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' +
-        (error instanceof Error ? error.message : String(error));
+  suppressSessionPersistence = true;
+  try {
+    // Migrate legacy data once, and only when the service project itself has just been created.
+    // On an existing service project, cached translations, Prompt and literary memory are never
+    // pushed back during open/restore; the next block hydrates the extension from SQLite instead.
+    if (createdNewProject) {
+      await importWorkspaceTranslations(base, token, project.projectId, state.value.translations);
+      await workspaceApi(base, token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+        { method: 'POST', body: JSON.stringify({ memory: literaryMemory.value }) },
+      );
     }
-  }
 
-  const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
-    base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
-  );
-  workspaceProject.value = refreshed.project;
-  workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
-    ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
-  const accepted = await loadWorkspaceAcceptedTranslations(
-    base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length,
-  );
-  await replaceCurrentTranslations(accepted);
+    await hydrateWorkspacePrompt(base, token, project.projectId);
+    const memoryPath = '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory';
+    const currentMemory = await workspaceApi<{ current?: { memoryRevisionId?: string | null; memory?: unknown } }>(
+      base, token, memoryPath,
+    );
+    literaryMemory.value = sanitizeLiteraryMemory(currentMemory.current?.memory);
+
+    // Original bytes are a backup concern, not project-state authority. Upload only when the
+    // exact source project has no saved original file yet; this does not alter translations/runs.
+    if (!project.sourceFileSaved && loadedSourceFile.value) {
+      try {
+        await backupWorkspaceSourceFile(base, token, project.projectId, loadedSourceFile.value);
+      } catch (error) {
+        persistenceMessage.value = 'workspace 已保存解析文本，但原始文件备份失败：' +
+          (error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    const refreshed = await workspaceApi<{ project: any; runs?: any[] }>(
+      base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId),
+    );
+    workspaceProject.value = refreshed.project;
+    workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
+      ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+    const accepted = await loadWorkspaceAcceptedTranslations(
+      base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length,
+    );
+    await replaceCurrentTranslations(accepted);
+  } finally {
+    suppressSessionPersistence = false;
+  }
+  await persistCurrentSession();
 
   // Project details, translations and memory are now hydrated from the service; only session UI
   // state is persisted locally. Long preprocessing remains conditional on the local-Agent setting.
