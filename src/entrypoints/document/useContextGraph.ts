@@ -240,7 +240,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
       if (translationAlreadyActive && shouldStart) {
         contextGraphState.value = {
           ...contextGraphState.value,
-          error: '当前项目已有翻译任务运行，服务会保护本轮上下文不被修改。翻译结束后再启动预处理。',
+          error: '当前项目有未完成的翻译运行（状态：' + (latestTranslationStatus || '未知') +
+            '），服务会保护本轮上下文不被预处理修改。请到 Agent 面板恢复或取消该运行后，再重新分析全书。',
         };
         return;
       }

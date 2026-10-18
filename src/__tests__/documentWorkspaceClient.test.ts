@@ -136,6 +136,31 @@ describe('workspaceApi 传输层失败', () => {
 
     expect(error.status).not.toBe(404);
   });
+
+  /**
+   * 回归背景：fetch 在连接被黑洞（浏览器代理接管、端口假活）时既不成功也不失败，
+   * Promise 永远悬着。没有超时的话用户点「翻译」只会看到「一点反应都没有」，
+   * 连错误文案都拿不到。
+   */
+  it('请求永久悬着时按超时报错，而不是一直没反应', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn((_url: string, init: any) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      })));
+
+      const pending = workspaceApi('http://127.0.0.1:8789', '', '/api/documents/projects/hang')
+        .catch((e: unknown) => e as WorkspaceApiError);
+      await vi.advanceTimersByTimeAsync(20_000);
+      const error = await pending;
+
+      expect(error).toBeInstanceOf(WorkspaceApiError);
+      expect(error.status).toBe(0);
+      expect(error.message).toContain('20 秒内没有响应');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('WorkspaceApiError 携带 HTTP 状态', () => {

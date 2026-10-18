@@ -157,6 +157,9 @@
           </button>
         </div>
         <p v-if="state.error" class="err-text small">{{ state.error }}</p>
+        <p v-else-if="translationBlockedByPreprocessing" class="err-text small">
+          {{ translationPreprocessingReadiness.message }}
+        </p>
       </section>
 
       <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->

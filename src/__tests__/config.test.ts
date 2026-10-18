@@ -13,7 +13,7 @@ vi.mock('@wxt-dev/storage', () => {
   };
 });
 
-import { getConfig, setConfig, resetConfig, hasApiKey } from '../entrypoints/utils/config';
+import { getConfig, setConfig, resetConfig, hasApiKey, DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES } from '../entrypoints/utils/config';
 import type { Config } from '../entrypoints/utils/config';
 
 const defaultConfig: Config = {
@@ -64,6 +64,8 @@ const defaultConfig: Config = {
   documentContextBudgetChars: 18000,
   documentMaxModelAttempts: 2,
   documentLiteraryReviewEnabled: true,
+  // 任务级模型/思考配置整块来自默认表；这里只引用，不复制一份容易过期的手写副本。
+  documentCodeBuddyTaskProfiles: DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES,
 };
 
 describe('config', () => {

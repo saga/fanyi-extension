@@ -151,6 +151,19 @@ function describeNetworkFailure(base: string, error: unknown): string {
   return '无法连接本机服务 ' + base + '：服务可能未启动或正在重启，请确认服务运行后重试' + detail;
 }
 
+/**
+ * 本机服务调用超时。
+ *
+ * fetch 在连接被黑洞（代理接管、端口假活）时既不成功也不失败，Promise 永远悬着；
+ * 没有超时的话点击按钮只会表现为「一点反应都没有」，连错误文案都没有。
+ */
+const WORKSPACE_REQUEST_TIMEOUT_MS = 20_000;
+
+function describeTimeoutFailure(base: string): string {
+  return '本机服务 ' + base + ' 在 ' + Math.round(WORKSPACE_REQUEST_TIMEOUT_MS / 1000) +
+    ' 秒内没有响应：请求可能被浏览器代理拦截，或服务进程卡住。请确认服务运行后重试。';
+}
+
 export async function workspaceApi<T = any>(
   baseUrl: string,
   token: string,
@@ -162,9 +175,27 @@ export async function workspaceApi<T = any>(
   const headers = new Headers(init.headers || {});
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', 'Bearer ' + token);
+  // 调用方自带 signal 时以它为准，但仍叠加本服务的超时，避免任何调用点无限等待。
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, WORKSPACE_REQUEST_TIMEOUT_MS);
+  if (init.signal) {
+    if (init.signal.aborted) controller.abort();
+    else init.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
   // status 0 表示传输层失败（没有 HTTP 响应），不会和 404/401 这些真实状态码混淆。
-  const response = await fetch(url.toString(), { ...init, headers })
-    .catch((error: unknown) => { throw new WorkspaceApiError(describeNetworkFailure(base, error), 0); });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), { ...init, headers, signal: controller.signal })
+      .catch((error: unknown) => {
+        throw new WorkspaceApiError(timedOut ? describeTimeoutFailure(base) : describeNetworkFailure(base, error), 0);
+      });
+  } finally {
+    clearTimeout(timer);
+  }
   const payload = await response.json().catch(() => ({})) as any;
   if (!response.ok) throw new WorkspaceApiError(describeWorkspaceFailure(payload, response.status), response.status);
   return payload as T;
