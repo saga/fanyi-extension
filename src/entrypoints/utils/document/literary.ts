@@ -60,6 +60,8 @@ export interface CharacterVoiceProfile {
   traits?: string[];
   aliases: string[];
   status: 'candidate' | 'confirmed' | 'rejected';
+  /** 有证据的画像默认可作为弱提示；用户可停用，不需要逐个确认才能用于翻译。 */
+  useForTranslation: boolean;
   /** null 表示未评估；数值仅表示模型自报，不是校准后的概率。 */
   confidence: number | null;
   confidenceSource?: CharacterVoiceConfidenceSource;
@@ -401,7 +403,6 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const characterId = safeText(value.characterId, 100) || stableCharacterId(canonicalSourceName);
     // Legacy Context Graph profiles used a hard-coded 0.55 and may have been mixed with other scores.
     // Unless explicitly marked as model-reported by the new contract, their score is unassessed.
-    const isContextGraphProfile = characterId.startsWith('context-graph-');
     const voice = value.voiceCore && typeof value.voiceCore === 'object' && !Array.isArray(value.voiceCore) ? value.voiceCore : {};
     const strings = (key: string, count = 6) => safeList(voice[key], count, 180);
     const evidence: CharacterVoiceEvidence[] = [];
@@ -416,8 +417,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
           ? ev.dimension as LiteraryVoiceDimension : null;
         if (!segmentId || !sourceQuote || !observation || !dimension) continue;
         const evidenceConfidence = safeConfidence(ev.confidence);
-        const confidenceSource = evidenceConfidence !== null &&
-          (ev.confidenceSource === 'model_self_report' || !isContextGraphProfile)
+        // 未带来源标记的历史值可能是默认值（旧 0.55 / 0.4），不能冒充模型自报。
+        const confidenceSource = evidenceConfidence !== null && ev.confidenceSource === 'model_self_report'
           ? 'model_self_report' as const
           : undefined;
         evidence.push({
@@ -440,17 +441,19 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     // 即便输入声称 confirmed，没有可定位的原文证据也只能降级为 candidate。
     const status = profileStatus === 'confirmed' && evidence.length ? 'confirmed' : profileStatus === 'rejected' ? 'rejected' : 'candidate';
     const profileConfidence = safeConfidence(value.confidence);
-    const confidenceSource = profileConfidence !== null &&
-      (value.confidenceSource === 'model_self_report' || !isContextGraphProfile)
+    const confidenceSource = profileConfidence !== null && value.confidenceSource === 'model_self_report'
       ? 'model_self_report' as const
       : undefined;
+    const profileStatus = reviewState(value.status, ['candidate', 'confirmed', 'rejected']) as CharacterVoiceProfile['status'];
     const profile: CharacterVoiceProfile = {
       characterId, canonicalSourceName,
       ...(safeText(value.targetName, 120) ? { targetName: safeText(value.targetName, 120) } : {}),
       ...(safeText(value.role, 360) ? { role: safeText(value.role, 360) } : {}),
       ...(safeList(value.traits, 10, 160).length ? { traits: safeList(value.traits, 10, 160) } : {}),
       aliases: safeList(value.aliases, 12, 80),
-      status, confidence: confidenceSource ? profileConfidence : null,
+      status: profileStatus,
+      useForTranslation: value.useForTranslation !== false && profileStatus !== 'rejected',
+      confidence: confidenceSource ? profileConfidence : null,
       ...(confidenceSource ? { confidenceSource } : {}),
       voiceCore: {
         ...(safeText(voice.register, 180) ? { register: safeText(voice.register, 180) } : {}),
