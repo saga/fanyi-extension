@@ -2339,13 +2339,6 @@ async function restoreLastSession() {
     suppressWorkspacePromptSync = false;
     suppressWorkspaceAutoEnsure = false;
     parsing.value = false;
-    if (doc.value && readerConfig.value?.documentUseLocalAgent === true &&
-        effectiveDocumentTranslationMode.value === 'literary') {
-      void ensureDocumentWorkspace().catch((error) => {
-        persistenceMessage.value = '无法准备本机文学翻译项目：' +
-          (error instanceof Error ? error.message : String(error));
-      });
-    }
   }
 }
 
