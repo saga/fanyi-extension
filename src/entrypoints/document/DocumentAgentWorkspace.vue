@@ -809,37 +809,52 @@ async function uploadCurrentSourceFile() {
 
 async function updateSourceRevision() {
   if (!project.value || !sourceChanged.value) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
+  const input = projectInput();
+  const sourceFileAtStart = props.sourceFile;
+  const baseUrl = props.localAgentUrl;
+  const token = props.localAgentToken;
   busy.value = true;
   error.value = '';
   message.value = '';
   try {
-    const result = await api('/api/documents/projects/' + encodeURIComponent(project.value.projectId) + '/source', {
+    const result = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/source', {
       method: 'POST',
       body: JSON.stringify({
-        title: props.title,
-        sourceFileName: props.sourceFileName,
-        format: props.format,
-        segments: props.segments,
+        title: input.title,
+        sourceFileName: input.sourceFileName,
+        format: input.format,
+        segments: input.segments,
       }),
     });
-    project.value = result.project;
-    if (props.sourceFile) {
+    // Keep the association tied to the captured source, even if the user has since switched books.
+    await rememberWorkspaceProject(input, projectId);
+    if (sourceFileAtStart) {
       try {
-        await uploadCurrentSourceFile();
+        await backupWorkspaceSourceFile(baseUrl, token, projectId, sourceFileAtStart);
       } catch (uploadError) {
-        message.value = '新来源片段已保存，但原始文件备份失败：' + (uploadError instanceof Error ? uploadError.message : String(uploadError));
+        if (isCurrent()) {
+          message.value = '新来源片段已保存，但原始文件备份失败：' +
+            (uploadError instanceof Error ? uploadError.message : String(uploadError));
+        }
       }
     }
-    await rememberWorkspaceProject(projectInput(), project.value.projectId);
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
+
+    project.value = result.project;
     sourceChanged.value = false;
     await refreshProject();
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     emit('projectUpdated', project.value, false);
     await emitWorkspaceSnapshot();
+    if (!isCurrent()) return;
     message.value = (message.value ? message.value + ' ' : '') + '新来源版本已保存；未变化片段保留有效译文，变化片段等待重译。';
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (isCurrent()) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    busy.value = false;
+    if (isCurrent()) busy.value = false;
   }
 }
 
