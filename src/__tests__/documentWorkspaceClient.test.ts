@@ -12,7 +12,7 @@ vi.mock('@wxt-dev/storage', () => ({
   storage: { getItem: vi.fn(async () => null), setItem: vi.fn(async () => {}) },
 }));
 
-import { workspaceApi, WorkspaceApiError } from '../entrypoints/document/documentWorkspaceClient';
+import { resolveWorkspaceProject, workspaceApi, WorkspaceApiError } from '../entrypoints/document/documentWorkspaceClient';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -26,6 +26,42 @@ function respond(status: number, body: unknown) {
     json: async () => body,
   } as unknown as Response;
 }
+
+describe('resolveWorkspaceProject', () => {
+  it('queries the service catalog with the parsed source and returns authoritative matches', async () => {
+    const input = {
+      title: 'Example Book',
+      format: 'epub',
+      sourceFileName: 'example.epub',
+      segments: [{ id: 'p1', text: 'The door was open.' }],
+    };
+    const resolution = {
+      exactProject: { projectId: 'server-project', sourceFingerprint: 'sha256:source' },
+      relatedProject: null,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(respond(200, resolution));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(resolveWorkspaceProject('http://127.0.0.1:8789', 'secret', input))
+      .resolves.toEqual(resolution);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://127.0.0.1:8789/api/documents/projects/resolve');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
+    expect(JSON.parse(String(init.body))).toEqual(input);
+  });
+
+  it('propagates service unavailability instead of interpreting it as an empty catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respond(503, { error: 'service unavailable' })));
+
+    await expect(resolveWorkspaceProject('http://127.0.0.1:8789', '', {
+      title: 'Example Book', format: 'epub', sourceFileName: 'example.epub',
+      segments: [{ id: 'p1', text: 'The door was open.' }],
+    })).rejects.toMatchObject({ status: 503 });
+  });
+});
 
 describe('workspaceApi 错误文案', () => {
   it('嵌套 error.message 原样呈现（401 token 错误）', async () => {
