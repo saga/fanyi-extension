@@ -122,7 +122,7 @@
                 <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].model"
                   placeholder="留空继承上面的模型覆盖"
                   @change="saveConfig('documentCodeBuddyTaskProfiles')" />
-                <small class="muted">填写 CodeBuddy 模型 ID（如 hy3 或 deepseek-v4-pro），不要加 workbuddy: 前缀。</small>
+                <small class="muted">填写 CodeBuddy SDK 可识别的模型 ID，不要加 workbuddy: 前缀。</small>
               </label>
               <label class="setting-field">
                 <span>Fallback Model（可选）</span>
@@ -185,6 +185,13 @@
           <details v-else class="built-in-prompt-preview">
             <summary>查看服务端实际使用的内置 System Prompt（只读）</summary>
             <pre v-if="builtInTaskPrompts[task.key]">{{ builtInTaskPrompts[task.key] }}</pre>
+            <p v-else-if="promptPreviewLoading" class="muted small">正在读取内置提示词…</p>
+            <p v-else-if="promptPreviewError" class="muted small">{{ promptPreviewError }}</p>
+            <p v-else class="muted small">请先启动并连接本机 Agent 服务，再读取内置提示词。</p>
+          </details>
+          <details v-if="task.key !== 'translation'" class="built-in-prompt-preview">
+            <summary>查看服务端内置 User Prompt / 输入结构（只读示例）</summary>
+            <pre v-if="builtInTaskUserPrompts[task.key]">{{ builtInTaskUserPrompts[task.key] }}</pre>
             <p v-else-if="promptPreviewLoading" class="muted small">正在读取内置提示词…</p>
             <p v-else-if="promptPreviewError" class="muted small">{{ promptPreviewError }}</p>
             <p v-else class="muted small">请先启动并连接本机 Agent 服务，再读取内置提示词。</p>
@@ -387,6 +394,7 @@ const localStatus = ref<'unknown' | 'ok' | 'fail'>('unknown');
 const configStatus = ref<'unknown' | 'ok' | 'fail'>('unknown');
 const configStatusDetail = ref('');
 const builtInTaskPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
+const builtInTaskUserPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
 const promptPreviewLoading = ref(false);
 const promptPreviewError = ref('');
 
@@ -482,6 +490,7 @@ async function loadBuiltInTaskPrompts() {
   promptPreviewLoading.value = true;
   promptPreviewError.value = '';
   builtInTaskPrompts.value = {};
+  builtInTaskUserPrompts.value = {};
   try {
     const url = new URL(config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     url.pathname = '/api/config/task-prompts';
@@ -496,8 +505,13 @@ async function loadBuiltInTaskPrompts() {
       },
     });
     if (!response.ok) throw new Error('读取内置 Prompt 失败（HTTP ' + response.status + '）');
-    const data = await response.json() as { prompts?: Partial<Record<DocumentCodeBuddyTaskKey, string>> };
+    const data = await response.json() as {
+      prompts?: Partial<Record<DocumentCodeBuddyTaskKey, string>>;
+      userPromptTemplates?: Partial<Record<DocumentCodeBuddyTaskKey, string>>;
+    };
     builtInTaskPrompts.value = data.prompts && typeof data.prompts === 'object' ? data.prompts : {};
+    builtInTaskUserPrompts.value = data.userPromptTemplates && typeof data.userPromptTemplates === 'object'
+      ? data.userPromptTemplates : {};
   } catch (error) {
     promptPreviewError.value = error instanceof Error ? error.message : String(error);
   } finally {
