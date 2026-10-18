@@ -3542,55 +3542,65 @@ async function ensureDocumentWorkspaceInternal(createIfMissing = true): Promise<
   const token = config.documentLocalAgentToken || '';
   const input = workspaceInput();
 
-  // The extension mapping is only a lookup optimization. If it is missing or stale, ask the
-  // service catalog to resolve the current source fingerprint before considering project creation.
+  // The extension map is only a hint. Always ask the service to compare the current parsed
+  // source against its authoritative fingerprint, even when a local mapping exists. The project
+  // might have been updated from another UI since this extension snapshot was saved.
   const mapping = await lookupWorkspaceProject(input);
-  let project: any = null;
-  let projectDetails: { project: any; runs?: any[] } | null = null;
+  let mappedProject: any = null;
+  let mappedDetails: { project: any; runs?: any[] } | null = null;
   if (mapping.projectId) {
     try {
-      projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
+      mappedDetails = await workspaceApi<{ project: any; runs?: any[] }>(
         base, token, '/api/documents/projects/' + encodeURIComponent(mapping.projectId),
       );
-      project = projectDetails.project;
+      mappedProject = mappedDetails.project;
     } catch (error) {
-      // Only a definitive 404 allows recovery through the service catalog. Network/auth failures
-      // must not be treated as a missing project, otherwise duplicate projects can be created.
+      // Only a definitive 404 permits discovery recovery. Network/auth failures must preserve the
+      // local backup and must never be reinterpreted as a nonexistent project.
       if (!(error instanceof WorkspaceApiError) || error.status !== 404) throw error;
     }
   }
 
-  if (project && mapping.sourceChanged) {
-    workspaceProject.value = project;
-    workspaceActiveRun.value = (projectDetails?.runs || []).find((run) =>
-      ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
-    workspaceSourceChanged.value = true;
-    persistenceMessage.value = '同名文档的原文内容已变化。请切换到“翻译 Agent”，明确选择导入新来源版本或另建项目后再继续翻译。';
-    activeTab.value = 'agent';
-    return null;
-  }
-
-  if (!project) {
-    const resolution = await resolveWorkspaceProject(base, token, input);
-    if (resolution.exactProject?.projectId) {
+  // Resolve on every open/restore. If a mapped project still exists but no longer has the exact
+  // current source fingerprint, it is a source-change candidate, not a valid translation source.
+  const resolution = await resolveWorkspaceProject(base, token, input);
+  let project: any = null;
+  let projectDetails: { project: any; runs?: any[] } | null = null;
+  let sourceChanged = false;
+  if (resolution.exactProject?.projectId) {
+    // Preserve an explicit project choice when two projects contain the same source revision.
+    // Otherwise follow the service's exact-source result and repair the local mapping.
+    if (mappedProject &&
+        mappedProject.sourceFingerprint === resolution.exactProject.sourceFingerprint) {
+      project = mappedProject;
+      projectDetails = mappedDetails;
+    } else {
       projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
         base, token, '/api/documents/projects/' + encodeURIComponent(resolution.exactProject.projectId),
       );
       project = projectDetails.project;
-      await rememberWorkspaceProject(input, project.projectId);
-    } else if (resolution.relatedProject?.projectId) {
-      projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
-        base, token, '/api/documents/projects/' + encodeURIComponent(resolution.relatedProject.projectId),
-      );
-      project = projectDetails.project;
-      workspaceProject.value = project;
-      workspaceActiveRun.value = (projectDetails.runs || []).find((run) =>
-        ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
-      workspaceSourceChanged.value = true;
-      persistenceMessage.value = '已在本机服务中找到同名/同文件文档，但原文指纹不同。请在“翻译 Agent”中选择更新来源版本或另建项目；不会把旧译文套用到新原文。';
-      activeTab.value = 'agent';
-      return null;
     }
+    if (mapping.projectId !== project.projectId) await rememberWorkspaceProject(input, project.projectId);
+  } else if (mappedProject) {
+    project = mappedProject;
+    projectDetails = mappedDetails;
+    sourceChanged = true;
+  } else if (resolution.relatedProject?.projectId) {
+    projectDetails = await workspaceApi<{ project: any; runs?: any[] }>(
+      base, token, '/api/documents/projects/' + encodeURIComponent(resolution.relatedProject.projectId),
+    );
+    project = projectDetails.project;
+    sourceChanged = true;
+  }
+
+  if (sourceChanged && project) {
+    workspaceProject.value = project;
+    workspaceActiveRun.value = (projectDetails?.runs || []).find((run) =>
+      ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+    workspaceSourceChanged.value = true;
+    persistenceMessage.value = '本机服务中存在关联文档，但当前原文指纹与其保存的来源版本不同。请选择更新来源版本或另建项目；旧译文不会自动套用。';
+    if (config.documentUseLocalAgent) activeTab.value = 'agent';
+    return null;
   }
 
   if (!project && !createIfMissing) return null;
