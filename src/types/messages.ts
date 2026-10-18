@@ -89,6 +89,8 @@ export interface TranslateChunkMessage {
   precedingSegments?: Array<{ id: string; text: string; contextPath?: string }>;
   /** 稳定的文档指纹；仅传给本机 Agent，用于隔离不同文档的 SDK Session。 */
   documentSessionId?: string;
+  /** Separate model/thinking/effort profile for each CodeBuddy document task. */
+  codeBuddyTaskProfiles?: Config['documentCodeBuddyTaskProfiles'];
   /** 文档翻译的并行通道；文学书籍固定使用 book，技术文档使用有限的 lane-*。 */
   documentSessionLane?: string;
   /** 强制本批重新调用模型；绕过扩展与本机 SQLite 的翻译缓存，结果仍回写缓存。 */
