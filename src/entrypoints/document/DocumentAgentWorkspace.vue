@@ -888,27 +888,35 @@ async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
 
 async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
   if (sourceChanged.value) { error.value = '请先确认是否导入新的来源版本。'; return; }
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
   busy.value = true; error.value = ''; message.value = '';
   try {
     if (!project.value) await createProject();
-    if (!project.value) return;
+    if (!isCurrent() || !project.value) return;
     if (!(await verifyPreprocessingBeforeTranslation())) return;
+    if (!isCurrent() || !project.value) return;
+    const projectId = project.value.projectId as string;
     const runScope = scope === 'visible'
       ? { type: 'ids', ids: props.visibleSegments.map((segment) => segment.id) }
       : { type: scope };
-    const response = await api('/api/documents/projects/' + project.value.projectId + '/runs', {
+    const response = await api('/api/documents/projects/' + projectId + '/runs', {
       method: 'POST',
       body: JSON.stringify({ scope: runScope }),
     });
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     runEvents.value = [];
     eventCursor = 0;
     activeRun.value = response.run;
     message.value = response.started ? '翻译 Agent 已启动；进度和模型调用结果会持久化到项目数据库。' : '当前范围没有需要处理的片段。';
     await refreshProject();
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     if (isRunning.value) schedulePoll(activeRun.value.runId);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-  } finally { busy.value = false; }
+    if (isCurrent()) error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    if (isCurrent()) busy.value = false;
+  }
 }
 
 async function selectRun(runId: string) {
@@ -968,31 +976,42 @@ async function refreshProjectWithoutRun() {
 
 async function resumeRun() {
   if (!activeRun.value || !project.value) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
+  const runId = activeRun.value.runId as string;
   busy.value = true; error.value = '';
   try {
-    if (!(await verifyPreprocessingBeforeTranslation())) return;
-    const response = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + activeRun.value.runId + '/resume', {
+    if (!(await verifyPreprocessingBeforeTranslation()) || !isCurrent() || project.value?.projectId !== projectId) return;
+    const response = await api('/api/documents/projects/' + projectId + '/runs/' + runId + '/resume', {
       method: 'POST', body: '{}',
     });
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     activeRun.value = response.run;
     if (['queued', 'running'].includes(activeRun.value.status)) schedulePoll(activeRun.value.runId);
-  } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
-  finally { busy.value = false; }
+  } catch (e) { if (isCurrent()) error.value = e instanceof Error ? e.message : String(e); }
+  finally { if (isCurrent()) busy.value = false; }
 }
 
 async function cancelRun() {
   if (!activeRun.value || !project.value) return;
+  const generation = workspaceSourceGeneration;
+  const isCurrent = () => isCurrentWorkspaceGeneration(generation);
+  const projectId = project.value.projectId as string;
+  const runId = activeRun.value.runId as string;
   busy.value = true; error.value = '';
   try {
-    const response = await api('/api/documents/projects/' + project.value.projectId + '/runs/' + activeRun.value.runId + '/cancel', {
+    const response = await api('/api/documents/projects/' + projectId + '/runs/' + runId + '/cancel', {
       method: 'POST', body: '{}',
     });
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     activeRun.value = response.run;
     await refreshRunEvents(activeRun.value.runId);
+    if (!isCurrent()) return;
     message.value = '已请求停止；已持久化的候选不会删除。';
     if (pollTimer) clearTimeout(pollTimer);
-  } catch (e) { error.value = e instanceof Error ? e.message : String(e); }
-  finally { busy.value = false; }
+  } catch (e) { if (isCurrent()) error.value = e instanceof Error ? e.message : String(e); }
+  finally { if (isCurrent()) busy.value = false; }
 }
 
 async function autoAcceptReadyCandidates() {
