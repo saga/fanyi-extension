@@ -3318,7 +3318,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
 
   // Context Graph already persisted evidenced relationship edges, but the reader memory bridge
   // previously copied only nodes. Bridge those edges into the visible relationship list as well.
-  const graphNodesById = new Map(nodes.map((node: any) => [String(node?.id || ''), node]));
+  const graphNodesById = new Map(nodes.map((node: any) => [String(node?.id || ''), node] as [string, any]));
   const canonicalPersonName = (node: any): string => {
     const name = typeof node?.name === 'string' ? node.name.trim() : '';
     const nodeNames = new Set([name, ...(Array.isArray(node?.attributes?.aliases) ? node.attributes.aliases : [])]
