@@ -3217,6 +3217,7 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
       ...(role ? { role } : {}),
       ...(traits.length ? { traits } : {}),
       status: 'candidate' as const,
+      useForTranslation: true,
       confidence: null,
       voiceCore: voices.length ? { register: observation } : {},
       contrastRules: [],
@@ -3276,6 +3277,91 @@ function mergeContextGraphEntitySuggestions(graph: any): LiteraryBookMemory {
     };
     for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existingVoices.splice(index, 1);
   }
+  // Use one canonical person identity across the entity glossary and the voice profile.
+  // Name, aliases and translation edits in the glossary are therefore reflected in the profile.
+  const sameName = (a: unknown, b: unknown) => normalizeName(a) === normalizeName(b);
+  for (const profile of existingVoices) {
+    const profileNames = new Set([profile.canonicalSourceName, ...(profile.aliases || [])].map(normalizeName).filter(Boolean));
+    let entity = existing.find((item) =>
+      item.kind === 'person' &&
+      [item.source, ...(item.aliases || [])].map(normalizeName).some((name) => profileNames.has(name)),
+    );
+    if (!entity && profile.targetName && profile.evidence.length) {
+      const evidenceRefs = profile.evidence.slice(0, 8).map((item) => ({
+        segmentId: item.segmentId, sourceQuote: item.sourceQuote,
+      }));
+      entity = {
+        source: profile.canonicalSourceName, target: profile.targetName, kind: 'person',
+        aliases: profile.aliases.slice(0, 12),
+        evidence: profile.evidence[0]?.sourceQuote || '',
+        ...(evidenceRefs.length ? { evidenceRefs } : {}),
+        reviewStatus: evidenceRefs.length ? 'confirmed' : 'suggested',
+      };
+      existing.push(entity);
+    }
+    if (!entity) continue;
+    const canonicalSource = entity.source.trim() || profile.canonicalSourceName;
+    const aliases = Array.from(new Set([
+      ...(entity.aliases || []),
+      ...(profile.aliases || []),
+      ...(profile.canonicalSourceName && !sameName(profile.canonicalSourceName, canonicalSource) ? [profile.canonicalSourceName] : []),
+    ].map((name) => String(name || '').trim()).filter((name) => name && !sameName(name, canonicalSource)))).slice(0, 12);
+    entity.aliases = aliases;
+    profile.canonicalSourceName = canonicalSource;
+    profile.aliases = aliases;
+    if (entity.target.trim()) profile.targetName = entity.target.trim();
+    else if (!profile.targetName) delete profile.targetName;
+    else entity.target = profile.targetName;
+  }
+
+  // Context Graph already persisted evidenced relationship edges, but the reader memory bridge
+  // previously copied only nodes. Bridge those edges into the visible relationship list as well.
+  const graphNodesById = new Map(nodes.map((node: any) => [String(node?.id || ''), node]));
+  const relationshipCandidates: LiteraryRelationship[] = (Array.isArray(graph?.edges) ? graph.edges : []).flatMap((edge: any) => {
+    if (!edge || edge.status === 'rejected') return [];
+    const fromNode = graphNodesById.get(String(edge.sourceNodeId || '')) as any;
+    const toNode = graphNodesById.get(String(edge.targetNodeId || '')) as any;
+    const subject = typeof fromNode?.name === 'string' ? fromNode.name.trim() : '';
+    const object = typeof toNode?.name === 'string' ? toNode.name.trim() : '';
+    const attributes = edge.attributes && typeof edge.attributes === 'object' ? edge.attributes : {};
+    const predicate = typeof attributes.description === 'string' && attributes.description.trim()
+      ? attributes.description.trim()
+      : typeof edge.kind === 'string' ? edge.kind.trim() : '';
+    const evidenceRows = Array.isArray(edge.evidence) ? edge.evidence.filter((item: any) =>
+      typeof item?.segmentId === 'string' && item.segmentId.trim() &&
+      typeof item?.quote === 'string' && item.quote.trim()).slice(0, 8) : [];
+    if (!subject || !predicate || !object || !evidenceRows.length) return [];
+    return [{
+      subject, predicate, object,
+      evidence: evidenceRows[0].quote.slice(0, 240),
+      evidenceRefs: evidenceRows.map((item: any) => ({
+        segmentId: item.segmentId, sourceQuote: item.quote.slice(0, 240),
+      })),
+      reviewStatus: 'suggested' as const,
+    }];
+  });
+  const relationshipKey = (relation: LiteraryRelationship) =>
+    [relation.subject, relation.predicate, relation.object].map(normalizeName).join('|');
+  for (const candidate of relationshipCandidates) {
+    const key = relationshipKey(candidate);
+    const index = next.relationships.findIndex((relation) => relationshipKey(relation) === key);
+    if (index < 0) {
+      next.relationships.push(candidate);
+      continue;
+    }
+    const prior = next.relationships[index]!;
+    const evidenceRefs = [...(prior.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
+      .filter((item, i, all) => all.findIndex((other) =>
+        other.segmentId === item.segmentId && normalizeName(other.sourceQuote) === normalizeName(item.sourceQuote)) === i)
+      .slice(0, 8);
+    next.relationships[index] = {
+      ...prior,
+      evidence: prior.evidence || candidate.evidence,
+      ...(evidenceRefs.length ? { evidenceRefs } : {}),
+      reviewStatus: prior.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
+    };
+  }
+
   next.entities = existing.slice(0, 120);
   next.characterVoices = existingVoices.slice(0, 80);
   const currentStyle = next.styleGuide || {};
