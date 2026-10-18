@@ -998,6 +998,7 @@
         :local-agent-url="readerConfig?.documentLocalAgentUrl || 'http://127.0.0.1:8789'"
         :local-agent-model="readerConfig?.documentLocalAgentModel || 'auto'"
         :local-agent-token="readerConfig?.documentLocalAgentToken || ''"
+        :code-buddy-task-profiles="readerConfig?.documentCodeBuddyTaskProfiles"
         :system-prompt="documentSystemPromptEditor || builtInDocumentSystemPrompt"
         :user-prompt-template="documentUserPromptEditor || BUILT_IN_USER_PROMPT_TEMPLATE"
         :literary-memory="literaryMemory"
@@ -2287,6 +2288,7 @@ async function buildTranslationOptions() {
     localAgentUrl: config.documentLocalAgentUrl,
     localAgentModel: config.documentLocalAgentModel,
     localAgentToken: config.documentLocalAgentToken,
+    codeBuddyTaskProfiles: config.documentCodeBuddyTaskProfiles,
     // Global literary profile enables entity/style memory for any structured document;
     // the EPUB/PDF checkbox remains an opt-in for users on the technical profile.
     literaryMode: effectiveDocumentTranslationMode.value === 'literary',
@@ -2335,6 +2337,7 @@ function workspacePromptInput(includeLiteraryMemory = false) {
     targetLang: targetLang.value,
     provider: config?.documentLocalAgentProvider || 'workbuddy',
     model: config?.documentLocalAgentModel || 'auto',
+    taskProfiles: config?.documentCodeBuddyTaskProfiles,
     translationMode: effectiveDocumentTranslationMode.value as 'technical' | 'literary',
     literaryReview: effectiveDocumentTranslationMode.value === 'literary' && literaryReview.value,
     glossary: glossary.value,
