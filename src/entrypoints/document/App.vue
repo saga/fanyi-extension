@@ -2456,7 +2456,7 @@ function rememberEntitySource(entity: LiteraryEntity) {
 }
 
 function syncEntityMappingToVoiceProfiles(entity: LiteraryEntity, previousSource = '') {
-  const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/[\\s._'’\\-]+/g, ' ').trim();
+  const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
   const canonicalSource = entity.source.trim();
   const aliases = Array.from(new Set([
     ...(entity.aliases || []),
