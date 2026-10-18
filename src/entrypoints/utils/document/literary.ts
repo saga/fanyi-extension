@@ -38,12 +38,16 @@ export type LiteraryVoiceDimension =
   | 'register' | 'syntax_rhythm' | 'lexicon' | 'discourse'
   | 'stance' | 'humor_irony' | 'disfluency' | 'relationship' | 'role_traits';
 
+export type CharacterVoiceConfidenceSource = 'model_self_report';
+
 export interface CharacterVoiceEvidence {
   segmentId: string;
   sourceQuote: string;
   dimension: LiteraryVoiceDimension;
   observation: string;
-  confidence: number;
+  /** null 表示未评估；数值仅表示模型自报，不是校准后的概率。 */
+  confidence: number | null;
+  confidenceSource?: CharacterVoiceConfidenceSource;
 }
 export interface CharacterVoiceProfile {
   /** 同一本书内稳定；以 source name 的规范化 ID 为后备，不因目标译名变更而变化。 */
@@ -56,7 +60,9 @@ export interface CharacterVoiceProfile {
   traits?: string[];
   aliases: string[];
   status: 'candidate' | 'confirmed' | 'rejected';
-  confidence: number;
+  /** null 表示未评估；数值仅表示模型自报，不是校准后的概率。 */
+  confidence: number | null;
+  confidenceSource?: CharacterVoiceConfidenceSource;
   voiceCore: {
     register?: string;
     syntaxRhythm?: string[];
@@ -174,8 +180,24 @@ function safeList(value: unknown, maxItems: number, maxText: number): string[] {
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(value.map((item) => safeText(item, maxText)).filter(Boolean))).slice(0, maxItems);
 }
-function safeConfidence(value: unknown, fallback = 0.4): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
+function safeConfidence(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : null;
+}
+
+/** Prefer a newly reported model score; otherwise retain a prior model score. Unknown is not zero. */
+export function mergeCharacterVoiceConfidence(
+  prior: Pick<CharacterVoiceProfile, 'confidence' | 'confidenceSource'>,
+  candidate: Pick<CharacterVoiceProfile, 'confidence' | 'confidenceSource'>,
+): Pick<CharacterVoiceProfile, 'confidence' | 'confidenceSource'> {
+  const candidateConfidence = safeConfidence(candidate.confidence);
+  if (candidate.confidenceSource === 'model_self_report' && candidateConfidence !== null) {
+    return { confidence: candidateConfidence, confidenceSource: 'model_self_report' };
+  }
+  const priorConfidence = safeConfidence(prior.confidence);
+  if (prior.confidenceSource === 'model_self_report' && priorConfidence !== null) {
+    return { confidence: priorConfidence, confidenceSource: 'model_self_report' };
+  }
+  return { confidence: null };
 }
 function reviewState(value: unknown, states: readonly string[]): string {
   return typeof value === 'string' && states.includes(value) ? value : 'candidate';
@@ -377,6 +399,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const canonicalSourceName = safeText(value.canonicalSourceName || value.source || value.name, 120);
     if (!canonicalSourceName) continue;
     const characterId = safeText(value.characterId, 100) || stableCharacterId(canonicalSourceName);
+    // Legacy Context Graph profiles used a hard-coded 0.55 and may have been mixed with other scores.
+    // Unless explicitly marked as model-reported by the new contract, their score is unassessed.
+    const isContextGraphProfile = characterId.startsWith('context-graph-');
     const voice = value.voiceCore && typeof value.voiceCore === 'object' && !Array.isArray(value.voiceCore) ? value.voiceCore : {};
     const strings = (key: string, count = 6) => safeList(voice[key], count, 180);
     const evidence: CharacterVoiceEvidence[] = [];
@@ -390,7 +415,16 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         const dimension = typeof ev.dimension === 'string' && VOICE_DIMENSIONS.has(ev.dimension as LiteraryVoiceDimension)
           ? ev.dimension as LiteraryVoiceDimension : null;
         if (!segmentId || !sourceQuote || !observation || !dimension) continue;
-        evidence.push({ segmentId, sourceQuote, observation, dimension, confidence: safeConfidence(ev.confidence) });
+        const evidenceConfidence = safeConfidence(ev.confidence);
+        const confidenceSource = evidenceConfidence !== null &&
+          (ev.confidenceSource === 'model_self_report' || !isContextGraphProfile)
+          ? 'model_self_report' as const
+          : undefined;
+        evidence.push({
+          segmentId, sourceQuote, observation, dimension,
+          confidence: confidenceSource ? evidenceConfidence : null,
+          ...(confidenceSource ? { confidenceSource } : {}),
+        });
       }
     }
     const contrastRules = Array.isArray(value.contrastRules) ? value.contrastRules.slice(0, 6).flatMap((rawRule: unknown) => {
@@ -405,13 +439,19 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const profileStatus = reviewState(value.status, ['candidate', 'confirmed', 'rejected']) as CharacterVoiceProfile['status'];
     // 即便输入声称 confirmed，没有可定位的原文证据也只能降级为 candidate。
     const status = profileStatus === 'confirmed' && evidence.length ? 'confirmed' : profileStatus === 'rejected' ? 'rejected' : 'candidate';
+    const profileConfidence = safeConfidence(value.confidence);
+    const confidenceSource = profileConfidence !== null &&
+      (value.confidenceSource === 'model_self_report' || !isContextGraphProfile)
+      ? 'model_self_report' as const
+      : undefined;
     const profile: CharacterVoiceProfile = {
       characterId, canonicalSourceName,
       ...(safeText(value.targetName, 120) ? { targetName: safeText(value.targetName, 120) } : {}),
       ...(safeText(value.role, 360) ? { role: safeText(value.role, 360) } : {}),
       ...(safeList(value.traits, 10, 160).length ? { traits: safeList(value.traits, 10, 160) } : {}),
       aliases: safeList(value.aliases, 12, 80),
-      status, confidence: safeConfidence(value.confidence),
+      status, confidence: confidenceSource ? profileConfidence : null,
+      ...(confidenceSource ? { confidenceSource } : {}),
       voiceCore: {
         ...(safeText(voice.register, 180) ? { register: safeText(voice.register, 180) } : {}),
         ...(strings('syntaxRhythm').length ? { syntaxRhythm: strings('syntaxRhythm') } : {}),
@@ -531,6 +571,7 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
     if (prior.status === 'confirmed') {
       map.set(candidate.characterId, {
         ...prior,
+        ...mergeCharacterVoiceConfidence(prior, candidate),
         aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
         evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>
           all.findIndex((other) => other.segmentId === item.segmentId && other.dimension === item.dimension) === index,
@@ -549,7 +590,7 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
       ...(!prior.role && candidate.role ? { role: candidate.role } : {}),
       ...(!prior.traits?.length && candidate.traits?.length ? { traits: candidate.traits } : {}),
       status: prior.status === 'rejected' ? 'rejected' : 'candidate',
-      confidence: Math.max(prior.confidence, candidate.confidence),
+      ...mergeCharacterVoiceConfidence(prior, candidate),
       aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
       evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>
         all.findIndex((other) => other.segmentId === item.segmentId && other.dimension === item.dimension) === index,
