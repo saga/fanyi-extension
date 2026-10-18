@@ -731,7 +731,6 @@
             </div>
           </div>
         </details>
-      </section>
 
         <details v-if="literaryMemory.relationshipVoiceRules.length" class="relationship-section">
           <summary><strong>人物对的说话规则</strong>（{{ literaryMemory.relationshipVoiceRules.length }} 项）</summary>
