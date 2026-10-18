@@ -2429,7 +2429,9 @@ watch([
       { method: 'POST', body: JSON.stringify(workspacePromptInput()) },
     );
     if (workspaceProject.value?.projectId !== projectId) return;
-    if (nextTranslationMode === 'literary') {
+    const graphContextChanged = next[0] !== previous[0] ||
+      next[1] !== previous[1] || next[2] !== previous[2];
+    if (nextTranslationMode === 'literary' && graphContextChanged) {
       await ensureContextGraphPreprocessing(workspaceProject.value, { force: false });
     }
   } catch (error) {
