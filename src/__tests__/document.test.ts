@@ -11,7 +11,7 @@ import { parseEpubDocument } from '../entrypoints/utils/document/parsers/office'
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../entrypoints/utils/document/translationResult';
 import { exportDocument, setByPath } from '../entrypoints/utils/document/export';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
-import { autoConfirmLiteraryMemory, buildLiteraryContextForBatch, buildLiteraryTranslationContextPrompt, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
+import { autoConfirmLiteraryMemory, buildLiteraryContextForBatch, buildLiteraryTranslationContextPrompt, mergeCharacterVoiceConfidence, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
 
 // ============================================================
 // detect
@@ -461,6 +461,65 @@ describe('文学书籍记忆', () => {
     expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.target).toBe('艾丽丝');
     expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
   });
+
+  it('Context Graph 的历史 55% 显示为未评估，混合置信度合并不再取最大值', () => {
+    const graph = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'context-graph-cg-legacy',
+        canonicalSourceName: 'Alice',
+        status: 'candidate',
+        confidence: 0.55,
+        voiceCore: { register: '待核验的语域观察' },
+        evidence: [{
+          segmentId: 'graph-a1', sourceQuote: 'Alice spoke softly.',
+          dimension: 'register', observation: '语气较轻', confidence: 0.55,
+        }],
+      }],
+    });
+    expect(graph.characterVoices[0]?.confidence).toBeNull();
+    expect(graph.characterVoices[0]?.confidenceSource).toBeUndefined();
+    expect(graph.characterVoices[0]?.evidence[0]?.confidence).toBeNull();
+    expect(graph.characterVoices[0]?.evidence[0]?.confidenceSource).toBeUndefined();
+
+    const prior = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'char-alice',
+        canonicalSourceName: 'Alice',
+        status: 'candidate',
+        confidence: 0.9,
+        confidenceSource: 'model_self_report',
+        voiceCore: { register: '短句、克制' },
+        evidence: [{
+          segmentId: 'model-a1', sourceQuote: 'Alice answered.',
+          dimension: 'register', observation: '使用短句', confidence: 0.9,
+          confidenceSource: 'model_self_report',
+        }],
+      }],
+    });
+    expect(mergeCharacterVoiceConfidence(prior.characterVoices[0]!, graph.characterVoices[0]!)).toEqual({
+      confidence: 0.9, confidenceSource: 'model_self_report',
+    });
+
+    const lowerNewAssessment = sanitizeLiteraryMemory({
+      characterVoices: [{
+        characterId: 'char-alice',
+        canonicalSourceName: 'Alice',
+        status: 'candidate',
+        confidence: 0.55,
+        confidenceSource: 'model_self_report',
+        voiceCore: { register: '短句、克制' },
+        evidence: [{
+          segmentId: 'model-a2', sourceQuote: 'Alice replied.',
+          dimension: 'register', observation: '仍然使用短句', confidence: 0.55,
+          confidenceSource: 'model_self_report',
+        }],
+      }],
+    });
+    const merged = mergeLiteraryMemory(prior, lowerNewAssessment);
+    expect(merged.characterVoices[0]?.confidence).toBe(0.55);
+    expect(merged.characterVoices[0]?.confidenceSource).toBe('model_self_report');
+  });
+
 });
 
 // ============================================================
