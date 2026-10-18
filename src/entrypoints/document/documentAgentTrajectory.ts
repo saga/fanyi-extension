@@ -23,6 +23,46 @@ export function formatAgentDuration(value: unknown): string {
     : (ms / 1000).toFixed(1) + ' 秒';
 }
 
+/** token 数展示：万位以上折算成 k，避免长数字挤爆轨迹行。 */
+export function formatTokenCount(value: unknown): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : n.toLocaleString();
+}
+
+interface UsageSummary {
+  inputTokens?: unknown;
+  outputTokens?: unknown;
+  cacheReadTokens?: unknown;
+  cacheCreationTokens?: unknown;
+  totalInputTokens?: unknown;
+  totalTokens?: unknown;
+  totalCostUsd?: unknown;
+  durationMs?: unknown;
+  numTurns?: unknown;
+}
+
+/** 把服务端 model.usage / run.finished 里的 usage 摘要转成一行可读文本。 */
+function usageDetailLine(usage: UsageSummary | null | undefined): string | null {
+  if (!usage || typeof usage !== 'object') return null;
+  const totalInput = Number(usage.totalInputTokens ??
+    (Number(usage.inputTokens || 0) + Number(usage.cacheReadTokens || 0) + Number(usage.cacheCreationTokens || 0)));
+  const output = Number(usage.outputTokens || 0);
+  const total = Number(usage.totalTokens || (totalInput + output));
+  if (!total) return null;
+  const cacheRead = Number(usage.cacheReadTokens || 0);
+  const cacheWrite = Number(usage.cacheCreationTokens || 0);
+  const parts = ['输入 ' + formatTokenCount(totalInput)];
+  if (cacheRead || cacheWrite) parts.push('缓存 ' + formatTokenCount(cacheRead + cacheWrite));
+  parts.push('输出 ' + formatTokenCount(output));
+  parts.push('合计 ' + formatTokenCount(total));
+  const cost = Number(usage.totalCostUsd || 0);
+  if (cost > 0) parts.push('费用 $' + cost.toFixed(4));
+  const durationMs = Number(usage.durationMs || 0);
+  if (usage.durationMs != null && durationMs > 0) parts.push('耗时 ' + formatAgentDuration(durationMs));
+  return parts.join(' · ');
+}
+
 export function agentTrajectoryRole(event: any): string {
   const type = String(event?.type || '');
   const stage = String(event?.payload?.stage || '');
@@ -60,6 +100,7 @@ export function agentTrajectoryTitle(event: any): string {
     'translation-brief.ready': 'TranslationBrief 已组装',
     'batch.prompt.ready': '向模型提交请求',
     'batch.model.response': '模型已返回结果',
+    'model.usage': '本次模型调用 token 消耗',
     'batch.translation.completed': '初译候选已保存',
     'batch.partial': '模型返回不完整，正在重试',
     'batch.output.validation': '模型输出校验告警',
@@ -134,6 +175,10 @@ export function agentTrajectoryDetail(event: any): string {
     details.push('返回 ' + (p.returnedSegments ?? 0) + '/' + (p.requestedSegments ?? 0) + ' 段');
     if (p.missingCount) details.push('缺少 ' + p.missingCount + ' 段：' + (p.missingIds || []).slice(0, 8).join(', '));
   }
+  if (type === 'model.usage') {
+    const line = usageDetailLine(p);
+    if (line) details.push(line);
+  }
   if (type === 'batch.translation.completed') {
     details.push('候选 ' + (p.candidateCount ?? 0) + ' 段，审校 ' + (p.reviewScheduled ? '已排队' : '关闭'));
   }
@@ -161,6 +206,8 @@ export function agentTrajectoryDetail(event: any): string {
   if (type === 'run.finished') {
     const counts = p.counts || {};
     details.push('候选 ' + (counts.candidate ?? 0) + ' 段，已接受 ' + (counts.accepted ?? 0) + ' 段，失败 ' + (counts.failed ?? 0) + ' 段');
+    const usageLine = usageDetailLine(p.usage);
+    if (usageLine) details.push('累计 ' + usageLine);
     if (p.error) details.push('状态信息：' + p.error);
   }
   if (type === 'stage.completed') {
@@ -242,7 +289,7 @@ export function agentTrajectoryRelatedFailureEvents(events: any[], event: any): 
 export function filterAgentTrajectoryEvents(events: any[], filter: AgentTrajectoryFilter): any[] {
   if (filter === 'issues') return events.filter((event) => ['failed', 'warning'].includes(agentTrajectoryStatus(event)));
   if (filter === 'model') return events.filter((event) =>
-    ['batch.started', 'batch.prompt.ready', 'batch.model.response', 'batch.translation.completed',
+    ['batch.started', 'batch.prompt.ready', 'batch.model.response', 'model.usage', 'batch.translation.completed',
       'stage.started', 'stage.completed', 'stage.warning', 'model.call.failed', 'context-graph.phase',
       'context-graph.scan.completed', 'context-graph.completed', 'context-graph.failed'].includes(event.type));
   return events;

@@ -472,6 +472,7 @@ const eventLabels: Record<string, string> = {
   'batch.started': '批次开始',
   'batch.prompt.ready': '翻译请求上下文',
   'batch.model.response': '模型返回结果',
+  'model.usage': 'token 消耗',
   'batch.translation.completed': '初译完成',
   'batch.completed': '批次完成',
   'batch.partial': '批次部分返回',
