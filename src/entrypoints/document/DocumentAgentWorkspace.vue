@@ -530,27 +530,28 @@ async function api(path: string, init: RequestInit = {}): Promise<any> {
 }
 
 async function recreateMissingProject() {
-  // Retry authoritative discovery after explicit user confirmation. A project created by another
-  // initializer since the error appeared must be reused instead of creating a second project.
+  // Retry authoritative discovery before creating anything. A network/auth failure is not the
+  // same as a missing project and must stop this action without creating another project.
+  restorationError.value = '';
   restorationProjectMissing.value = false;
   await loadExistingProject();
-  if (project.value || sourceChanged.value || restorationError.value) return;
-  if (!restorationProjectMissing.value) {
-    await createProject();
-    return;
-  }
-  // The stale mapping is still missing after a fresh service lookup; create with normal
-  // server-side idempotency rather than force-new semantics.
-  await createProject();
+  if (project.value || sourceChanged.value) return;
+  if (restorationError.value && !restorationProjectMissing.value) return;
+
+  // The user explicitly confirmed rebuild after discovery returned no usable server project.
+  // The service endpoint remains idempotent and can still reuse a project created in this race.
+  restorationError.value = '';
+  restorationProjectMissing.value = false;
+  await createProject(false, true);
 }
 
-async function createProject(forceNew = false) {
+async function createProject(forceNew = false, explicitRebuild = false) {
   if (!props.useLocalAgent) { error.value = '请先启用本机 Agent。'; return; }
   if (!props.segments.length) return;
 
   // Another part of the UI may have initialized the durable project after this panel rendered.
   // Re-resolve immediately before create instead of trusting a stale empty local map.
-  if (!forceNew && !restorationProjectMissing.value && !project.value) {
+  if (!forceNew && !explicitRebuild && !restorationProjectMissing.value && !project.value) {
     await loadExistingProject();
     if (project.value || sourceChanged.value || restorationError.value || restorationProjectMissing.value) return;
   }
