@@ -75,7 +75,7 @@
         </button>
         <button class="tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
           人物与预处理
-          <span v-if="literaryMode" class="tab-badge">{{ literaryMemory.characterVoices.length }}人物·{{ literaryMemory.entities.length }}实体</span>
+          <span v-if="literaryMode" class="tab-badge">{{ managedPeople.length }}人物·{{ nonPersonEntities.length }}实体</span>
         </button>
         <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'agent' }" @click="activeTab = 'agent'">
           翻译 Agent
@@ -523,14 +523,14 @@
         </article>
       </details>
 
-      <!-- 实体映射决定同一人物、地点、组织或重要物品在后续章节统一使用什么译名。 -->
+      <!-- 非人物实体仍使用独立译名表；人物名称、译名、角色和声音统一在下方人物管理中维护。 -->
       <section v-if="literaryMode" class="panel literary-dictionary">
         <div class="dictionary-heading">
           <div>
             <h3>实体译名表</h3>
-            <p class="muted small">有原文依据且译名明确的实体会自动纳入规范，并立即用于本次及后续批次。缺少依据或存在冲突的映射才会保留为待补全。修改原文名称、译名或别名后会自动保存并应用，无需逐条确认。</p>
+            <p class="muted small">这里只管理地点、组织、物品、概念等非人物实体。人物的规范名、译名、别名和角色/声音信息统一在下方「人物管理」中编辑。其他实体有原文依据且译名明确时会自动纳入规范。</p>
           </div>
-          <span class="chip">共 {{ literaryMemory.entities.length }} 项</span>
+          <span class="chip">共 {{ nonPersonEntities.length }} 项</span>
         </div>
 
         <div class="dictionary-toolbar">
@@ -538,7 +538,7 @@
             placeholder="搜索原文名、译名或别名…" aria-label="搜索实体译名" />
           <div class="entity-filters" aria-label="筛选实体状态">
             <button class="filter-chip" :class="{ active: entityFilter === 'all' }" @click="entityFilter = 'all'">
-              全部 {{ literaryMemory.entities.length }}
+              全部 {{ nonPersonEntities.length }}
             </button>
             <button class="filter-chip" :class="{ active: entityFilter === 'pending' }" @click="entityFilter = 'pending'">
               待核对 {{ pendingEntityCount }}
@@ -591,16 +591,126 @@
           </article>
         </div>
         <div v-else class="entity-empty">
-          <strong>{{ literaryMemory.entities.length ? '没有符合条件的实体' : '实体表还是空的' }}</strong>
+          <strong>{{ nonPersonEntities.length ? '没有符合条件的实体' : '暂无非人物实体' }}</strong>
           <p class="muted small">
-            {{ literaryMemory.entities.length
+            {{ nonPersonEntities.length
               ? '试试其他关键词或切换筛选条件。'
-              : '开始文学翻译后，系统会从正文中提取实体；也可以手动添加实体映射。' }}
+              : '完成预处理后，地点、组织、物品和术语等非人物实体会显示在这里。' }}
           </p>
-          <button v-if="literaryMemory.entities.length" class="btn" @click="entitySearch = ''; entityFilter = 'all'">
+          <button v-if="nonPersonEntities.length" class="btn" @click="entitySearch = ''; entityFilter = 'all'">
             清除筛选
           </button>
           <button v-else class="btn primary" @click="addEntity">手动添加实体映射</button>
+        </div>
+
+        <p class="muted small dictionary-footnote">状态说明：自动纳入规范＝有原文证据的规范译名或用户填写完成的映射；待补全＝名称、译名或证据不足。修改后自动保存并生效；删除映射即可停用。</p>
+      </section>
+
+      <section v-if="literaryMode" class="panel character-management">
+        <div class="dictionary-heading">
+          <div>
+            <h3>人物管理（译名、角色与声音）</h3>
+            <p class="muted small">每个人物只维护一份资料：规范原文名、统一译名、别名、角色定位、人物特征、说话风格与原文证据。带原文证据的声音/角色观察默认作为弱提示用于翻译；无需逐个确认，可随时停用。</p>
+          </div>
+          <div class="voice-counts">
+            <span class="chip">人物 {{ managedPeople.length }}</span>
+            <span class="chip">已核实 {{ confirmedCharacterVoiceCount }}</span>
+            <span class="chip">待核对 {{ pendingCharacterVoiceCount }}</span>
+          </div>
+        </div>
+
+        <div class="dictionary-toolbar">
+          <input v-model.trim="personSearch" type="search" class="entity-search"
+            placeholder="搜索人物原文名、译名、别名或角色特征…" aria-label="搜索人物管理" />
+          <div class="dictionary-actions">
+            <button class="btn primary" @click="addManagedPerson">添加人物</button>
+          </div>
+        </div>
+
+        <div v-if="filteredManagedPeople.length" class="entity-card-list">
+          <article v-for="item in filteredManagedPeople" :key="item.key" class="entity-card person-management-card">
+            <div class="entity-card-header">
+              <span class="entity-kind">人物</span>
+              <span v-if="item.profile" class="entity-status"
+                :class="item.profile.status === 'confirmed' ? 'is-confirmed' : item.profile.status === 'rejected' ? 'is-rejected' : 'is-pending'">
+                {{ item.profile.status === 'confirmed' ? '已核实' : item.profile.status === 'rejected' ? '已拒绝' : '角色/声音候选' }}
+              </span>
+              <span v-else class="entity-status"
+                :class="item.entity?.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
+                {{ item.entity?.reviewStatus === 'confirmed' ? '译名已纳入规范' : '译名待补全' }}
+              </span>
+              <span v-if="item.profile" class="entity-status"
+                :class="item.profile.useForTranslation ? 'is-confirmed' : 'is-pending'">
+                {{ item.profile.useForTranslation ? '默认用于翻译' : '已停用' }}
+              </span>
+              <span class="entity-card-spacer"></span>
+              <button class="btn ghost danger-text" @click="removeManagedPerson(item)">移除人物</button>
+            </div>
+
+            <div class="entity-fields">
+              <label>
+                <span>规范原文名</span>
+                <input :value="managedPersonSource(item)" placeholder="人物原文名"
+                  @focus="rememberManagedPersonSource(item)" @change="updateManagedPerson(item, 'source', $event)" />
+              </label>
+              <div class="entity-arrow" aria-hidden="true">→</div>
+              <label>
+                <span>统一译名（后续章节采用）</span>
+                <input :value="managedPersonTarget(item)" placeholder="统一中文译名"
+                  @change="updateManagedPerson(item, 'target', $event)" />
+              </label>
+            </div>
+
+            <details class="entity-aliases">
+              <summary>别名与其他写法（{{ managedPersonAliases(item).length }} 项）</summary>
+              <label>
+                <span>用英文逗号分隔</span>
+                <input :value="managedPersonAliases(item).join(', ')"
+                  placeholder="原文中的简称、头衔或其他写法"
+                  @change="updateManagedPerson(item, 'aliases', $event)" />
+              </label>
+            </details>
+            <p v-if="item.entity?.evidence" class="entity-evidence"><strong>译名提取依据：</strong>{{ item.entity.evidence }}</p>
+
+            <template v-if="item.profile">
+              <div class="voice-profile-fields">
+                <p v-if="item.profile.role"><strong>角色定位（默认弱提示；标记已核实后增强）：</strong>{{ item.profile.role }}</p>
+                <p v-if="item.profile.traits?.length"><strong>人物特征（默认弱提示；标记已核实后增强）：</strong>{{ item.profile.traits.join('；') }}</p>
+                <p v-if="item.profile.voiceCore.register"><strong>语域：</strong>{{ item.profile.voiceCore.register }}</p>
+                <p v-if="item.profile.voiceCore.syntaxRhythm?.length"><strong>句法 / 节奏：</strong>{{ item.profile.voiceCore.syntaxRhythm.join('；') }}</p>
+                <p v-if="item.profile.voiceCore.lexicalPreferences?.length"><strong>词汇：</strong>{{ item.profile.voiceCore.lexicalPreferences.join('；') }}</p>
+                <p v-if="item.profile.voiceCore.discourseHabits?.length"><strong>对话策略：</strong>{{ item.profile.voiceCore.discourseHabits.join('；') }}</p>
+                <p v-if="item.profile.voiceCore.stanceModality?.length"><strong>立场 / 情态：</strong>{{ item.profile.voiceCore.stanceModality.join('；') }}</p>
+                <p v-if="item.profile.voiceCore.humorIrony"><strong>幽默 / 反讽：</strong>{{ item.profile.voiceCore.humorIrony }}</p>
+                <p v-if="item.profile.voiceCore.disfluency"><strong>口语特征：</strong>{{ item.profile.voiceCore.disfluency }}</p>
+                <p v-if="item.profile.voiceCore.avoid?.length"><strong>避免：</strong>{{ item.profile.voiceCore.avoid.join('；') }}</p>
+              </div>
+              <details>
+                <summary>原文证据（{{ item.profile.evidence.length }}）与人物对比（{{ item.profile.contrastRules.length }}）</summary>
+                <div v-for="(evidence, index) in item.profile.evidence" :key="item.profile.characterId + '-ev-' + index" class="voice-evidence">
+                  <p><strong>{{ evidence.dimension === 'role_traits' ? '人物角色/特征' : evidence.dimension }} · {{ evidence.confidenceSource === 'model_self_report' && evidence.confidence !== null ? '模型自报 ' + Math.round(evidence.confidence * 100) + '%' : '置信度未评估' }}</strong> · {{ evidence.observation }}</p>
+                  <blockquote>{{ evidence.sourceQuote }}</blockquote>
+                  <button class="btn ghost" @click="showReviewSegment(evidence.segmentId)">定位证据片段 {{ evidence.segmentId }}</button>
+                </div>
+                <p v-for="(rule, index) in item.profile.contrastRules" :key="item.profile.characterId + '-contrast-' + index" class="muted small">
+                  与 {{ characterName(rule.otherCharacterId) }} 的差异：{{ rule.difference }}（证据：{{ rule.evidenceSegmentIds.join('、') }}）
+                </p>
+                <p v-for="(question, index) in item.profile.openQuestions" :key="item.profile.characterId + '-q-' + index" class="warn small">待确认：{{ question }}</p>
+              </details>
+              <div class="voice-profile-actions">
+                <button class="btn primary" :disabled="item.profile.status === 'confirmed' || !item.profile.evidence.length" @click="setCharacterVoiceStatus(item.profile, 'confirmed')">标记已核实</button>
+                <button class="btn" :disabled="!item.profile.evidence.length" @click="setCharacterVoiceUse(item.profile, !item.profile.useForTranslation)">{{ item.profile.useForTranslation ? '停用用于翻译' : '启用用于翻译' }}</button>
+                <button class="btn" :disabled="item.profile.status === 'rejected'" @click="setCharacterVoiceStatus(item.profile, 'rejected')">拒绝此画像</button>
+                <button class="btn ghost" :disabled="item.profile.status === 'candidate' && item.profile.useForTranslation" @click="setCharacterVoiceStatus(item.profile, 'candidate')">恢复为候选并启用</button>
+              </div>
+            </template>
+            <p v-else class="muted small">该人物暂时只有译名映射。完成全书预处理、获得可核验的原文证据后，角色定位和声音观察会合并显示在这张卡片中。</p>
+          </article>
+        </div>
+        <div v-else class="entity-empty">
+          <strong>{{ managedPeople.length ? '没有符合条件的人物' : '暂无人物资料' }}</strong>
+          <p class="muted small">{{ managedPeople.length ? '试试其他关键词。' : '完成全书预处理后，人物译名、角色定位与声音观察会集中显示在这里。' }}</p>
+          <button v-if="managedPeople.length" class="btn" @click="personSearch = ''">清除筛选</button>
         </div>
 
         <details class="relationship-section">
@@ -621,69 +731,7 @@
             </div>
           </div>
         </details>
-        <p class="muted small dictionary-footnote">状态说明：自动纳入规范＝有原文证据的规范译名或用户填写完成的映射；待补全＝名称、译名或证据不足。修改后自动保存并生效；删除映射即可停用。</p>
       </section>
-
-      <section v-if="literaryMode" class="panel character-voice-bible">
-        <div class="dictionary-heading">
-          <div>
-            <h3>人物角色与声音档案</h3>
-            <p class="muted small">有原文证据的角色档案默认用于翻译，候选内容只作为弱提示，不需要逐个确认。可随时停用或拒绝；标记为已核实后才作为较稳定参考。</p>
-          </div>
-          <div class="voice-counts">
-            <span class="chip">人物 {{ literaryMemory.characterVoices.length }}</span>
-            <span class="chip">已确认 {{ confirmedCharacterVoiceCount }}</span>
-            <span class="chip">待核对 {{ pendingCharacterVoiceCount }}</span>
-          </div>
-        </div>
-        <div v-if="!literaryMemory.characterVoices.length" class="review-empty">
-          <strong>尚未建立人物角色与声音画像</strong>
-          <p class="muted small">完成全书预处理后会出现带原文证据的角色/特征候选；具备对白证据时还会生成声音观察。系统不会为了填满档案而猜测人物口头禅、方言或性格。</p>
-        </div>
-        <article v-for="profile in literaryMemory.characterVoices" :key="profile.characterId" class="voice-profile-card">
-          <div class="voice-profile-heading">
-            <div>
-              <strong>{{ profile.canonicalSourceName }}<template v-if="profile.targetName"> → {{ profile.targetName }}</template></strong>
-              <p class="muted small">{{ profile.characterId }} · {{ profile.confidenceSource === 'model_self_report' && profile.confidence !== null ? '模型自报 ' + Math.round(profile.confidence * 100) + '%' : '置信度未评估' }} · {{ profile.aliases.join('、') || '暂无别名' }}</p>
-            </div>
-            <span class="entity-status" :class="profile.status === 'confirmed' ? 'is-confirmed' : profile.status === 'rejected' ? 'is-rejected' : 'is-pending'">
-              {{ profile.status === 'confirmed' ? '已核实' : profile.status === 'rejected' ? '已拒绝' : '候选' }}
-            </span>
-            <span class="entity-status" :class="profile.useForTranslation ? 'is-confirmed' : 'is-pending'">
-              {{ profile.useForTranslation ? '默认用于翻译' : '已停用' }}
-            </span>
-          </div>
-          <div class="voice-profile-fields">
-            <p v-if="profile.role"><strong>角色定位（默认弱提示；标记已核实后增强）：</strong>{{ profile.role }}</p>
-            <p v-if="profile.traits?.length"><strong>人物特征（默认弱提示；标记已核实后增强）：</strong>{{ profile.traits.join('；') }}</p>
-            <p v-if="profile.voiceCore.register"><strong>语域：</strong>{{ profile.voiceCore.register }}</p>
-            <p v-if="profile.voiceCore.syntaxRhythm?.length"><strong>句法 / 节奏：</strong>{{ profile.voiceCore.syntaxRhythm.join('；') }}</p>
-            <p v-if="profile.voiceCore.lexicalPreferences?.length"><strong>词汇：</strong>{{ profile.voiceCore.lexicalPreferences.join('；') }}</p>
-            <p v-if="profile.voiceCore.discourseHabits?.length"><strong>对话策略：</strong>{{ profile.voiceCore.discourseHabits.join('；') }}</p>
-            <p v-if="profile.voiceCore.stanceModality?.length"><strong>立场 / 情态：</strong>{{ profile.voiceCore.stanceModality.join('；') }}</p>
-            <p v-if="profile.voiceCore.humorIrony"><strong>幽默 / 反讽：</strong>{{ profile.voiceCore.humorIrony }}</p>
-            <p v-if="profile.voiceCore.disfluency"><strong>口语特征：</strong>{{ profile.voiceCore.disfluency }}</p>
-            <p v-if="profile.voiceCore.avoid?.length"><strong>避免：</strong>{{ profile.voiceCore.avoid.join('；') }}</p>
-          </div>
-          <details>
-            <summary>原文证据（{{ profile.evidence.length }}）与人物对比（{{ profile.contrastRules.length }}）</summary>
-            <div v-for="(evidence, index) in profile.evidence" :key="profile.characterId + '-ev-' + index" class="voice-evidence">
-              <p><strong>{{ evidence.dimension === 'role_traits' ? '人物角色/特征' : evidence.dimension }} · {{ evidence.confidenceSource === 'model_self_report' && evidence.confidence !== null ? '模型自报 ' + Math.round(evidence.confidence * 100) + '%' : '置信度未评估' }}</strong> · {{ evidence.observation }}</p>
-              <blockquote>{{ evidence.sourceQuote }}</blockquote>
-              <button class="btn ghost" @click="showReviewSegment(evidence.segmentId)">定位证据片段 {{ evidence.segmentId }}</button>
-            </div>
-            <p v-for="(rule, index) in profile.contrastRules" :key="profile.characterId + '-contrast-' + index" class="muted small">
-              与 {{ characterName(rule.otherCharacterId) }} 的差异：{{ rule.difference }}（证据：{{ rule.evidenceSegmentIds.join('、') }}）
-            </p>
-            <p v-for="(question, index) in profile.openQuestions" :key="profile.characterId + '-q-' + index" class="warn small">待确认：{{ question }}</p>
-          </details>
-          <div class="voice-profile-actions">
-            <button class="btn primary" :disabled="profile.status === 'confirmed' || !profile.evidence.length" @click="setCharacterVoiceStatus(profile, 'confirmed')">标记已核实</button>
-            <button class="btn" :disabled="!profile.evidence.length" @click="setCharacterVoiceUse(profile, !profile.useForTranslation)">{{ profile.useForTranslation ? '停用用于翻译' : '启用用于翻译' }}</button>
-            <button class="btn" :disabled="profile.status === 'rejected'" @click="setCharacterVoiceStatus(profile, 'rejected')">拒绝此画像</button>
-            <button class="btn ghost" :disabled="profile.status === 'candidate' && profile.useForTranslation" @click="setCharacterVoiceStatus(profile, 'candidate')">恢复为候选并启用</button>
-          </div>
-        </article>
 
         <details v-if="literaryMemory.relationshipVoiceRules.length" class="relationship-section">
           <summary><strong>人物对的说话规则</strong>（{{ literaryMemory.relationshipVoiceRules.length }} 项）</summary>
@@ -1239,8 +1287,9 @@ const userPromptPreview = computed(() => documentUserPromptEditor.value
   .join('[当前页片段 JSON 在发送时插入]'));
 const entitySearch = ref('');
 const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
-const pendingEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus !== 'confirmed').length);
-const confirmedEntityCount = computed(() => literaryMemory.value.entities.filter((entity) => entity.reviewStatus === 'confirmed').length);
+const nonPersonEntities = computed(() => literaryMemory.value.entities.filter((entity) => entity.kind !== 'person'));
+const pendingEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus !== 'confirmed').length);
+const confirmedEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus === 'confirmed').length);
 const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
 const pendingCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'candidate').length +
   literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'candidate').length);
@@ -1260,6 +1309,7 @@ const filteredLiteraryEntities = computed(() => {
   const query = entitySearch.value.toLocaleLowerCase();
   return literaryMemory.value.entities
     .map((entity, index) => ({ entity, index }))
+    .filter(({ entity }) => entity.kind !== 'person')
     .filter(({ entity }) => {
       if (entityFilter.value === 'pending' && entity.reviewStatus === 'confirmed') return false;
       if (entityFilter.value === 'confirmed' && entity.reviewStatus !== 'confirmed') return false;
