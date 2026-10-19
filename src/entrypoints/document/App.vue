@@ -1868,17 +1868,19 @@ async function persistDocumentCheckpointToLocalService(input: {
 
 async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDocumentSession | null> {
   const config = await getConfig();
+  const baseUrl = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
   try {
-    // 仅恢复此前的本机快照，不调用本机模型；恢复不应依赖当前翻译 Provider 开关。
-    const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
-    base.pathname = '/api/documents/session/get';
-    base.search = '';
-    base.hash = '';
-    const response = await fetch(base.toString(), {
+    // This endpoint contains only reader-resume metadata for new project-backed sessions.
+    const endpoint = new URL(baseUrl);
+    endpoint.pathname = '/api/documents/session/get';
+    endpoint.search = '';
+    endpoint.hash = '';
+    const response = await fetch(endpoint.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
+        ...(token ? { Authorization: 'Bearer ' + token } : {}),
       },
       body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
     });
@@ -1889,15 +1891,42 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
     };
     const session = result.session;
     const payload = session?.payload;
-    if (!result.found || !payload?.document || !payload?.snapshot) return null;
+    if (!result.found || !payload?.snapshot) return null;
 
-    const snapshot = payload.snapshot;
-    const document = payload.document as ParsedDocument;
-    const translations = Array.isArray(snapshot.translations)
-      ? snapshot.translations.filter((entry: unknown): entry is [string, string] =>
-          Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string')
-      : [];
-    const literaryMemory = (snapshot.literaryMemory ?? createEmptyLiteraryMemory()) as ReturnType<typeof getSnapshot>['literaryMemory'];
+    const snapshot = payload.snapshot as Record<string, any>;
+    let document: ParsedDocument;
+    let translations: Array<[string, string]> = [];
+    let literaryMemory: ReturnType<typeof getSnapshot>['literaryMemory'];
+
+    if (payload.projectBacked === true && typeof payload.projectId === 'string') {
+      // Rehydrate source, adopted translations and LiteraryMemory from the authoritative project
+      // database. The generic reader-session table deliberately stores none of that content.
+      const projectResponse = await workspaceApi<{ project: any }>(
+        baseUrl, token,
+        '/api/documents/projects/' + encodeURIComponent(payload.projectId),
+      );
+      document = await loadWorkspaceParsedDocument(baseUrl, token, projectResponse.project);
+      const accepted = await loadWorkspaceAcceptedTranslations(
+        baseUrl, token, payload.projectId, Number(projectResponse.project?.segmentCount) || document.segments.length,
+      );
+      translations = accepted.map((entry) => [entry.id, entry.text]);
+      const memoryResponse = await workspaceApi<{ current?: { memory?: unknown } }>(
+        baseUrl, token,
+        '/api/documents/projects/' + encodeURIComponent(payload.projectId) + '/literary-memory',
+      );
+      literaryMemory = sanitizeLiteraryMemory(memoryResponse.current?.memory);
+    } else {
+      // Backwards compatibility for old session checkpoints created before project-backed
+      // recovery. New writes never include these fields.
+      if (!payload.document) return null;
+      document = payload.document as ParsedDocument;
+      translations = Array.isArray(snapshot.translations)
+        ? snapshot.translations.filter((entry: unknown): entry is [string, string] =>
+            Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string')
+        : [];
+      literaryMemory = sanitizeLiteraryMemory(snapshot.literaryMemory ?? createEmptyLiteraryMemory());
+    }
+
     const literaryStatus = (snapshot.literaryStatus ?? {
       enabled: payload.literaryMode === true,
       bookProfileReady: false,
@@ -1907,16 +1936,21 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       warnings: [],
       reviewFindings: [],
     }) as ReturnType<typeof getSnapshot>['literaryStatus'];
+
     return {
-      fileName: typeof payload.fileName === 'string' ? payload.fileName : (session?.title || document.title || 'document'),
+      fileName: typeof payload.fileName === 'string'
+        ? payload.fileName
+        : (session?.title || document.title || 'document'),
       title: session?.title || document.title || '未命名文档',
       format: session?.format || document.format || 'txt',
       segmentCount: Number.isFinite(document.meta?.segmentCount) ? document.meta.segmentCount : document.segments.length,
-      charCount: Number.isFinite(document.meta?.charCount) ? document.meta.charCount : 0,
+      charCount: Number.isFinite(document.meta?.charCount)
+        ? document.meta.charCount
+        : document.segments.reduce((sum, segment) => sum + segment.text.length, 0),
       updatedAt: Date.parse(session?.updatedAt || '') || Date.now(),
       translatedSegmentCount: translations.length,
-      total: Number.isFinite(snapshot.total) ? snapshot.total : 0,
-      done: Number.isFinite(snapshot.done) ? snapshot.done : 0,
+      total: Number.isFinite(snapshot.total) ? snapshot.total : document.segments.length,
+      done: Number.isFinite(snapshot.done) ? snapshot.done : translations.length,
       currentPageIndex: Number.isFinite(payload.currentPageIndex) ? Math.max(0, Math.floor(payload.currentPageIndex)) : 0,
       activeTab: (['reading', 'settings', 'prompt', 'characters', 'agent', 'trajectory'].includes(payload.activeTab) ? payload.activeTab : 'reading') as SavedDocumentTab,
       literaryMode: payload.literaryMode === true,
@@ -1930,8 +1964,12 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       error: typeof snapshot.error === 'string' ? snapshot.error : '',
       literaryMemory,
       literaryStatus,
-      analyzedChapterKeys: Array.isArray(snapshot.analyzedChapterKeys) ? snapshot.analyzedChapterKeys.filter((key: unknown): key is string => typeof key === 'string') : [],
-      lastRunSegmentIds: Array.isArray(snapshot.lastRunSegmentIds) ? snapshot.lastRunSegmentIds.filter((id: unknown): id is string => typeof id === 'string') : [],
+      analyzedChapterKeys: Array.isArray(snapshot.analyzedChapterKeys)
+        ? snapshot.analyzedChapterKeys.filter((key: unknown): key is string => typeof key === 'string')
+        : [],
+      lastRunSegmentIds: Array.isArray(snapshot.lastRunSegmentIds)
+        ? snapshot.lastRunSegmentIds.filter((id: unknown): id is string => typeof id === 'string')
+        : [],
       translations,
     };
   } catch {
