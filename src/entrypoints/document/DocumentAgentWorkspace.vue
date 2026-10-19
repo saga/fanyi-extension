@@ -239,7 +239,7 @@
                 {{ qualityAuditRepairing ? '正在创建返工任务…' : '定点返工（' + selectedQualityRepairCount + '）' }}
               </button>
             </div>
-            <p v-if="qualityAuditBlocked" class="agent-footnote">全书审计需等待当前任务结束，并确保来源版本没有待确认变更。</p>
+            <p v-if="qualityAuditUnavailable" class="agent-footnote">全书审计需等待当前任务结束，并确保来源版本没有待确认变更。</p>
             <p v-if="qualityAuditError" class="agent-feedback agent-feedback-error" role="alert">{{ qualityAuditError }}</p>
             <p v-if="qualityAudit && !qualityAuditMatchesSource" class="agent-quality-stale" role="status">
               这份报告对应旧的原文版本，不能用于当前版本的返工。请重新执行审计。
@@ -257,8 +257,27 @@
                 报告共 {{ qualityAudit.findings?.length || 0 }} 项。可勾选可返工的问题创建新的候选 Run；规范译名冲突需要先在“人物角色/声音”或 LiteraryMemory 中人工统一，不允许自动猜选。
               </p>
               <div v-if="qualityAudit.findings?.length" class="agent-quality-findings">
+                <div class="agent-quality-filter">
+                  <label class="agent-quality-filter-label" for="quality-audit-filter">筛选问题</label>
+                  <input
+                    id="quality-audit-filter"
+                    v-model="qualityAuditQuery"
+                    type="search"
+                    placeholder="人物名、规范译名、章节、片段 ID、英文残留…"
+                    autocomplete="off"
+                  >
+                  <span class="agent-quality-filter-count">
+                    {{ qualityAuditFilteredFindings.length }} / {{ qualityAudit.findings.length }} 项
+                  </span>
+                  <button
+                    v-if="qualityAuditQuery"
+                    class="agent-button agent-button-tertiary"
+                    type="button"
+                    @click="qualityAuditQuery = ''"
+                  >清除</button>
+                </div>
                 <article
-                  v-for="finding in qualityAudit.findings.slice(0, 80)"
+                  v-for="finding in qualityAuditDisplayedFindings"
                   :key="finding.findingId"
                   class="agent-quality-finding"
                 >
@@ -291,10 +310,11 @@
                     <p v-if="finding.segmentIds?.length">片段 ID：{{ finding.segmentIds.slice(0, 12).join('、') }}{{ finding.segmentIds.length > 12 ? '…' : '' }}</p>
                   </details>
                 </article>
-                <p v-if="qualityAudit.findings.length > 80" class="agent-footnote">
-                  为保持面板响应，本页最多展示前 80 项；完整报告仍保存在本机项目数据库中。
+                <p v-if="qualityAuditFilteredFindings.length > 80" class="agent-footnote">
+                  当前筛选结果较多，仅展示前 80 项。输入人物名、译名或片段 ID 可缩小范围；完整报告仍保存在本机项目数据库中。
                 </p>
               </div>
+              <p v-else-if="qualityAuditQuery" class="agent-detail-description">当前筛选条件没有匹配项。可以尝试人物规范名、目标译名、章节或片段 ID。</p>
               <p v-else class="agent-detail-description">当前审计没有发现上述规则能够识别的问题。这不代表模型审校已证明译文完全正确。</p>
             </template>
           </section>
@@ -513,6 +533,7 @@ const qualityAudit = ref<any>(null);
 const qualityAuditLoading = ref(false);
 const qualityAuditRepairing = ref(false);
 const qualityAuditError = ref('');
+const qualityAuditQuery = ref('');
 const selectedQualityFindingIds = ref<string[]>([]);
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
 const preprocessingBlockedByPreprocessing = computed(() =>
@@ -554,14 +575,35 @@ const runProgressPercent = computed(() => {
   const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0);
   return Math.round(Math.min(100, resolved / Number(counts.total) * 100));
 });
-const qualityAuditBlocked = computed(() =>
+const qualityAuditUnavailable = computed(() =>
   !project.value || busy.value || sourceChanged.value ||
   ['queued', 'running', 'paused'].includes(String(activeRun.value?.status || '')),
+);
+const qualityAuditBlocked = computed(() =>
+  qualityAuditUnavailable.value || qualityAuditLoading.value || qualityAuditRepairing.value,
 );
 const qualityAuditMatchesSource = computed(() =>
   !!qualityAudit.value && !!project.value?.currentSourceRevisionId &&
   qualityAudit.value.sourceRevisionId === project.value.currentSourceRevisionId,
 );
+const qualityAuditFilteredFindings = computed(() => {
+  const findings = Array.isArray(qualityAudit.value?.findings) ? qualityAudit.value.findings : [];
+  const query = String(qualityAuditQuery.value || '').normalize('NFKC').toLocaleLowerCase().trim();
+  if (!query) return findings;
+  return findings.filter((finding: any) => {
+    const haystack = [
+      finding?.type, finding?.category, finding?.severity, finding?.chapter,
+      finding?.explanation, finding?.reason, finding?.suggestion,
+      finding?.entity?.source, finding?.entity?.target,
+      ...(Array.isArray(finding?.entity?.targets) ? finding.entity.targets : []),
+      ...(Array.isArray(finding?.residueExamples) ? finding.residueExamples : []),
+      finding?.sourceExcerpt, finding?.translationExcerpt, finding?.draftExcerpt,
+      ...(Array.isArray(finding?.segmentIds) ? finding.segmentIds : []),
+    ].filter((value) => value !== null && value !== undefined).join(' ');
+    return haystack.normalize('NFKC').toLocaleLowerCase().includes(query);
+  });
+});
+const qualityAuditDisplayedFindings = computed(() => qualityAuditFilteredFindings.value.slice(0, 80));
 const selectedQualityRepairCount = computed(() => {
   const repairableIds = new Set(
     (Array.isArray(qualityAudit.value?.findings) ? qualityAudit.value.findings : [])
@@ -875,10 +917,11 @@ async function refreshQualityAudit() {
 
 async function runQualityAudit() {
   if (!project.value) return;
-  if (qualityAuditBlocked.value) {
+  if (qualityAuditUnavailable.value) {
     qualityAuditError.value = '请先完成或结束当前运行，并确认来源版本。';
     return;
   }
+  if (qualityAuditLoading.value || qualityAuditRepairing.value) return;
   const generation = workspaceSourceGeneration;
   const projectId = project.value.projectId as string;
   qualityAuditLoading.value = true;
@@ -893,6 +936,7 @@ async function runQualityAudit() {
     });
     if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
     qualityAudit.value = result.report || null;
+    qualityAuditQuery.value = '';
     selectedQualityFindingIds.value = [];
     message.value = '全书质量审计完成：共 ' + Number(result.report?.findings?.length || 0) +
       ' 项问题提示。报告已保存在本机项目数据库中。';
@@ -1027,6 +1071,7 @@ function resetProjectStateForSourceChange(): void {
   qualityAuditLoading.value = false;
   qualityAuditRepairing.value = false;
   qualityAuditError.value = '';
+  qualityAuditQuery.value = '';
   selectedQualityFindingIds.value = [];
   selectedSegmentId.value = props.visibleSegments[0]?.id || '';
   manualText.value = '';
@@ -1117,6 +1162,7 @@ async function createSeparateProject() {
   runs.value = [];
   qualityAudit.value = null;
   selectedQualityFindingIds.value = [];
+  qualityAuditQuery.value = '';
   qualityAuditError.value = '';
   sourceChanged.value = false;
   await createProject(true);
@@ -1865,6 +1911,30 @@ onUnmounted(() => {
   font-size: .82rem;
 }
 .agent-quality-findings { display: grid; gap: .55rem; margin-top: .75rem; }
+.agent-quality-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem .6rem;
+  padding: .7rem;
+  border: 1px solid #e5e5ea;
+  border-radius: 11px;
+  background: #fafafc;
+}
+.agent-quality-filter-label { color: #515158; font-size: .78rem; font-weight: 600; }
+.agent-quality-filter input {
+  flex: 1 1 15rem;
+  min-width: 8rem;
+  max-width: 100%;
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  padding: .48rem .6rem;
+  background: #fff;
+  color: var(--agent-ink);
+  font: inherit;
+  font-size: .8rem;
+}
+.agent-quality-filter-count { color: var(--agent-secondary); font-size: .75rem; font-variant-numeric: tabular-nums; }
 .agent-quality-finding {
   min-width: 0;
   border: 1px solid #e5e5ea;
