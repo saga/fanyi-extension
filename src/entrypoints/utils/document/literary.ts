@@ -759,22 +759,32 @@ export function refreshLiteraryExampleTargets(
  * 有依据≠人工审过：confirmed 在此表示"模型已给出处、可直接当规范用"，
  * 用户编辑/删除仍随时覆盖。
  */
-export function autoConfirmLiteraryMemory(input: unknown): LiteraryBookMemory {
+export function autoConfirmLiteraryMemory(
+  input: unknown,
+  sourceSegments: Array<{ id: string; text: string }> = [],
+): LiteraryBookMemory {
   const memory = sanitizeLiteraryMemory(input);
+  const sourceById = new Map(sourceSegments.map((segment) => [segment.id, segment.text]));
+  const normalizeEvidence = (value: string) => value.normalize('NFKC').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+  const refsMatchSource = (refs: Array<{ segmentId: string; sourceQuote: string }> | undefined): boolean =>
+    Array.isArray(refs) && refs.some((ref) => {
+      const source = sourceById.get(ref.segmentId);
+      const quote = normalizeEvidence(ref.sourceQuote || '');
+      return !!source && !!quote && normalizeEvidence(source).includes(quote);
+    });
+
+  // Do not trust a model-claimed quote or segment ID. Activate only when a supplied source segment
+  // with that stable ID contains the quoted evidence. The Local Agent service repeats this check
+  // against its immutable current source revision before persisting the memory.
   for (const entity of memory.entities) {
-    // A free-form evidence string is only a model claim. Automatic activation requires source-positioned evidence refs.
-    if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target &&
-        Array.isArray(entity.evidenceRefs) && entity.evidenceRefs.length > 0) {
+    if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target && refsMatchSource(entity.evidenceRefs)) {
       entity.reviewStatus = 'confirmed';
       entity.confirmationSource = 'evidence-verified';
     }
   }
   for (const relation of memory.relationships) {
-    if (
-      relation.reviewStatus !== 'confirmed' && relation.subject &&
-      relation.predicate && relation.object &&
-      Array.isArray(relation.evidenceRefs) && relation.evidenceRefs.length > 0
-    ) {
+    if (relation.reviewStatus !== 'confirmed' && relation.subject && relation.predicate && relation.object &&
+        refsMatchSource(relation.evidenceRefs)) {
       relation.reviewStatus = 'confirmed';
       relation.confirmationSource = 'evidence-verified';
     }
