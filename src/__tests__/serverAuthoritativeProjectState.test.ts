@@ -31,3 +31,42 @@ describe('server-authoritative document project state', () => {
     expect(workspace).toContain('v-if="!project && !restoringProject && !restorationError"');
   });
 });
+
+
+describe('Local Agent document ingestion boundary', () => {
+  it('routes selected EPUB/PDF originals to Local Agent for parsing', () => {
+    expect(app).toContain('importDocumentFileViaLocalAgent(base, token, file)');
+    expect(app).toContain('loadWorkspaceParsedDocument(base, token, imported.project)');
+    expect(app).toContain('Local Agent模式下 EPUB/PDF 必须通过原始文件导入');
+  });
+
+  it('stores reader-resume metadata as a project pointer instead of copying document, translations or LiteraryMemory', () => {
+    const start = app.indexOf('async function persistDocumentCheckpointToLocalService');
+    const end = app.indexOf('async function loadDocumentCheckpointFromLocalService', start);
+    const checkpointWriter = app.slice(start, end);
+    expect(checkpointWriter).toContain('projectBacked: true');
+    expect(checkpointWriter).toContain('projectId,');
+    expect(checkpointWriter).toContain('mergeExisting: false');
+    expect(checkpointWriter).not.toContain('document: doc.value');
+    expect(checkpointWriter).not.toContain('rawText,');
+    expect(checkpointWriter).not.toContain('snapshot: input.snapshot');
+    expect(checkpointWriter).not.toContain('literaryMemory:');
+  });
+
+  it('rehydrates a project-backed reader checkpoint from Local Agent project APIs', () => {
+    const start = app.indexOf('async function loadDocumentCheckpointFromLocalService');
+    const end = app.indexOf('async function persistCurrentSession', start);
+    const checkpointReader = app.slice(start, end);
+    expect(checkpointReader).toContain('payload.projectBacked === true');
+    expect(checkpointReader).toContain('loadWorkspaceParsedDocument');
+    expect(checkpointReader).toContain('loadWorkspaceAcceptedTranslations');
+    expect(checkpointReader).toContain('/literary-memory');
+  });
+
+  it('does not send EPUB/PDF segment arrays to project resolution from Agent Workspace', () => {
+    expect(workspace).toContain('const isLocalAgentBook = /^(epub|pdf)$/i.test(props.format)');
+    expect(workspace).toContain('importDocumentFileViaLocalAgent');
+    expect(workspace).toContain('Never send the parsed');
+    expect(workspace).toContain('projectBacked');
+  });
+});
