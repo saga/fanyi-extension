@@ -765,7 +765,7 @@ export function autoConfirmLiteraryMemory(
 ): LiteraryBookMemory {
   const memory = sanitizeLiteraryMemory(input);
   const sourceById = new Map(sourceSegments.map((segment) => [segment.id, segment.text]));
-  const normalizeEvidence = (value: string) => value.normalize('NFKC').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+  const normalizeEvidence = (value: string) => value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
   const refsMatchSource = (refs: Array<{ segmentId: string; sourceQuote: string }> | undefined): boolean =>
     Array.isArray(refs) && refs.some((ref) => {
       const source = sourceById.get(ref.segmentId);
