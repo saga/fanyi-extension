@@ -387,3 +387,31 @@ export async function backupWorkspaceSourceFile(
     body: file,
   });
 }
+
+
+/**
+ * Replace a project's source revision from original EPUB/PDF bytes. Parsing and immutable
+ * revision creation stay inside Local Agent; the extension never resends the book as JSON.
+ */
+export async function updateWorkspaceSourceFromFile(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  file: File,
+): Promise<{ project: any; sourceFile?: unknown }> {
+  return workspaceApi(
+    baseUrl,
+    token,
+    '/api/documents/projects/' + encodeURIComponent(projectId) + '/source-file',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': contentTypeForDocumentFile(file),
+        'X-Source-File-Name': encodeURIComponent(file.name),
+        'X-Source-Action': 'update-revision',
+      },
+      body: file,
+    },
+    WORKSPACE_FILE_IMPORT_TIMEOUT_MS,
+  );
+}
