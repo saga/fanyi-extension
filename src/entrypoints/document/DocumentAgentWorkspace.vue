@@ -167,11 +167,12 @@
           <span>{{ runStatusLabel(activeRun.status) }}</span>
           <span class="agent-meta-dot">·</span>
           <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</span>
-          <span v-if="activeRun.counts?.failed" class="agent-run-failure">有 {{ activeRun.counts.failed }} 段需要重试</span>
+          <span v-if="activeRun.counts?.failed" class="agent-run-failure">{{ activeRun.counts.failed }} 段未能完成</span>
         </div>
+        <p v-if="activeRun.error" class="agent-failed-segment-error agent-run-error">{{ activeRun.error }}</p>
         <details v-if="failedRunSegments.length" class="agent-failed-segments">
-          <summary>查看失败详情（{{ failedRunSegments.length }} 段）</summary>
-          <p class="agent-detail-description">下面列出本次运行中失败片段的最后记录原因、尝试次数与原文摘要。若原因只是“模型未返回完整的片段集合”，请同时查看 Agent 执行轨迹中的模型调用和重试事件。</p>
+          <summary>查看未完成片段的原因（{{ failedRunSegments.length }} 段）</summary>
+          <p class="agent-detail-description">这里列出每个未完成片段最后一次记录的原因、尝试次数和原文摘要。若提示“模型未返回完整的片段集合”，请展开“Agent 执行轨迹”，查看模型调用与重试事件。</p>
           <article v-for="item in failedRunSegments" :key="item.id" class="agent-failed-segment">
             <div class="agent-failed-segment-heading">
               <strong>{{ item.contextPath || '失败片段' }}</strong>
@@ -200,7 +201,7 @@
             </div>
             <div class="agent-inline-actions">
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !(activeRun?.counts?.failed)" @click="startRun('failed')">
-                重试失败内容<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
+                重试未完成片段<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
               </button>
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing" @click="startRun('all')">重新翻译全文</button>
