@@ -450,8 +450,12 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       return;
     }
     anchor.status = status;
-    if (status === 'approved') anchor.confirmationSource = 'user-confirmed';
-    else delete anchor.confirmationSource;
+    if (status === 'approved') {
+      anchor.confirmationSource = 'user-confirmed';
+      anchor.approvedBy = 'user';
+    } else {
+      delete anchor.confirmationSource;
+    }
     await persistVoiceMemoryChange(
       status === 'approved' ? '已批准声音锚点；后续相关场景可复用这组原文—译文示例。'
         : status === 'rejected' ? '已拒绝该声音锚点。' : '已将声音锚点移回候选。',
