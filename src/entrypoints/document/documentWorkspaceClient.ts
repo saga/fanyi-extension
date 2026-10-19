@@ -5,6 +5,7 @@
  * 因为各自生成 session ID 或 Prompt 快照而创建两份数据库、产生两套译文版本。
  */
 import { storage } from '@wxt-dev/storage';
+import type { ParsedDocument, DocumentSegment } from '@/entrypoints/utils/document/types';
 
 export interface WorkspaceSegment {
   id: string;
@@ -38,6 +39,129 @@ export interface WorkspaceProjectMappingInput {
   format: string;
   sourceFileName: string;
   segments: WorkspaceSegment[];
+}
+
+
+export interface LocalAgentFileImportResult {
+  project?: {
+    projectId: string;
+    title: string;
+    format: string;
+    sourceFileName: string;
+    segmentCount: number;
+    sourceFingerprint: string;
+    sourceFileSaved?: boolean;
+  };
+  reusedExisting?: boolean;
+  sourceChanged?: boolean;
+  relatedProject?: { projectId: string; title: string; sourceFileName: string };
+  document?: { title: string; format: string; segments: Array<Record<string, unknown>> };
+}
+
+function contentTypeForDocumentFile(file: File): string {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (extension === 'epub') return 'application/epub+zip';
+  if (extension === 'pdf') return 'application/pdf';
+  return 'application/octet-stream';
+}
+
+/**
+ * Import original bytes and parse EPUB/PDF inside local-agent-service.
+ * Do not build an all-book JSON body in the extension; the service persists parsed segments
+ * directly in the per-project SQLite database.
+ */
+export async function importDocumentFileViaLocalAgent(
+  baseUrl: string,
+  token: string,
+  file: File,
+): Promise<LocalAgentFileImportResult> {
+  return workspaceApi<LocalAgentFileImportResult>(
+    baseUrl,
+    token,
+    '/api/documents/projects/import-file',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': contentTypeForDocumentFile(file),
+        'X-Source-File-Name': encodeURIComponent(file.name),
+      },
+      body: file,
+    },
+    WORKSPACE_FILE_IMPORT_TIMEOUT_MS,
+  );
+}
+
+function mapWorkspaceSegment(raw: Record<string, unknown>, fallbackIndex: number): DocumentSegment {
+  const index = Number.isInteger(raw.ordinal) ? Number(raw.ordinal) : fallbackIndex;
+  const allowedKinds = new Set(['heading', 'paragraph', 'list-item', 'caption', 'code', 'quote', 'other']);
+  const kind = typeof raw.kind === 'string' && allowedKinds.has(raw.kind)
+    ? raw.kind as DocumentSegment['kind']
+    : 'paragraph';
+  return {
+    id: String(raw.id || ('s' + index)),
+    index,
+    text: typeof raw.text === 'string' ? raw.text : '',
+    kind,
+    ...(typeof raw.path === 'string' && raw.path ? { path: raw.path } : {}),
+    ...(Number.isInteger(raw.level) ? { level: Number(raw.level) } : {}),
+    ...(typeof raw.marker === 'string' && raw.marker ? { marker: raw.marker } : {}),
+    ...(Number.isInteger(raw.page) ? { page: Number(raw.page) } : {}),
+    ...(typeof raw.contextPath === 'string' && raw.contextPath ? { contextPath: raw.contextPath } : {}),
+    ...(typeof raw.start === 'string' && raw.start ? { start: raw.start } : {}),
+    ...(typeof raw.end === 'string' && raw.end ? { end: raw.end } : {}),
+  };
+}
+
+/** Convert the server parser's conflict preview into the reader's display DTO. */
+export function parsedDocumentFromLocalAgentPreview(input: {
+  title: string;
+  format: string;
+  segments: Array<Record<string, unknown>>;
+}): ParsedDocument {
+  const segments = input.segments.map((segment, index) => mapWorkspaceSegment(segment, index));
+  return {
+    title: input.title,
+    format: input.format as ParsedDocument['format'],
+    segments,
+    meta: {
+      charCount: segments.reduce((sum, segment) => sum + segment.text.length, 0),
+      segmentCount: segments.length,
+      warnings: [],
+    },
+  };
+}
+
+/** Read source segments in bounded pages; no single whole-book JSON response is required. */
+export async function loadWorkspaceParsedDocument(
+  baseUrl: string,
+  token: string,
+  project: NonNullable<LocalAgentFileImportResult['project']>,
+): Promise<ParsedDocument> {
+  const segments: DocumentSegment[] = [];
+  const expectedCount = Math.max(0, Number(project.segmentCount) || 0);
+  for (let offset = 0; offset < expectedCount; offset += 1000) {
+    const page = await workspaceApi<{ segments?: Array<Record<string, unknown>> }>(
+      baseUrl,
+      token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/segments?limit=1000&offset=' + offset,
+    );
+    const rows = Array.isArray(page.segments) ? page.segments : [];
+    segments.push(...rows.map((segment, index) => mapWorkspaceSegment(segment, offset + index)));
+    if (!rows.length) break;
+  }
+  if (segments.length !== expectedCount) {
+    throw new Error('本机服务解析结果不完整：项目记录 ' + expectedCount + ' 段，实际读取 ' + segments.length + ' 段。请重新导入文件。');
+  }
+  return {
+    title: project.title,
+    format: project.format as ParsedDocument['format'],
+    segments,
+    meta: {
+      charCount: segments.reduce((sum, segment) => sum + segment.text.length, 0),
+      segmentCount: segments.length,
+      warnings: [],
+    },
+  };
 }
 
 type ExactProjectMap = Record<string, string>;
@@ -158,9 +282,10 @@ function describeNetworkFailure(base: string, error: unknown): string {
  * 没有超时的话点击按钮只会表现为「一点反应都没有」，连错误文案都没有。
  */
 const WORKSPACE_REQUEST_TIMEOUT_MS = 20_000;
+const WORKSPACE_FILE_IMPORT_TIMEOUT_MS = 10 * 60_000;
 
-function describeTimeoutFailure(base: string): string {
-  return '本机服务 ' + base + ' 在 ' + Math.round(WORKSPACE_REQUEST_TIMEOUT_MS / 1000) +
+function describeTimeoutFailure(base: string, timeoutMs: number): string {
+  return '本机服务 ' + base + ' 在 ' + Math.round(timeoutMs / 1000) +
     ' 秒内没有响应：请求可能被浏览器代理拦截，或服务进程卡住。请确认服务运行后重试。';
 }
 
@@ -169,6 +294,7 @@ export async function workspaceApi<T = any>(
   token: string,
   route: string,
   init: RequestInit = {},
+  timeoutMs = WORKSPACE_REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const base = (baseUrl || 'http://127.0.0.1:8789').trim().replace(/\/+$/, '');
   const url = new URL(route, base + '/');
@@ -181,7 +307,7 @@ export async function workspaceApi<T = any>(
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, WORKSPACE_REQUEST_TIMEOUT_MS);
+  }, timeoutMs);
   if (init.signal) {
     if (init.signal.aborted) controller.abort();
     else init.signal.addEventListener('abort', () => controller.abort(), { once: true });
@@ -191,7 +317,7 @@ export async function workspaceApi<T = any>(
   try {
     response = await fetch(url.toString(), { ...init, headers, signal: controller.signal })
       .catch((error: unknown) => {
-        throw new WorkspaceApiError(timedOut ? describeTimeoutFailure(base) : describeNetworkFailure(base, error), 0);
+        throw new WorkspaceApiError(timedOut ? describeTimeoutFailure(base, timeoutMs) : describeNetworkFailure(base, error), 0);
       });
   } finally {
     clearTimeout(timer);
