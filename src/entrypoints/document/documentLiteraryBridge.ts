@@ -36,9 +36,10 @@ export function mergeContextGraphEntitySuggestions(graph: any, memory: LiteraryB
       source, target, kind, aliases,
       evidence: typeof node.evidence[0]?.quote === 'string' ? node.evidence[0].quote : '',
       ...(evidenceRefs.length ? { evidenceRefs } : {}),
-      // Context Graph nodes carry source-validated evidence; their name mappings are automatically
-      // active even when the graph row itself remains a candidate for non-name review.
+      // Context Graph evidence has already been checked by the Local Agent service against source segments.
+      // The entity mapping can be active without pretending the user explicitly confirmed it.
       reviewStatus: node.status === 'confirmed' || evidenceRefs.length > 0 ? 'confirmed' : 'suggested',
+      ...(evidenceRefs.length ? { confirmationSource: 'evidence-verified' as const } : {}),
     }];
   });
   const normalizeName = (value: unknown) => String(value || '').normalize('NFKC')
@@ -108,6 +109,11 @@ export function mergeContextGraphEntitySuggestions(graph: any, memory: LiteraryB
       ...(evidence ? { evidence } : {}),
       ...(evidenceRefs.length ? { evidenceRefs } : {}),
       reviewStatus: confirmed || candidate.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
+      ...((confirmed || candidate.reviewStatus === 'confirmed') ? {
+        confirmationSource: confirmed?.confirmationSource === 'user-confirmed' ? 'user-confirmed' as const
+          : evidenceRefs.length ? 'evidence-verified' as const
+            : confirmed?.confirmationSource || 'legacy-unknown' as const,
+      } : {}),
     };
     for (const index of matchingIndices.slice(1).sort((a, b) => b - a)) existing.splice(index, 1);
   }
