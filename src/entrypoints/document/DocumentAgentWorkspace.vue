@@ -714,6 +714,10 @@ async function createProject(forceNew = false, explicitRebuild = false) {
   const legacyTranslations = new Map(props.translations);
   const legacyMemory = JSON.parse(JSON.stringify(props.literaryMemory));
   const sourceFileAtStart = props.sourceFile;
+  if (props.useLocalAgent && /^(epub|pdf)$/i.test(props.format) && !sourceFileAtStart) {
+    error.value = '本机服务模式下 EPUB/PDF 必须由本机解析。请重新选择原始文件后再新建项目。';
+    return;
+  }
   const promptAtStart = promptInput();
   busy.value = true; error.value = ''; message.value = '';
   restorationError.value = '';
@@ -744,7 +748,7 @@ async function createProject(forceNew = false, explicitRebuild = false) {
 
     if (response.reusedExisting === true) {
       // Server-side deduplication won a concurrent create race. Repair only this source's map.
-      await rememberWorkspaceProject(input, response.project.projectId);
+      await rememberWorkspaceProject(input, response.project.projectId, response.project.sourceFingerprint);
       if (!isCurrent()) return;
       project.value = null;
       await loadExistingProject();
@@ -825,7 +829,17 @@ async function loadExistingProject() {
     let hasSourceChanged = false;
     let result: any = null;
 
-    if (isLocalAgentBook && props.sourceFile) {
+    if (isLocalAgentBook && props.sourceFile && mappedResult?.project &&
+        !mapping.sourceChanged &&
+        (!mapping.sourceFingerprint || mapping.sourceFingerprint === mappedResult.project.sourceFingerprint)) {
+      // A previous Local Agent import already established the exact source mapping. Reuse it
+      // without uploading or parsing the same large binary again.
+      projectId = mapping.projectId!;
+      result = mappedResult;
+      if (!mapping.sourceFingerprint) {
+        await rememberWorkspaceProject(input, projectId, mappedResult.project.sourceFingerprint);
+      }
+    } else if (isLocalAgentBook && props.sourceFile) {
       // The Local Agent owns raw EPUB/PDF parsing and source identity. Never send the parsed
       // whole-book segment array to /projects/resolve from this UI.
       const imported = await importDocumentFileViaLocalAgent(
@@ -1167,6 +1181,10 @@ async function updateSourceRevision() {
   const projectId = project.value.projectId as string;
   const input = projectInput();
   const sourceFileAtStart = props.sourceFile;
+  if (props.useLocalAgent && /^(epub|pdf)$/i.test(props.format) && !sourceFileAtStart) {
+    error.value = '当前会话没有原始 EPUB/PDF 文件。请重新选择原文件，再由本机服务更新来源版本。';
+    return;
+  }
   const baseUrl = props.localAgentUrl;
   const token = props.localAgentToken;
   busy.value = true;
@@ -1186,7 +1204,7 @@ async function updateSourceRevision() {
           }),
         });
     // Keep the association tied to the captured source, even if the user has since switched books.
-    await rememberWorkspaceProject(input, projectId);
+    await rememberWorkspaceProject(input, projectId, result.project?.sourceFingerprint);
     if (sourceFileAtStart && !updateFromRawFile) {
       try {
         await backupWorkspaceSourceFile(baseUrl, token, projectId, sourceFileAtStart);
