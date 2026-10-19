@@ -673,3 +673,40 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - 片段的 `id`、`kind`、`level`、`marker`、`page`、`contextPath` 在客户端和服务端保持一致。章节路径、列表标记及页码作为只读元数据使用，不进入译文正文。
 - 只有所有预期 ID 都有非空译文时 `complete` 才为 true。服务端会重试一次缺失片段；仍缺失时返回 `missingSegmentIds`，扩展保留已完成结果并允许只重试缺失片段。
 - 当前 PDF parser 会告警扫描件/低文本页；本次没有接入 OCR 引擎，不能把无文本层的页面报告成已识别。
+
+
+## 八、文学译名一致性与全书质量审计（2026-10-19）
+
+这轮改动属于 **Local Agent 文档项目工作流**，不是 Cloudflare Worker 与扩展共享的网页翻译代码；不得把这些文件加入 check-sync.ts 的逐字节同步清单。
+
+### 服务端事实来源与保护规则
+
+- 文学翻译的 TranslationBrief 会把当前批次可见的、人物角色/声音档案中**已确认且启用翻译**的规范名映射补入名称约束；它与已确认 LiteraryMemory entity 映射共同参与 Reviewer 的规范名保护。初译与 Reviewer 仍使用同一个固定批次上下文。
+- 称谓和通用词（例如 Lord、General、Lady）不能单独成为人物规范名。与目标人物身份不兼容的别名不参与保护；尚未出现于当前可见原文的别名不能因为“存在于全书档案”就注入当前批次。
+- 同一原文身份有多个互相冲突的**已确认**译名时，不由模型或数组顺序擅自选一个。服务端把冲突加入上下文诊断和全书质量审计；需要先由用户统一 LiteraryMemory/人物角色声音档案。
+- canonical-name-mapping-conflict 不可通过普通的定点返工自动修复；术语漂移、疑似英文残留和数字差异则是启发式审阅提示，不等于已证明的翻译错误。
+
+### 全书质量审计 API 与 UI
+
+- 本机服务 POST /api/documents/projects/:projectId/quality-audit 对当前来源版本执行全书审计，可选传 { "runId": "..." } 将该已结束 Run 的候选译文叠加到已采纳文本上；GET .../quality-audit 读取最近报告，或用 auditId 指定报告。
+- POST .../quality-audit/repair 接受 auditId 和 findingIds，为所选片段创建新的候选 Run。新候选仍需既有采纳流程确认，不能直接覆盖人工译文。
+- 扩展在“翻译 Agent → 更多选项 → 全书质量审计”展示覆盖/缺译、规范名冲突、译名漂移、疑似英文残留、数字和重复表达指标；finding 列表支持按人物、译名、章节、片段 ID、证据文字进行本地筛选，列表展示上限不影响服务端报告。
+- 报告绑定 sourceRevisionId，并记录已采纳译文快照与实际审计文本的两个固定大小哈希。若原文版本变化或审计后发生不一致的人工译文修订，服务端返回 409，要求重新审计，防止旧报告创建过期返工。
+- queued / running / paused 阻止同项目普通审计；partial 是终态但不完整，可继续审计以发现未完成片段。每个项目有独立 project.sqlite，不可对 translation_runs 假设存在 project_id 字段。
+
+### 诊断闭环
+
+- npm run diagnose:character-voice 用于追踪全书采样、Context Graph 与人物/声音档案的候选来源与持久化情况。
+- 新增 npm run diagnose:translation -- --project-id UUID --run-id UUID --name Yabu --word again，只读检查 Run 固定的 LiteraryMemory、实际保存的 TranslationBrief、发送给模型的文本/规范名遮罩标记以及指定英文词在已采纳译文中的残留。报告输出到 JSON，并含有限长度原文/译文摘录；分享前需检查内容。
+- 两个诊断脚本都不调用模型、不修改数据库，也不等同于真实翻译质量评估。真实模型效果仍需对同一原文版本重跑并检查初译、两个 Reviewer 阶段和返工结果。
+
+### 服务端与扩展协作的单一契约
+
+服务端唯一协作规范为 [vocal-saga/docs/LOCAL_AGENT_EXTENSION_QUALITY_CONTRACT.md](https://github.com/devweekly/vocal-saga/blob/main/docs/LOCAL_AGENT_EXTENSION_QUALITY_CONTRACT.md)。修改 finding type、报告字段、Run 状态或返工 API 时，必须同步检查该文档、服务端实现/测试和 DocumentAgentWorkspace.vue 的消费逻辑；不要在扩展端复制质量扫描或返工规划算法。
+
+关键实现：
+- 服务端：local-agent-service/src/documents/translationBrief.ts、translationAgent.ts、qualityAudit.ts、projectRoutes.ts、scripts/diagnose-vocal-translation.mjs
+- 服务端测试：local-agent-service/tests/translation-brief.test.mjs、quality-audit.test.mjs、document-agent-prompt.test.mjs
+- 扩展端：src/entrypoints/document/DocumentAgentWorkspace.vue、src/entrypoints/document/documentWorkspaceClient.ts
+
+> CI 合成测试不调用真实本地模型。不要把“代码已合并”表述为“Yabu 在整本真实小说中已全部验证为统一译名”；还需要用具体项目/Run 执行上述只读诊断与实际模型复跑。
