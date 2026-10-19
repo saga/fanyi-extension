@@ -902,13 +902,23 @@ async function refreshQualityAudit() {
   try {
     const result = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/quality-audit');
     if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
-    qualityAudit.value = result.report || null;
-    selectedQualityFindingIds.value = [];
+    const nextReport = result.report || null;
+    const sameReport = !!nextReport &&
+      nextReport.auditId === qualityAudit.value?.auditId &&
+      nextReport.sourceRevisionId === qualityAudit.value?.sourceRevisionId;
+    qualityAudit.value = nextReport;
+    // Preserve in-progress UI selection while reloading the same report (for example after
+    // refreshing project status). A different audit/source version is a new selection context.
+    if (!sameReport) {
+      selectedQualityFindingIds.value = [];
+      qualityAuditQuery.value = '';
+    }
   } catch (e) {
     if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
     if (e instanceof WorkspaceApiError && e.status === 404) {
       qualityAudit.value = null;
       selectedQualityFindingIds.value = [];
+      qualityAuditQuery.value = '';
       return;
     }
     qualityAuditError.value = e instanceof Error ? e.message : String(e);
