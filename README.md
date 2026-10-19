@@ -63,6 +63,8 @@ npm run local-agent:start
 
 本机服务使用 SQLite 保存请求历史、翻译缓存和文档恢复副本，默认数据库位于 `~/.vocal-saga-local-agent/local-agent.sqlite`。请求正文是否记录由 `LOCAL_AGENT_STORE_CONTENT` 控制；翻译缓存和文档检查点是独立业务数据，不受该选项关闭影响。更多配置、数据上限和清理方法见 [本机服务说明](https://github.com/devweekly/vocal-saga/blob/main/local-agent-service/README.md)。
 
+质量审计与定点返工使用服务端现有项目 API。跨仓库字段、Run 状态、过期报告保护和回归要求统一记录在[本机服务与扩展质量审计契约](https://github.com/devweekly/vocal-saga/blob/main/docs/LOCAL_AGENT_EXTENSION_QUALITY_CONTRACT.md)；修改其中一端时应同步检查另一端。
+
 EPUB/PDF 文件选择和容器解析仍由扩展在浏览器中处理；本机服务负责本机模型调用、文学分析/审校、SQLite 翻译缓存以及文档检查点。阅读器优先使用 IndexedDB，SQLite 作为附加恢复副本。当开启“本机 Agent”时，EPUB/PDF 阅读页和“翻译 Agent”共用一个 workspace：workspace 项目 SQLite 保存来源版本、Prompt 版本、运行/批次状态、候选译文、采纳译文、人工修订与完整事件记录；原始文件按来源版本存放在项目目录。阅读页和 Agent Tab 都通过同一 Translation Agent 运行；任务完成后会自动把有效候选写入当前译文，并同步回阅读器，不需要用户逐条采纳或预先填写译文。重新翻译时，同一原文版本已有的人工修订优先保留；用户仍可在“更多选项”中按需手工纠正、查看运行历史或重试失败项。两个入口使用同一份 system/user Prompt、语言方向、模型、术语表和书籍记忆。旧阅读器已有译文会在创建/关联 workspace 时导入，后续以 workspace 中当前来源版本的已采纳译文为准。翻译 Agent 的“更多选项 → 全书质量审计”可以扫描缺译、规范译名冲突/漂移、疑似英文残留、数字/单位差异和重复表达；可返工项会创建新的候选 Run，规范译名配置冲突必须先人工统一，审计不会直接覆盖已有译文，报告保存在本机项目数据库并绑定来源版本。注意：扩展可打开不超过 20 MiB 的文件。扩展写入 SQLite 恢复副本时，会将单个文档检查点的序列化 JSON 控制在 5 MiB 以内；这是客户端检查点限制，不是 project API 的 HTTP 限制。`/api/documents/*` JSON 请求体上限为 100 MiB，其他本机服务 JSON API 为 24 MiB，原始源文件上传上限为 20 MiB。大文档仍可使用 IndexedDB，但 SQLite 可能无法备份完整快照。如果 IndexedDB 也不可用，该文档刷新后可能无法恢复。清空翻译缓存不等于删除文档检查点或请求历史；要清除所有 SQLite 中的本机内容，可在服务停止后删除整个数据库文件。
 
 ## 🎮 快捷键
