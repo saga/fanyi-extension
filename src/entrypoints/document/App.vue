@@ -216,8 +216,8 @@
 
       <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
       <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
-        <button class="quick-action" :disabled="state.running || translationPreprocessingNeedsAttention || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
-        <button class="quick-action" :disabled="state.running || translationPreprocessingNeedsAttention || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
+        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
         <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
       </div>
 
@@ -1282,14 +1282,12 @@ const {
   contextGraphStatusLabel,
   contextGraphPhaseLabel,
   contextGraphProgressPercent,
-  translationPreprocessingRequired,
   translationPreprocessingReadiness,
   translationPreprocessingNeedsAttention,
   translationPreprocessingUiState,
   clearContextGraphPoll,
   loadContextGraph,
   refreshContextGraphStatus,
-  ensureContextGraphPreprocessing,
   handlePreprocessingStatusRefreshRequested,
   openPreprocessingAndEnsure,
   reanalyzeContextGraph,
@@ -2513,7 +2511,8 @@ watch([
     const graphContextChanged = next[0] !== previous[0] ||
       next[1] !== previous[1] || next[2] !== previous[2];
     if (nextTranslationMode === 'literary' && graphContextChanged) {
-      await ensureContextGraphPreprocessing(workspaceProject.value, { force: false });
+      // This is display state only. The Local Agent Run worker owns preprocessing and readiness.
+      await refreshContextGraphStatus(workspaceProject.value, true);
     }
   } catch (error) {
     if (workspaceProject.value?.projectId === projectId) {
@@ -2566,11 +2565,8 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     await replaceCurrentTranslations(accepted);
     stateHydrated = true;
 
-    if (translationPreprocessingRequired.value) {
-      await ensureContextGraphPreprocessing(refreshed.project, { force: false });
-    } else {
-      await refreshContextGraphStatus(refreshed.project, true);
-    }
+    // Refresh the status projection only. Never start full-book analysis during hydration.
+    await refreshContextGraphStatus(refreshed.project, true);
   } catch (error) {
     if (isCurrent()) {
       persistenceMessage.value = '同步本机项目状态失败：' + (error instanceof Error ? error.message : String(error));
@@ -2839,9 +2835,9 @@ async function ensureDocumentWorkspaceInternal(
   await persistCurrentSession();
 
   // Project details, translations and memory are now hydrated from the service; only session UI
-  // state is persisted locally. Long preprocessing remains conditional on the local-Agent setting.
-  if (effectiveDocumentTranslationMode.value === 'literary' && config.documentUseLocalAgent) {
-    void ensureContextGraphPreprocessing(refreshed.project, { force: false });
+  // state is persisted locally. Opening/restoring a project reads status but never starts analysis.
+  if (config.documentUseLocalAgent) {
+    void refreshContextGraphStatus(refreshed.project, true);
   }
   return refreshed.project;
 }
