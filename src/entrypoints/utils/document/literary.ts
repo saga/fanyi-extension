@@ -616,7 +616,8 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     styleGuide,
     styleGuideStatus: existing.styleGuideStatus === 'confirmed' ? 'confirmed' : incoming.styleGuideStatus,
     styleGuideConfirmationSource: existing.styleGuideStatus === 'confirmed'
-      ? existing.styleGuideConfirmationSource : incoming.styleGuideConfirmationSource,
+      ? mergeConfirmationSource(existing.styleGuideConfirmationSource, incoming.styleGuideConfirmationSource)
+      : incoming.styleGuideConfirmationSource,
     chapterSummaries: Array.from(summaries.values()).slice(-MAX_SUMMARIES),
     recentExamples: [...existing.recentExamples, ...incoming.recentExamples].slice(-MAX_EXAMPLES),
     characterVoices: mergeCharacterVoices(existing.characterVoices, incoming.characterVoices),
@@ -761,7 +762,9 @@ export function refreshLiteraryExampleTargets(
 export function autoConfirmLiteraryMemory(input: unknown): LiteraryBookMemory {
   const memory = sanitizeLiteraryMemory(input);
   for (const entity of memory.entities) {
-    if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target && entity.evidence) {
+    // A free-form evidence string is only a model claim. Automatic activation requires source-positioned evidence refs.
+    if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target &&
+        Array.isArray(entity.evidenceRefs) && entity.evidenceRefs.length > 0) {
       entity.reviewStatus = 'confirmed';
       entity.confirmationSource = 'evidence-verified';
     }
@@ -769,7 +772,8 @@ export function autoConfirmLiteraryMemory(input: unknown): LiteraryBookMemory {
   for (const relation of memory.relationships) {
     if (
       relation.reviewStatus !== 'confirmed' && relation.subject &&
-      relation.predicate && relation.object && relation.evidence
+      relation.predicate && relation.object &&
+      Array.isArray(relation.evidenceRefs) && relation.evidenceRefs.length > 0
     ) {
       relation.reviewStatus = 'confirmed';
       relation.confirmationSource = 'evidence-verified';
