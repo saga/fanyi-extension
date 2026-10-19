@@ -87,7 +87,7 @@ describe('literary preprocessing status projection (informational only)', () => 
     expect(result.ready).toBe(true);
   });
 
-  it('fails closed when the last status refresh failed even if a previous snapshot looked completed', () => {
+  it('reports a status refresh error even if a previous snapshot looked completed', () => {
     const result = assessContextGraphReadiness({
       ...baseInput,
       snapshot: { ...completedSnapshot, error: '本机服务暂时不可用' },
