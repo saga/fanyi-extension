@@ -167,7 +167,7 @@
           <span>{{ runStatusLabel(activeRun.status) }}</span>
           <span class="agent-meta-dot">·</span>
           <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</span>
-          <span v-if="activeRun.counts?.failed" class="agent-run-failure">{{ activeRun.counts.failed }} 段未能完成</span>
+          <span v-if="activeRun.counts?.failed" class="agent-run-failure">{{ activeRun.counts.failed }} 段未完成，可仅重试这些片段</span>
         </div>
         <p v-if="activeRun.error" class="agent-failed-segment-error agent-run-error">{{ activeRun.error }}</p>
         <details v-if="failedRunSegments.length" class="agent-failed-segments">
@@ -175,7 +175,7 @@
           <p class="agent-detail-description">这里列出每个未完成片段最后一次记录的原因、尝试次数和原文摘要。若提示“模型未返回完整的片段集合”，请展开“Agent 执行轨迹”，查看模型调用与重试事件。</p>
           <article v-for="item in failedRunSegments" :key="item.id" class="agent-failed-segment">
             <div class="agent-failed-segment-heading">
-              <strong>{{ item.contextPath || '失败片段' }}</strong>
+              <strong>{{ item.contextPath || '未完成片段' }}</strong>
               <span class="agent-segment-id">{{ item.id }}</span>
               <span class="agent-segment-attempts">尝试 {{ item.attempts || 0 }} 次</span>
             </div>
@@ -250,7 +250,7 @@
               <div v-for="run in runs" :key="run.runId" class="agent-history-row">
                 <div class="agent-history-copy">
                   <strong>{{ new Date(run.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</strong>
-                  <span>{{ run.scope?.type === 'stale' ? '未完成内容' : run.scope?.type === 'all' ? '全文重译' : run.scope?.type === 'failed' ? '失败重试' : '指定范围' }} · {{ run.runId.slice(0, 8) }}</span>
+                  <span>{{ run.scope?.type === 'stale' ? '未完成内容' : run.scope?.type === 'all' ? '全文重译' : run.scope?.type === 'failed' ? '未完成片段重试' : '指定范围' }} · {{ run.runId.slice(0, 8) }}</span>
                 </div>
                 <span class="agent-history-status">{{ runStatusLabel(run.status) }}</span>
                 <button class="agent-button agent-button-tertiary" :disabled="busy" @click="selectRun(run.runId)">查看</button>
@@ -457,7 +457,8 @@ const documentProgressPercent = computed(() => totalSegmentCount.value
 const runProgressPercent = computed(() => {
   const counts = activeRun.value?.counts;
   if (!counts || !Number(counts.total)) return documentProgressPercent.value;
-  const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0) + Number(counts.failed || 0);
+  // 未完成片段不能算作已处理，否则大规模失败时进度条也会显示 100%。
+  const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0);
   return Math.round(Math.min(100, resolved / Number(counts.total) * 100));
 });
 const runLabels: Record<string, string> = {
