@@ -1289,6 +1289,20 @@ function schedulePoll(runId: string) {
       else {
         await refreshProjectWithoutRun();
         if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+        // Local Agent may start a bounded automatic quality-repair Run after the parent Run finishes.
+        // Follow that child so its progress/results remain visible; the service already auto-accepts it.
+        const automaticChild = runs.value.find((run: any) =>
+          run.parentRunId === runId && run.scope?.automation?.kind === 'quality-audit-repair');
+        if (automaticChild && automaticChild.runId !== runId) {
+          activeRun.value = automaticChild;
+          runEvents.value = [];
+          eventCursor = 0;
+          await refreshRun(automaticChild.runId);
+          if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+          if (isRunning.value) schedulePoll(automaticChild.runId);
+          return;
+        }
+        // Compatibility/recovery only: current Local Agent runs auto-accept inside the server worker.
         await autoAcceptReadyCandidates();
       }
     } catch (e) {
