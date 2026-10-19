@@ -1339,6 +1339,8 @@ function schedulePoll(runId: string) {
       else {
         await refreshProjectWithoutRun();
         if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+        await refreshQualityAudit();
+        if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
         // Local Agent may start a bounded automatic quality-repair Run after the parent Run finishes.
         // Follow that child so its progress/results remain visible; the service already auto-accepts it.
         const automaticChild = runs.value.find((run: any) =>
