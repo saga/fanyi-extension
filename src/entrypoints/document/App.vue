@@ -39,7 +39,7 @@
       <p class="dz-title">把文件拖到这里，或</p>
       <button class="btn primary" @click="pickFile">选择文件</button>
       <p class="dz-hint">
-        支持 TXT / Markdown / HTML / SRT / VTT / JSON / PDF / DOCX / EPUB，单个文件 ≤ 20MB
+        支持 TXT / Markdown / HTML / SRT / VTT / JSON / PDF / DOCX / EPUB。启用本机 Agent 时，EPUB/PDF 由本机解析（默认原文件上限 512 MiB）；其他模式仍受扩展本地解析上限约束。
       </p>
       <input ref="fileInput" type="file" class="hidden-input" :accept="DOCUMENT_ACCEPT_ATTR"
         @change="onFilePicked" />
@@ -1128,7 +1128,7 @@ let ensureWorkspacePromiseKey: string | null = null;
 /** Invalidates asynchronous work when the reader switches to another document. */
 let workspaceDocumentGeneration = 0;
 /** A file imported and parsed by Local Agent is already authoritative; don't resend all segments to resolve/create it. */
-let localAgentImportBinding: { documentKey: string; projectId: string; createdNewProject: boolean } | null = null;
+let localAgentImportBinding: { documentKey: string; projectId: string; createdNewProject: boolean; sourceChanged?: boolean; sourceFingerprint?: string } | null = null;
 /** Session hydration must not be mistaken for explicit user changes that update the service Prompt. */
 let suppressWorkspacePromptSync = false;
 /** Avoid creating a new service project before the existing browser/session snapshot has been compared. */
@@ -2223,14 +2223,21 @@ async function loadFile(file: File) {
       const token = config.documentLocalAgentToken || '';
       const imported = await importDocumentFileViaLocalAgent(base, token, file);
       rawText = '';
-      if (imported.sourceChanged && imported.document) {
+      if (imported.sourceChanged && imported.document && imported.relatedProject?.projectId) {
         doc.value = parsedDocumentFromLocalAgentPreview(imported.document);
+        localAgentImportBinding = {
+          documentKey: buildDocumentAgentSessionId(doc.value, documentFileName),
+          projectId: imported.relatedProject.projectId,
+          createdNewProject: false,
+          sourceChanged: true,
+        };
       } else if (imported.project?.projectId) {
         doc.value = await loadWorkspaceParsedDocument(base, token, imported.project);
         localAgentImportBinding = {
           documentKey: buildDocumentAgentSessionId(doc.value, documentFileName),
           projectId: imported.project.projectId,
           createdNewProject: imported.reusedExisting !== true,
+          sourceFingerprint: imported.project.sourceFingerprint,
         };
       } else {
         throw new Error('本机服务没有返回已解析的文档项目。');
@@ -2731,7 +2738,6 @@ async function ensureDocumentWorkspaceInternal(
     ? { projectId: importBinding.projectId, sourceChanged: false, documentKey: expectedDocumentKey }
     : await lookupWorkspaceProject(input);
   if (!isCurrent()) return null;
-  if (importBinding) await rememberWorkspaceProject(input, importBinding.projectId);
   let mappedProject: any = null;
   let mappedDetails: { project: any; runs?: any[] } | null = null;
   if (mapping.projectId) {
@@ -2754,9 +2760,45 @@ async function ensureDocumentWorkspaceInternal(
   if (importBinding && !mappedProject) {
     throw new Error('本机服务已导入文件，但对应项目不存在；请重新选择文件导入。');
   }
-  const resolution = importBinding
-    ? { exactProject: mappedProject, relatedProject: null }
-    : await resolveWorkspaceProject(base, token, input);
+  const isLocalAgentBook = config.documentUseLocalAgent === true &&
+    /^(epub|pdf)$/i.test(input.format);
+  if (importBinding?.sourceChanged && mappedProject) {
+    workspaceProject.value = mappedProject;
+    workspaceActiveRun.value = (mappedDetails?.runs || []).find((run) =>
+      ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
+    workspaceSourceChanged.value = true;
+    persistenceMessage.value = '本机服务中存在同名但原文不同的项目。请在 Agent 面板明确更新来源版本或另建项目；解析由本机服务负责。';
+    activeTab.value = 'agent';
+    return null;
+  }
+  let resolution: { exactProject: any | null; relatedProject: any | null };
+  if (importBinding) {
+    resolution = { exactProject: mappedProject, relatedProject: null };
+  } else if (isLocalAgentBook && !sourceFileAtStart) {
+    // After restoration the source file bytes may no longer be in the browser session. Use the
+    // durable exact mapping and its recorded server fingerprint; never upload the whole book
+    // again just to resolve a project. A legacy mapping without a baseline fingerprint is kept
+    // for compatibility, but any new mapping records the server fingerprint.
+    if (!mappedProject) {
+      persistenceMessage.value = '本机项目映射不可用，无法在不重传原文件的情况下安全确认 EPUB/PDF 来源。请重新选择原始文件；本机服务会负责解析。';
+      return null;
+    }
+    const fingerprintChanged = !!mapping.sourceFingerprint &&
+      mapping.sourceFingerprint !== mappedProject.sourceFingerprint;
+    resolution = fingerprintChanged || mapping.sourceChanged
+      ? { exactProject: null, relatedProject: mappedProject }
+      : { exactProject: mappedProject, relatedProject: null };
+  } else if (isLocalAgentBook) {
+    // In Local Agent mode raw EPUB/PDF imports must pass through import-file. Falling back to
+    // a full-book JSON resolve would reintroduce the payload-size problem this path removes.
+    if (!importBinding && sourceFileAtStart) {
+      persistenceMessage.value = '本机服务尚未完成原文件导入。请重新选择该 EPUB/PDF 文件重试。';
+      return null;
+    }
+    resolution = { exactProject: null, relatedProject: null };
+  } else {
+    resolution = await resolveWorkspaceProject(base, token, input);
+  }
   if (!isCurrent()) return null;
   let project: any = null;
   let projectDetails: { project: any; runs?: any[] } | null = null;
@@ -2775,7 +2817,9 @@ async function ensureDocumentWorkspaceInternal(
       if (!isCurrent()) return null;
       project = projectDetails.project;
     }
-    if (mapping.projectId !== project.projectId) await rememberWorkspaceProject(input, project.projectId);
+    if (mapping.projectId !== project.projectId || importBinding) {
+      await rememberWorkspaceProject(input, project.projectId, project.sourceFingerprint);
+    }
   } else if (mappedProject) {
     project = mappedProject;
     projectDetails = mappedDetails;
@@ -2805,13 +2849,17 @@ async function ensureDocumentWorkspaceInternal(
   let createdNewProject = importBinding?.createdNewProject ?? false;
   if (!project) {
     if (!isCurrent()) return null;
+    if (isLocalAgentBook) {
+      persistenceMessage.value = '本机服务模式下 EPUB/PDF 必须通过原始文件导入，不能回退到整本片段 JSON。请重新选择原文件后再试。';
+      return null;
+    }
     const created = await workspaceApi<{ project: any; reusedExisting?: boolean }>(base, token, '/api/documents/projects', {
       method: 'POST',
       body: JSON.stringify({ ...input, prompt: initialPrompt }),
     });
     project = created.project;
     createdNewProject = created.reusedExisting !== true;
-    await rememberWorkspaceProject(input, project.projectId);
+    await rememberWorkspaceProject(input, project.projectId, project.sourceFingerprint);
     // A server project created just as the user switches documents still needs the one-time
     // migration from the captured old session, but must not mutate the new document's UI.
   }
