@@ -1798,49 +1798,62 @@ async function persistDocumentCheckpointToLocalService(input: {
 }): Promise<boolean> {
   const config = await getConfig();
   if (!config.documentUseLocalAgent || !doc.value || localSessionDisabled) return false;
+
+  // Local Agent projects already persist immutable source segments, accepted translations,
+  // Prompt revisions, LiteraryMemory and Run history in their project SQLite database.
+  // Never duplicate the whole document or memory into the generic reader-session table.
+  const projectId = workspaceProject.value?.projectId as string | undefined;
+  if (!projectId) return false;
+
   try {
     const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/save';
     base.search = '';
     base.hash = '';
 
-    // 增量基于已确认写入 SQLite 的数据，而不是 IndexedDB 的游标。
-    // 服务暂时离线后，之前未成功写入的译文仍会包含在下次请求中。
-    const localTranslationDelta = input.snapshot.translations.filter(([id, text]) =>
-      localPersistedTranslations.get(id) !== text,
-    );
-    const { translations: _allTranslations, ...snapshotWithoutTranslations } = input.snapshot;
-    const localSnapshot = localSessionDocumentSaved ? snapshotWithoutTranslations : input.snapshot;
     const payload = {
-      ...input,
-      snapshot: localSnapshot,
-      // 首次写入已有完整 snapshot.translations，不重复携带同样大小的增量数组。
-      translationDelta: localSessionDocumentSaved ? localTranslationDelta : [],
-      ...(!localSessionDocumentSaved ? { document: doc.value, rawText, fileName: documentFileName, glossary: glossary.value } : {}),
+      projectBacked: true,
+      projectId,
+      fileName: documentFileName,
+      sourceLang: input.sourceLang,
+      targetLang: input.targetLang,
+      viewMode: input.viewMode,
+      literaryMode: input.literaryMode,
+      currentPageIndex: input.currentPageIndex,
+      translatedSegmentCount: input.translatedSegmentCount,
+      // This table is only a reader-resume pointer. Project content and translation state are
+      // recovered from document_projects, not copied here.
+      snapshot: {
+        total: input.snapshot.total,
+        done: input.snapshot.done,
+        failedBatches: input.snapshot.failedBatches.slice(-100),
+        error: input.snapshot.error,
+      },
+      translationDelta: [],
     };
-
     const response = await fetch(base.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
+      // Replace a legacy full-document checkpoint on the first pointer write; otherwise the
+      // server's merge semantics could retain its obsolete document/rawText/literaryMemory.
       body: JSON.stringify({
         sessionId: LOCAL_DOCUMENT_SESSION_ID,
         title: doc.value.title || documentFileName,
         format: doc.value.format,
-        mergeExisting: localSessionDocumentSaved,
+        mergeExisting: false,
         payload,
       }),
     });
     if (!response.ok) {
-      if (response.status === 413) localSessionDisabled = true;
-      console.debug('[document-reader] local SQLite checkpoint skipped:', response.status);
+      console.debug('[document-reader] local SQLite reader pointer skipped:', response.status);
       return false;
     }
 
     localSessionDocumentSaved = true;
-    for (const [id, text] of localTranslationDelta) localPersistedTranslations.set(id, text);
+    localPersistedTranslations = new Map(input.snapshot.translations);
     localSessionSummary.value = {
       title: doc.value.title || documentFileName,
       format: doc.value.format,
@@ -1848,7 +1861,6 @@ async function persistDocumentCheckpointToLocalService(input: {
     };
     return true;
   } catch (error) {
-    // SQLite 是独立备份；本机服务未启动不应中断用户翻译。
     console.debug('[document-reader] local SQLite checkpoint unavailable:', error);
     return false;
   }
