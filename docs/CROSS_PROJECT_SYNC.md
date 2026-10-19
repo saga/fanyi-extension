@@ -719,3 +719,12 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - On the normal Local Agent literary path, the extension submits a project Run. local-agent-service validates source revision, analysis version and language direction, starts or waits for preprocessing, and only then changes the translation Run to running. The extension must not start a second preprocessing gate before submitting the Run.
 - Manual re-analysis remains an explicit UI action that invokes the service API. If the service is unavailable, surface that failure; do not present extension-side graph state as authoritative.
 - The 120 KiB LiteraryMemory guard applies only to compact, editable memory DTOs, not full-book Context Graph analysis or evidence.
+
+
+## 九、小说 Context Graph 的责任边界（2026-10-19）
+
+- Local Agent 的 SQLite 是全书 Context Graph、人物/关系候选、章节摘要、原文证据与分析 Run 的唯一事实来源。不要将这些数据批量复制到扩展 LiteraryMemory，也不因 120 KiB 的客户端记忆 DTO 守卫而压缩或截断服务端分析数据。
+- 扩展的状态展示只调用 GET /api/documents/projects/:projectId/context-graph/status，读取来源版本、运行阶段、计数和必要的文风摘要；不得在常规轮询中下载完整 nodes、edges、evidence 或章节摘要。
+- 文学 Run 的 Context Graph 自动启动、等待、分析版本/source revision/语言方向验证，必须在 local-agent-service 的 executeRun 内完成，并在校验通过前不进入正常翻译批次。扩展只提交 Run、显示持久化事件，并提供明确的手动重新分析操作。
+- 打开人物/预处理 Tab 只刷新状态，不自动开始长任务；客户端 readiness 可以用于解释当前状态，但不能阻止用户提交 Run。服务不可用时明确报告 API 失败；远程 fallback 不得伪装成已写入 Local Agent 项目的规范分析结果。
+- 测试验收应关注实际译文与 reviewer findings、漏译率、专名/关系/角色声音一致性和定点返工闭环。API 状态 DTO 大小只是界面传输设计，不是整本书分析的数据质量指标。

@@ -40,6 +40,10 @@ Key files for server mode:
 
 `src/components/` — Vue 3 components (FloatingBall, SelectionTranslator, TranslationStatus).
 
+## Document Agent ownership boundary
+
+For EPUB/PDF literary translation with Local Agent enabled, the extension is a UI/client and submits project Runs. The service owns full-book Context Graph analysis, source evidence, chapter summaries, TranslationBrief retrieval, and the source/version/language readiness gate. Do not copy Context Graph nodes/evidence into extension LiteraryMemory, do not block Run creation based on client-side readiness, and do not run a second analysis/wait workflow in the browser. Poll GET /api/documents/projects/:id/context-graph/status for the small display projection. Explicit reanalysis is a command to the service and should return promptly while the UI polls status. If the service is unavailable, surface the request error; any remote-only fallback must remain separate from authoritative Local Agent project state.
+
 ## Local Agent Provider
 
 `config.useLocalAgent` has priority over `config.useServerTranslation`. When enabled, webpage/chunk translation, document chunk translation, side-panel chat, YouTube subtitles, and EPUB/PDF literary analysis/review must use the configured local Agent endpoint. A local request failure is an error or a retained-draft warning; do not retry it through the remote Vocal Saga/DeepSeek endpoint. The optional `localAgentToken` is sent only when configured. SQLite cache read/write failures are cache misses, but clearing the SQLite cache must report a failed request instead of claiming complete success.

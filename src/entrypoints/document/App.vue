@@ -93,7 +93,7 @@
       <!-- 阅读区只保留操作条、章节导航和正文；配置与人物/预处理分别放在独立 Tab。 -->
       <template v-if="activeTab === 'reading'">
       <section
-        v-if="translationBlockedByPreprocessing"
+        v-if="translationPreprocessingNeedsAttention"
         class="panel preprocessing-gate-banner"
         :class="'preprocessing-gate-' + translationPreprocessingReadiness.reason"
         role="status"
@@ -102,14 +102,14 @@
         <div class="preprocessing-gate-copy">
           <strong>
             {{ translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running'
-              ? '全书预处理进行中，翻译暂不可用'
+              ? '本机服务正在准备全书上下文'
               : translationPreprocessingReadiness.reason === 'failed'
-                ? '全书预处理失败，翻译已暂停'
+                ? '上次全书预处理失败'
                 : translationPreprocessingReadiness.reason === 'language'
-                  ? '需要按当前语言设置重新预处理'
-                  : '文学翻译需要先完成全书预处理' }}
+                  ? '将按当前语言设置准备全书上下文'
+                  : '当前原文版本尚无可用的全书预处理记录' }}
           </strong>
-          <p>{{ translationPreprocessingReadiness.message }}</p>
+          <p>点击开始文学翻译后，local-agent-service 会核对原文版本、分析版本和语言，并在服务端自动启动或等待预处理。全书分析、原文证据和章节摘要不会复制进扩展的 LiteraryMemory。</p>
           <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
             预处理任务 {{ contextGraphState.runId }}
             <span v-if="contextGraphPhaseLabel"> · {{ contextGraphPhaseLabel }}</span>
@@ -119,9 +119,7 @@
             <div :style="{ width: contextGraphProgressPercent + '%' }"></div>
           </div>
         </div>
-        <button class="btn" type="button" @click="openPreprocessingAndEnsure">
-          {{ translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running' ? '查看预处理进度' : '前往预处理' }}
-        </button>
+        <button class="btn" type="button" @click="openPreprocessingAndEnsure">查看预处理状态</button>
       </section>
       <section class="panel action-bar">
         <div class="action-title">
@@ -148,22 +146,19 @@
           <button
             v-if="!state.running"
             class="btn primary"
-            :disabled="!hasPendingDocument || translationBlockedByPreprocessing"
+            :disabled="!hasPendingDocument"
             @click="startTranslate">
             {{ startLabel }}
           </button>
-          <button v-if="!state.running && visibleSegments.length" class="btn warn" :disabled="translationBlockedByPreprocessing" @click="forceTranslateCurrentPage">
+          <button v-if="!state.running && visibleSegments.length" class="btn warn"  @click="forceTranslateCurrentPage">
             强制重译当前页
           </button>
           <button v-if="state.running" class="btn" @click="stopCurrentTranslation">停止</button>
-          <button v-if="state.failedBatches.length" class="btn warn" :disabled="translationBlockedByPreprocessing" @click="retry">
+          <button v-if="state.failedBatches.length" class="btn warn"  @click="retry">
             重试失败批次（{{ state.failedBatches.length }}）
           </button>
         </div>
         <p v-if="state.error" class="err-text small">{{ state.error }}</p>
-        <p v-else-if="translationBlockedByPreprocessing" class="err-text small">
-          {{ translationPreprocessingReadiness.message }}
-        </p>
       </section>
 
       <!-- 阅读导航：只渲染当前页片段，避免整本 EPUB 一次变成超长页面。 -->
@@ -221,8 +216,8 @@
 
       <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
       <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
-        <button class="quick-action" :disabled="state.running || translationBlockedByPreprocessing || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
-        <button class="quick-action" :disabled="state.running || translationBlockedByPreprocessing || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action" :disabled="state.running || translationPreprocessingNeedsAttention || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
+        <button class="quick-action" :disabled="state.running || translationPreprocessingNeedsAttention || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
         <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
       </div>
 
@@ -1289,7 +1284,7 @@ const {
   contextGraphProgressPercent,
   translationPreprocessingRequired,
   translationPreprocessingReadiness,
-  translationBlockedByPreprocessing,
+  translationPreprocessingNeedsAttention,
   translationPreprocessingUiState,
   clearContextGraphPoll,
   loadContextGraph,
@@ -1302,7 +1297,6 @@ const {
 } = useContextGraph({
   readerConfig,
   workspaceProject,
-  workspaceActiveRun,
   doc,
   sourceLang,
   targetLang,
@@ -3014,14 +3008,6 @@ async function runWorkspaceTranslation(options: {
       return;
     }
   }
-  if (effectiveDocumentTranslationMode.value === 'literary') {
-    // UI disablement is only a convenience; re-read the authoritative project state before POST /runs.
-    await refreshContextGraphStatus(project, true);
-    if (translationBlockedByPreprocessing.value) {
-      state.value.error = translationPreprocessingReadiness.value.message;
-      return;
-    }
-  }
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
@@ -3141,7 +3127,7 @@ function displayTranslation(segmentId: string): string {
  * “下三页”= 当前页 + 后 3 页。当前页已译完时，仍只预翻译后续 N 页。
  */
 async function translatePages(pageCount: number) {
-  if (!doc.value || state.value.running || translationBlockedByPreprocessing.value || pageCount < 1) return;
+  if (!doc.value || state.value.running || pageCount < 1) return;
 
   // 当前页存在任何待译片段时，必须先把当前页纳入范围，不能直接跳到下一页。
   // pageCount 表示按钮要求的后续页数，因此当前页待译时总范围是 1 + pageCount 页。
@@ -3178,7 +3164,6 @@ async function translatePages(pageCount: number) {
 
 async function startTranslate() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
-  if (translationBlockedByPreprocessing.value) { state.value.error = translationPreprocessingReadiness.value.message; return; }
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (config.documentUseLocalAgent) {
@@ -3259,7 +3244,6 @@ async function startTranslate() {
 
 async function forceTranslateCurrentPage() {
   if (!doc.value || !visibleSegments.value.length || state.value.running) return;
-  if (translationBlockedByPreprocessing.value) { state.value.error = translationPreprocessingReadiness.value.message; return; }
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (config.documentUseLocalAgent) {
@@ -3278,7 +3262,6 @@ async function forceTranslateCurrentPage() {
 
 async function retry() {
   if (!doc.value) return;
-  if (translationBlockedByPreprocessing.value) { state.value.error = translationPreprocessingReadiness.value.message; return; }
   const config = readerConfig.value || await getConfig();
   readerConfig.value = config;
   if (config.documentUseLocalAgent) {

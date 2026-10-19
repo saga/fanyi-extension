@@ -1172,12 +1172,6 @@ async function createSeparateProject() {
   await createProject(true);
 }
 
-async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
-  // The Local Agent Run worker owns Context Graph start/wait/version checks; the extension does not
-  // maintain a second preprocessing state machine for the normal local-service translation path.
-  return true;
-}
-
 async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
   if (sourceChanged.value) { error.value = '请先确认是否导入新的来源版本。'; return; }
   const generation = workspaceSourceGeneration;
@@ -1186,7 +1180,6 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
   try {
     if (!project.value) await createProject();
     if (!isCurrent() || !project.value) return;
-    if (!(await verifyPreprocessingBeforeTranslation())) return;
     if (!isCurrent() || !project.value) return;
     const projectId = project.value.projectId as string;
     const runScope = scope === 'visible'
@@ -1290,7 +1283,7 @@ async function resumeRun() {
   const runId = activeRun.value.runId as string;
   busy.value = true; error.value = '';
   try {
-    if (!(await verifyPreprocessingBeforeTranslation()) || !isCurrent() || project.value?.projectId !== projectId) return;
+    if (!isCurrent() || project.value?.projectId !== projectId) return;
     const response = await api('/api/documents/projects/' + projectId + '/runs/' + runId + '/resume', {
       method: 'POST', body: '{}',
     });

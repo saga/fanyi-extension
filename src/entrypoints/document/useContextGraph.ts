@@ -1,16 +1,12 @@
 import { computed, ref, type Ref } from 'vue';
 import { getConfig, type Config } from '@/entrypoints/utils/config';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
-import {
-  assessContextGraphReadiness,
-  CONTEXT_GRAPH_ANALYSIS_VERSION,
-} from './documentPreprocessing';
+import { assessContextGraphReadiness } from './documentPreprocessing';
 import { workspaceApi } from './documentWorkspaceClient';
 
 export interface ContextGraphDeps {
   readerConfig: Ref<Config | null>;
   workspaceProject: Ref<any>;
-  workspaceActiveRun: Ref<any>;
   doc: Ref<ParsedDocument | null>;
   sourceLang: Ref<string>;
   targetLang: Ref<string>;
@@ -30,7 +26,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
     const {
       readerConfig,
       workspaceProject,
-      workspaceActiveRun,
       doc,
       sourceLang,
       targetLang,
@@ -90,7 +85,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
   }));
-  const translationBlockedByPreprocessing = computed(() =>
+  // Informational UI state only. The Local Agent owns the actual translation readiness gate.
+  const translationPreprocessingNeedsAttention = computed(() =>
     translationPreprocessingRequired.value && !translationPreprocessingReadiness.value.ready,
   );
   const translationPreprocessingUiState = computed(() => ({
@@ -184,68 +180,42 @@ export function useContextGraph(deps: ContextGraphDeps) {
     }
   }
 
+  /**
+   * Explicit user command only. Start the service-side job and return promptly;
+   * polling updates the display projection without owning the long-running workflow.
+   */
   async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
-    if (!project?.projectId || effectiveDocumentTranslationMode.value !== 'literary' || readerConfig.value?.documentUseLocalAgent !== true) return;
-    const base = readerConfig.value.documentLocalAgentUrl || 'http://127.0.0.1:8789';
-    const token = readerConfig.value.documentLocalAgentToken || '';
-    const latestTranslationStatus = workspaceActiveRun.value?.status;
-    const translationAlreadyActive = ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(latestTranslationStatus);
+    if (!project?.projectId ||
+        effectiveDocumentTranslationMode.value !== 'literary' ||
+        readerConfig.value?.documentUseLocalAgent !== true) return;
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+    const token = config.documentLocalAgentToken || '';
     contextGraphAnalyzing.value = true;
+    contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
     try {
-      let graph = await loadContextGraph(project, false);
-      let status = contextGraphState.value.status;
-      let run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-      const needsVersionUpgrade = status === 'completed' &&
-        run?.progress?.analysisVersion !== CONTEXT_GRAPH_ANALYSIS_VERSION;
-      const needsLanguageRefresh = status === 'completed' &&
-        (run?.progress?.sourceLang !== sourceLang.value || run?.progress?.targetLang !== targetLang.value);
-      const shouldStart = options.force === true || status === 'not-started' || status === 'failed' ||
-        needsVersionUpgrade || needsLanguageRefresh;
-      if (translationAlreadyActive && shouldStart) {
-        contextGraphState.value = {
-          ...contextGraphState.value,
-          error: '当前项目有未完成的翻译运行（状态：' + (latestTranslationStatus || '未知') +
-            '），服务会保护本轮上下文不被预处理修改。可点击“取消运行并重新分析全书”取消该运行后重新分析，或到 Agent 面板恢复/取消该运行。',        };
+      const graph = await loadContextGraph(project, false);
+      const currentStatus = String(graph.status || contextGraphState.value.status || 'not-started');
+      if (!options.force && ['queued', 'running'].includes(currentStatus)) {
+        scheduleContextGraphPoll(project.projectId);
         return;
       }
-      if (shouldStart) {
-        await workspaceApi(
-          base, token,
-          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/analyze',
-          { method: 'POST', body: JSON.stringify({}) },
-        );
-        graph = await loadContextGraph(project, false);
-        const deadline = Date.now() + 45 * 60 * 1000;
-        while (['queued', 'running'].includes(contextGraphState.value.status) && Date.now() < deadline) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1200));
-          graph = await loadContextGraph(project, false);
-        }
-        status = contextGraphState.value.status;
-        run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-        if (['queued', 'running'].includes(status)) {
-          contextGraphState.value = {
-            ...contextGraphState.value,
-            error: '预处理仍在运行；页面会继续显示当前状态。稍后刷新即可查看结果。',
-          };
-          scheduleContextGraphPoll(project.projectId);
-          return;
-        }
-      } else if (['queued', 'running'].includes(status)) {
-        const deadline = Date.now() + 45 * 60 * 1000;
-        while (['queued', 'running'].includes(contextGraphState.value.status) && Date.now() < deadline) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1200));
-          graph = await loadContextGraph(project, false);
-        }
-        status = contextGraphState.value.status;
-        run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-      }
+      if (!options.force && translationPreprocessingReadiness.value.ready) return;
+      await workspaceApi(
+        base,
+        token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/analyze',
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      await loadContextGraph(project, true);
+      contextGraphState.value = { ...contextGraphState.value, error: '' };
     } catch (error) {
       contextGraphState.value = {
         ...contextGraphState.value,
-        status: 'failed',
         loading: false,
-        error: error instanceof Error ? error.message : String(error),
         checkedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
       };
     } finally {
       contextGraphAnalyzing.value = false;
@@ -259,21 +229,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
 
   async function openPreprocessingAndEnsure() {
     activeTab.value = 'characters';
-    if (!translationPreprocessingRequired.value) {
-      await refreshContextGraphStatus(workspaceProject.value || undefined, true);
-      return;
-    }
     try {
       const project = workspaceProject.value || await deps.ensureWorkspace();
-      if (!project?.projectId) return;
-      await refreshContextGraphStatus(project, true);
-      const readiness = translationPreprocessingReadiness.value;
-      if (readiness.ready) return;
-      if (!['queued', 'running'].includes(String(contextGraphState.value.status || ''))) {
-        await ensureContextGraphPreprocessing(project, { force: false });
-      }
+      if (project?.projectId) await refreshContextGraphStatus(project, true);
     } catch (error) {
-      persistenceMessage.value = '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error));
+      persistenceMessage.value = '无法读取全书预处理状态：' +
+        (error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -306,7 +267,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     contextGraphProgressPercent,
     translationPreprocessingRequired,
     translationPreprocessingReadiness,
-    translationBlockedByPreprocessing,
+    translationPreprocessingNeedsAttention,
     translationPreprocessingUiState,
     clearContextGraphPoll,
     loadContextGraph,
