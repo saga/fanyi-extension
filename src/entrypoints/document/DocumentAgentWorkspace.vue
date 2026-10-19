@@ -556,7 +556,7 @@ const runProgressPercent = computed(() => {
 });
 const qualityAuditBlocked = computed(() =>
   !project.value || busy.value || sourceChanged.value ||
-  ['queued', 'running', 'paused', 'partial'].includes(String(activeRun.value?.status || '')),
+  ['queued', 'running', 'paused'].includes(String(activeRun.value?.status || '')),
 );
 const qualityAuditMatchesSource = computed(() =>
   !!qualityAudit.value && !!project.value?.currentSourceRevisionId &&
