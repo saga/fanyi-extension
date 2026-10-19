@@ -2309,14 +2309,20 @@ async function loadFile(file: File) {
     literaryMode.value = doc.value.format === 'epub' || doc.value.format === 'pdf';
     // 术语抽取不需要扫描整本书：限制在前 12,000 个字符，避免超长 EPUB
     // 在首次显示阅读器前把整本内容拼接、复制并交给 NLP 分析。重试继续复用这份结果。
-    const glossaryLimit = 12_000;
-    let glossarySample = '';
-    for (const segment of doc.value.segments) {
-      if (glossarySample.length >= glossaryLimit) break;
-      const remaining = glossaryLimit - glossarySample.length;
-      glossarySample += segment.text.slice(0, remaining) + '\n';
+    if (config.documentUseLocalAgent && /^(epub|pdf)$/i.test(doc.value.format) && literaryMode.value) {
+      // Literary EPUB/PDF terminology and canonical names come from Local Agent's project
+      // memory/Context Graph. Do not run a second extension-side heuristic glossary pipeline.
+      glossary.value = undefined;
+    } else {
+      const glossaryLimit = 12_000;
+      let glossarySample = '';
+      for (const segment of doc.value.segments) {
+        if (glossarySample.length >= glossaryLimit) break;
+        const remaining = glossaryLimit - glossarySample.length;
+        glossarySample += segment.text.slice(0, remaining) + '\n';
+      }
+      glossary.value = extractGlossaryLocal(glossarySample);
     }
-    glossary.value = extractGlossaryLocal(glossarySample);
     // Re-selecting the same file restores the active IndexedDB reading session before a new
     // empty session replaces it. Translation cache remains a fallback for documents without a
     // matching saved reader session.
