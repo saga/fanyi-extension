@@ -6,6 +6,9 @@
  */
 export type LiteraryEntityKind = 'person' | 'place' | 'object' | 'organization' | 'concept' | 'other';
 
+/** 记录启用依据，而不是把机器证据误称为用户确认。 */
+export type LiteraryConfirmationSource = 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
+
 export interface LiteraryEntity {
   source: string;
   target: string;
@@ -16,6 +19,8 @@ export interface LiteraryEntity {
   /** 服务端动态上下文候选的来源定位；用于防止后文证据泄漏到前文。 */
   evidenceRefs?: Array<{ segmentId: string; sourceQuote: string }>;
   reviewStatus?: 'suggested' | 'confirmed';
+  /** confirmed 是运行强度；此字段记录该状态的来源。旧数据缺失时为 legacy-unknown。 */
+  confirmationSource?: LiteraryConfirmationSource;
 }
 export interface LiteraryRelationship {
   subject: string;
@@ -24,6 +29,7 @@ export interface LiteraryRelationship {
   evidence?: string;
   evidenceRefs?: Array<{ segmentId: string; sourceQuote: string }>;
   reviewStatus?: 'suggested' | 'confirmed';
+  confirmationSource?: LiteraryConfirmationSource;
 }
 export interface LiteraryStyleGuide {
   narrativeVoice?: string;
@@ -60,6 +66,8 @@ export interface CharacterVoiceProfile {
   traits?: string[];
   aliases: string[];
   status: 'candidate' | 'confirmed' | 'rejected';
+  /** confirmed 的来源；缺失的历史来源不会被猜成用户确认。 */
+  confirmationSource?: LiteraryConfirmationSource;
   /** 有证据的画像默认可作为弱提示；用户可停用，不需要逐个确认才能用于翻译。 */
   useForTranslation: boolean;
   /** null 表示未评估；数值仅表示模型自报，不是校准后的概率。 */
@@ -87,6 +95,7 @@ export interface RelationshipVoiceRule {
   speakerId: string;
   addresseeId: string;
   status: 'candidate' | 'confirmed' | 'rejected';
+  confirmationSource?: LiteraryConfirmationSource;
   baselineRegister?: string;
   addressTerms: string[];
   directness?: string;
@@ -103,6 +112,8 @@ export interface CharacterVoiceAnchor {
   chapter?: string;
   segmentId: string;
   status: 'candidate' | 'approved' | 'rejected';
+  /** 旧锚点可能没有可证明的审批来源。 */
+  confirmationSource?: LiteraryConfirmationSource;
   approvedBy: 'user' | 'reviewer' | 'manual-edit';
   /** 原文中用于判断说话人归属的可核对证据；没有它不能批准声音锚点。 */
   attributionEvidence?: string;
@@ -114,6 +125,7 @@ export interface LiteraryVoiceContext {
   policyVersion: 'character-voice-v3';
   styleGuide: LiteraryStyleGuide;
   styleGuideStatus: 'candidate' | 'confirmed';
+  styleGuideConfirmationSource?: LiteraryConfirmationSource;
   /** 当前批所在章节与片段位置；这里只传可验证的结构信息，不推测人物情绪或说话人。 */
   scene: { chapterTitle?: string; contextPaths: string[]; segmentIds: string[] };
   /** 与当前批有关的确认实体译名和剧情关系，不能被角色声线替代。 */
@@ -223,6 +235,21 @@ function entityKind(value: unknown): LiteraryEntityKind {
 export function createEmptyLiteraryMemory(): LiteraryBookMemory {
   return { version: 2, entities: [], relationships: [], styleGuide: {}, styleGuideStatus: 'candidate', chapterSummaries: [], recentExamples: [], characterVoices: [], relationshipVoiceRules: [], voiceAnchors: [] };
 }
+
+function confirmationSource(value: unknown, active: boolean): LiteraryConfirmationSource | undefined {
+  if (!active) return undefined;
+  return value === 'evidence-verified' || value === 'user-confirmed' || value === 'legacy-unknown'
+    ? value : 'legacy-unknown';
+}
+
+function mergeConfirmationSource(
+  prior: LiteraryConfirmationSource | undefined,
+  incoming: LiteraryConfirmationSource | undefined,
+): LiteraryConfirmationSource | undefined {
+  const rank = (value: LiteraryConfirmationSource | undefined) =>
+    value === 'user-confirmed' ? 3 : value === 'evidence-verified' ? 2 : value === 'legacy-unknown' ? 1 : 0;
+  return rank(incoming) > rank(prior) ? incoming : prior;
+}
 function normalizedEntityName(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’\-]+/g, ' ').trim();
 }
@@ -255,6 +282,9 @@ function mergeEntityRecord(prior: LiteraryEntity, candidate: LiteraryEntity): Li
     ...(evidenceRefs.length ? { evidenceRefs } : {}),
     ...(sameTarget && prior.reviewStatus !== 'confirmed' && candidate.reviewStatus === 'confirmed'
       ? { reviewStatus: 'confirmed' as const }
+      : {}),
+    ...(sameTarget && (prior.reviewStatus === 'confirmed' || candidate.reviewStatus === 'confirmed')
+      ? { confirmationSource: mergeConfirmationSource(prior.confirmationSource, candidate.confirmationSource) }
       : {}),
     description: prior.description || candidate.description,
     evidence: prior.evidence || candidate.evidence,
@@ -330,6 +360,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(safeText(entity.evidence, 160) ? { evidence: safeText(entity.evidence, 160) } : {}),
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
         reviewStatus: entity.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
+        ...(confirmationSource(entity.confirmationSource, entity.reviewStatus === 'confirmed')
+          ? { confirmationSource: confirmationSource(entity.confirmationSource, entity.reviewStatus === 'confirmed') } : {}),
       });
     }
   }
@@ -354,6 +386,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(safeText(rel.evidence, 160) ? { evidence: safeText(rel.evidence, 160) } : {}),
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
         reviewStatus: rel.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
+        ...(confirmationSource(rel.confirmationSource, rel.reviewStatus === 'confirmed')
+          ? { confirmationSource: confirmationSource(rel.confirmationSource, rel.reviewStatus === 'confirmed') } : {}),
       });
     }
   }
@@ -374,6 +408,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     if (avoid.length) styleGuide.avoid = avoid;
   }
   const styleGuideStatus = raw.styleGuideStatus === 'confirmed' ? 'confirmed' : 'candidate';
+  const styleGuideConfirmationSource = confirmationSource(raw.styleGuideConfirmationSource, styleGuideStatus === 'confirmed');
   const chapterSummaries = Array.isArray(raw.chapterSummaries)
     ? raw.chapterSummaries.slice(-MAX_SUMMARIES).flatMap((item) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
@@ -451,6 +486,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       ...(safeList(value.traits, 10, 160).length ? { traits: safeList(value.traits, 10, 160) } : {}),
       aliases: safeList(value.aliases, 12, 80),
       status,
+      ...(confirmationSource(value.confirmationSource, status === 'confirmed')
+        ? { confirmationSource: confirmationSource(value.confirmationSource, status === 'confirmed') } : {}),
       useForTranslation: value.useForTranslation !== false && status !== 'rejected',
       confidence: confidenceSource ? profileConfidence : null,
       ...(confidenceSource ? { confidenceSource } : {}),
@@ -482,6 +519,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     relationshipVoiceRules.push({
       speakerId, addresseeId,
       status: reviewState(value.status, ['candidate', 'confirmed', 'rejected']) as RelationshipVoiceRule['status'],
+      ...(confirmationSource(value.confirmationSource, value.status === 'confirmed')
+        ? { confirmationSource: confirmationSource(value.confirmationSource, value.status === 'confirmed') } : {}),
       ...(safeText(value.baselineRegister, 180) ? { baselineRegister: safeText(value.baselineRegister, 180) } : {}),
       addressTerms: safeList(value.addressTerms, 8, 100),
       ...(safeText(value.directness, 180) ? { directness: safeText(value.directness, 180) } : {}),
@@ -513,6 +552,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       ...(safeText(value.chapter, 120) ? { chapter: safeText(value.chapter, 120) } : {}),
       segmentId,
       status,
+      ...(confirmationSource(value.confirmationSource, status === 'approved')
+        ? { confirmationSource: confirmationSource(value.confirmationSource, status === 'approved') } : {}),
       approvedBy: value.approvedBy === 'user' || value.approvedBy === 'reviewer' || value.approvedBy === 'manual-edit'
         ? value.approvedBy : 'reviewer',
       ...(attributionEvidence ? { attributionEvidence } : {}),
@@ -531,7 +572,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     version: 2,
     entities: entityList,
     relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
-    styleGuide, styleGuideStatus, chapterSummaries, recentExamples,
+    styleGuide, styleGuideStatus,
+    ...(styleGuideConfirmationSource ? { styleGuideConfirmationSource } : {}),
+    chapterSummaries, recentExamples,
     characterVoices: validVoices,
     relationshipVoiceRules: relationshipVoiceRules.filter((rule) => validCharacterIds.has(rule.speakerId) && validCharacterIds.has(rule.addresseeId)).slice(0, MAX_VOICE_RULES),
     voiceAnchors: voiceAnchors.filter((anchor) => validCharacterIds.has(anchor.speakerId)).slice(-MAX_VOICE_ANCHORS),
@@ -684,6 +727,7 @@ export function autoConfirmLiteraryMemory(input: unknown): LiteraryBookMemory {
   for (const entity of memory.entities) {
     if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target && entity.evidence) {
       entity.reviewStatus = 'confirmed';
+      entity.confirmationSource = 'evidence-verified';
     }
   }
   for (const relation of memory.relationships) {
@@ -692,6 +736,7 @@ export function autoConfirmLiteraryMemory(input: unknown): LiteraryBookMemory {
       relation.predicate && relation.object && relation.evidence
     ) {
       relation.reviewStatus = 'confirmed';
+      relation.confirmationSource = 'evidence-verified';
     }
   }
   return memory;
@@ -818,7 +863,7 @@ export function buildLiteraryTranslationContextPrompt(chapterTitle = ''): string
     '任务模式：书籍/文学作品的章节翻译，不要套用网页翻译的简短、信息压缩式表达。',
     '忠实保留原意、叙述视角、人物动机、事实细节和关系，在此基础上使用自然的文学表达，保留文字的节奏、味道和人物声音。',
     '各片段的 voiceContext 是独立的只读书籍记忆 JSON；用它维持实体译名、经确认的角色声音、关系语言规则和批准锚点。contextPath 只表示章节/页面结构，绝不能混入角色记忆。',
-    'reviewStatus=confirmed 表示已纳入规范（用户明确确认，或模型提供原文依据后自动纳入），必须遵守；suggested 是待核对建议，原文有明确反证时应报告冲突，不得静默改动已纳入规范的映射。',
+    'reviewStatus=confirmed 表示当前运行将其作为强规范；confirmationSource 单独说明其来源（evidence-verified、user-confirmed 或 legacy-unknown）。不得把机器证据验证冒称为用户确认；suggested 是弱候选，原文有反证时应报告冲突。',
     '书籍记忆中 source 与 aliases 指向同一实体时，所有形式必须统一使用该实体的 target；target 只代表名称本身，不要因原文改用简称或全名而重新音译。',
     '区分姓名与头衔：英文 Lady 按人物关系和语境译作“夫人/女士/小姐”或自然省略，不得默认译成“大人”；日语 -san 也不能一律译成“大人”。Lord 是否译作“大人/主公”等须按身份判断，不能把称谓并入人名。',
     '关系记忆只用于消歧，不要把角色关系说明写进正文。不要擅自解释悬念、含混、反讽和信息差。',
