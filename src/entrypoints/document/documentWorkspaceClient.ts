@@ -166,8 +166,9 @@ export async function loadWorkspaceParsedDocument(
   };
 }
 
-type ExactProjectMap = Record<string, string>;
-type IdentityProjectMap = Record<string, { projectId: string; documentKey: string }>;
+type ProjectMapEntry = string | { projectId: string; sourceFingerprint?: string };
+type ExactProjectMap = Record<string, ProjectMapEntry>;
+type IdentityProjectMap = Record<string, { projectId: string; documentKey: string; sourceFingerprint?: string }>;
 
 export function workspaceDocumentKey(input: Pick<WorkspaceProjectMappingInput, 'title' | 'format' | 'segments'>): string {
   let hash = 0x811c9dc5;
@@ -191,6 +192,7 @@ export function workspaceSourceIdentityKey(input: Pick<WorkspaceProjectMappingIn
 
 export async function lookupWorkspaceProject(input: WorkspaceProjectMappingInput): Promise<{
   projectId: string | null;
+  sourceFingerprint?: string;
   sourceChanged: boolean;
   documentKey: string;
 }> {
@@ -198,9 +200,15 @@ export async function lookupWorkspaceProject(input: WorkspaceProjectMappingInput
   const exact = (await storage.getItem<ExactProjectMap>('local:documentAgentProjectMap')) || {};
   const identities = (await storage.getItem<IdentityProjectMap>('local:documentAgentProjectIdentityMap')) || {};
   const identity = identities[workspaceSourceIdentityKey(input)];
-  const exactProjectId = exact[documentKey];
+  const exactValue = exact[documentKey];
+  // Read the legacy string map without treating browser state as the canonical source fingerprint.
+  const exactProjectId = typeof exactValue === 'string' ? exactValue : exactValue?.projectId;
+  const sourceFingerprint = typeof exactValue === 'object' && exactValue
+    ? exactValue.sourceFingerprint
+    : identity?.documentKey === documentKey ? identity.sourceFingerprint : undefined;
   return {
     projectId: exactProjectId || identity?.projectId || null,
+    ...(sourceFingerprint ? { sourceFingerprint } : {}),
     sourceChanged: !exactProjectId && !!identity && identity.documentKey !== documentKey,
     documentKey,
   };
@@ -223,13 +231,19 @@ export async function resolveWorkspaceProject(
   );
 }
 
-export async function rememberWorkspaceProject(input: WorkspaceProjectMappingInput, projectId: string): Promise<void> {
+export async function rememberWorkspaceProject(
+  input: WorkspaceProjectMappingInput,
+  projectId: string,
+  sourceFingerprint?: string,
+): Promise<void> {
   const documentKey = workspaceDocumentKey(input);
   const exact = (await storage.getItem<ExactProjectMap>('local:documentAgentProjectMap')) || {};
-  exact[documentKey] = projectId;
+  exact[documentKey] = { projectId, ...(sourceFingerprint ? { sourceFingerprint } : {}) };
   await storage.setItem('local:documentAgentProjectMap', exact);
   const identities = (await storage.getItem<IdentityProjectMap>('local:documentAgentProjectIdentityMap')) || {};
-  identities[workspaceSourceIdentityKey(input)] = { projectId, documentKey };
+  identities[workspaceSourceIdentityKey(input)] = {
+    projectId, documentKey, ...(sourceFingerprint ? { sourceFingerprint } : {}),
+  };
   await storage.setItem('local:documentAgentProjectIdentityMap', identities);
 }
 
