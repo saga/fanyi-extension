@@ -74,6 +74,7 @@ export async function importDocumentFileViaLocalAgent(
   baseUrl: string,
   token: string,
   file: File,
+  mode: 'default' | 'separate' = 'default',
 ): Promise<LocalAgentFileImportResult> {
   return workspaceApi<LocalAgentFileImportResult>(
     baseUrl,
@@ -84,6 +85,7 @@ export async function importDocumentFileViaLocalAgent(
       headers: {
         'Content-Type': contentTypeForDocumentFile(file),
         'X-Source-File-Name': encodeURIComponent(file.name),
+        ...(mode === 'separate' ? { 'X-Import-Mode': 'separate' } : {}),
       },
       body: file,
     },
