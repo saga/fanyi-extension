@@ -1181,19 +1181,30 @@ async function createSeparateProject() {
 async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
   const generation = workspaceSourceGeneration;
   const isCurrent = () => isCurrentWorkspaceGeneration(generation);
-  const preprocessingState = props.preprocessingState;
-  if (!preprocessingState.required) return true;
+  if (!props.preprocessingState.required) return true;
   if (!project.value?.projectId) {
-    error.value = preprocessingState.message || '需要先建立文档项目并完成全书预处理。';
-    emit('openPreprocessing');
+    error.value = '文档项目尚未建立，无法自动准备全书上下文。';
     return false;
   }
+
   const projectId = project.value.projectId as string;
   const sourceRevisionId = project.value.currentSourceRevisionId || '';
   const sourceLang = props.sourceLang;
   const targetLang = props.targetLang;
-  try {
-    const response = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph');
+  const waitStartedAt = Date.now();
+  const maxWaitMs = 30 * 60 * 1000;
+  let analysisStarted = false;
+
+  // 正常路径自动启动或恢复预处理，在当前工作区等待；不要求用户跳到另一个 Tab。
+  while (isCurrent() && Date.now() - waitStartedAt < maxWaitMs) {
+    let response: any;
+    try {
+      response = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph');
+    } catch (e) {
+      if (!isCurrent()) return false;
+      error.value = '无法连接本机服务，暂时不能准备全书上下文：' + (e instanceof Error ? e.message : String(e));
+      return false;
+    }
     if (!isCurrent() || project.value?.projectId !== projectId) return false;
     const snapshot: ContextGraphPreprocessingSnapshot = contextGraphSnapshotFromResponse(
       projectId, response.contextGraph || {},
@@ -1206,18 +1217,57 @@ async function verifyPreprocessingBeforeTranslation(): Promise<boolean> {
       sourceLang,
       targetLang,
     });
-    if (!readiness.ready) {
+    if (readiness.ready) {
+      error.value = '';
+      return true;
+    }
+
+    if (['project', 'source-revision'].includes(readiness.reason)) {
       error.value = readiness.message;
       emit('preprocessingStatusRefreshRequested', project.value);
       return false;
     }
-    return true;
-  } catch (e) {
-    if (!isCurrent()) return false;
-    error.value = '无法验证全书预处理状态，已阻止启动文学翻译：' + (e instanceof Error ? e.message : String(e));
+
+    const shouldStart = !analysisStarted &&
+      ['missing', 'failed', 'version', 'language'].includes(readiness.reason);
+    if (shouldStart) {
+      try {
+        await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph/analyze', {
+          method: 'POST',
+          body: '{}',
+        });
+        analysisStarted = true;
+        message.value = '正在自动准备全书上下文；完成后会继续翻译，无需手动确认。';
+        emit('preprocessingStatusRefreshRequested', project.value);
+      } catch (e) {
+        if (!isCurrent()) return false;
+        const detail = e instanceof Error ? e.message : String(e);
+        // A concurrently started analysis is not an error: re-read the authoritative status.
+        if (/409|already running|仍在运行|已在运行/i.test(detail)) {
+          analysisStarted = true;
+        } else {
+          error.value = '无法自动启动全书预处理：' + detail;
+          emit('preprocessingStatusRefreshRequested', project.value);
+          return false;
+        }
+      }
+    } else if (analysisStarted && snapshot.status === 'failed') {
+      error.value = readiness.message;
+      emit('preprocessingStatusRefreshRequested', project.value);
+      return false;
+    }
+
+    message.value = '全书预处理 ' +
+      (snapshot.status === 'running' ? '正在运行' : snapshot.status === 'queued' ? '已排队' : '准备中') +
+      '；翻译会在预处理完成后自动继续。';
     emit('preprocessingStatusRefreshRequested', project.value);
-    return false;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1500));
   }
+
+  if (!isCurrent()) return false;
+  error.value = '全书预处理等待超时，翻译任务尚未启动。预处理仍会在本机继续执行；刷新状态或稍后继续翻译即可。';
+  emit('preprocessingStatusRefreshRequested', project.value);
+  return false;
 }
 
 async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
