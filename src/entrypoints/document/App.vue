@@ -575,7 +575,7 @@
             :key="'entity-' + index + '-' + entity.source" class="entity-card" :class="{ 'is-pending-card': entity.reviewStatus !== 'confirmed' }">
             <div class="entity-card-header">
               <span class="entity-status" :class="entity.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
-                {{ entity.reviewStatus === 'confirmed' ? '自动纳入规范' : '待补全' }}
+                {{ entity.reviewStatus !== 'confirmed' ? '待补全' : entity.confirmationSource === 'user-confirmed' ? '用户确认' : entity.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明' }}
               </span>
               <span v-if="entity.kind" class="entity-kind">{{ entityKindLabel(entity.kind) }}</span>
               <span class="entity-card-spacer"></span>
@@ -621,7 +621,7 @@
           <button v-else class="btn primary" @click="addEntity">手动添加实体映射</button>
         </div>
 
-        <p class="muted small dictionary-footnote">状态说明：自动纳入规范＝有原文证据的规范译名或用户填写完成的映射；待补全＝名称、译名或证据不足。修改后自动保存并生效；删除映射即可停用。</p>
+        <p class="muted small dictionary-footnote">状态说明：证据验证表示系统验证了来源依据；用户确认表示你明确修改或确认了条目；历史来源不明表示旧版本未记录来源，系统不会推断为用户确认。条目启用状态与确认来源分开记录。</p>
       </section>
 
       <section v-if="literaryMode" class="panel character-management">
@@ -632,7 +632,7 @@
           </div>
           <div class="voice-counts">
             <span class="chip">人物 {{ managedPeople.length }}</span>
-            <span class="chip">已核实 {{ confirmedCharacterVoiceCount }}</span>
+            <span class="chip">已启用 {{ confirmedCharacterVoiceCount }}</span>
             <span class="chip">待核对 {{ pendingCharacterVoiceCount }}</span>
           </div>
         </div>
@@ -651,11 +651,11 @@
               <span class="entity-kind">人物</span>
               <span v-if="item.profile" class="entity-status"
                 :class="item.profile.status === 'confirmed' ? 'is-confirmed' : item.profile.status === 'rejected' ? 'is-rejected' : 'is-pending'">
-                {{ item.profile.status === 'confirmed' ? '已核实' : item.profile.status === 'rejected' ? '已拒绝' : '角色/声音候选' }}
+                {{ item.profile.status === 'confirmed' ? (item.profile.confirmationSource === 'user-confirmed' ? '用户确认' : item.profile.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明') : item.profile.status === 'rejected' ? '已拒绝' : '角色/声音候选' }}
               </span>
               <span v-else class="entity-status"
                 :class="item.entity?.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
-                {{ item.entity?.reviewStatus === 'confirmed' ? '译名已纳入规范' : '译名待补全' }}
+                {{ item.entity?.reviewStatus !== 'confirmed' ? '译名待补全' : item.entity?.confirmationSource === 'user-confirmed' ? '译名：用户确认' : item.entity?.confirmationSource === 'evidence-verified' ? '译名：证据验证' : '译名：历史来源不明' }}
               </span>
               <span v-if="item.profile" class="entity-status"
                 :class="item.profile.useForTranslation ? 'is-confirmed' : 'is-pending'">
@@ -739,7 +739,7 @@
               <label>主体<input v-model="relation.subject" @change="markRelationshipSuggested(relation)" /></label>
               <label>关系<input v-model="relation.predicate" @change="markRelationshipSuggested(relation)" /></label>
               <label>对象<input v-model="relation.object" @change="markRelationshipSuggested(relation)" /></label>
-              <span class="chip">{{ relation.reviewStatus === 'confirmed' ? '已纳入规范' : '待核对' }}</span>
+              <span class="chip">{{ relation.reviewStatus !== 'confirmed' ? '候选' : relation.confirmationSource === 'user-confirmed' ? '用户确认' : relation.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明' }}</span>
               <button class="btn ghost" :disabled="!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()" @click="confirmRelationship(relation)">确认并应用</button>
               <button class="btn ghost danger-text" @click="removeRelationship(index)">移除</button>
             </div>
@@ -756,7 +756,7 @@
           <article v-for="(rule, index) in literaryMemory.relationshipVoiceRules" :key="'voice-rule-' + index" class="voice-profile-card">
             <div class="voice-profile-heading">
               <strong>{{ characterName(rule.speakerId) }} → {{ characterName(rule.addresseeId) }}</strong>
-              <span class="entity-status" :class="rule.status === 'confirmed' ? 'is-confirmed' : rule.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ rule.status === 'confirmed' ? '已确认' : rule.status === 'rejected' ? '已拒绝' : '候选' }}</span>
+              <span class="entity-status" :class="rule.status === 'confirmed' ? 'is-confirmed' : rule.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ rule.status === 'confirmed' ? (rule.confirmationSource === 'user-confirmed' ? '用户确认' : rule.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明') : rule.status === 'rejected' ? '已拒绝' : '候选' }}</span>
             </div>
             <p v-if="rule.baselineRegister"><strong>语域：</strong>{{ rule.baselineRegister }}</p>
             <p v-if="rule.addressTerms.length"><strong>称呼：</strong>{{ rule.addressTerms.join('、') }}</p>
@@ -777,7 +777,7 @@
           <article v-for="anchor in literaryMemory.voiceAnchors" :key="anchor.anchorId" class="voice-profile-card">
             <div class="voice-profile-heading">
               <strong>{{ characterName(anchor.speakerId) }} · {{ anchor.chapter || '未标章节' }}</strong>
-              <span class="entity-status" :class="anchor.status === 'approved' ? 'is-confirmed' : anchor.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ anchor.status === 'approved' ? '已批准' : anchor.status === 'rejected' ? '已拒绝' : '候选' }}</span>
+              <span class="entity-status" :class="anchor.status === 'approved' ? 'is-confirmed' : anchor.status === 'rejected' ? 'is-rejected' : 'is-pending'">{{ anchor.status === 'approved' ? (anchor.confirmationSource === 'user-confirmed' ? '用户确认' : anchor.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明') : anchor.status === 'rejected' ? '已拒绝' : '候选' }}</span>
             </div>
             <p><strong>原文：</strong>{{ anchor.source }}</p>
             <label class="voice-anchor-target">
