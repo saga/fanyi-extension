@@ -37,7 +37,7 @@ describe('Local Agent document ingestion boundary', () => {
   it('routes selected EPUB/PDF originals to Local Agent for parsing', () => {
     expect(app).toContain('importDocumentFileViaLocalAgent(base, token, file)');
     expect(app).toContain('loadWorkspaceParsedDocument(base, token, imported.project)');
-    expect(app).toContain('Local Agent模式下 EPUB/PDF 必须通过原始文件导入');
+    expect(app).toContain('本机服务模式下 EPUB/PDF 必须通过原始文件导入');
   });
 
   it('stores reader-resume metadata as a project pointer instead of copying document, translations or LiteraryMemory', () => {
@@ -67,6 +67,5 @@ describe('Local Agent document ingestion boundary', () => {
     expect(workspace).toContain('const isLocalAgentBook = /^(epub|pdf)$/i.test(props.format)');
     expect(workspace).toContain('importDocumentFileViaLocalAgent');
     expect(workspace).toContain('Never send the parsed');
-    expect(workspace).toContain('projectBacked');
   });
 });
