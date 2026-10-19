@@ -33,10 +33,10 @@
       <div class="agent-preprocessing-copy">
         <strong>
           {{ ['queued', 'running'].includes(preprocessingState.status)
-            ? '全书预处理进行中，翻译暂不可用'
+            ? '本机服务正在准备全书上下文'
             : preprocessingState.reason === 'failed'
-              ? '全书预处理失败，翻译暂不可用'
-              : '文学翻译需要先完成全书预处理' }}
+              ? '上次全书预处理失败'
+              : '当前预处理状态尚未就绪' }}
         </strong>
         <p>{{ preprocessingState.message }}</p>
         <p v-if="preprocessingState.runId" class="agent-footnote">
@@ -54,11 +54,11 @@
         </div>
       </div>
       <button class="agent-button agent-button-secondary" type="button" @click="emit('openPreprocessing')">
-        {{ ['queued', 'running'].includes(preprocessingState.status) ? '查看预处理进度' : '前往预处理' }}
+        {{ ['queued', 'running'].includes(preprocessingState.status) ? '查看预处理进度' : '打开预处理状态' }}
       </button>
     </section>
 
-    <section v-else-if="restoringProject && !project" class="agent-notice">
+    <section v-if="restoringProject && !project" class="agent-notice">
       <span class="agent-spinner" aria-hidden="true"></span>
       <div>
         <strong>正在恢复文档进度</strong>
@@ -66,7 +66,7 @@
       </div>
     </section>
 
-    <section v-else-if="restorationError && !project" class="agent-notice agent-notice-error">
+    <section v-if="restorationError && !project" class="agent-notice agent-notice-error">
       <strong>暂时无法恢复文档进度</strong>
       <p>{{ restorationError }}</p>
       <div class="agent-inline-actions">
@@ -75,7 +75,7 @@
       </div>
     </section>
 
-    <template v-else-if="!project">
+    <template v-if="!project && !restoringProject && !restorationError">
       <section class="agent-work-card agent-ready-card">
         <div class="agent-state-mark" aria-hidden="true">文</div>
         <div class="agent-ready-copy">
@@ -84,10 +84,10 @@
         </div>
         <button
           class="agent-button agent-button-primary agent-button-large"
-          :disabled="busy || restoringProject || segments.length === 0 || (preprocessingState.required && preprocessingState.ready === false && !!project)"
+          :disabled="busy || restoringProject || segments.length === 0"
           @click="startRun('stale')"
         >
-          {{ busy ? '正在准备…' : preprocessingState.required && !project ? '初始化项目并开始预处理' : '开始翻译' }}
+          {{ busy ? '正在准备…' : '初始化项目并开始翻译' }}
         </button>
       </section>
     </template>
@@ -139,7 +139,7 @@
           <button
             v-else-if="pendingSegmentCount > 0"
             class="agent-button agent-button-primary agent-button-large"
-            :disabled="busy || sourceChanged || preprocessingBlockedByPreprocessing"
+            :disabled="busy || sourceChanged"
             @click="startRun('stale')"
           >
             {{ busy ? '正在准备…' : acceptedSegmentCount > 0 ? '继续翻译' : '开始翻译' }}
@@ -200,12 +200,12 @@
               <p>一般情况下只需使用上方的开始 / 继续翻译。以下操作用于有明确需要时。</p>
             </div>
             <div class="agent-inline-actions">
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !(activeRun?.counts?.failed)" @click="startRun('failed')">
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !(activeRun?.counts?.failed)" @click="startRun('failed')">
                 重试未完成片段<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
               </button>
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing" @click="startRun('all')">重新翻译全文</button>
-              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing" @click="resumeRun">恢复中断任务</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="startRun('all')">重新翻译全文</button>
+              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="resumeRun">恢复中断任务</button>
               <button class="agent-button agent-button-tertiary" :disabled="busy || isRunning" @click="refreshProject">刷新状态</button>
             </div>
             <p class="agent-footnote">重新翻译会生成新结果。相同原文版本下已有的人工修订会优先保留。</p>
@@ -530,9 +530,6 @@ const qualityAuditError = ref('');
 const qualityAuditQuery = ref('');
 const selectedQualityFindingIds = ref<string[]>([]);
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
-const preprocessingBlockedByPreprocessing = computed(() =>
-  props.preprocessingState.required && !props.preprocessingState.ready,
-);
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
 const failedRunSegments = computed(() => {
   const segments = Array.isArray(activeRun.value?.segments) ? activeRun.value.segments : [];
