@@ -274,14 +274,19 @@ describe('文学书籍记忆', () => {
   it('入库自动确认有原文依据的规范项，无依据的保持待确认', () => {
     const memory = autoConfirmLiteraryMemory({
       entities: [
-        { source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice said' },
+        { source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice said',
+          evidenceRefs: [{ segmentId: 's1', sourceQuote: 'Alice said hello.' }] },
         { source: 'Bob', target: '鲍勃', kind: 'person' },
       ],
       relationships: [
-        { subject: 'Alice', predicate: 'sister of', object: 'Bob', evidence: 'her sister' },
+        { subject: 'Alice', predicate: 'sister of', object: 'Bob', evidence: 'her sister',
+          evidenceRefs: [{ segmentId: 's2', sourceQuote: 'She is her sister.' }] },
         { subject: 'Alice', predicate: 'likes', object: 'Tea' },
       ],
-    });
+    }, [
+      { id: 's1', text: 'Alice said hello.' },
+      { id: 's2', text: 'She is her sister.' },
+    ]);
     expect(memory.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
     expect(memory.entities.find((entity) => entity.source === 'Bob')?.reviewStatus).toBe('suggested');
     expect(memory.relationships.find((rel) => rel.predicate === 'sister of')?.reviewStatus).toBe('confirmed');
@@ -484,12 +489,14 @@ describe('文学书籍记忆', () => {
       entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'suggested' }],
     });
     const corroborated = mergeLiteraryMemory(first, autoConfirmLiteraryMemory({
-      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice smiled' }],
-    }));
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice smiled',
+        evidenceRefs: [{ segmentId: 's1', sourceQuote: 'Alice smiled at Bob.' }] }],
+    }, [{ id: 's1', text: 'Alice smiled at Bob.' }]));
     expect(corroborated.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
     const conflicted = mergeLiteraryMemory(first, autoConfirmLiteraryMemory({
-      entities: [{ source: 'Alice', target: '爱丽斯', kind: 'person', evidence: 'Alice nodded' }],
-    }));
+      entities: [{ source: 'Alice', target: '爱丽斯', kind: 'person', evidence: 'Alice nodded',
+        evidenceRefs: [{ segmentId: 's2', sourceQuote: 'Alice nodded slowly.' }] }],
+    }, [{ id: 's2', text: 'Alice nodded slowly.' }]));
     expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.target).toBe('艾丽丝');
     expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
   });
