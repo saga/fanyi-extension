@@ -228,6 +228,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     entity = entity || ensureManagedPersonEntity(item);
     if (entity) {
       entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
+      if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-confirmed';
+      else delete entity.confirmationSource;
       syncEntityMappingToVoiceProfiles(entity, field === 'source' ? oldSource : '');
     }
     // A hand-added person mapping requires both names before the sanitizer can persist it.
@@ -278,6 +280,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     syncEntityMappingToVoiceProfiles(entity, previousSource);
     // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认.
     entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
+    if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-confirmed';
+    else delete entity.confirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
     });
@@ -294,6 +298,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
     syncEntityMappingToVoiceProfiles(entity);
     entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
+    if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-confirmed';
+    else delete entity.confirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
     });
@@ -312,6 +318,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
   function markRelationshipSuggested(relation: LiteraryRelationship) {
     relation.reviewStatus = 'suggested';
+    delete relation.confirmationSource;
     if (relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
       void persistLiteraryMemoryToWorkspace().catch((error) => {
         persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
@@ -321,6 +328,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   function confirmRelationship(relation: LiteraryRelationship) {
     if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) return;
     relation.reviewStatus = 'confirmed';
+    relation.confirmationSource = 'user-confirmed';
     persistenceMessage.value = '已确认关系：' + relation.subject + ' — ' + relation.predicate + ' → ' + relation.object;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
@@ -331,6 +339,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     for (const relation of literaryMemory.value.relationships) {
       if (relation.reviewStatus !== 'confirmed' && relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
         relation.reviewStatus = 'confirmed';
+        relation.confirmationSource = 'user-confirmed';
         count++;
       }
     }
@@ -375,6 +384,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       }
     }
     profile.status = status;
+    if (status === 'confirmed') profile.confirmationSource = 'user-confirmed';
+    else delete profile.confirmationSource;
     profile.useForTranslation = status !== 'rejected';
     await persistVoiceMemoryChange(
       status === 'confirmed' ? '已确认人物声音：' + profile.canonicalSourceName + '。后续相关对白会参考这份画像。'
@@ -401,6 +412,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       return;
     }
     rule.status = status;
+    if (status === 'confirmed') rule.confirmationSource = 'user-confirmed';
+    else delete rule.confirmationSource;
     await persistVoiceMemoryChange(
       status === 'confirmed' ? '已确认有方向的人物对话规则：' + characterName(rule.speakerId) + ' → ' + characterName(rule.addresseeId) + '。'
         : status === 'rejected' ? '已拒绝该人物对话规则。' : '已将该人物对话规则移回候选。',
@@ -408,7 +421,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
   async function editVoiceAnchor(anchor: LiteraryBookMemory['voiceAnchors'][number]) {
     anchor.status = 'candidate';
-    anchor.approvedBy = 'reviewer';
+    delete anchor.confirmationSource;
+    anchor.approvedBy = 'manual-edit';
     await persistVoiceMemoryChange('声音锚点译文已修改，需要重新批准。');
   }
 
@@ -436,6 +450,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       return;
     }
     anchor.status = status;
+    if (status === 'approved') anchor.confirmationSource = 'user-confirmed';
+    else delete anchor.confirmationSource;
     await persistVoiceMemoryChange(
       status === 'approved' ? '已批准声音锚点；后续相关场景可复用这组原文—译文示例。'
         : status === 'rejected' ? '已拒绝该声音锚点。' : '已将声音锚点移回候选。',
@@ -492,6 +508,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
 
   function markStyleGuideCandidate() {
     literaryMemory.value.styleGuideStatus = 'candidate';
+    delete literaryMemory.value.styleGuideConfirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存全书文风基准失败：' + (error instanceof Error ? error.message : String(error));
     });
@@ -516,6 +533,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       ...(rules.length ? { rules } : {}),
     };
     literaryMemory.value.styleGuideStatus = 'candidate';
+    delete literaryMemory.value.styleGuideConfirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存预处理文风候选失败：' + (error instanceof Error ? error.message : String(error));
     });
@@ -524,6 +542,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   async function setStyleGuideStatus(status: 'candidate' | 'confirmed') {
     if (status === 'confirmed' && !hasStyleGuideContent.value) return;
     literaryMemory.value.styleGuideStatus = status;
+    if (status === 'confirmed') literaryMemory.value.styleGuideConfirmationSource = 'user-confirmed';
+    else delete literaryMemory.value.styleGuideConfirmationSource;
     await persistLiteraryMemoryToWorkspace();
     persistenceMessage.value = status === 'confirmed'
       ? '全书文风基准已确认，后续文学翻译与 Reviewer 会注入这组风格规则。'
