@@ -1,13 +1,11 @@
 import { computed, ref, type Ref } from 'vue';
 import { getConfig, type Config } from '@/entrypoints/utils/config';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
-import { sanitizeLiteraryMemory, type LiteraryBookMemory } from '@/entrypoints/utils/document/literary';
 import {
   assessContextGraphReadiness,
   CONTEXT_GRAPH_ANALYSIS_VERSION,
 } from './documentPreprocessing';
 import { workspaceApi } from './documentWorkspaceClient';
-import { mergeContextGraphEntitySuggestions } from './documentLiteraryBridge';
 
 export interface ContextGraphDeps {
   readerConfig: Ref<Config | null>;
@@ -17,19 +15,16 @@ export interface ContextGraphDeps {
   sourceLang: Ref<string>;
   targetLang: Ref<string>;
   effectiveDocumentTranslationMode: Ref<'technical' | 'literary'>;
-  literaryMemory: Ref<LiteraryBookMemory>;
   persistenceMessage: Ref<string>;
   activeTab: Ref<string>;
   ensureWorkspace: () => Promise<any | null>;
-  persistSession: () => Promise<void>;
-  persistLiteraryMemoryToWorkspace: () => Promise<void>;
 }
 
 /**
  * 全书预处理（Context Graph）状态机。
  *
- * 负责读取/轮询分析进度、维护翻译前的就绪门禁，以及把分析结果合并进书籍记忆；
- * 具体的分析任务由本机服务执行。
+ * 只负责调用服务端 API、展示状态和响应用户明确的重新分析动作。
+ * Context Graph、证据和运行前就绪门禁全部归 local-agent-service 所有。
  */
 export function useContextGraph(deps: ContextGraphDeps) {
     const {
@@ -40,7 +35,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
       sourceLang,
       targetLang,
       effectiveDocumentTranslationMode,
-      literaryMemory,
       persistenceMessage,
       activeTab,
     } = deps;
@@ -133,7 +127,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     const projectId = String(project?.projectId || '');
     if (!projectId) throw new Error('无法查询预处理状态：缺少文档 projectId。');
     const result = await workspaceApi<{ contextGraph: any }>(
-      base, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph',
+      base, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph/status',
     );
     const graph = result.contextGraph || {};
     contextGraphOverview.value = {
@@ -177,15 +171,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
     if (!project?.projectId) return;
     contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
     try {
-      const graph = await loadContextGraph(project, schedulePoll);
-      const latestRun = Array.isArray(graph?.runs) ? graph.runs[0] : null;
-      if (effectiveDocumentTranslationMode.value === 'literary' && latestRun?.status === 'completed' &&
-          latestRun?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION &&
-          graph?.sourceRevisionId === contextGraphState.value.sourceRevisionId) {
-        // Also bridge completed analyses created by CLI or another UI session into the editable
-        // character-memory workflow. The merge preserves human-confirmed names and voice profiles.
-        await syncContextGraphEntitiesToMemory(project, graph);
-      }
+      await loadContextGraph(project, schedulePoll);
+      // Status is a display projection only. Graph entities/evidence never get copied into UI memory.
     } catch (error) {
       contextGraphState.value = {
         ...contextGraphState.value,
@@ -195,29 +182,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }
-
-  async function syncContextGraphEntitiesToMemory(project: any, graph: any) {
-    // Context Graph analysis may finish after several translation waves. Always merge against the
-    // newest SQLite memory revision, not the reader's possibly stale IndexedDB snapshot.
-    const config = readerConfig.value || await getConfig();
-    const serverMemory = await workspaceApi<{ current?: { memory?: unknown } }>(
-      config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-      config.documentLocalAgentToken || '',
-      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-    );
-    literaryMemory.value = sanitizeLiteraryMemory(serverMemory.current?.memory);
-    const next = mergeContextGraphEntitySuggestions(graph, literaryMemory.value);
-    if (JSON.stringify(next.entities) === JSON.stringify(literaryMemory.value.entities) &&
-        JSON.stringify(next.relationships) === JSON.stringify(literaryMemory.value.relationships) &&
-        JSON.stringify(next.characterVoices) === JSON.stringify(literaryMemory.value.characterVoices) &&
-        JSON.stringify(next.styleGuide) === JSON.stringify(literaryMemory.value.styleGuide) &&
-        next.styleGuideStatus === literaryMemory.value.styleGuideStatus) {
-      await deps.persistSession();
-      return;
-    }
-    literaryMemory.value = next;
-    await deps.persistLiteraryMemoryToWorkspace();
   }
 
   async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
@@ -274,9 +238,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
         }
         status = contextGraphState.value.status;
         run = Array.isArray(graph.runs) ? graph.runs[0] : null;
-      }
-      if (status === 'completed' && run?.progress?.analysisVersion === CONTEXT_GRAPH_ANALYSIS_VERSION) {
-        await syncContextGraphEntitiesToMemory(project, graph);
       }
     } catch (error) {
       contextGraphState.value = {
@@ -350,7 +311,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
     clearContextGraphPoll,
     loadContextGraph,
     refreshContextGraphStatus,
-    syncContextGraphEntitiesToMemory,
     ensureContextGraphPreprocessing,
     handlePreprocessingStatusRefreshRequested,
     openPreprocessingAndEnsure,

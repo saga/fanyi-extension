@@ -1043,7 +1043,6 @@ import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
 import { useAgentTrajectory } from './useAgentTrajectory';
-import { mergeContextGraphEntitySuggestions } from './documentLiteraryBridge';
 import { useLiteraryMemoryEditor } from './useLiteraryMemoryEditor';
 import { useContextGraph } from './useContextGraph';
 import {
@@ -1295,7 +1294,6 @@ const {
   clearContextGraphPoll,
   loadContextGraph,
   refreshContextGraphStatus,
-  syncContextGraphEntitiesToMemory,
   ensureContextGraphPreprocessing,
   handlePreprocessingStatusRefreshRequested,
   openPreprocessingAndEnsure,
@@ -1309,12 +1307,9 @@ const {
   sourceLang,
   targetLang,
   effectiveDocumentTranslationMode,
-  literaryMemory,
   persistenceMessage,
   activeTab,
   ensureWorkspace: ensureDocumentWorkspace,
-  persistSession: persistCurrentSession,
-  persistLiteraryMemoryToWorkspace,
 });
 
 async function cancelTranslationRunAndReanalyzeContextGraph() {

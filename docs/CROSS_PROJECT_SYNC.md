@@ -710,3 +710,12 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - 扩展端：src/entrypoints/document/DocumentAgentWorkspace.vue、src/entrypoints/document/documentWorkspaceClient.ts
 
 > CI 合成测试不调用真实本地模型。不要把“代码已合并”表述为“Yabu 在整本真实小说中已全部验证为统一译名”；还需要用具体项目/Run 执行上述只读诊断与实际模型复跑。
+
+
+## Local Agent Context Graph ownership (2026-10-19)
+
+- Full-book Context Graph, source evidence, chapter summaries and graph analysis stay in vocal-saga/local-agent-service SQLite. They are not mirrored into extension LiteraryMemory and must not be serialized through its small-memory persistence endpoint.
+- The extension reads GET /api/documents/projects/:projectId/context-graph/status for progress, counts and the small style projection. The full graph GET endpoint is not used for routine UI polling.
+- On the normal Local Agent literary path, the extension submits a project Run. local-agent-service validates source revision, analysis version and language direction, starts or waits for preprocessing, and only then changes the translation Run to running. The extension must not start a second preprocessing gate before submitting the Run.
+- Manual re-analysis remains an explicit UI action that invokes the service API. If the service is unavailable, surface that failure; do not present extension-side graph state as authoritative.
+- The 120 KiB LiteraryMemory guard applies only to compact, editable memory DTOs, not full-book Context Graph analysis or evidence.
