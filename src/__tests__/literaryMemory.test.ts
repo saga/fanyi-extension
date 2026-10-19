@@ -86,6 +86,50 @@ describe('automatic canonical entity activation', () => {
     });
 
     expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'the King')?.confirmationSource).toBe('evidence-verified');
     expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.reviewStatus).toBe('suggested');
+  });
+
+  it('labels legacy confirmed records as source-unknown instead of inferring user approval', () => {
+    const memory = sanitizeLiteraryMemory({
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'confirmed' }],
+      relationships: [{ subject: 'Alice', predicate: 'knows', object: 'Bob', reviewStatus: 'confirmed' }],
+      characterVoices: [{
+        characterId: 'char_alice', canonicalSourceName: 'Alice', targetName: '艾丽丝',
+        status: 'confirmed', useForTranslation: true,
+        voiceCore: { register: 'restrained' },
+        evidence: [{ segmentId: 's1', sourceQuote: 'Alice answered.', dimension: 'register', observation: 'brief', confidence: null }],
+      }],
+      styleGuide: { register: 'restrained' }, styleGuideStatus: 'confirmed',
+    });
+
+    expect(memory.entities[0]?.confirmationSource).toBe('legacy-unknown');
+    expect(memory.relationships[0]?.confirmationSource).toBe('legacy-unknown');
+    expect(memory.characterVoices[0]?.confirmationSource).toBe('legacy-unknown');
+    expect(memory.styleGuideConfirmationSource).toBe('legacy-unknown');
+  });
+
+  it('preserves explicit user confirmation over machine-generated candidates during memory merge', () => {
+    const merged = mergeLiteraryMemory({
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'confirmed', confirmationSource: 'legacy-unknown' }],
+      characterVoices: [{
+        characterId: 'char_alice', canonicalSourceName: 'Alice', targetName: '艾丽丝',
+        status: 'candidate', useForTranslation: true,
+        voiceCore: { register: 'restrained' },
+        evidence: [{ segmentId: 's1', sourceQuote: 'Alice answered.', dimension: 'register', observation: 'brief', confidence: null }],
+      }],
+    }, {
+      entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', reviewStatus: 'confirmed', confirmationSource: 'user-confirmed' }],
+      characterVoices: [{
+        characterId: 'char_alice', canonicalSourceName: 'Alice', targetName: '艾丽丝',
+        status: 'confirmed', confirmationSource: 'user-confirmed', useForTranslation: true,
+        voiceCore: { register: 'restrained' },
+        evidence: [{ segmentId: 's1', sourceQuote: 'Alice answered.', dimension: 'register', observation: 'brief', confidence: null }],
+      }],
+    });
+
+    expect(merged.entities[0]?.confirmationSource).toBe('user-confirmed');
+    expect(merged.characterVoices[0]?.status).toBe('confirmed');
+    expect(merged.characterVoices[0]?.confirmationSource).toBe('user-confirmed');
   });
 });
