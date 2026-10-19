@@ -758,7 +758,7 @@ async function createProject(forceNew = false, explicitRebuild = false) {
       return;
     }
 
-    await rememberWorkspaceProject(input, response.project.projectId);
+    await rememberWorkspaceProject(input, response.project.projectId, response.project.sourceFingerprint);
     // Finish one-time migration from the snapshot captured for the request. If the user switches
     // documents during these writes, complete the old project durably but never bind it to the
     // newly opened document's reader state.
