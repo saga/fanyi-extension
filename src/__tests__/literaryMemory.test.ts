@@ -72,6 +72,7 @@ describe('automatic canonical entity activation', () => {
           kind: 'person',
           aliases: ['King'],
           evidence: 'But Timsen was much too clever to allow the King to see through him.',
+          evidenceRefs: [{ segmentId: 's1', sourceQuote: 'But Timsen was much too clever to allow the King to see through him.' }],
           reviewStatus: 'suggested',
         },
         {
