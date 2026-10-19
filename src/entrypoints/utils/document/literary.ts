@@ -323,13 +323,27 @@ function dedupeEntities(entities: LiteraryEntity[]): LiteraryEntity[] {
   return merged;
 }
 function dedupeRelationships(relationships: LiteraryRelationship[]): LiteraryRelationship[] {
-  const seen = new Set<string>();
-  return relationships.filter((rel) => {
-    const key = [rel.subject, rel.predicate, rel.object].join('|').toLocaleLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const map = new Map<string, LiteraryRelationship>();
+  for (const rel of relationships) {
+    const key = [rel.subject, rel.predicate, rel.object].map(normalizedEntityName).join('|');
+    const prior = map.get(key);
+    if (!prior) {
+      map.set(key, rel);
+      continue;
+    }
+    const confirmed = prior.reviewStatus === 'confirmed' || rel.reviewStatus === 'confirmed';
+    map.set(key, {
+      ...prior,
+      ...(confirmed ? { reviewStatus: 'confirmed' as const,
+        confirmationSource: mergeConfirmationSource(prior.confirmationSource, rel.confirmationSource) } : {}),
+      evidence: prior.evidence || rel.evidence,
+      evidenceRefs: [...(prior.evidenceRefs || []), ...(rel.evidenceRefs || [])]
+        .filter((item, index, all) => all.findIndex((other) =>
+          other.segmentId === item.segmentId && normalizedEntityName(other.sourceQuote) === normalizedEntityName(item.sourceQuote)) === index)
+        .slice(0, 8),
+    });
+  }
+  return Array.from(map.values());
 }
 
 export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
@@ -618,6 +632,8 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
     if (prior.status === 'confirmed') {
       map.set(candidate.characterId, {
         ...prior,
+        ...(candidate.confirmationSource === 'user-confirmed'
+          ? { confirmationSource: 'user-confirmed' as const } : {}),
         ...mergeCharacterVoiceConfidence(prior, candidate),
         aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
         evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>
@@ -636,7 +652,10 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
       ...(!conflicts ? { voiceCore: { ...candidate.voiceCore, ...prior.voiceCore } } : {}),
       ...(!prior.role && candidate.role ? { role: candidate.role } : {}),
       ...(!prior.traits?.length && candidate.traits?.length ? { traits: candidate.traits } : {}),
-      status: prior.status === 'rejected' ? 'rejected' : 'candidate',
+      status: prior.status === 'rejected' ? 'rejected'
+        : candidate.status === 'confirmed' && candidate.confirmationSource === 'user-confirmed' ? 'confirmed' : 'candidate',
+      ...(candidate.status === 'confirmed' && candidate.confirmationSource === 'user-confirmed'
+        ? { confirmationSource: 'user-confirmed' as const } : { confirmationSource: undefined }),
       ...mergeCharacterVoiceConfidence(prior, candidate),
       aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
       evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>
@@ -663,7 +682,15 @@ function mergeVoiceRules(existing: RelationshipVoiceRule[], incoming: Relationsh
     const prior = map.get(key);
     if (!prior) { map.set(key, rule); continue; }
     if (prior.status === 'confirmed' || prior.status === 'rejected') {
-      map.set(key, { ...prior, evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
+      map.set(key, {
+        ...prior,
+        ...(rule.status === 'confirmed' && rule.confirmationSource === 'user-confirmed'
+          ? { confirmationSource: 'user-confirmed' as const } : {}),
+        evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8),
+      });
+    } else if (rule.status === 'confirmed' && rule.confirmationSource === 'user-confirmed') {
+      map.set(key, { ...prior, ...rule, status: 'confirmed',
+        evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     } else if (JSON.stringify({ register: prior.baselineRegister, terms: prior.addressTerms }) === JSON.stringify({ register: rule.baselineRegister, terms: rule.addressTerms })) {
       map.set(key, { ...prior, ...rule, status: 'candidate', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     } else {
@@ -677,8 +704,14 @@ function mergeVoiceAnchors(existing: CharacterVoiceAnchor[], incoming: Character
   for (const candidate of incoming) {
     const prior = map.get(candidate.anchorId);
     if (!prior) { map.set(candidate.anchorId, candidate); continue; }
-    // 用户/人工批准与拒绝状态不能被后续模型重置。
-    if (prior.approvedBy === 'user' || prior.approvedBy === 'manual-edit' || prior.status === 'rejected') continue;
+    // 用户/人工批准与拒绝状态不能被后续模型重置；明确的用户确认来源可以补全旧记录的 provenance。
+    if (prior.approvedBy === 'user' || prior.approvedBy === 'manual-edit' || prior.status === 'rejected') {
+      if (prior.status === 'approved' && candidate.status === 'approved' &&
+          candidate.confirmationSource === 'user-confirmed' && prior.confirmationSource !== 'user-confirmed') {
+        map.set(candidate.anchorId, { ...prior, confirmationSource: 'user-confirmed' });
+      }
+      continue;
+    }
     map.set(candidate.anchorId, { ...prior, ...candidate, status: prior.status === 'approved' ? 'approved' : 'candidate' });
   }
   return Array.from(map.values()).slice(-MAX_VOICE_ANCHORS);
