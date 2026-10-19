@@ -211,6 +211,94 @@
             <p class="agent-footnote">重新翻译会生成新结果。相同原文版本下已有的人工修订会优先保留。</p>
           </section>
 
+          <section class="agent-option-group agent-quality-audit">
+            <div class="agent-option-heading">
+              <h4>全书质量审计</h4>
+              <p>检查缺译、规范译名冲突、英文残留、数字差异与重复表达。审计只生成问题清单，不会直接改写已采纳译文。</p>
+            </div>
+            <div class="agent-inline-actions">
+              <button
+                class="agent-button agent-button-secondary"
+                :disabled="qualityAuditLoading || qualityAuditBlocked"
+                @click="runQualityAudit"
+              >
+                {{ qualityAuditLoading ? '正在审计…' : '执行全书审计' }}
+              </button>
+              <button
+                v-if="qualityAudit"
+                class="agent-button agent-button-tertiary"
+                :disabled="qualityAuditLoading || !project"
+                @click="refreshQualityAudit"
+              >读取最近报告</button>
+              <button
+                v-if="qualityAuditMatchesSource && selectedQualityRepairCount"
+                class="agent-button agent-button-primary"
+                :disabled="qualityAuditRepairing || busy || isRunning || sourceChanged"
+                @click="repairSelectedQualityFindings"
+              >
+                {{ qualityAuditRepairing ? '正在创建返工任务…' : '定点返工（' + selectedQualityRepairCount + '）' }}
+              </button>
+            </div>
+            <p v-if="qualityAuditBlocked" class="agent-footnote">全书审计需等待当前任务结束，并确保来源版本没有待确认变更。</p>
+            <p v-if="qualityAuditError" class="agent-feedback agent-feedback-error" role="alert">{{ qualityAuditError }}</p>
+            <p v-if="qualityAudit && !qualityAuditMatchesSource" class="agent-quality-stale" role="status">
+              这份报告对应旧的原文版本，不能用于当前版本的返工。请重新执行审计。
+            </p>
+            <template v-else-if="qualityAuditMatchesSource">
+              <div class="agent-quality-metrics">
+                <span>缺译 <strong>{{ qualityAudit.metrics?.missingTranslationCount || 0 }}</strong></span>
+                <span>规范名冲突 <strong>{{ qualityAudit.metrics?.canonicalNameMappingConflictCount || 0 }}</strong></span>
+                <span>译名漂移 <strong>{{ qualityAudit.metrics?.terminologyDriftCount || 0 }}</strong></span>
+                <span>英文残留 <strong>{{ qualityAudit.metrics?.englishResidueCount || 0 }}</strong></span>
+                <span>数字差异 <strong>{{ qualityAudit.metrics?.numericTokenMismatchCount || 0 }}</strong></span>
+                <span>重复表达组 <strong>{{ qualityAudit.metrics?.repeatedExpressionDriftGroups || 0 }}</strong></span>
+              </div>
+              <p class="agent-footnote">
+                报告共 {{ qualityAudit.findings?.length || 0 }} 项。可勾选可返工的问题创建新的候选 Run；规范译名冲突需要先在“人物角色/声音”或 LiteraryMemory 中人工统一，不允许自动猜选。
+              </p>
+              <div v-if="qualityAudit.findings?.length" class="agent-quality-findings">
+                <article
+                  v-for="finding in qualityAudit.findings.slice(0, 80)"
+                  :key="finding.findingId"
+                  class="agent-quality-finding"
+                >
+                  <div class="agent-quality-finding-heading">
+                    <label v-if="finding.repairable === true" class="agent-quality-select">
+                      <input v-model="selectedQualityFindingIds" type="checkbox" :value="String(finding.findingId)">
+                      <span>定点返工</span>
+                    </label>
+                    <span class="agent-finding-kind">{{ qualityFindingLabel(finding) }}</span>
+                    <span class="agent-quality-severity" :class="'severity-' + String(finding.severity || 'review')">
+                      {{ qualitySeverityLabel(finding.severity) }}
+                    </span>
+                    <span class="agent-segment-id">{{ (finding.segmentIds || []).length }} 段</span>
+                  </div>
+                  <p class="agent-quality-explanation">{{ finding.explanation || finding.reason || '需要结合原文和上下文复核。' }}</p>
+                  <p v-if="finding.entity?.source" class="agent-quality-evidence">
+                    规范原文名：{{ finding.entity.source }}
+                    <span v-if="finding.entity?.target"> · 规范译名：{{ finding.entity.target }}</span>
+                    <span v-if="finding.entity?.targets?.length"> · 冲突译名：{{ finding.entity.targets.join(' / ') }}</span>
+                  </p>
+                  <p v-if="finding.residueExamples?.length" class="agent-quality-evidence">
+                    疑似残留：{{ finding.residueExamples.join(' / ') }}
+                  </p>
+                  <details class="agent-quality-detail">
+                    <summary>查看片段证据</summary>
+                    <p v-if="finding.chapter">章节：{{ finding.chapter }}</p>
+                    <p v-if="finding.sourceExcerpt">原文：{{ finding.sourceExcerpt }}</p>
+                    <p v-if="finding.translationExcerpt">译文：{{ finding.translationExcerpt }}</p>
+                    <p v-else-if="finding.draftExcerpt">译文：{{ finding.draftExcerpt }}</p>
+                    <p v-if="finding.segmentIds?.length">片段 ID：{{ finding.segmentIds.slice(0, 12).join('、') }}{{ finding.segmentIds.length > 12 ? '…' : '' }}</p>
+                  </details>
+                </article>
+                <p v-if="qualityAudit.findings.length > 80" class="agent-footnote">
+                  为保持面板响应，本页最多展示前 80 项；完整报告仍保存在本机项目数据库中。
+                </p>
+              </div>
+              <p v-else class="agent-detail-description">当前审计没有发现上述规则能够识别的问题。这不代表模型审校已证明译文完全正确。</p>
+            </template>
+          </section>
+
           <section v-if="!project.sourceFileSaved && sourceFile" class="agent-option-group">
             <div class="agent-option-heading">
               <h4>原始文件备份</h4>
@@ -421,6 +509,11 @@ let workspaceSourceGeneration = 0;
 const autoAcceptingRunId = ref('');
 const queuedAutoAcceptRunId = ref('');
 const autoAcceptError = ref('');
+const qualityAudit = ref<any>(null);
+const qualityAuditLoading = ref(false);
+const qualityAuditRepairing = ref(false);
+const qualityAuditError = ref('');
+const selectedQualityFindingIds = ref<string[]>([]);
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
 const preprocessingBlockedByPreprocessing = computed(() =>
   props.preprocessingState.required && !props.preprocessingState.ready,
@@ -460,6 +553,22 @@ const runProgressPercent = computed(() => {
   // 未完成片段不能算作已处理，否则大规模失败时进度条也会显示 100%。
   const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0);
   return Math.round(Math.min(100, resolved / Number(counts.total) * 100));
+});
+const qualityAuditBlocked = computed(() =>
+  !project.value || busy.value || sourceChanged.value ||
+  ['queued', 'running', 'paused', 'partial'].includes(String(activeRun.value?.status || '')),
+);
+const qualityAuditMatchesSource = computed(() =>
+  !!qualityAudit.value && !!project.value?.currentSourceRevisionId &&
+  qualityAudit.value.sourceRevisionId === project.value.currentSourceRevisionId,
+);
+const selectedQualityRepairCount = computed(() => {
+  const repairableIds = new Set(
+    (Array.isArray(qualityAudit.value?.findings) ? qualityAudit.value.findings : [])
+      .filter((finding: any) => finding.repairable === true)
+      .map((finding: any) => String(finding.findingId)),
+  );
+  return selectedQualityFindingIds.value.filter((id) => repairableIds.has(id)).length;
 });
 const runLabels: Record<string, string> = {
   queued: '排队中', running: '运行中', paused: '已暂停', awaiting_acceptance: '待采纳',
@@ -740,6 +849,133 @@ async function refreshProject() {
   verification.value = result.verification;
   runs.value = result.runs || [];
   if (activeRun.value) await refreshRun(activeRun.value.runId);
+  await refreshQualityAudit();
+}
+
+async function refreshQualityAudit() {
+  if (!project.value) return;
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  qualityAuditError.value = '';
+  try {
+    const result = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/quality-audit');
+    if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+    qualityAudit.value = result.report || null;
+    selectedQualityFindingIds.value = [];
+  } catch (e) {
+    if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+    if (e instanceof WorkspaceApiError && e.status === 404) {
+      qualityAudit.value = null;
+      selectedQualityFindingIds.value = [];
+      return;
+    }
+    qualityAuditError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function runQualityAudit() {
+  if (!project.value) return;
+  if (qualityAuditBlocked.value) {
+    qualityAuditError.value = '请先完成或结束当前运行，并确认来源版本。';
+    return;
+  }
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  qualityAuditLoading.value = true;
+  qualityAuditError.value = '';
+  try {
+    const finishedRunId = ['completed', 'awaiting_acceptance'].includes(String(activeRun.value?.status || ''))
+      ? String(activeRun.value.runId || '')
+      : '';
+    const result = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/quality-audit', {
+      method: 'POST',
+      body: JSON.stringify(finishedRunId ? { runId: finishedRunId } : {}),
+    });
+    if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+    qualityAudit.value = result.report || null;
+    selectedQualityFindingIds.value = [];
+    message.value = '全书质量审计完成：共 ' + Number(result.report?.findings?.length || 0) +
+      ' 项问题提示。报告已保存在本机项目数据库中。';
+  } catch (e) {
+    if (isCurrentWorkspaceGeneration(generation)) {
+      qualityAuditError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    if (isCurrentWorkspaceGeneration(generation)) qualityAuditLoading.value = false;
+  }
+}
+
+async function repairSelectedQualityFindings() {
+  if (!project.value || !qualityAuditMatchesSource.value || !qualityAudit.value?.auditId) return;
+  if (qualityAuditBlocked.value || qualityAuditRepairing.value) return;
+  const repairableIds = new Set(
+    (Array.isArray(qualityAudit.value.findings) ? qualityAudit.value.findings : [])
+      .filter((finding: any) => finding.repairable === true)
+      .map((finding: any) => String(finding.findingId)),
+  );
+  const findingIds = selectedQualityFindingIds.value.filter((id) => repairableIds.has(id));
+  if (!findingIds.length) {
+    qualityAuditError.value = '请选择至少一项可返工的问题。';
+    return;
+  }
+  const generation = workspaceSourceGeneration;
+  const projectId = project.value.projectId as string;
+  qualityAuditRepairing.value = true;
+  qualityAuditError.value = '';
+  try {
+    const response = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/quality-audit/repair', {
+      method: 'POST',
+      body: JSON.stringify({ auditId: qualityAudit.value.auditId, findingIds }),
+    });
+    if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+    selectedQualityFindingIds.value = [];
+    if (response.repair?.run) {
+      runEvents.value = [];
+      eventCursor = 0;
+      activeRun.value = response.repair.run;
+      await refreshProject();
+      if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
+      if (isRunning.value) schedulePoll(activeRun.value.runId);
+    }
+    message.value = response.started
+      ? '已创建定点返工任务。返工结果是新的候选 Run，完成后仍需由你确认；旧译文不会被直接覆盖。'
+      : '没有创建新的返工任务。请检查所选问题是否仍属于当前来源版本。';
+  } catch (e) {
+    if (isCurrentWorkspaceGeneration(generation)) {
+      qualityAuditError.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    if (isCurrentWorkspaceGeneration(generation)) qualityAuditRepairing.value = false;
+  }
+}
+
+function qualityFindingLabel(finding: any): string {
+  const labels: Record<string, string> = {
+    'missing-translation': '缺译片段',
+    'canonical-name-mapping-conflict': '规范译名冲突',
+    'terminology-drift': '规范译名漂移',
+    'english-residue': '疑似英文残留',
+    'numeric-token-mismatch': '数字/单位差异',
+    'repeated-expression-drift': '重复表达不一致',
+    'repeated-expression-alignment-review': '重复表达需人工对齐',
+    'entity-mention-drift': '实体表面译名漂移',
+    'context-delta-conflict': '候选译名冲突',
+    'duplicate-output-id': '重复输出 ID',
+    'unexpected-output-id': '未知输出 ID',
+    'malformed-output-row': '模型输出结构异常',
+    'accuracy-review': '准确性审校',
+    'reviewer-terminology-review': '术语审校',
+    'character-voice-review': '人物声音审校',
+    'style-review': '文风审校',
+  };
+  return labels[String(finding?.type || '')] || String(finding?.type || '质量问题');
+}
+
+function qualitySeverityLabel(severity: string | undefined): string {
+  if (severity === 'must-fix') return '必须修复';
+  if (severity === 'warning') return '警告';
+  if (severity === 'review') return '人工复核';
+  return '提示';
 }
 
 async function refreshRunEvents(runId: string): Promise<void> {
@@ -787,6 +1023,11 @@ function resetProjectStateForSourceChange(): void {
   autoAcceptingRunId.value = '';
   queuedAutoAcceptRunId.value = '';
   autoAcceptError.value = '';
+  qualityAudit.value = null;
+  qualityAuditLoading.value = false;
+  qualityAuditRepairing.value = false;
+  qualityAuditError.value = '';
+  selectedQualityFindingIds.value = [];
   selectedSegmentId.value = props.visibleSegments[0]?.id || '';
   manualText.value = '';
   busy.value = false;
@@ -874,6 +1115,9 @@ async function createSeparateProject() {
   activeRun.value = null;
   verification.value = null;
   runs.value = [];
+  qualityAudit.value = null;
+  selectedQualityFindingIds.value = [];
+  qualityAuditError.value = '';
   sourceChanged.value = false;
   await createProject(true);
 }
@@ -1594,6 +1838,60 @@ onUnmounted(() => {
 .agent-subdetails { padding: .8rem 0; border-top: 1px solid #f0f0f2; }
 .agent-subdetails > summary { cursor: pointer; font-size: .86rem; font-weight: 600; }
 .agent-subdetails .agent-detail-description { margin-top: .65rem; }
+.agent-quality-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-top: .85rem;
+}
+.agent-quality-metrics span {
+  display: inline-flex;
+  gap: .35rem;
+  align-items: center;
+  border: 1px solid #e5e5ea;
+  border-radius: 999px;
+  padding: .3rem .6rem;
+  color: #515158;
+  background: #fafafc;
+  font-size: .76rem;
+}
+.agent-quality-metrics strong { color: #1d1d1f; font-variant-numeric: tabular-nums; }
+.agent-quality-stale {
+  margin: .75rem 0 0;
+  border-left: 3px solid #b45309;
+  padding: .35rem .6rem;
+  color: #854d0e;
+  background: #fffbeb;
+  font-size: .82rem;
+}
+.agent-quality-findings { display: grid; gap: .55rem; margin-top: .75rem; }
+.agent-quality-finding {
+  min-width: 0;
+  border: 1px solid #e5e5ea;
+  border-radius: 12px;
+  padding: .7rem .8rem;
+  background: #fff;
+}
+.agent-quality-finding-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.agent-quality-select { display: inline-flex; align-items: center; gap: .32rem; color: #515158; font-size: .76rem; }
+.agent-quality-select input { accent-color: var(--agent-blue); }
+.agent-quality-severity {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: .18rem .45rem;
+  background: #f5f5f7;
+  color: #515158;
+  font-size: .7rem;
+}
+.agent-quality-severity.severity-must-fix { background: #fff1f0; color: #a61d24; }
+.agent-quality-severity.severity-warning { background: #fff7e6; color: #ad6800; }
+.agent-quality-finding p { overflow-wrap: anywhere; }
+.agent-quality-explanation { margin: .5rem 0; font-size: .83rem; line-height: 1.5; }
+.agent-quality-evidence { margin: .25rem 0; color: #515158; font-size: .78rem; line-height: 1.5; }
+.agent-quality-detail { margin-top: .45rem; font-size: .78rem; }
+.agent-quality-detail summary { cursor: pointer; color: #515158; }
+.agent-quality-detail p { margin: .35rem 0 0; color: #515158; line-height: 1.5; }
 .agent-field { display: flex; flex-direction: column; gap: .35rem; margin-top: .8rem; color: #424245; font-size: .8rem; }
 .agent-field select, .agent-field textarea {
   width: 100%;
