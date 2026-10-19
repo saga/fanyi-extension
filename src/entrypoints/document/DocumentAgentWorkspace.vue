@@ -166,7 +166,7 @@
           <span class="agent-status-dot" :class="'status-' + activeRun.status"></span>
           <span>{{ runStatusLabel(activeRun.status) }}</span>
           <span class="agent-meta-dot">·</span>
-          <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString() }}</span>
+          <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</span>
           <span v-if="activeRun.counts?.failed" class="agent-run-failure">有 {{ activeRun.counts.failed }} 段需要重试</span>
         </div>
         <details v-if="failedRunSegments.length" class="agent-failed-segments">
@@ -248,7 +248,7 @@
             <div v-if="runs.length" class="agent-history-list">
               <div v-for="run in runs" :key="run.runId" class="agent-history-row">
                 <div class="agent-history-copy">
-                  <strong>{{ new Date(run.createdAt).toLocaleString() }}</strong>
+                  <strong>{{ new Date(run.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</strong>
                   <span>{{ run.scope?.type === 'stale' ? '未完成内容' : run.scope?.type === 'all' ? '全文重译' : run.scope?.type === 'failed' ? '失败重试' : '指定范围' }} · {{ run.runId.slice(0, 8) }}</span>
                 </div>
                 <span class="agent-history-status">{{ runStatusLabel(run.status) }}</span>
@@ -291,7 +291,7 @@
                 <div class="agent-trace-heading">
                   <strong>{{ eventTitle(event.type) }}</strong>
                   <span>{{ event.type }}</span>
-                  <time>{{ new Date(event.createdAt).toLocaleTimeString() }}</time>
+                  <time>{{ new Date(event.createdAt).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</time>
                 </div>
                 <p v-if="eventSummary(event)">{{ eventSummary(event) }}</p>
               </article>

@@ -20,7 +20,7 @@
         <span v-else-if="localSessionSummary" class="muted small">
           {{ FORMAT_LABEL[localSessionSummary.format] || localSessionSummary.format }} · 本机 SQLite 恢复副本
         </span>
-        <span class="muted small">上次保存：{{ new Date(savedSessionSummary?.updatedAt ?? localSessionSummary?.updatedAt ?? Date.now()).toLocaleString() }}</span>
+        <span class="muted small">上次保存：{{ formatAgentDateTime(savedSessionSummary?.updatedAt ?? localSessionSummary?.updatedAt ?? Date.now()) }}</span>
       </div>
       <div class="saved-session-actions">
         <button class="btn primary" @click="restoreLastSession">恢复阅读</button>
@@ -408,6 +408,12 @@
               @click="reanalyzeContextGraph">
               {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
             </button>
+            <button class="btn" type="button"
+              v-if="workspaceActiveRun && ['queued','running','paused','awaiting_acceptance','partial'].includes(workspaceActiveRun.status)"
+              :disabled="contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
+              @click="cancelTranslationRunAndReanalyzeContextGraph">
+              {{ contextGraphAnalyzing ? '正在分析全书…' : '取消运行并重新分析全书' }}
+            </button>
           </div>
         </div>
         <div class="literary-status-title">
@@ -440,9 +446,9 @@
         </p>
         <p class="muted small" v-if="contextGraphState.sourceRevisionId">
           来源版本：{{ contextGraphState.sourceRevisionId.slice(0, 12) }}
-          <template v-if="contextGraphState.startedAt"> · 开始 {{ new Date(contextGraphState.startedAt).toLocaleString() }}</template>
-          <template v-if="contextGraphState.finishedAt"> · 结束 {{ new Date(contextGraphState.finishedAt).toLocaleString() }}</template>
-          <template v-if="contextGraphState.checkedAt"> · 最近检查 {{ new Date(contextGraphState.checkedAt).toLocaleTimeString() }}</template>
+          <template v-if="contextGraphState.startedAt"> · 开始 {{ formatAgentDateTime(contextGraphState.startedAt) }}</template>
+          <template v-if="contextGraphState.finishedAt"> · 结束 {{ formatAgentDateTime(contextGraphState.finishedAt) }}</template>
+          <template v-if="contextGraphState.checkedAt"> · 最近检查 {{ formatAgentTime(contextGraphState.checkedAt) }}</template>
         </p>
         <p class="warn" v-if="contextGraphState.error">{{ contextGraphState.error }}</p>
         <p class="warn" v-else-if="contextGraphState.status === 'completed' && contextGraphState.counts.characters + contextGraphState.counts.entities === 0">
@@ -528,7 +534,7 @@
           <div class="literary-diagnostic-heading">
             <span class="chip">{{ entry.stage }}</span>
             <span class="chip" :class="'diagnostic-' + entry.status">{{ entry.status }}</span>
-            <time class="muted small">{{ new Date(entry.at).toLocaleTimeString() }}</time>
+            <time class="muted small">{{ formatAgentTime(entry.at) }}</time>
           </div>
           <p>{{ entry.message }}</p>
           <p v-if="entry.details" class="muted small literary-diagnostic-details">{{ entry.details }}</p>
@@ -885,7 +891,7 @@
             {{ workspaceActiveRun?.status === 'running' || workspaceActiveRun?.status === 'queued'
               ? '翻译任务运行中' : workspaceActiveRun?.status === 'failed' ? '最近任务失败' : '显示持久化执行记录' }}
           </span>
-          <span class="chip">项目 {{ workspaceProject?.projectId?.slice(0, 8) || '未连接' }}</span>
+          <span class="chip">project-id {{ workspaceProject?.projectId || '未连接' }}</span>
           <span class="chip">事件 {{ agentTrajectoryEvents.length }}</span>
           <span class="chip">最近事件 ID {{ agentTrajectoryCursor || '—' }}</span>
         </div>
@@ -904,7 +910,7 @@
               <div class="agent-task-main">
                 <strong>{{ task.role }}</strong>
                 <span>{{ task.title }}</span>
-                <small class="muted">{{ task.runId ? 'Run ' + task.runId.slice(0, 8) : '' }}{{ task.batchLabel ? ' · ' + task.batchLabel : '' }}</small>
+                <small class="muted">{{ task.runId ? 'run-id ' + task.runId : '' }}{{ task.batchLabel ? ' · ' + task.batchLabel : '' }}</small>
               </div>
             </article>
           </div>
@@ -929,11 +935,12 @@
                 <strong>{{ agentTrajectoryTitle(event) }}</strong>
                 <span class="chip">{{ agentTrajectoryRole(event) }}</span>
                 <span class="chip" :class="'diagnostic-' + agentTrajectoryStatus(event)">{{ agentTrajectoryStatusLabel(event) }}</span>
-                <time class="muted small">{{ new Date(event.createdAt).toLocaleTimeString() }}</time>
+                <time class="muted small">{{ formatAgentTime(event.createdAt) }}</time>
               </div>
               <p class="agent-trace-detail">{{ agentTrajectoryDetail(event) }}</p>
               <div class="agent-trace-meta">
-                <span v-if="event.runId">Run {{ event.runId.slice(0, 8) }}</span>
+                <span v-if="workspaceProject?.projectId">project-id {{ workspaceProject.projectId }}</span>
+                <span v-if="event.runId">run-id {{ event.runId }}</span>
                 <span>事件 #{{ event.eventId }}</span>
                 <span v-if="event.payload?.batchIndex">批次 {{ event.payload.batchIndex }}{{ event.payload.batchCount ? '/' + event.payload.batchCount : '' }}</span>
                 <span v-if="event.payload?.durationMs != null">耗时 {{ formatAgentDuration(event.payload.durationMs) }}</span>
@@ -975,7 +982,7 @@
                   <div v-if="agentTrajectoryRelatedFailureEvents(event).length" class="agent-trace-failure-related">
                     <strong>相关 Agent 轨迹</strong>
                     <p v-for="related in agentTrajectoryRelatedFailureEvents(event)" :key="related.eventId">
-                      {{ new Date(related.createdAt).toLocaleTimeString() }} · {{ agentTrajectoryTitle(related) }} · {{ agentTrajectoryDetail(related) }}
+                      {{ formatAgentTime(related.createdAt) }} · {{ agentTrajectoryTitle(related) }} · {{ agentTrajectoryDetail(related) }}
                     </p>
                   </div>
                 </template>
@@ -1053,6 +1060,8 @@ import {
   computeAgentTrajectoryActiveTasks,
   filterAgentTrajectoryEvents,
   formatAgentDuration,
+  formatAgentTime,
+  formatAgentDateTime,
   type AgentTrajectoryFilter,
 } from './documentAgentTrajectory';
 import {
@@ -1303,6 +1312,38 @@ const {
   persistSession: persistCurrentSession,
   persistLiteraryMemoryToWorkspace,
 });
+
+async function cancelTranslationRunAndReanalyzeContextGraph() {
+  const active = workspaceActiveRun.value;
+  if (!active?.runId) return;
+  if (['queued', 'running'].includes(active.status)) {
+    if (!window.confirm('当前翻译运行尚未结束。取消后将停止本轮翻译并重新分析全书，是否继续？')) return;
+  }
+  const config = readerConfig.value || await getConfig();
+  readerConfig.value = config;
+  const project = workspaceProject.value || await ensureDocumentWorkspace();
+  if (!project?.projectId) return;
+  const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+  const token = config.documentLocalAgentToken || '';
+  try {
+    const response = await workspaceApi<{ run?: any }>(
+      base, token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(active.runId) + '/cancel',
+      { method: 'POST', body: '{}' },
+    );
+    const next = response?.run || null;
+    if (next && ['completed', 'cancelled'].includes(next.status)) {
+      workspaceActiveRun.value = null;
+    } else {
+      workspaceActiveRun.value = next || workspaceActiveRun.value;
+      persistenceMessage.value = '运行尚未取消（状态：' + (workspaceActiveRun.value?.status || '未知') + '），请到 Agent 面板处理后再重新分析全书。';
+      return;
+    }
+    await reanalyzeContextGraph();
+  } catch (error) {
+    persistenceMessage.value = '取消运行失败：' + (error instanceof Error ? error.message : String(error));
+  }
+}
 
 const currentPageTranslatedCount = computed(() =>
   visibleSegments.value.filter((segment) => !!state.value.translations.get(segment.id)?.trim()).length,

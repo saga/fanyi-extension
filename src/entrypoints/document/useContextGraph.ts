@@ -241,8 +241,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
         contextGraphState.value = {
           ...contextGraphState.value,
           error: '当前项目有未完成的翻译运行（状态：' + (latestTranslationStatus || '未知') +
-            '），服务会保护本轮上下文不被预处理修改。请到 Agent 面板恢复或取消该运行后，再重新分析全书。',
-        };
+            '），服务会保护本轮上下文不被预处理修改。可点击“取消运行并重新分析全书”取消该运行后重新分析，或到 Agent 面板恢复/取消该运行。',        };
         return;
       }
       if (shouldStart) {

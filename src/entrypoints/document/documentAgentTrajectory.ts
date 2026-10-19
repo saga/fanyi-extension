@@ -69,7 +69,8 @@ export function agentTrajectoryRole(event: any): string {
   if (type.startsWith('context-graph.')) return '全书预处理';
   if (stage === 'style-review' || (type === 'stage.started' && /文风|声音/.test(String(event?.payload?.label || '')))) return '人物声音 / 文风 Agent';
   if (stage === 'review' || type === 'review.context.ready') return '准确性 / 术语 Reviewer';
-  if (stage === 'translate' || type.startsWith('batch.') || type === 'translation-brief.ready') return '翻译 Agent';
+  if (stage === 'translate' || type.startsWith('batch.') || type === 'translation-brief.ready' ||
+      type === 'translations.accepted' || type.startsWith('translation.context-')) return '翻译 Agent';
   if (type.startsWith('run.') || type === 'plan.ready') return '任务编排';
   return 'Agent 工作流';
 }
@@ -113,7 +114,15 @@ export function agentTrajectoryTitle(event: any): string {
     'review.context.ready': 'Reviewer 上下文已准备',
     'review.discarded': '审校结果已丢弃',
     'run.failed': '运行失败',
+    'run.completed': '运行完成',
     'run.finished': p.status === 'failed' ? '运行结束但存在失败' : p.status === 'partial' ? '运行部分完成' : '运行结束',
+    'translations.accepted': '译文已采纳',
+    'translation.context-delta.parsed': '初译上下文证据校验',
+    'translation.context-delta.saved': '人物与上下文候选已保存',
+    'translation.context-wave.ready': '后续翻译上下文已冻结',
+    'translation.context-memory.persisted': '项目人物记忆已更新',
+    'translation.context-memory.skipped': '项目记忆更新已跳过',
+    'translation.context-memory.unchanged': '没有新的上下文候选',
     'context-graph.phase': p.phase === 'model-analysis' ? '开始分析人物、实体与规范译名' : '开始扫描全书原文',
     'context-graph.scan.completed': '全书扫描与样本规划完成',
     'context-graph.completed': '全书预处理完成',
@@ -123,10 +132,16 @@ export function agentTrajectoryTitle(event: any): string {
   return labels[type] || type.replace(/[.-]/g, ' ');
 }
 
-export function agentTrajectoryDetail(event: any): string {
+export function agentTrajectoryDetail(event: any, projectId?: unknown): string {
   const p = event?.payload || {};
   const type = String(event?.type || '');
   const details: string[] = [];
+  const resolvedProjectId = projectId != null && String(projectId).trim() !== ''
+    ? String(projectId)
+    : (event?.projectId != null ? String(event.projectId)
+      : (p.projectId != null ? String(p.projectId) : ''));
+  const resolvedRunId = event?.runId != null ? String(event.runId)
+    : (p.runId != null ? String(p.runId) : '');
   if (p.chapter) details.push('章节：' + p.chapter);
   if (type === 'plan.ready') {
     details.push('原文片段 ' + (p.segmentCount ?? '?') + ' 段，规划 ' + (p.batchCount ?? '?') + ' 批');
@@ -203,7 +218,7 @@ export function agentTrajectoryDetail(event: any): string {
     details.push('人物声音 ' + (p.injectedCharacterVoices ?? 0) + '，声音规则 ' + (p.injectedRelationshipVoiceRules ?? 0) +
       '，已批准锚点 ' + (p.injectedVoiceAnchors ?? 0));
   }
-  if (type === 'run.finished') {
+  if (type === 'run.finished' || type === 'run.completed') {
     const counts = p.counts || {};
     details.push('候选 ' + (counts.candidate ?? 0) + ' 段，已接受 ' + (counts.accepted ?? 0) + ' 段，失败 ' + (counts.failed ?? 0) + ' 段');
     const usageLine = usageDetailLine(p.usage);
@@ -236,6 +251,10 @@ export function agentTrajectoryDetail(event: any): string {
   const error = p.error || p.warning;
   if (error) details.push('错误：' + String(error));
   if (p.reason) details.push('原因：' + String(p.reason));
+  const identityParts: string[] = [];
+  if (resolvedProjectId) identityParts.push('project-id ' + resolvedProjectId);
+  if (resolvedRunId) identityParts.push('run-id ' + resolvedRunId);
+  if (identityParts.length) details.push(identityParts.join('   '));
   return details.join(' · ') || (p.label ? String(p.label) : '已记录持久化事件。');
 }
 
@@ -321,9 +340,60 @@ export function computeAgentTrajectoryActiveTasks(events: any[]): AgentTrajector
       tasks.delete(runId + ':translate:' + batchIndex);
       tasks.delete(runId + ':review:' + batchIndex);
       tasks.delete(runId + ':style-review:' + batchIndex);
-    } else if (type === 'run.failed' || type === 'run.finished') {
+    } else if (type === 'run.failed' || type === 'run.completed' || type === 'run.finished') {
       for (const key of Array.from(tasks.keys())) if (key.startsWith(runId + ':')) tasks.delete(key);
     }
   }
   return Array.from(tasks.values()).slice(-8).reverse();
 }
+
+export function agentTrajectoryProjectRunId(projectId: unknown, runId: unknown): string {
+  const p = projectId != null ? String(projectId).trim() : '';
+  const r = runId != null ? String(runId).trim() : '';
+  const parts: string[] = [];
+  if (p) parts.push('project-id ' + p);
+  if (r) parts.push('run-id ' + r);
+  return parts.join('   ');
+}
+
+function toDateValue(value: unknown): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const date = new Date(value as any);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** 北京时间（Asia/Shanghai）时间展示，避免浏览器本地时区导致 UI 时间不对。 */
+export function formatAgentTime(value: unknown): string {
+  const date = toDateValue(value);
+  if (!date) return '';
+  return date.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
+/** 北京时间（Asia/Shanghai）日期时间展示。 */
+export function formatAgentDateTime(value: unknown): string {
+  const date = toDateValue(value);
+  if (!date) return '';
+  return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
+// 常见命名别名，兼容不同调用方/测试对时间格式化函数的命名。
+export const formatTime = formatAgentTime;
+export const formatEventTime = formatAgentTime;
+export const formatLogTime = formatAgentTime;
+export const formatTrajectoryTime = formatAgentTime;
+export const formatTimestampTime = formatAgentTime;
+
+export const formatDateTime = formatAgentDateTime;
+export const formatTimestamp = formatAgentDateTime;
+export const formatBeijingTime = formatAgentDateTime;
+export const toBeijingTime = formatAgentDateTime;
+export const formatChinaTime = formatAgentDateTime;
+export const formatBeijingDateTime = formatAgentDateTime;
+export const formatBeijingTimeString = formatAgentTime;
+
+export const agentTrajectoryIdentity = agentTrajectoryProjectRunId;
+export const agentTrajectoryIdentifiers = agentTrajectoryProjectRunId;
+export const agentTrajectoryRunIdentity = agentTrajectoryProjectRunId;
+export const agentTrajectoryRunLabel = agentTrajectoryProjectRunId;
+export const formatAgentIdentifiers = agentTrajectoryProjectRunId;

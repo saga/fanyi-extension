@@ -68,20 +68,36 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
     try {
       const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
       const token = config.documentLocalAgentToken || '';
-      const query = reset || agentTrajectoryCursor.value <= 0
-        ? '?latest=true&limit=500'
-        : '?after=' + agentTrajectoryCursor.value + '&limit=500';
-      const response = await workspaceApi<{ events: any[] }>(
-        base, token,
-        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events' + query,
-      );
+      const fetchAll = reset || agentTrajectoryCursor.value <= 0;
+      let incoming: any[] = [];
+      if (fetchAll) {
+        let cursor = 0;
+        const collected: any[] = [];
+        for (let page = 0; page < 20; page++) {
+          const response = await workspaceApi<{ events: any[] }>(
+            base, token,
+            '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events?after=' + cursor + '&limit=500',
+          );
+          const pageEvents = Array.isArray(response.events) ? response.events : [];
+          collected.push(...pageEvents);
+          if (pageEvents.length < 500) break;
+          cursor = pageEvents.reduce((max, item) => Math.max(max, Number(item?.eventId) || 0), cursor);
+          if (collected.length >= 5000) break;
+        }
+        incoming = collected;
+      } else {
+        const response = await workspaceApi<{ events: any[] }>(
+          base, token,
+          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events?after=' + agentTrajectoryCursor.value + '&limit=500',
+        );
+        incoming = Array.isArray(response.events) ? response.events : [];
+      }
       if (generation !== agentTrajectoryRequestGeneration || deps.activeTab.value !== 'trajectory') return;
-      const incoming = Array.isArray(response.events) ? response.events : [];
-      if (reset || agentTrajectoryCursor.value <= 0) {
-        agentTrajectoryEvents.value = incoming.slice(-600);
+      if (fetchAll) {
+        agentTrajectoryEvents.value = incoming.slice(-5000);
       } else if (incoming.length) {
         const seen = new Set(agentTrajectoryEvents.value.map((item) => item.eventId));
-        agentTrajectoryEvents.value = [...agentTrajectoryEvents.value, ...incoming.filter((item) => !seen.has(item.eventId))].slice(-600);
+        agentTrajectoryEvents.value = [...agentTrajectoryEvents.value, ...incoming.filter((item) => !seen.has(item.eventId))].slice(-5000);
       }
       agentTrajectoryCursor.value = agentTrajectoryEvents.value.reduce(
         (max, item) => Math.max(max, Number(item.eventId) || 0), agentTrajectoryCursor.value,
