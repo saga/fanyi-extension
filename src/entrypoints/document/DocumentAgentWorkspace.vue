@@ -167,14 +167,16 @@
           <span>{{ runStatusLabel(activeRun.status) }}</span>
           <span class="agent-meta-dot">·</span>
           <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</span>
-          <span v-if="activeRun.counts?.failed" class="agent-run-failure">有 {{ activeRun.counts.failed }} 段需要重试</span>
+          <span v-if="activeRun.counts?.failed" class="agent-run-failure">
+            {{ activeRun.counts.failed }} 段未完成；可在“更多选项”中仅重试这些片段
+          </span>
         </div>
         <details v-if="failedRunSegments.length" class="agent-failed-segments">
-          <summary>查看失败详情（{{ failedRunSegments.length }} 段）</summary>
-          <p class="agent-detail-description">下面列出本次运行中失败片段的最后记录原因、尝试次数与原文摘要。若原因只是“模型未返回完整的片段集合”，请同时查看 Agent 执行轨迹中的模型调用和重试事件。</p>
+          <summary>查看未完成片段详情（{{ failedRunSegments.length }} 段）</summary>
+          <p class="agent-detail-description">这些片段尚未生成可用译文，不代表译文质量审查不合格。常见原因是模型响应没有返回全部片段；已生成的其他译文不会丢失。可重试这些未完成片段，详细原因见下方记录。</p>
           <article v-for="item in failedRunSegments" :key="item.id" class="agent-failed-segment">
             <div class="agent-failed-segment-heading">
-              <strong>{{ item.contextPath || '失败片段' }}</strong>
+              <strong>{{ item.contextPath || '未完成片段' }}</strong>
               <span class="agent-segment-id">{{ item.id }}</span>
               <span class="agent-segment-attempts">尝试 {{ item.attempts || 0 }} 次</span>
             </div>
@@ -200,7 +202,7 @@
             </div>
             <div class="agent-inline-actions">
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !(activeRun?.counts?.failed)" @click="startRun('failed')">
-                重试失败内容<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
+                仅重试未完成片段<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
               </button>
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
               <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || preprocessingBlockedByPreprocessing" @click="startRun('all')">重新翻译全文</button>
@@ -249,7 +251,7 @@
               <div v-for="run in runs" :key="run.runId" class="agent-history-row">
                 <div class="agent-history-copy">
                   <strong>{{ new Date(run.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</strong>
-                  <span>{{ run.scope?.type === 'stale' ? '未完成内容' : run.scope?.type === 'all' ? '全文重译' : run.scope?.type === 'failed' ? '失败重试' : '指定范围' }} · {{ run.runId.slice(0, 8) }}</span>
+                  <span>{{ run.scope?.type === 'stale' ? '未完成内容' : run.scope?.type === 'all' ? '全文重译' : run.scope?.type === 'failed' ? '未完成片段重试' : '指定范围' }} · {{ run.runId.slice(0, 8) }}</span>
                 </div>
                 <span class="agent-history-status">{{ runStatusLabel(run.status) }}</span>
                 <button class="agent-button agent-button-tertiary" :disabled="busy" @click="selectRun(run.runId)">查看</button>
@@ -456,12 +458,13 @@ const documentProgressPercent = computed(() => totalSegmentCount.value
 const runProgressPercent = computed(() => {
   const counts = activeRun.value?.counts;
   if (!counts || !Number(counts.total)) return documentProgressPercent.value;
-  const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0) + Number(counts.failed || 0);
+  // Unfinished/failed segments are not completed work and must not inflate the progress bar.
+  const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0);
   return Math.round(Math.min(100, resolved / Number(counts.total) * 100));
 });
 const runLabels: Record<string, string> = {
   queued: '排队中', running: '运行中', paused: '已暂停', awaiting_acceptance: '待采纳',
-  partial: '部分完成', completed: '已完成', failed: '失败', cancelled: '已停止',
+  partial: '部分完成', completed: '已完成', failed: '运行失败', cancelled: '已停止',
 };
 function runStatusLabel(status: string): string { return runLabels[status] || status; }
 
