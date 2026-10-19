@@ -2209,15 +2209,45 @@ async function loadFile(file: File) {
   parsing.value = true;
   progress.value = { done: 0, total: 0 };
   try {
-    // 文本类格式直接读字符串，二进制走 arrayBuffer，避免 PDF/zip 被 utf-8 解码破坏
-    const isBinary = /\.(pdf|docx|epub)$/i.test(file.name);
-    const input = isBinary
-      ? { fileName: file.name, mime: file.type, arrayBuffer: await file.arrayBuffer() }
-      : { fileName: file.name, mime: file.type, text: await file.text() };
-    rawText = input.text ?? '';
-    doc.value = await parseDocument(input, {
-      onProgress: (done, total) => { progress.value = { done, total }; },
-    });
+    const config = await getConfig();
+    readerConfig.value = config;
+    sourceLang.value = config.documentSourceLang || 'auto';
+    targetLang.value = config.documentTargetLang || 'zh';
+
+    // With Local Agent enabled, the service receives the original EPUB/PDF bytes and owns
+    // parsing, segmentation and SQLite persistence. The extension only pages back segments
+    // needed to render the reader; it no longer parses the binary or posts a whole-book JSON.
+    if (config.documentUseLocalAgent && /\.(pdf|epub)$/i.test(file.name)) {
+      progress.value = { done: 0, total: 1 };
+      const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+      const token = config.documentLocalAgentToken || '';
+      const imported = await importDocumentFileViaLocalAgent(base, token, file);
+      rawText = '';
+      if (imported.sourceChanged && imported.document) {
+        doc.value = parsedDocumentFromLocalAgentPreview(imported.document);
+      } else if (imported.project?.projectId) {
+        doc.value = await loadWorkspaceParsedDocument(base, token, imported.project);
+        localAgentImportBinding = {
+          documentKey: buildDocumentAgentSessionId(doc.value, documentFileName),
+          projectId: imported.project.projectId,
+          createdNewProject: imported.reusedExisting !== true,
+        };
+      } else {
+        throw new Error('本机服务没有返回已解析的文档项目。');
+      }
+      progress.value = { done: 1, total: 1 };
+    } else {
+      // Remote-only / offline translation keeps the existing extension parser. In Local Agent
+      // mode, EPUB/PDF never falls back to browser parsing on a server import error.
+      const isBinary = /\.(pdf|docx|epub)$/i.test(file.name);
+      const input = isBinary
+        ? { fileName: file.name, mime: file.type, arrayBuffer: await file.arrayBuffer() }
+        : { fileName: file.name, mime: file.type, text: await file.text() };
+      rawText = input.text ?? '';
+      doc.value = await parseDocument(input, {
+        onProgress: (done, total) => { progress.value = { done, total }; },
+      });
+    }
     // EPUB/PDF 默认启用书籍级实体记忆和独立文风审校；用户可以在工具栏关闭。
     literaryMode.value = doc.value.format === 'epub' || doc.value.format === 'pdf';
     // 术语抽取不需要扫描整本书：限制在前 12,000 个字符，避免超长 EPUB
@@ -2230,11 +2260,6 @@ async function loadFile(file: File) {
       glossarySample += segment.text.slice(0, remaining) + '\n';
     }
     glossary.value = extractGlossaryLocal(glossarySample);
-    const config = await getConfig();
-    readerConfig.value = config;
-    sourceLang.value = config.documentSourceLang || 'auto';
-    targetLang.value = config.documentTargetLang || 'zh';
-
     // Re-selecting the same file restores the active IndexedDB reading session before a new
     // empty session replaces it. Translation cache remains a fallback for documents without a
     // matching saved reader session.
@@ -2699,8 +2724,14 @@ async function ensureDocumentWorkspaceInternal(
   // The extension map is only a hint. Always ask the service to compare the current parsed
   // source against its authoritative fingerprint, even when a local mapping exists. The project
   // might have been updated from another UI since this extension snapshot was saved.
-  const mapping = await lookupWorkspaceProject(input);
+  const importBinding = localAgentImportBinding?.documentKey === expectedDocumentKey
+    ? localAgentImportBinding
+    : null;
+  const mapping = importBinding
+    ? { projectId: importBinding.projectId, sourceChanged: false, documentKey: expectedDocumentKey }
+    : await lookupWorkspaceProject(input);
   if (!isCurrent()) return null;
+  if (importBinding) await rememberWorkspaceProject(input, importBinding.projectId);
   let mappedProject: any = null;
   let mappedDetails: { project: any; runs?: any[] } | null = null;
   if (mapping.projectId) {
@@ -2720,7 +2751,12 @@ async function ensureDocumentWorkspaceInternal(
 
   // Resolve on every open/restore. If a mapped project still exists but no longer has the exact
   // current source fingerprint, it is a source-change candidate, not a valid translation source.
-  const resolution = await resolveWorkspaceProject(base, token, input);
+  if (importBinding && !mappedProject) {
+    throw new Error('本机服务已导入文件，但对应项目不存在；请重新选择文件导入。');
+  }
+  const resolution = importBinding
+    ? { exactProject: mappedProject, relatedProject: null }
+    : await resolveWorkspaceProject(base, token, input);
   if (!isCurrent()) return null;
   let project: any = null;
   let projectDetails: { project: any; runs?: any[] } | null = null;
@@ -2766,7 +2802,7 @@ async function ensureDocumentWorkspaceInternal(
 
   if (!project && !createIfMissing) return null;
 
-  let createdNewProject = false;
+  let createdNewProject = importBinding?.createdNewProject ?? false;
   if (!project) {
     if (!isCurrent()) return null;
     const created = await workspaceApi<{ project: any; reusedExisting?: boolean }>(base, token, '/api/documents/projects', {
@@ -2790,11 +2826,20 @@ async function ensureDocumentWorkspaceInternal(
     // On an existing service project, cached translations, Prompt and literary memory are never
     // pushed back during open/restore; the next block hydrates the extension from SQLite instead.
     if (createdNewProject) {
+      // File imports are created by the service with a minimal default Prompt. Save the reader's
+      // configured Prompt separately; LiteraryMemory always has its own compact DTO endpoint.
+      if (importBinding) {
+        await workspaceApi(base, token,
+          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/prompts',
+          { method: 'POST', body: JSON.stringify(initialPrompt) },
+        );
+      }
       await importWorkspaceTranslations(base, token, project.projectId, legacyTranslations);
       await workspaceApi(base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
         { method: 'POST', body: JSON.stringify({ memory: legacyMemory }) },
       );
+      if (importBinding) importBinding.createdNewProject = false;
     }
     if (!isCurrent()) return null;
 
