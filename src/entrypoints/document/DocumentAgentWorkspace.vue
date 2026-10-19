@@ -417,11 +417,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   backupWorkspaceSourceFile,
+  importDocumentFileViaLocalAgent,
   importWorkspaceTranslations,
   loadWorkspaceAcceptedTranslations,
   lookupWorkspaceProject,
   rememberWorkspaceProject,
   resolveWorkspaceProject,
+  updateWorkspaceSourceFromFile,
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
@@ -447,7 +449,6 @@ interface PromptInput {
   model: string;
   translationMode: 'technical' | 'literary';
   literaryReview: boolean;
-  literaryMemory: unknown;
   glossary: unknown;
   taskProfiles: unknown;
 }
@@ -718,10 +719,28 @@ async function createProject(forceNew = false, explicitRebuild = false) {
   restorationError.value = '';
   restorationProjectMissing.value = false;
   try {
-    const response = await api('/api/documents/projects', {
-      method: 'POST',
-      body: JSON.stringify({ ...input, prompt: promptAtStart, allowDuplicate: forceNew }),
-    });
+    const useRawFileImport = !!sourceFileAtStart && /\.(?:epub|pdf)$/i.test(sourceFileAtStart.name);
+    const response = useRawFileImport
+      ? await importDocumentFileViaLocalAgent(
+          props.localAgentUrl,
+          props.localAgentToken,
+          sourceFileAtStart,
+          forceNew || explicitRebuild ? 'separate' : 'default',
+        )
+      : await api('/api/documents/projects', {
+          method: 'POST',
+          body: JSON.stringify({ ...input, prompt: promptAtStart, allowDuplicate: forceNew }),
+        });
+
+    if (response.sourceChanged === true && response.relatedProject?.projectId) {
+      project.value = response.relatedProject;
+      sourceChanged.value = true;
+      await refreshProject();
+      if (!isCurrent()) return;
+      emit('projectUpdated', project.value, true);
+      message.value = '本机服务检测到同名但内容不同的来源；请明确更新现有项目或另建项目。';
+      return;
+    }
 
     if (response.reusedExisting === true) {
       // Server-side deduplication won a concurrent create race. Repair only this source's map.
@@ -739,12 +758,19 @@ async function createProject(forceNew = false, explicitRebuild = false) {
     // Finish one-time migration from the snapshot captured for the request. If the user switches
     // documents during these writes, complete the old project durably but never bind it to the
     // newly opened document's reader state.
+    if (useRawFileImport) {
+      // The import endpoint starts with a minimal Prompt; persist the user-selected one separately.
+      await api('/api/documents/projects/' + encodeURIComponent(response.project.projectId) + '/prompts', {
+        method: 'POST',
+        body: JSON.stringify(promptAtStart),
+      });
+    }
     await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, response.project.projectId, legacyTranslations);
     await api('/api/documents/projects/' + encodeURIComponent(response.project.projectId) + '/literary-memory', {
       method: 'POST',
       body: JSON.stringify({ memory: legacyMemory }),
     });
-    if (sourceFileAtStart) {
+    if (sourceFileAtStart && !useRawFileImport) {
       try {
         await backupWorkspaceSourceFile(props.localAgentUrl, props.localAgentToken, response.project.projectId, sourceFileAtStart);
       } catch (uploadError) {
@@ -1116,18 +1142,21 @@ async function updateSourceRevision() {
   error.value = '';
   message.value = '';
   try {
-    const result = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/source', {
-      method: 'POST',
-      body: JSON.stringify({
-        title: input.title,
-        sourceFileName: input.sourceFileName,
-        format: input.format,
-        segments: input.segments,
-      }),
-    });
+    const updateFromRawFile = !!sourceFileAtStart && /\.(?:epub|pdf)$/i.test(sourceFileAtStart.name);
+    const result = updateFromRawFile
+      ? await updateWorkspaceSourceFromFile(baseUrl, token, projectId, sourceFileAtStart)
+      : await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/source', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: input.title,
+            sourceFileName: input.sourceFileName,
+            format: input.format,
+            segments: input.segments,
+          }),
+        });
     // Keep the association tied to the captured source, even if the user has since switched books.
     await rememberWorkspaceProject(input, projectId);
-    if (sourceFileAtStart) {
+    if (sourceFileAtStart && !updateFromRawFile) {
       try {
         await backupWorkspaceSourceFile(baseUrl, token, projectId, sourceFileAtStart);
       } catch (uploadError) {
