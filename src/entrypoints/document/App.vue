@@ -941,6 +941,10 @@
               <div class="agent-trace-meta">
                 <span v-if="workspaceProject?.projectId">project-id {{ workspaceProject.projectId }}</span>
                 <span v-if="event.runId">run-id {{ event.runId }}</span>
+                <span v-if="event.payload?.provider || event.payload?.model">model {{ event.payload?.provider || '?' }}/{{ event.payload?.model || '运行时默认' }}</span>
+                <span v-if="event.payload?.thinkingMode || event.payload?.thinking_mode">thinking {{ event.payload?.thinkingMode || event.payload?.thinking_mode }}{{ (event.payload?.thinkingBudgetTokens || event.payload?.thinking_budget_tokens) ? ' ' + (event.payload?.thinkingBudgetTokens || event.payload?.thinking_budget_tokens) : '' }}</span>
+                <span v-if="event.payload?.effort">effort {{ event.payload.effort }}</span>
+                <span v-if="event.payload?.fallbackModel || event.payload?.fallback_model">fallback {{ event.payload?.fallbackModel || event.payload?.fallback_model }}</span>
                 <span>事件 #{{ event.eventId }}</span>
                 <span v-if="event.payload?.batchIndex">批次 {{ event.payload.batchIndex }}{{ event.payload.batchCount ? '/' + event.payload.batchCount : '' }}</span>
                 <span v-if="event.payload?.durationMs != null">耗时 {{ formatAgentDuration(event.payload.durationMs) }}</span>

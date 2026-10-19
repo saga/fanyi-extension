@@ -132,6 +132,46 @@ export function agentTrajectoryTitle(event: any): string {
   return labels[type] || type.replace(/[.-]/g, ' ');
 }
 
+export interface AgentTrajectoryModelInfo {
+  provider?: string;
+  model?: string;
+  thinkingMode?: string;
+  thinkingBudgetTokens?: number;
+  effort?: string;
+  fallbackModel?: string;
+}
+
+/** 从事件 payload / 顶层字段中提取本次调用实际使用的模型与思考配置。 */
+export function resolveAgentTrajectoryModelInfo(event: any): AgentTrajectoryModelInfo {
+  const p = (event && event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload))
+    ? event.payload : {};
+  const top = event && typeof event === 'object' ? event : {};
+  const taskProfile = (p.taskProfile || p.task_profile) && typeof (p.taskProfile || p.task_profile) === 'object'
+    ? (p.taskProfile || p.task_profile) : {};
+  const thinkingObj = p.thinking && typeof p.thinking === 'object' && !Array.isArray(p.thinking)
+    ? p.thinking : {};
+  const provider = p.provider ?? top.provider ?? taskProfile.provider;
+  const model = p.model ?? top.model ?? taskProfile.model;
+  let thinkingMode = p.thinkingMode ?? p.thinking_mode ?? thinkingObj.type ?? thinkingObj.mode ?? taskProfile.thinkingMode;
+  let thinkingBudgetTokens = p.thinkingBudgetTokens ?? p.thinking_budget_tokens ?? p.thinkingBudget ??
+    thinkingObj.budgetTokens ?? thinkingObj.budget_tokens ?? taskProfile.thinkingBudgetTokens;
+  const effort = p.effort ?? taskProfile.effort;
+  const fallbackModel = p.fallbackModel ?? p.fallback_model ?? taskProfile.fallbackModel;
+  if (thinkingMode != null) thinkingMode = String(thinkingMode);
+  if (thinkingBudgetTokens != null) thinkingBudgetTokens = Number(thinkingBudgetTokens);
+  if (effort != null) {
+    // keep as-is string
+  }
+  return {
+    provider: provider != null ? String(provider) : undefined,
+    model: model != null ? String(model) : undefined,
+    thinkingMode: thinkingMode != null && thinkingMode !== '' ? String(thinkingMode) : undefined,
+    thinkingBudgetTokens: Number.isFinite(thinkingBudgetTokens as number) ? Number(thinkingBudgetTokens) : undefined,
+    effort: effort != null && String(effort) !== '' ? String(effort) : undefined,
+    fallbackModel: fallbackModel != null && String(fallbackModel) !== '' ? String(fallbackModel) : undefined,
+  };
+}
+
 export function agentTrajectoryDetail(event: any, projectId?: unknown): string {
   const p = event?.payload || {};
   const type = String(event?.type || '');
@@ -254,6 +294,18 @@ export function agentTrajectoryDetail(event: any, projectId?: unknown): string {
   const identityParts: string[] = [];
   if (resolvedProjectId) identityParts.push('project-id ' + resolvedProjectId);
   if (resolvedRunId) identityParts.push('run-id ' + resolvedRunId);
+  // 模型与思考配置：与 project-id / run-id 一样作为小字标识，便于排查每次调用实际使用的模型。
+  const modelInfo = resolveAgentTrajectoryModelInfo(event);
+  if (modelInfo.provider || modelInfo.model) {
+    identityParts.push('model ' + (modelInfo.provider || '?') + '/' + (modelInfo.model || '运行时默认'));
+  }
+  if (modelInfo.thinkingMode) {
+    identityParts.push('thinking ' + modelInfo.thinkingMode +
+      (modelInfo.thinkingMode === 'enabled' && modelInfo.thinkingBudgetTokens
+        ? ' ' + modelInfo.thinkingBudgetTokens : ''));
+  }
+  if (modelInfo.effort) identityParts.push('effort ' + modelInfo.effort);
+  if (modelInfo.fallbackModel) identityParts.push('fallback ' + modelInfo.fallbackModel);
   if (identityParts.length) details.push(identityParts.join('   '));
   return details.join(' · ') || (p.label ? String(p.label) : '已记录持久化事件。');
 }
@@ -302,16 +354,20 @@ export function agentTrajectoryRelatedFailureEvents(events: any[], event: any): 
     if (String(item.runId || '') !== runId || !relatedTypes.has(String(item.type || ''))) return false;
     if (batchIndex != null && item.payload?.batchIndex != null && item.payload.batchIndex !== batchIndex) return false;
     return true;
-  }).slice(-8);
+  }).slice(-8).reverse();
 }
 
 export function filterAgentTrajectoryEvents(events: any[], filter: AgentTrajectoryFilter): any[] {
-  if (filter === 'issues') return events.filter((event) => ['failed', 'warning'].includes(agentTrajectoryStatus(event)));
-  if (filter === 'model') return events.filter((event) =>
-    ['batch.started', 'batch.prompt.ready', 'batch.model.response', 'model.usage', 'batch.translation.completed',
-      'stage.started', 'stage.completed', 'stage.warning', 'model.call.failed', 'context-graph.phase',
-      'context-graph.scan.completed', 'context-graph.completed', 'context-graph.failed'].includes(event.type));
-  return events;
+  const filtered = filter === 'issues'
+    ? events.filter((event) => ['failed', 'warning'].includes(agentTrajectoryStatus(event)))
+    : filter === 'model'
+      ? events.filter((event) =>
+        ['batch.started', 'batch.prompt.ready', 'batch.model.response', 'model.usage', 'batch.translation.completed',
+          'stage.started', 'stage.completed', 'stage.warning', 'model.call.failed', 'context-graph.phase',
+          'context-graph.scan.completed', 'context-graph.completed', 'context-graph.failed'].includes(event.type))
+      : events;
+  // 事件按时间顺序存储（旧的在前、新的在后）；展示时最新的在最上面、旧的在最下面。
+  return filtered.slice().reverse();
 }
 
 export function computeAgentTrajectoryActiveTasks(events: any[]): AgentTrajectoryTask[] {
@@ -392,6 +448,9 @@ export const formatChinaTime = formatAgentDateTime;
 export const formatBeijingDateTime = formatAgentDateTime;
 export const formatBeijingTimeString = formatAgentTime;
 
+export const agentTrajectoryModelDetails = resolveAgentTrajectoryModelInfo;
+export const agentTrajectoryModelInfo = resolveAgentTrajectoryModelInfo;
+export const getModelInfo = resolveAgentTrajectoryModelInfo;
 export const agentTrajectoryIdentity = agentTrajectoryProjectRunId;
 export const agentTrajectoryIdentifiers = agentTrajectoryProjectRunId;
 export const agentTrajectoryRunIdentity = agentTrajectoryProjectRunId;
