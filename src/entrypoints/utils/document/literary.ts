@@ -754,10 +754,10 @@ export function refreshLiteraryExampleTargets(
 }
 
 /**
- * 新分析入库时的自动确认：有原文依据（evidence）的规范项直接标 confirmed，
- * 免去逐条点击；无依据的仍待人工过目（面板可一键确认剩余）。
- * 有依据≠人工审过：confirmed 在此表示"模型已给出处、可直接当规范用"，
- * 用户编辑/删除仍随时覆盖。
+ * 新分析入库时自动激活可核验的规范项，免去逐条点击。
+ * 必须用稳定 segment ID 将 evidenceRefs 与实际 sourceSegments 对齐，并验证连续引文；
+ * 只有自由文本 evidence 或模型自报 ID/quote 的记录继续作为候选。
+ * confirmed 表示运行时作为强规范使用，confirmationSource 独立记录依据，不代表用户一定审过。
  */
 export function autoConfirmLiteraryMemory(
   input: unknown,
