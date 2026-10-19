@@ -26,12 +26,12 @@ const completedSnapshot = {
   },
 };
 
-describe('literary preprocessing readiness', () => {
+describe('literary preprocessing status projection (informational only)', () => {
   it('does not block non-literary or non-local translation', () => {
     expect(assessContextGraphReadiness({ ...baseInput, required: false }).ready).toBe(true);
   });
 
-  it('fails closed while project/revision state is unknown', () => {
+  it('reports a checking status while project/revision state is unknown', () => {
     const result = assessContextGraphReadiness({
       ...baseInput, expectedProjectId: null, snapshot: null,
     });
@@ -39,7 +39,7 @@ describe('literary preprocessing readiness', () => {
     expect(result.reason).toBe('checking');
   });
 
-  it.each(['queued', 'running'] as const)('blocks translation while preprocessing is %s', (status) => {
+  it.each(['queued', 'running'] as const)('reports status while preprocessing is %s without deciding whether a Run may be submitted', (status) => {
     const result = assessContextGraphReadiness({
       ...baseInput,
       snapshot: { ...completedSnapshot, status, phase: status },
@@ -49,7 +49,7 @@ describe('literary preprocessing readiness', () => {
     expect(result.message).toContain('预处理');
   });
 
-  it('blocks failed preprocessing and preserves the actionable failure state', () => {
+  it('reports failed preprocessing and preserves actionable diagnostics', () => {
     const result = assessContextGraphReadiness({
       ...baseInput,
       snapshot: { ...completedSnapshot, status: 'failed', error: 'model quota' },
@@ -58,7 +58,7 @@ describe('literary preprocessing readiness', () => {
     expect(result.reason).toBe('failed');
   });
 
-  it('blocks an index from another source revision', () => {
+  it('reports an index from another source revision', () => {
     const result = assessContextGraphReadiness({
       ...baseInput,
       snapshot: { ...completedSnapshot, sourceRevisionId: 'source-1' },
@@ -67,7 +67,7 @@ describe('literary preprocessing readiness', () => {
     expect(result.reason).toBe('source-revision');
   });
 
-  it('blocks an obsolete preprocessing version or a language mismatch', () => {
+  it('reports an obsolete preprocessing version or a language mismatch', () => {
     const oldVersion = assessContextGraphReadiness({
       ...baseInput,
       snapshot: { ...completedSnapshot, progress: { ...completedSnapshot.progress, analysisVersion: 'old-version' } },
@@ -82,7 +82,7 @@ describe('literary preprocessing readiness', () => {
     expect(languageMismatch.reason).toBe('language');
   });
 
-  it('allows translation only when revision, analysis version and languages all match', () => {
+  it('marks the projection ready only when revision, analysis version and languages all match', () => {
     const result = assessContextGraphReadiness({ ...baseInput, snapshot: completedSnapshot });
     expect(result.ready).toBe(true);
   });
