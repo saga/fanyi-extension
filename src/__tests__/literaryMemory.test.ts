@@ -81,14 +81,16 @@ describe('automatic canonical entity activation', () => {
           kind: 'other',
           aliases: [],
           evidence: '',
+          evidenceRefs: [{ segmentId: 's1', sourceQuote: 'a quote that is not in the source' }],
           reviewStatus: 'suggested',
         },
       ],
-    });
+    }, [{ id: 's1', text: 'But Timsen was much too clever to allow the King to see through him.' }]);
 
     expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('confirmed');
     expect(memory.entities.find((entity) => entity.source === 'the King')?.confirmationSource).toBe('evidence-verified');
     expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.reviewStatus).toBe('suggested');
+    expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.confirmationSource).toBeUndefined();
   });
 
   it('labels legacy confirmed records as source-unknown instead of inferring user approval', () => {
