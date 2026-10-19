@@ -12,7 +12,7 @@ vi.mock('@wxt-dev/storage', () => ({
   storage: { getItem: vi.fn(async () => null), setItem: vi.fn(async () => {}) },
 }));
 
-import { resolveWorkspaceProject, workspaceApi, WorkspaceApiError } from '../entrypoints/document/documentWorkspaceClient';
+import { importDocumentFileViaLocalAgent, loadWorkspaceParsedDocument, resolveWorkspaceProject, workspaceApi, WorkspaceApiError } from '../entrypoints/document/documentWorkspaceClient';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -193,5 +193,62 @@ describe('WorkspaceApiError 携带 HTTP 状态', () => {
 
     expect(error).toBeInstanceOf(WorkspaceApiError);
     expect((error as WorkspaceApiError).status).toBe(401);
+  });
+});
+
+
+describe('Local Agent binary document import', () => {
+  it('sends the original EPUB bytes to the service instead of a whole-book JSON payload', async () => {
+    const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'The Book.epub', {
+      type: 'application/epub+zip',
+    });
+    const project = {
+      projectId: 'local-project',
+      title: 'The Book',
+      format: 'epub',
+      sourceFileName: file.name,
+      segmentCount: 10,
+      sourceFingerprint: 'service-source-hash',
+      sourceFileSaved: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(respond(201, { project, reusedExisting: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(importDocumentFileViaLocalAgent('http://127.0.0.1:8789', 'secret', file))
+      .resolves.toMatchObject({ project: { projectId: 'local-project' } });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://127.0.0.1:8789/api/documents/projects/import-file');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(file);
+    expect(typeof init.body).not.toBe('string');
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/epub+zip');
+    expect(new Headers(init.headers).get('X-Source-File-Name')).toBe('The%20Book.epub');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
+  });
+
+  it('loads server-parsed source in bounded pages for reader rendering', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respond(200, {
+      segments: [
+        { id: 's0', ordinal: 0, text: 'Chapter 1', kind: 'heading', contextPath: 'Chapter 1' },
+        { id: 's1', ordinal: 1, text: 'The door was open.', kind: 'paragraph', contextPath: 'Chapter 1' },
+      ],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const document = await loadWorkspaceParsedDocument('http://127.0.0.1:8789', '', {
+      projectId: 'local-project',
+      title: 'The Book',
+      format: 'epub',
+      sourceFileName: 'book.epub',
+      segmentCount: 2,
+      sourceFingerprint: 'service-source-hash',
+    });
+
+    expect(document.segments.map((segment) => segment.text)).toEqual(['Chapter 1', 'The door was open.']);
+    expect(document.meta.segmentCount).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/segments?limit=1000&offset=0');
   });
 });
