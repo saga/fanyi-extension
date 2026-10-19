@@ -1064,8 +1064,11 @@ import {
 } from './documentAgentTrajectory';
 import {
   backupWorkspaceSourceFile,
+  importDocumentFileViaLocalAgent,
   importWorkspaceTranslations,
   loadWorkspaceAcceptedTranslations,
+  loadWorkspaceParsedDocument,
+  parsedDocumentFromLocalAgentPreview,
   lookupWorkspaceProject,
   rememberWorkspaceProject,
   resolveWorkspaceProject,
@@ -1124,6 +1127,8 @@ let ensureWorkspacePromise: Promise<any | null> | null = null;
 let ensureWorkspacePromiseKey: string | null = null;
 /** Invalidates asynchronous work when the reader switches to another document. */
 let workspaceDocumentGeneration = 0;
+/** A file imported and parsed by Local Agent is already authoritative; don't resend all segments to resolve/create it. */
+let localAgentImportBinding: { documentKey: string; projectId: string; createdNewProject: boolean } | null = null;
 /** Session hydration must not be mistaken for explicit user changes that update the service Prompt. */
 let suppressWorkspacePromptSync = false;
 /** Avoid creating a new service project before the existing browser/session snapshot has been compared. */
@@ -1990,6 +1995,7 @@ function isWorkspaceDocumentCurrent(documentKey: string, generation: number): bo
 /** Clear only ephemeral project bindings; durable service projects are never deleted here. */
 function resetWorkspaceBindingForDocument(): void {
   workspaceDocumentGeneration++;
+  localAgentImportBinding = null;
   ensureWorkspacePromise = null;
   ensureWorkspacePromiseKey = null;
   workspaceProject.value = null;
@@ -2406,7 +2412,7 @@ function workspaceInput() {
   };
 }
 
-function workspacePromptInput(includeLiteraryMemory = false) {
+function workspacePromptInput() {
   const config = readerConfig.value;
   return {
     systemPrompt: documentSystemPromptEditor.value || builtInDocumentSystemPrompt.value,
@@ -2419,7 +2425,6 @@ function workspacePromptInput(includeLiteraryMemory = false) {
     translationMode: effectiveDocumentTranslationMode.value as 'technical' | 'literary',
     literaryReview: effectiveDocumentTranslationMode.value === 'literary' && literaryReview.value,
     glossary: glossary.value,
-    ...(includeLiteraryMemory ? { literaryMemory: literaryMemory.value } : {}),
     translationStrategy: {
       maxBatchSegments: config?.documentBatchMaxSegments ?? 16,
       maxBatchSourceChars: config?.documentBatchMaxSourceChars ?? 8000,
@@ -2679,7 +2684,7 @@ async function ensureDocumentWorkspaceInternal(
 ): Promise<any | null> {
   if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return null;
   const input = workspaceInput();
-  const initialPrompt = workspacePromptInput(true);
+  const initialPrompt = workspacePromptInput();
   const legacyTranslations = new Map(state.value.translations);
   const legacyMemory = sanitizeLiteraryMemory(JSON.parse(JSON.stringify(literaryMemory.value)));
   const sourceFileAtStart = loadedSourceFile.value;
