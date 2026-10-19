@@ -27,7 +27,7 @@ const completedSnapshot = {
 };
 
 describe('literary preprocessing status projection (informational only)', () => {
-  it('does not block non-literary or non-local translation', () => {
+  it('marks non-literary or non-local translation as not requiring this status', () => {
     expect(assessContextGraphReadiness({ ...baseInput, required: false }).ready).toBe(true);
   });
 
