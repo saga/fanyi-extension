@@ -820,46 +820,77 @@ async function loadExistingProject() {
       }
     }
 
-    // Validate the actual current source against the service on every open. A local mapping can
-    // still point to a live project whose source revision changed elsewhere.
-    const resolution = await resolveWorkspaceProject(props.localAgentUrl, props.localAgentToken, input);
-    if (!isCurrent()) return;
+    const isLocalAgentBook = /^(epub|pdf)$/i.test(props.format);
     let projectId: string | null = null;
     let hasSourceChanged = false;
     let result: any = null;
 
-    if (resolution.exactProject?.projectId) {
-      // Preserve a user's explicit project choice when duplicate projects share the same source.
-      // A mapped project is reusable only if the service says its current fingerprint is exact.
-      if (mappedResult?.project?.sourceFingerprint === resolution.exactProject.sourceFingerprint) {
-        projectId = mapping.projectId!;
-        result = mappedResult;
+    if (isLocalAgentBook && props.sourceFile) {
+      // The Local Agent owns raw EPUB/PDF parsing and source identity. Never send the parsed
+      // whole-book segment array to /projects/resolve from this UI.
+      const imported = await importDocumentFileViaLocalAgent(
+        props.localAgentUrl, props.localAgentToken, props.sourceFile,
+      );
+      if (!isCurrent()) return;
+      if (imported.sourceChanged && imported.relatedProject?.projectId) {
+        projectId = imported.relatedProject.projectId;
+        hasSourceChanged = true;
+        result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+      } else if (imported.project?.projectId) {
+        projectId = imported.project.projectId;
+        await rememberWorkspaceProject(input, projectId, imported.project.sourceFingerprint);
+        result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
       } else {
-        projectId = resolution.exactProject.projectId;
-        if (mapping.projectId !== projectId) await rememberWorkspaceProject(input, projectId);
-        if (!isCurrent()) return;
+        throw new Error('本机服务没有返回 EPUB/PDF 项目。请重新选择原文件后重试。');
+      }
+      if (!isCurrent()) return;
+    } else if (isLocalAgentBook) {
+      // A restored reading session may not retain the original File object. Use its previously
+      // stored mapping and service fingerprint; if neither is available, ask for the original
+      // file rather than uploading every segment just to rediscover the project.
+      if (!mappedResult?.project) {
+        restorationError.value = '没有可验证的 EPUB/PDF 本机项目映射。请重新选择原始文件，本机服务会负责解析；不会把整本书作为 JSON 上传。';
+        restorationProjectMissing.value = true;
+        return;
+      }
+      projectId = mapping.projectId!;
+      hasSourceChanged = mapping.sourceChanged ||
+        (!!mapping.sourceFingerprint && mapping.sourceFingerprint !== mappedResult.project.sourceFingerprint);
+      result = mappedResult;
+    } else {
+      // Other supported text formats may still use the compact project fingerprint resolution
+      // flow. Binary EPUB/PDF files are explicitly excluded from this JSON endpoint.
+      const resolution = await resolveWorkspaceProject(props.localAgentUrl, props.localAgentToken, input);
+      if (!isCurrent()) return;
+      if (resolution.exactProject?.projectId) {
+        if (mappedResult?.project?.sourceFingerprint === resolution.exactProject.sourceFingerprint) {
+          projectId = mapping.projectId!;
+          result = mappedResult;
+        } else {
+          projectId = resolution.exactProject.projectId;
+          if (mapping.projectId !== projectId) {
+            await rememberWorkspaceProject(input, projectId, resolution.exactProject.sourceFingerprint);
+          }
+          if (!isCurrent()) return;
+          result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
+          if (!isCurrent()) return;
+        }
+      } else if (mappedResult) {
+        projectId = mapping.projectId!;
+        hasSourceChanged = true;
+        result = mappedResult;
+      } else if (resolution.relatedProject?.projectId) {
+        projectId = resolution.relatedProject.projectId;
+        hasSourceChanged = true;
         result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
         if (!isCurrent()) return;
+      } else {
+        if (mapping.projectId) {
+          restorationProjectMissing.value = true;
+          restorationError.value = '原有关联的项目已不在本机服务中，服务目录也未找到同一原文版本。确认后可以新建项目；本地译文备份仍会保留。';
+        }
+        return;
       }
-    } else if (mappedResult) {
-      // The old project still exists, but it no longer represents this document's source.
-      // Surface the mismatch rather than loading its translations into the current reader.
-      projectId = mapping.projectId!;
-      hasSourceChanged = true;
-      result = mappedResult;
-    } else if (resolution.relatedProject?.projectId) {
-      projectId = resolution.relatedProject.projectId;
-      hasSourceChanged = true;
-      result = await api('/api/documents/projects/' + encodeURIComponent(projectId));
-      if (!isCurrent()) return;
-    } else {
-      // No server-side match is a normal first-open case. Do not create until the user starts
-      // the workflow; importantly, don't re-upload stale local session data to "discover" it.
-      if (mapping.projectId) {
-        restorationProjectMissing.value = true;
-        restorationError.value = '原有关联的项目已不在本机服务中，服务目录也未找到同一原文版本。确认后可以新建项目；本地译文备份仍会保留。';
-      }
-      return;
     }
 
     if (!isCurrent()) return;
