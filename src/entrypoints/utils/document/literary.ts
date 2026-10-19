@@ -129,7 +129,7 @@ export interface LiteraryVoiceContext {
   /** 当前批所在章节与片段位置；这里只传可验证的结构信息，不推测人物情绪或说话人。 */
   scene: { chapterTitle?: string; contextPaths: string[]; segmentIds: string[] };
   /** 与当前批有关的确认实体译名和剧情关系，不能被角色声线替代。 */
-  entities: Array<Pick<LiteraryEntity, 'source' | 'target' | 'kind' | 'aliases' | 'reviewStatus'>>;
+  entities: Array<Pick<LiteraryEntity, 'source' | 'target' | 'kind' | 'aliases' | 'reviewStatus' | 'confirmationSource'>>;
   relationships: LiteraryRelationship[];
   recentExamples: LiteraryExample[];
   characterVoices: CharacterVoiceProfile[];
@@ -148,7 +148,7 @@ export interface LiteraryReviewFinding {
   draftExcerpt: string;
   reason: string;
   suggestion: string;
-  /** Full candidate returned by Reviewer for optional style findings; never auto-applied. */
+  /** Full style proposal returned by Reviewer; the service may auto-apply only under the versioned disposition policy. */
   proposedTranslation?: string;
   /** User-facing workflow state for a style suggestion. */
   applicationStatus?: 'pending' | 'applied' | 'dismissed';
@@ -168,6 +168,7 @@ export interface LiteraryBookMemory {
   relationships: LiteraryRelationship[];
   styleGuide: LiteraryStyleGuide;
   styleGuideStatus: 'candidate' | 'confirmed';
+  styleGuideConfirmationSource?: LiteraryConfirmationSource;
   chapterSummaries: Array<{ chapter: string; summary: string }>;
   recentExamples: LiteraryExample[];
   characterVoices: CharacterVoiceProfile[];
@@ -600,6 +601,8 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     relationships: [...existing.relationships, ...incoming.relationships],
     styleGuide,
     styleGuideStatus: existing.styleGuideStatus === 'confirmed' ? 'confirmed' : incoming.styleGuideStatus,
+    styleGuideConfirmationSource: existing.styleGuideStatus === 'confirmed'
+      ? existing.styleGuideConfirmationSource : incoming.styleGuideConfirmationSource,
     chapterSummaries: Array.from(summaries.values()).slice(-MAX_SUMMARIES),
     recentExamples: [...existing.recentExamples, ...incoming.recentExamples].slice(-MAX_EXAMPLES),
     characterVoices: mergeCharacterVoices(existing.characterVoices, incoming.characterVoices),
@@ -816,6 +819,7 @@ export function buildLiteraryContextForBatch(input: {
     version: 1, policyVersion: 'character-voice-v3',
     styleGuide: memory.styleGuideStatus === 'confirmed' ? memory.styleGuide : {},
     styleGuideStatus: memory.styleGuideStatus,
+    ...(memory.styleGuideConfirmationSource ? { styleGuideConfirmationSource: memory.styleGuideConfirmationSource } : {}),
     scene: {
       ...(input.chapterTitle ? { chapterTitle: input.chapterTitle.slice(0, 160) } : {}),
       contextPaths: Array.from(new Set(input.segments.map((segment) => segment.contextPath?.trim()).filter((value): value is string => !!value))).slice(0, 6),
