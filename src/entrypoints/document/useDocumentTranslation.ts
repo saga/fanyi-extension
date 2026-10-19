@@ -429,7 +429,7 @@ async function analyzeLiteraryChapterViaLocalAgent(
     throw new Error(message + requestId);
   }
   return {
-    memory: mergeLiteraryMemory(memory, autoConfirmLiteraryMemory(data.memory)),
+    memory: mergeLiteraryMemory(memory, autoConfirmLiteraryMemory(data.memory, segments.map((segment) => ({ id: segment.id, text: segment.text })))),
     analyzed: data.analyzed === true,
     ...(typeof data.warning === 'string' && data.warning ? { warning: data.warning } : {}),
   };
