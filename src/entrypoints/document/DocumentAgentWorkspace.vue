@@ -659,7 +659,7 @@ function eventSummary(event: any): string {
   return rows.join(' · ').slice(0, 900);
 }
 
-function promptInput(includeLiteraryMemory = false): PromptInput {
+function promptInput(): PromptInput {
   return {
     systemPrompt: props.systemPrompt,
     userPromptTemplate: props.userPromptTemplate,
@@ -670,7 +670,6 @@ function promptInput(includeLiteraryMemory = false): PromptInput {
     taskProfiles: props.codeBuddyTaskProfiles,
     translationMode: props.translationMode,
     literaryReview: props.translationMode === 'literary' && props.literaryReview,
-    ...(includeLiteraryMemory ? { literaryMemory: props.literaryMemory } : {}),
     glossary: props.glossary,
   };
 }
@@ -714,7 +713,7 @@ async function createProject(forceNew = false, explicitRebuild = false) {
   const legacyTranslations = new Map(props.translations);
   const legacyMemory = JSON.parse(JSON.stringify(props.literaryMemory));
   const sourceFileAtStart = props.sourceFile;
-  const promptAtStart = promptInput(true);
+  const promptAtStart = promptInput();
   busy.value = true; error.value = ''; message.value = '';
   restorationError.value = '';
   restorationProjectMissing.value = false;
