@@ -82,7 +82,7 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
   if (snapshot.sourceRevisionId !== input.expectedSourceRevisionId) {
     return {
       required: true, ready: false, reason: 'source-revision',
-      message: '预处理记录属于另一个原文版本。请先更新来源并完成当前原文版本的全书预处理。',
+      message: '预处理记录属于另一个原文版本。文学 Run 会由服务端按当前原文版本重新准备；也可以手动刷新或重新分析全书。',
     };
   }
 
