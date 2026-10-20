@@ -1906,6 +1906,17 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
         '/api/documents/projects/' + encodeURIComponent(payload.projectId),
       );
       document = await loadWorkspaceParsedDocument(baseUrl, token, projectResponse.project);
+      const restoredFileName = typeof payload.fileName === 'string'
+        ? payload.fileName
+        : (session?.title || document.title || 'document');
+      // The project pointer is itself enough to rebuild the extension's transient mapping.
+      // Recovery must still work after extension storage was cleared or the mapping was lost.
+      localAgentImportBinding = {
+        documentKey: buildDocumentAgentSessionId(document, restoredFileName),
+        projectId: payload.projectId,
+        createdNewProject: false,
+        sourceFingerprint: projectResponse.project.sourceFingerprint,
+      };
       const accepted = await loadWorkspaceAcceptedTranslations(
         baseUrl, token, payload.projectId, Number(projectResponse.project?.segmentCount) || document.segments.length,
       );
