@@ -449,6 +449,9 @@
           <template v-if="contextGraphState.checkedAt"> · 最近检查 {{ formatAgentTime(contextGraphState.checkedAt) }}</template>
         </p>
         <p class="warn" v-if="contextGraphState.error">{{ contextGraphState.error }}</p>
+        <p class="warn" v-else-if="contextGraphState.status === 'completed' && translationPreprocessingReadiness.reason === 'version'">
+          这是一轮旧版预处理记录，未包含当前版本要求的完整文风维度。点击“重新分析全书”后会使用新的分阶段/单次 A/B 策略重新生成；已有译文不会被改写。
+        </p>
         <p class="warn" v-else-if="contextGraphState.status === 'completed' && contextGraphState.counts.characters + contextGraphState.counts.entities === 0">
           预处理已结束，但没有保存任何有原文证据的人物或实体。请检查本轮模型响应、抽样内容与证据校验计数；可重新分析。
         </p>
