@@ -1,4 +1,5 @@
-export const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v5-language-pinned';
+/** Must stay in sync with local-agent-service/src/documents/contextGraph.ts. */
+export const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v7-workflow-ab-style-required';
 
 export type DocumentTranslationMode = 'literary' | 'technical';
 
