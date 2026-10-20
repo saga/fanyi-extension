@@ -55,9 +55,23 @@ export function useContextGraph(deps: ContextGraphDeps) {
       queued: '预处理已排队，等待开始。',
       sample: '阶段 1/2：扫描全书结构、对话密度和名称线索，规划代表性样本。',
       'model-analysis': '阶段 2/2：模型正在分析人物、规范译名、实体、关系、文风与章节摘要。',
+      'workflow-style': 'B 方案 · 步骤 1/5：分析叙述声音、语域、节奏、对白与措辞。',
+      'workflow-characters': 'B 方案 · 步骤 2/5：识别人物、规范译名与角色声音。',
+      'workflow-entities': 'B 方案 · 步骤 3/5：识别重要实体并规范译名。',
+      'workflow-relationships': 'B 方案 · 步骤 4/5：识别有原文证据支持的关系。',
+      'workflow-chapters': 'B 方案 · 步骤 5/5：生成章节摘要与待人工确认的问题。',
       completed: '全书预处理完成。翻译批次会注入与当前原文匹配的规范专名和有时间边界的上下文。',
       failed: '预处理失败。错误详情已记录；修复配置后可以重新分析。',
     };
+    if (typeof phase === 'string' && phase.startsWith('workflow-')) {
+      const order: Record<string, number> = {
+        'workflow-style': 1, 'workflow-characters': 2, 'workflow-entities': 3,
+        'workflow-relationships': 4, 'workflow-chapters': 5,
+      };
+      const step = order[phase] || 1;
+      const completed = Array.isArray(run.progress?.completedStages) ? run.progress.completedStages.length : 0;
+      return 'B 方案工作流 · 步骤 ' + step + '/5；已保存 ' + completed + '/5 步。';
+    }
     return labels[phase] || labels[run.status] || '读取预处理状态中。';
   });
   const contextGraphProgressPercent = computed(() => {
@@ -68,6 +82,10 @@ export function useContextGraph(deps: ContextGraphDeps) {
     if (phase === 'model-analysis') {
       const sampleCount = Number(progress?.sampleCount || progress?.scan?.samplePlan?.length || 0);
       return sampleCount > 0 ? 68 : 55;
+    }
+    if (typeof phase === 'string' && phase.startsWith('workflow-')) {
+      const completedStages = Array.isArray(progress?.completedStages) ? progress.completedStages.length : 0;
+      return Math.min(96, 55 + Math.round(((completedStages + 0.5) / 5) * 40));
     }
     if (status === 'running') return 12;
     return 0;
