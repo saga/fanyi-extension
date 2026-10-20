@@ -2355,13 +2355,28 @@ async function loadFile(file: File) {
     // matching saved reader session.
     let previousSession: LoadedActiveDocumentSession | null = null;
     try { previousSession = await loadActiveDocumentSession(); } catch { /* cache still supports reuse */ }
+    const localAgentOwnsSelectedSource = config.documentUseLocalAgent === true &&
+      /\.(?:epub|pdf)$/i.test(file.name);
+    const sameServerSourceSegments = !!previousSession && !!doc.value &&
+      previousSession.document.segments.length === doc.value.segments.length &&
+      previousSession.document.segments.every((segment, index) =>
+        segment.id === doc.value!.segments[index]?.id &&
+        segment.text === doc.value!.segments[index]?.text,
+      );
     if (previousSession &&
         previousSession.fileName === documentFileName &&
         buildDocumentAgentSessionId(previousSession.document, previousSession.fileName) ===
-          buildDocumentAgentSessionId(doc.value, documentFileName)) {
-      doc.value = previousSession.document;
-      rawText = previousSession.rawText;
-      glossary.value = previousSession.glossary;
+          buildDocumentAgentSessionId(doc.value, documentFileName) &&
+        (!localAgentOwnsSelectedSource || sameServerSourceSegments)) {
+      // Local Agent owns EPUB/PDF source segments. Reuse the old reader snapshot only when the
+      // segment IDs and text are identical, and never replace service-parsed metadata with an
+      // older browser-parser document object. Legacy translations can still be migrated for a
+      // newly created project when they map to the exact same source segments.
+      if (!localAgentOwnsSelectedSource) {
+        doc.value = previousSession.document;
+        rawText = previousSession.rawText;
+        glossary.value = previousSession.glossary;
+      }
       sourceLang.value = previousSession.sourceLang;
       targetLang.value = previousSession.targetLang;
       viewMode.value = previousSession.viewMode;
