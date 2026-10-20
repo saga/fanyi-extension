@@ -1911,6 +1911,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
 
     const snapshot = payload.snapshot as Record<string, any>;
     let document: ParsedDocument;
+    let sourceFingerprint: string | undefined;
     let translations: Array<[string, string]> = [];
     let literaryMemory: ReturnType<typeof getSnapshot>['literaryMemory'];
 
@@ -1922,10 +1923,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
         '/api/documents/projects/' + encodeURIComponent(payload.projectId),
       );
       document = await loadWorkspaceParsedDocument(baseUrl, token, projectResponse.project);
-      (document as any).__sourceFingerprint = projectResponse.project.sourceFingerprint;
-      const restoredFileName = typeof payload.fileName === 'string'
-        ? payload.fileName
-        : (session?.title || document.title || 'document');
+      sourceFingerprint = projectResponse.project.sourceFingerprint;
       const accepted = await loadWorkspaceAcceptedTranslations(
         baseUrl, token, payload.projectId, Number(projectResponse.project?.segmentCount) || document.segments.length,
       );
@@ -1964,9 +1962,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
       ...(payload.projectBacked === true && typeof payload.projectId === 'string'
         ? {
             projectId: payload.projectId,
-            ...(typeof (document as any).__sourceFingerprint === 'string'
-              ? { sourceFingerprint: (document as any).__sourceFingerprint }
-              : {}),
+            ...(sourceFingerprint ? { sourceFingerprint } : {}),
           }
         : {}),
       title: session?.title || document.title || '未命名文档',
