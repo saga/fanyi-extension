@@ -24,6 +24,7 @@ export interface AgentTrajectoryDeps {
  */
 export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
   const agentTrajectoryEvents = ref<any[]>([]);
+  const agentTrajectoryContextGraphRuns = ref<any[] | null>(null);
   const agentTrajectoryCursor = ref(0);
   const agentTrajectoryLoading = ref(false);
   const agentTrajectoryError = ref('');
@@ -85,7 +86,25 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
         );
         incoming = Array.isArray(response.events) ? response.events : [];
       }
+
+      // Read Context Graph's authoritative run projection alongside the event history.
+      // Do not fail trajectory rendering if this auxiliary status request is temporarily unavailable.
+      let currentGraphRuns: any[] | null = null;
+      try {
+        const statusResponse = await workspaceApi<{ contextGraph: any }>(
+          base, token,
+          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/status',
+        );
+        if (Array.isArray(statusResponse.contextGraph?.runs)) {
+          currentGraphRuns = statusResponse.contextGraph.runs;
+        }
+      } catch {
+        currentGraphRuns = null;
+      }
       if (generation !== agentTrajectoryRequestGeneration || deps.activeTab.value !== 'trajectory') return;
+      // A failed status request switches back to event-only fallback instead of trusting
+      // stale server statuses that might hide a newly started analysis.
+      agentTrajectoryContextGraphRuns.value = currentGraphRuns;
       if (fetchAll) {
         agentTrajectoryEvents.value = incoming.slice(-5000);
       } else if (incoming.length) {
@@ -98,6 +117,7 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
       agentTrajectoryError.value = '';
     } catch (error) {
       if (generation === agentTrajectoryRequestGeneration) {
+        agentTrajectoryContextGraphRuns.value = null;
         agentTrajectoryError.value = '读取 Agent 轨迹失败：' + (error instanceof Error ? error.message : String(error));
       }
     } finally {
@@ -186,7 +206,7 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
     filterAgentTrajectoryEvents(agentTrajectoryEvents.value, agentTrajectoryFilter.value),
   );
 
-  const agentTrajectoryActiveTasks = computed(() => computeAgentTrajectoryActiveTasks(agentTrajectoryEvents.value));
+  const agentTrajectoryActiveTasks = computed(() => computeAgentTrajectoryActiveTasks(agentTrajectoryEvents.value, agentTrajectoryContextGraphRuns.value));
 
 
   return {
