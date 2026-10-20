@@ -1470,18 +1470,34 @@ watch(literaryMemory, () => {
   if (effectiveDocumentTranslationMode.value === 'literary') void persistCurrentSession();
 }, { deep: true });
 
-watch([doc, effectiveDocumentTranslationMode, () => readerConfig.value?.documentUseLocalAgent], ([currentDoc, translationMode, useLocalAgent]) => {
-  if (suppressWorkspaceAutoEnsure || !currentDoc || translationMode !== 'literary' || useLocalAgent !== true) return;
-  // Existing documents must receive preprocessing too; opening an old reading snapshot must not
-  // be mistaken for a completed whole-book analysis.
-  void ensureDocumentWorkspace().catch((error) => {
-    contextGraphState.value = {
-      ...contextGraphState.value,
-      status: 'failed',
-      error: '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error)),
-    };
-  });
-}, { flush: 'post' });
+watch(
+  [doc, effectiveDocumentTranslationMode, () => readerConfig.value?.documentUseLocalAgent],
+  ([currentDoc, translationMode, useLocalAgent], previous) => {
+    if (suppressWorkspaceAutoEnsure || !currentDoc || useLocalAgent !== true) return;
+
+    const wasUsingLocalAgent = previous?.[2] === true;
+    const isBookFile = /^(epub|pdf)$/i.test(currentDoc.format);
+    if (isBookFile && !wasUsingLocalAgent && loadedSourceFile.value && !localAgentImportBinding) {
+      // Local Agent enabled after the reader opened this book in offline/remote mode.
+      // Re-import the original bytes and replace extension-parser segments with server segments;
+      // never promote client-generated full-book JSON into the authoritative project.
+      void loadFile(loadedSourceFile.value);
+      return;
+    }
+
+    if (translationMode !== 'literary') return;
+    // Existing documents must receive preprocessing too; opening an old reading snapshot must not
+    // be mistaken for a completed whole-book analysis.
+    void ensureDocumentWorkspace().catch((error) => {
+      contextGraphState.value = {
+        ...contextGraphState.value,
+        status: 'failed',
+        error: '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error)),
+      };
+    });
+  },
+  { flush: 'post' },
+);
 
 onUnmounted(() => {
   clearContextGraphPoll();
