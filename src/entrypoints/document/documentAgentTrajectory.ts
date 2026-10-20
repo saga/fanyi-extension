@@ -396,7 +396,7 @@ export function computeAgentTrajectoryActiveTasks(events: any[], contextGraphRun
       tasks.delete(runId + ':translate:' + batchIndex);
       tasks.delete(runId + ':review:' + batchIndex);
       tasks.delete(runId + ':style-review:' + batchIndex);
-    } else if (type === 'run.failed' || type === 'run.completed' || type === 'run.finished') {
+    } else if (['run.failed', 'run.completed', 'run.finished', 'run.cancelled', 'run.paused', 'run.partial', 'run.awaiting_acceptance'].includes(type)) {
       for (const key of Array.from(tasks.keys())) if (key.startsWith(runId + ':')) tasks.delete(key);
     }
   }
