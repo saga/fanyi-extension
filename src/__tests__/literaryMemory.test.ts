@@ -1,6 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { autoConfirmLiteraryMemory, mergeLiteraryMemory, sanitizeLiteraryMemory } from '../entrypoints/utils/document/literary';
 
+describe('literary style guide dimensions', () => {
+  it('preserves all full-book style dimensions and line-based rules', () => {
+    const memory = sanitizeLiteraryMemory({
+      styleGuide: {
+        narrativeVoice: '第三人称全知叙事。',
+        register: '正式、克制。',
+        rhythm: '长短句交替，动作段落节奏较快。',
+        dialogue: '对白简洁，称谓随关系变化。',
+        diction: '保留日语敬称和航海词汇。',
+        rules: ['-san 按场合译为先生/女士', 'Sire 统一译为大人'],
+        avoid: ['避免现代网络流行语', '避免无依据增加心理描写'],
+      },
+      styleGuideStatus: 'candidate',
+    });
+
+    expect(memory.styleGuide).toEqual({
+      narrativeVoice: '第三人称全知叙事。',
+      register: '正式、克制。',
+      rhythm: '长短句交替，动作段落节奏较快。',
+      dialogue: '对白简洁，称谓随关系变化。',
+      diction: '保留日语敬称和航海词汇。',
+      rules: ['-san 按场合译为先生/女士', 'Sire 统一译为大人'],
+      avoid: ['避免现代网络流行语', '避免无依据增加心理描写'],
+    });
+    expect(memory.styleGuideStatus).toBe('candidate');
+  });
+});
+
 describe('literary memory source evidence', () => {
   it('preserves source-positioned evidence references for entities and relationships', () => {
     const memory = sanitizeLiteraryMemory({
