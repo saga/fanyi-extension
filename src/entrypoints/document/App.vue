@@ -399,15 +399,15 @@
               {{ contextGraphState.loading ? '刷新中…' : '刷新预处理状态' }}
             </button>
             <button class="btn primary" type="button"
-              :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
+              :disabled="readerConfig?.documentUseLocalAgent !== true || contextGraphBusy"
               @click="reanalyzeContextGraph">
-              {{ contextGraphAnalyzing ? '正在分析全书…' : '重新分析全书' }}
+              {{ contextGraphBusy ? '正在分析全书…' : '重新分析全书' }}
             </button>
             <button class="btn" type="button"
               v-if="workspaceActiveRun && ['queued','running','paused','awaiting_acceptance','partial'].includes(workspaceActiveRun.status)"
-              :disabled="contextGraphAnalyzing || contextGraphState.status === 'running' || contextGraphState.status === 'queued'"
+              :disabled="contextGraphBusy"
               @click="cancelTranslationRunAndReanalyzeContextGraph">
-              {{ contextGraphAnalyzing ? '正在分析全书…' : '取消运行并重新分析全书' }}
+              {{ contextGraphBusy ? '正在分析全书…' : '取消运行并重新分析全书' }}
             </button>
           </div>
         </div>
@@ -1289,6 +1289,7 @@ const {
 const {
   contextGraphState,
   contextGraphAnalyzing,
+  contextGraphBusy,
   contextGraphOverview,
   contextGraphStatusLabel,
   contextGraphPhaseLabel,

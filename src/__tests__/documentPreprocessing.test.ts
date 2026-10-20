@@ -3,6 +3,7 @@ import {
   CONTEXT_GRAPH_ANALYSIS_VERSION,
   assessContextGraphReadiness,
   contextGraphSnapshotFromResponse,
+  isContextGraphBusy,
   resolveDocumentTranslationMode,
 } from '../entrypoints/document/documentPreprocessing';
 
@@ -121,6 +122,25 @@ describe('literary preprocessing status projection (informational only)', () => 
   });
 });
 
+
+describe('context graph busy state (button disable guard)', () => {
+  it('treats queued and running preprocessing as busy', () => {
+    expect(isContextGraphBusy('queued')).toBe(true);
+    expect(isContextGraphBusy('running')).toBe(true);
+  });
+
+  it('keeps the trigger disabled while the analyze request is in flight', () => {
+    expect(isContextGraphBusy('completed', true)).toBe(true);
+    expect(isContextGraphBusy('not-started', true)).toBe(true);
+  });
+
+  it('allows retry only after preprocessing reached a terminal state', () => {
+    expect(isContextGraphBusy('completed')).toBe(false);
+    expect(isContextGraphBusy('failed')).toBe(false);
+    expect(isContextGraphBusy('not-started')).toBe(false);
+    expect(isContextGraphBusy(undefined)).toBe(false);
+  });
+});
 
 describe('document translation mode resolution', () => {
   it('keeps EPUB/PDF per-document literary mode enabled even when the global default is technical', () => {

@@ -1,7 +1,7 @@
 import { computed, ref, type Ref } from 'vue';
 import { getConfig, type Config } from '@/entrypoints/utils/config';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
-import { assessContextGraphReadiness } from './documentPreprocessing';
+import { assessContextGraphReadiness, isContextGraphBusy } from './documentPreprocessing';
 import { workspaceApi } from './documentWorkspaceClient';
 
 export interface ContextGraphDeps {
@@ -41,6 +41,9 @@ export function useContextGraph(deps: ContextGraphDeps) {
     startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
   });
   const contextGraphAnalyzing = ref(false);
+  // 排队、运行和“正在提交启动请求”都算 busy；按钮与文案统一使用这个状态。
+  const contextGraphBusy = computed(() =>
+    isContextGraphBusy(contextGraphState.value.status, contextGraphAnalyzing.value));
   const contextGraphOverview = ref<{ narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[] }>({ narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [] });
   let contextGraphPollTimer: number | null = null;
   const contextGraphStatusLabel = computed(() => ({
@@ -211,6 +214,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
     if (!project?.projectId ||
         effectiveDocumentTranslationMode.value !== 'literary' ||
         readerConfig.value?.documentUseLocalAgent !== true) return;
+    // 已有启动请求在途时直接忽略，避免重复 POST analyze。
+    if (contextGraphAnalyzing.value) return;
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
@@ -225,12 +230,23 @@ export function useContextGraph(deps: ContextGraphDeps) {
         return;
       }
       if (!options.force && translationPreprocessingReadiness.value.ready) return;
-      await workspaceApi(
+      const response = await workspaceApi<{ preprocessing?: { runId?: string; alreadyRunning?: boolean } }>(
         base,
         token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/analyze',
         { method: 'POST', body: JSON.stringify({}) },
       );
+      // 服务端已接受请求就先进入 queued/running；即使随后状态刷新失败，按钮也不会重新可点。
+      const acceptedRunId = String(response?.preprocessing?.runId || '');
+      if (acceptedRunId) {
+        contextGraphState.value = {
+          ...contextGraphState.value,
+          status: response?.preprocessing?.alreadyRunning ? 'running' : 'queued',
+          phase: response?.preprocessing?.alreadyRunning ? 'running' : 'queued',
+          runId: acceptedRunId,
+          error: '',
+        };
+      }
       await loadContextGraph(project, true);
       contextGraphState.value = { ...contextGraphState.value, error: '' };
     } catch (error) {
@@ -284,6 +300,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
   return {
     contextGraphState,
     contextGraphAnalyzing,
+    contextGraphBusy,
     contextGraphOverview,
     contextGraphStatusLabel,
     contextGraphPhaseLabel,

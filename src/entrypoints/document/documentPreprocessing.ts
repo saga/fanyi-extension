@@ -4,6 +4,14 @@ export const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v7-workflow-ab-styl
 export type DocumentTranslationMode = 'literary' | 'technical';
 
 /**
+ * 预处理是否处于“进行中”状态：既包括服务端已排队/运行，也包括扩展正在提交启动请求。
+ * UI 必须在 busy 时禁用“重新分析全书”，避免重复提交和状态闪烁。
+ */
+export function isContextGraphBusy(status: unknown, analyzing = false): boolean {
+  return analyzing === true || status === 'queued' || status === 'running';
+}
+
+/**
  * Resolve the translation mode shared by the reader, Agent workspace and persisted Prompt.
  * Preprocessing status is informational in the extension; the Local Agent Run worker owns the
  * actual source/version/language readiness gate. Per-document literary mode takes precedence.
