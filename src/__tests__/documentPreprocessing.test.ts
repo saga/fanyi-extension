@@ -27,6 +27,10 @@ const completedSnapshot = {
 };
 
 describe('literary preprocessing status projection (informational only)', () => {
+  it('uses the same analysis version as local-agent-service Context Graph', () => {
+    expect(CONTEXT_GRAPH_ANALYSIS_VERSION).toBe('context-graph-v7-workflow-ab-style-required');
+  });
+
   it('marks non-literary or non-local translation as not requiring this status', () => {
     expect(assessContextGraphReadiness({ ...baseInput, required: false }).ready).toBe(true);
   });
