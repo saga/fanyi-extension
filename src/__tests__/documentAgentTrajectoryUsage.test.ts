@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agentTrajectoryDetail,
   agentTrajectoryTitle,
+  computeAgentTrajectoryActiveTasks,
   filterAgentTrajectoryEvents,
   formatTokenCount,
 } from '../entrypoints/document/documentAgentTrajectory';
@@ -99,3 +100,38 @@ describe('run.finished 的累计 token', () => {
     expect(detail).not.toContain('累计');
   });
 });
+
+describe('Agent 轨迹活跃任务的终态收敛', () => {
+  it('同一个 Context Graph run 收到 failed 终态事件后不再显示为运行中', () => {
+    const tasks = computeAgentTrajectoryActiveTasks([
+      {
+        eventId: 10, runId: 'old-graph-run', type: 'context-graph.phase',
+        payload: { phase: 'model-analysis' },
+      },
+      {
+        eventId: 11, runId: 'old-graph-run', type: 'context-graph.failed',
+        payload: { error: '服务重启后分析中断' },
+      },
+    ]);
+    expect(tasks).toEqual([]);
+  });
+
+  it('旧 run 的终态不能清除另一个 run 的活跃任务', () => {
+    const tasks = computeAgentTrajectoryActiveTasks([
+      {
+        eventId: 10, runId: 'old-graph-run', type: 'context-graph.phase',
+        payload: { phase: 'model-analysis' },
+      },
+      {
+        eventId: 11, runId: 'old-graph-run', type: 'context-graph.failed',
+        payload: { error: 'timeout' },
+      },
+      {
+        eventId: 12, runId: 'new-graph-run', type: 'context-graph.phase',
+        payload: { phase: 'model-analysis' },
+      },
+    ]);
+    expect(tasks.map((task) => task.runId)).toEqual(['new-graph-run']);
+  });
+});
+
