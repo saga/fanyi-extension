@@ -1882,7 +1882,7 @@ async function persistDocumentCheckpointToLocalService(input: {
   }
 }
 
-async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDocumentSession | null> {
+async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDocumentSession & { projectId?: string; sourceFingerprint?: string }) | null> {
   const config = await getConfig();
   const baseUrl = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = config.documentLocalAgentToken || '';
@@ -1922,17 +1922,10 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
         '/api/documents/projects/' + encodeURIComponent(payload.projectId),
       );
       document = await loadWorkspaceParsedDocument(baseUrl, token, projectResponse.project);
+      (document as any).__sourceFingerprint = projectResponse.project.sourceFingerprint;
       const restoredFileName = typeof payload.fileName === 'string'
         ? payload.fileName
         : (session?.title || document.title || 'document');
-      // The project pointer is itself enough to rebuild the extension's transient mapping.
-      // Recovery must still work after extension storage was cleared or the mapping was lost.
-      localAgentImportBinding = {
-        documentKey: buildDocumentAgentSessionId(document, restoredFileName),
-        projectId: payload.projectId,
-        createdNewProject: false,
-        sourceFingerprint: projectResponse.project.sourceFingerprint,
-      };
       const accepted = await loadWorkspaceAcceptedTranslations(
         baseUrl, token, payload.projectId, Number(projectResponse.project?.segmentCount) || document.segments.length,
       );
@@ -1968,6 +1961,14 @@ async function loadDocumentCheckpointFromLocalService(): Promise<LoadedActiveDoc
       fileName: typeof payload.fileName === 'string'
         ? payload.fileName
         : (session?.title || document.title || 'document'),
+      ...(payload.projectBacked === true && typeof payload.projectId === 'string'
+        ? {
+            projectId: payload.projectId,
+            ...(typeof (document as any).__sourceFingerprint === 'string'
+              ? { sourceFingerprint: (document as any).__sourceFingerprint }
+              : {}),
+          }
+        : {}),
       title: session?.title || document.title || '未命名文档',
       format: session?.format || document.format || 'txt',
       segmentCount: Number.isFinite(document.meta?.segmentCount) ? document.meta.segmentCount : document.segments.length,
@@ -2096,7 +2097,7 @@ async function restoreLastSession() {
   parseError.value = '';
   persistenceMessage.value = '';
   try {
-    let saved: LoadedActiveDocumentSession | null = null;
+    let saved: (LoadedActiveDocumentSession & { projectId?: string; sourceFingerprint?: string }) | null = null;
     let restoredFromLocalService = false;
     try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
     if (!saved) {
@@ -2124,6 +2125,19 @@ async function restoreLastSession() {
     localSessionDocumentSaved = restoredFromLocalService;
     localSessionDisabled = false;
     doc.value = saved.document;
+    if (restoredFromLocalService && saved.projectId) {
+      localAgentImportBinding = {
+        documentKey: buildDocumentAgentSessionId(saved.document, saved.fileName),
+        projectId: saved.projectId,
+        createdNewProject: false,
+        sourceFingerprint: saved.sourceFingerprint,
+      };
+      try {
+        await rememberWorkspaceProject(workspaceInput(), saved.projectId, saved.sourceFingerprint);
+      } catch {
+        // The checkpoint projectId remains authoritative even when extension map persistence fails.
+      }
+    }
     glossary.value = saved.glossary;
     sourceLang.value = saved.sourceLang;
     targetLang.value = saved.targetLang;
