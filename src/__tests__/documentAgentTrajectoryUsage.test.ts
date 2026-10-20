@@ -157,5 +157,19 @@ describe('Agent 轨迹活跃任务的终态收敛', () => {
       title: '正在分析人物、实体与规范译名',
     }]);
   });
+
+  it('翻译 Run 暂停后清除其仍未完成的阶段任务', () => {
+    const tasks = computeAgentTrajectoryActiveTasks([
+      {
+        eventId: 20, runId: 'paused-translation', type: 'stage.started',
+        payload: { stage: 'translate', label: '开始翻译' },
+      },
+      {
+        eventId: 21, runId: 'paused-translation', type: 'run.paused',
+        payload: { error: 'user paused' },
+      },
+    ]);
+    expect(tasks).toEqual([]);
+  });
 });
 
