@@ -64,6 +64,7 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
     if (reset) {
       agentTrajectoryCursor.value = 0;
       agentTrajectoryEvents.value = [];
+      agentTrajectoryContextGraphRuns.value = null;
     }
     agentTrajectoryLoading.value = true;
     try {
