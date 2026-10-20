@@ -43,19 +43,17 @@
 | service/japanese-natural-zh-prompt | `src/entrypoints/service/japanese-natural-zh-prompt.ts` | `lib/translate/service/japanese-natural-zh-prompt.ts` |
 | rules/ | `src/rules/` | `lib/translate/rules/` |
 | **文档解析** | `src/entrypoints/utils/document/` | `lib/translate/document/` |
-| 文档翻译责任边界 | 扩展负责解析、阅读器 UI、范围选择和结果呈现；Local Agent 模式下 Run 调度/上下文/审校/持久化统一交给本机服务 | Worker 仅暴露无状态 `/api/translate/document/segments` 单次翻译 |
+| 文档翻译责任边界 | Local Agent 模式下 EPUB/PDF 原始文件由本机服务解析、分段和持久化；扩展读取分页片段并负责阅读器 UI/范围选择/结果呈现。未启用 Local Agent 时仍可使用扩展解析器 | Worker 只接收结构化 segments，既不解析原始文件也不维护项目 |
 | 测试 | `src/__tests__/*.test.ts` | `tests/*.test.ts` |
 
-> **文档解析模块（2026-09-09 新增）**
+> **纯函数文档模块（2026-09-09 新增）**
 > `types.ts` / `detect.ts` / `batcher.ts` / `export.ts` / `parsers/{text,subtitle,html,json}.ts`
-> **完全一致，必须同步**（纯函数，不碰 DOM，两端都能跑；这 8 组自 2026-10-15 起纳入 `check-sync.ts`）。
-> 差异仅两处：
-> - `document/index.ts`：扩展版支持 PDF/DOCX/EPUB（`parsers/pdf.ts` 走 pdfjs-dist、
->   `parsers/office.ts` 走 jszip，均动态 import）；服务端版**不支持**这三种，直接抛
->   `UnsupportedDocumentError`，因为二进制解析依赖 Worker/canvas；Worker 不解析原始文档。
-> - 编排层：扩展版是 Vue composable（逐批提交到 UI），服务端版是纯函数
->   `translateDocument()`（调用 `translateBlocks`）。分批策略一致，都按
->   `buildSegmentBatches` 的预算切。
+> **完全一致，必须同步**（不碰 DOM；这 8 组纳入 `check-sync.ts`）。
+> 文件解析按运行模式区分：
+> - Local Agent 模式下 EPUB/PDF 原始二进制交给 `POST /api/documents/projects/import-file`，由 `vocal-saga/local-agent-service/src/documents/ingest.ts` 校验、解析、生成片段并保存到项目 SQLite。扩展分页读取 `/segments?limit=1000&offset=...` 用于阅读器显示，不再把整本书作为 JSON 发送。
+> - 未启用 Local Agent 的离线/轻量路径，扩展仍可用 PDF.js/JSZip 解析 PDF/EPUB/DOCX。
+> - Cloudflare Worker 仍只接收结构化片段，不接收原始文件，也不承担项目级解析/持久化。
+> - 编排层因宿主不同而异：扩展为 Vue composable；Worker 为无状态 `translateDocument()`；Local Agent 是包含 SQLite、Run 生命周期、Context Graph 和 Reviewer 的项目 Agent。Local Agent 不加入 Worker 的字节级同步清单。
 
 ---
 
@@ -637,19 +635,18 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 
 ### 执行边界
 
-- fanyi-extension/src/entrypoints/utils/document/ 负责浏览器文件选择、EPUB/PDF/Office 解析、片段元数据和阅读器 UI。src/entrypoints/document/useDocumentTranslation.ts 仍保留给非 Local Agent/轻量服务模式使用的客户端批次路径；Local Agent 模式下 App.vue 所有阅读器翻译动作都必须委托 runWorkspaceTranslation，不得触发该旧路径。
+- fanyi-extension/src/entrypoints/utils/document/ 保留格式识别、导出、阅读器展示类型和非 Local Agent 模式的客户端解析能力；Local Agent 模式下，EPUB/PDF 原始文件上传、解析、分段、来源版本和持久化归 vocal-saga/local-agent-service。扩展不得把整本解析后的片段通过 JSON 上传，只读取分页片段用于阅读器渲染。src/entrypoints/document/useDocumentTranslation.ts 保留给非 Local Agent/轻量服务模式；Local Agent 模式下 App.vue 阅读器翻译动作都必须委托 runWorkspaceTranslation。
 - `vocal-saga/local-agent-service/src/documents/translationAgent.ts` 是 project-based Agent 的服务端编排入口，拥有批次调度、Session scope、候选译文/审校 finding 的持久化、运行状态与事件。它是本机 Express 服务的一部分，不部署在 Cloudflare Worker 上，也不应被加入纯网页翻译模块的字节级同步清单。
 - `fanyi-extension` 的 `DocumentAgentWorkspace.vue` / `documentWorkspaceClient.ts` 通过 `/api/documents/projects/...` 使用该服务端 workflow。修改路由、JSON 字段或事件名时，客户端消费逻辑和 `local-agent-service` 的路由/测试必须一起更新。
 
-### 请求体、源文件与恢复副本大小契约（2026-10-16）
+### 请求体、原始文件与恢复副本大小契约（2026-10-20）
 
-不要把以下限制混为一谈；它们对应不同的接口与持久化路径：
+这些限制服务于不同路径，不应拿 JSON 上限来限制整本书：
 
-- `/api/documents/*` 的 JSON 请求体上限由 `MAX_DOCUMENT_BODY_BYTES` 控制，当前为 **100 MiB**。
-- 其他 Local Agent JSON API 的请求体上限由 `MAX_BODY_BYTES` 控制，当前为 **24 MiB**。
-- `POST /api/documents/projects/:id/source-file` 上传原始 EPUB/PDF/DOCX 文件时走二进制流，单文件上限为 **20 MiB**（`MAX_DOCUMENT_SOURCE_BYTES`），源文件保存在项目目录，不放入 SQLite。
-- 旧阅读器的 SQLite 检查点是额外恢复副本，扩展端将单个序列化快照控制在 **5 MiB** 以内；该限制不是上述 HTTP 请求体上限。IndexedDB 仍是阅读器的主要状态存储。
-- `documentWorkspaceClient.ts` 每次导入最多发送 200 条已采纳译文，是分批写入策略，不是为了满足旧的“6 MiB HTTP 上限”。README、服务配置和接口实现均应以当前实际限制为准。
+- 普通 Local Agent JSON API 的请求体上限由 `MAX_BODY_BYTES` 控制；`/api/documents` JSON 请求体上限由 `MAX_DOCUMENT_BODY_BYTES` 控制。这些是接口防护，不是 EPUB/PDF 整书传输机制。
+- Local Agent 模式下 EPUB/PDF 使用 `POST /api/documents/projects/import-file` 上传原始二进制；默认文件上限 **512 MiB**，由 `LOCAL_AGENT_MAX_DOCUMENT_SOURCE_MB` 调整。展开/提取文本默认上限 **1024 MiB**，由 `LOCAL_AGENT_MAX_DOCUMENT_EXPANDED_MB` 调整；PDF 文本提取默认超时 **180 秒**，由 `LOCAL_AGENT_PDF_TIMEOUT_MS` 调整。服务仍保留资源与解压炸弹防护。
+- 项目 SQLite 保存来源文件及片段。通用 `document_sessions` 仅保存 `projectId`、阅读位置、语言/视图等轻量元数据，不再复制全文、全部译文或 LiteraryMemory。恢复时从项目 API 分页加载原文、已采纳译文和文学记忆。
+- `documentWorkspaceClient.ts` 每次最多发送 200 条已采纳译文，仅用于旧阅读副本迁移等路径；新 EPUB/PDF 导入不通过该 JSON 批次传输全书内容。
 ### 当前调度与状态契约
 
 1. 默认配置上限为 4 个翻译 worker + 2 个 Reviewer worker；四槽位且启用审校时，实际预算为 2 个翻译 + 2 个 Reviewer；关闭审校时翻译可占用最多 4 个槽位。两项上限按 `LOCAL_AGENT_POOL_SIZE` 收敛。由于每批使用独立 Session，初始化开销必须纳入真实压测；CI 不测量实际耗时。
@@ -669,7 +666,7 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 ---
 ### PDF/EPUB 结构化翻译（2026-10）
 
-- 浏览器扩展负责 PDF.js 文本层解析、批次调度、断点恢复和导出；Worker 只接收结构化 segments 并通过 `/api/translate/document/segments` 进行单次有界翻译。小说/长文档的持久化项目、跨章节记忆与审校必须使用 `local-agent-service`，Worker 不再提供重复的文档解析/全文翻译/文学分析/审校 endpoints。
+- 未启用 Local Agent 的轻量/离线路径仍可使用扩展 PDF.js/JSZip 解析；启用 Local Agent 后，EPUB/PDF 原始文件解析、分段、来源修订与原文件持久化由 `local-agent-service` 执行，扩展不得先解析整本书再通过 JSON 重传。Worker 只接收结构化 segments 并通过 `/api/translate/document/segments` 进行单次有界翻译；项目级跨章节记忆、Run 调度与审校归 `local-agent-service`。
 - 片段的 `id`、`kind`、`level`、`marker`、`page`、`contextPath` 在客户端和服务端保持一致。章节路径、列表标记及页码作为只读元数据使用，不进入译文正文。
 - 只有所有预期 ID 都有非空译文时 `complete` 才为 true。服务端会重试一次缺失片段；仍缺失时返回 `missingSegmentIds`，扩展保留已完成结果并允许只重试缺失片段。
 - 当前 PDF parser 会告警扫描件/低文本页；本次没有接入 OCR 引擎，不能把无文本层的页面报告成已识别。
@@ -728,3 +725,11 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - 文学 Run 的 Context Graph 自动启动、等待、分析版本/source revision/语言方向验证，必须在 local-agent-service 的 executeRun 内完成，并在校验通过前不进入正常翻译批次。扩展只提交 Run、显示持久化事件，并提供明确的手动重新分析操作。
 - 打开人物/预处理 Tab、恢复会话或同步项目时，只读取 `/context-graph/status` 投影，不启动全书分析。正常翻译按钮与快捷操作不得根据客户端 readiness 禁用；扩展只提交 Run，由服务端负责预处理、来源/分析版本/语言校验以及失败事件。只有用户明确选择“重新分析全书”时，扩展才调用分析 API。服务不可用时明确报告 API 失败；远程 fallback 不得伪装成已写入 Local Agent 项目的规范分析结果。
 - 测试验收应关注实际译文与 reviewer findings、漏译率、专名/关系/角色声音一致性和定点返工闭环。API 状态 DTO 大小只是界面传输设计，不是整本书分析的数据质量指标。
+
+## Local Agent 原始文件导入与恢复边界（2026-10-20）
+
+- Local Agent 模式的 EPUB/PDF 只将原始文件字节传给 `POST /api/documents/projects/import-file`。项目创建、发现、来源变化和 Agent Workspace 不得回退到整本 segments JSON。
+- 服务端应复用字节相同的原文件；同名但字节不同则要求用户显式“更新来源”或“另建项目”。不能因解析器版本不同而自动套用旧译文。
+- Reader checkpoint 是项目引用和轻量 UI 状态。原文、译文、文学记忆、Prompt、Run 和审校结果均由项目 SQLite 管理；旧全量快照只维持迁移兼容。
+- LiteraryMemory 是有界编辑 DTO；Context Graph、全书证据与章节摘要保留在项目 SQLite，大小限制不能反过来限制全书分析数据。
+- `extractGlossaryLocal`、PDF.js 和 JSZip 仍作为非 Local Agent 模式的客户端能力；Local Agent 文学 EPUB/PDF 路径依赖服务端项目记忆，不重复运行扩展端 heuristic glossary。
