@@ -19,7 +19,7 @@ export interface LiteraryMemoryEditorDeps {
   persistenceMessage: Ref<string>;
   persistSession: () => Promise<void>;
   /** 延迟读取：Context Graph 状态由 `useContextGraph` 持有，避免两个 composable 循环依赖。 */
-  getContextGraphOverview: () => { narrativeStyle: string; styleRules: string[] };
+  getContextGraphOverview: () => { narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[] };
 }
 
 /**
@@ -530,11 +530,21 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const style = literaryMemory.value.styleGuide || {};
     const overview = deps.getContextGraphOverview();
     const narrativeVoice = overview.narrativeStyle.trim();
+    const register = overview.styleRegister.trim();
+    const rhythm = overview.styleRhythm.trim();
+    const dialogue = overview.styleDialogue.trim();
+    const diction = overview.styleDiction.trim();
     const rules = overview.styleRules.slice(0, 16);
+    const avoid = overview.styleAvoid.slice(0, 12);
     literaryMemory.value.styleGuide = {
       ...style,
       ...(narrativeVoice ? { narrativeVoice } : {}),
+      ...(register ? { register } : {}),
+      ...(rhythm ? { rhythm } : {}),
+      ...(dialogue ? { dialogue } : {}),
+      ...(diction ? { diction } : {}),
       ...(rules.length ? { rules } : {}),
+      ...(avoid.length ? { avoid } : {}),
     };
     literaryMemory.value.styleGuideStatus = 'candidate';
     delete literaryMemory.value.styleGuideConfirmationSource;
