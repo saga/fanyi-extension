@@ -41,7 +41,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
   });
   const contextGraphAnalyzing = ref(false);
-  const contextGraphOverview = ref<{ narrativeStyle: string; styleRules: string[] }>({ narrativeStyle: '', styleRules: [] });
+  const contextGraphOverview = ref<{ narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[] }>({ narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [] });
   let contextGraphPollTimer: number | null = null;
   const contextGraphStatusLabel = computed(() => ({
     'not-started': '尚未运行', queued: '等待执行', running: '运行中',
@@ -128,7 +128,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
     const graph = result.contextGraph || {};
     contextGraphOverview.value = {
       narrativeStyle: typeof graph.overview?.narrativeStyle === 'string' ? graph.overview.narrativeStyle : '',
+      styleRegister: typeof graph.overview?.styleRegister === 'string' ? graph.overview.styleRegister : '',
+      styleRhythm: typeof graph.overview?.styleRhythm === 'string' ? graph.overview.styleRhythm : '',
+      styleDialogue: typeof graph.overview?.styleDialogue === 'string' ? graph.overview.styleDialogue : '',
+      styleDiction: typeof graph.overview?.styleDiction === 'string' ? graph.overview.styleDiction : '',
       styleRules: Array.isArray(graph.overview?.styleRules) ? graph.overview.styleRules.filter((item: unknown): item is string => typeof item === 'string') : [],
+      styleAvoid: Array.isArray(graph.overview?.styleAvoid) ? graph.overview.styleAvoid.filter((item: unknown): item is string => typeof item === 'string') : [],
     };
     const run = Array.isArray(graph.runs) ? graph.runs[0] : null;
     const status = run?.status || 'not-started';
