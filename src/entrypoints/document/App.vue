@@ -2093,12 +2093,27 @@ async function restoreLastSession() {
   parseError.value = '';
   persistenceMessage.value = '';
   try {
+    const restoreConfig = await getConfig();
+    readerConfig.value = restoreConfig;
     let saved: (LoadedActiveDocumentSession & { projectId?: string; sourceFingerprint?: string }) | null = null;
     let restoredFromLocalService = false;
-    try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
+
+    // When Local Agent is enabled, prefer its lightweight project pointer over an older IndexedDB
+    // copy. It rehydrates server-owned EPUB/PDF segments and accepted translations from SQLite.
+    if (restoreConfig.documentUseLocalAgent) {
+      try {
+        saved = await loadDocumentCheckpointFromLocalService();
+        restoredFromLocalService = !!saved;
+      } catch { /* fall back to the extension copy when the service is unavailable */ }
+    }
     if (!saved) {
-      saved = await loadDocumentCheckpointFromLocalService();
-      restoredFromLocalService = !!saved;
+      try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
+    }
+    if (!saved && !restoredFromLocalService) {
+      try {
+        saved = await loadDocumentCheckpointFromLocalService();
+        restoredFromLocalService = !!saved;
+      } catch { /* report the missing snapshot below */ }
     }
     if (!saved) {
       savedSessionSummary.value = null;
