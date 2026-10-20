@@ -260,7 +260,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
         status: 'not-started', phase: 'not-started', progress: {}, runId: '',
         startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
       };
-      contextGraphOverview.value = { narrativeStyle: '', styleRules: [] };
+      contextGraphOverview.value = { narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [] };
     }
 
   return {
