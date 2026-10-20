@@ -370,7 +370,7 @@ export function filterAgentTrajectoryEvents(events: any[], filter: AgentTrajecto
   return filtered.slice().reverse();
 }
 
-export function computeAgentTrajectoryActiveTasks(events: any[]): AgentTrajectoryTask[] {
+export function computeAgentTrajectoryActiveTasks(events: any[], contextGraphRuns?: any[] | null): AgentTrajectoryTask[] {
   const tasks = new Map<string, AgentTrajectoryTask>();
   for (const event of events) {
     const type = String(event.type || '');
@@ -398,6 +398,31 @@ export function computeAgentTrajectoryActiveTasks(events: any[]): AgentTrajector
       tasks.delete(runId + ':style-review:' + batchIndex);
     } else if (type === 'run.failed' || type === 'run.completed' || type === 'run.finished') {
       for (const key of Array.from(tasks.keys())) if (key.startsWith(runId + ':')) tasks.delete(key);
+    }
+  }
+
+  // When available, the Context Graph status endpoint is authoritative for preprocessing
+  // activity. Event history explains what happened; it must not override current run state.
+  // This also prunes phase-only events from old source revisions and reconstructs an active
+  // task if its phase event fell outside the retained event window.
+  if (Array.isArray(contextGraphRuns)) {
+    const byRunId = new Map<string, any>(
+      contextGraphRuns.filter((run) => run?.runId != null).map((run) => [String(run.runId), run]),
+    );
+    for (const [key, task] of tasks) {
+      if (task.role !== '全书预处理 Agent') continue;
+      const run = byRunId.get(task.runId);
+      if (!run || run.active !== true || !['queued', 'running'].includes(String(run.status))) tasks.delete(key);
+    }
+    for (const run of contextGraphRuns) {
+      const runId = String(run?.runId || '');
+      if (!runId || run.active !== true || !['queued', 'running'].includes(String(run.status))) continue;
+      const key = runId + ':context-graph';
+      const phase = String(run.phase || '');
+      tasks.set(key, {
+        key, runId, role: '全书预处理 Agent',
+        title: phase === 'model-analysis' ? '正在分析人物、实体与规范译名' : '正在扫描原文并选择样本',
+      });
     }
   }
   return Array.from(tasks.values()).slice(-8).reverse();
