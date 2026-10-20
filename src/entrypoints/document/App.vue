@@ -434,6 +434,9 @@
           {{ contextGraphState.progress.scan?.chapterCount ?? contextGraphState.progress.chapterCount ?? contextGraphState.counts.chapters }} 章；
           扫描到 {{ contextGraphState.progress.scan?.nameCandidateCount ?? 0 }} 个名称候选；
           本轮抽样 {{ contextGraphState.progress.sampleCount ?? contextGraphState.progress.scan?.samplePlan?.length ?? 0 }} 段。
+          <template v-if="contextGraphState.progress.strategy">策略 {{ contextGraphState.progress.strategy }}。</template>
+          <template v-if="contextGraphState.progress.strategy === 'B'">已保存步骤 {{ contextGraphState.progress.completedStages?.length ?? 0 }}/5。</template>
+          <template v-if="contextGraphState.progress.workflowElapsedMs != null">模型分析耗时 {{ (contextGraphState.progress.workflowElapsedMs / 1000).toFixed(1) }} 秒。</template>
           已核验人物 {{ contextGraphState.progress.characterCount ?? contextGraphState.counts.characters }} 个、
           其他实体 {{ contextGraphState.progress.entityCount ?? contextGraphState.counts.entities }} 个；
           有规范译名 {{ contextGraphState.progress.canonicalNameMappingCount ?? 0 }} 个。
