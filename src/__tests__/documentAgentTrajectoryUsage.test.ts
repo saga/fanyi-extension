@@ -133,5 +133,29 @@ describe('Agent 轨迹活跃任务的终态收敛', () => {
     ]);
     expect(tasks.map((task) => task.runId)).toEqual(['new-graph-run']);
   });
+
+  it('服务端已将旧 run 标为 failed 时，即使没有 failed 事件也不显示为活跃', () => {
+    const tasks = computeAgentTrajectoryActiveTasks([
+      {
+        eventId: 10, runId: 'legacy-orphan', type: 'context-graph.phase',
+        payload: { phase: 'model-analysis' },
+      },
+    ], [
+      { runId: 'legacy-orphan', status: 'failed', phase: 'failed', active: false },
+    ]);
+    expect(tasks).toEqual([]);
+  });
+
+  it('事件窗口未包含 phase 时，从服务端仍活跃的 run 重建预处理任务', () => {
+    const tasks = computeAgentTrajectoryActiveTasks([], [
+      { runId: 'live-run', status: 'running', phase: 'model-analysis', active: true },
+    ]);
+    expect(tasks).toEqual([{
+      key: 'live-run:context-graph',
+      runId: 'live-run',
+      role: '全书预处理 Agent',
+      title: '正在分析人物、实体与规范译名',
+    }]);
+  });
 });
 
