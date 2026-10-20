@@ -467,7 +467,7 @@
         </div>
         <div class="settings-actions">
           <button class="btn" type="button"
-            :disabled="!contextGraphOverview.narrativeStyle && !contextGraphOverview.styleRules.length"
+            :disabled="!contextGraphOverview.narrativeStyle && !contextGraphOverview.styleRegister && !contextGraphOverview.styleRhythm && !contextGraphOverview.styleDialogue && !contextGraphOverview.styleDiction && !contextGraphOverview.styleRules.length && !contextGraphOverview.styleAvoid.length"
             @click="importContextGraphStyleGuide">载入预处理文风建议</button>
           <span class="muted small">导入后仍是候选，需要检查并确认；后续可以随时撤销确认。</span>
         </div>
