@@ -71,20 +71,13 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
       const fetchAll = reset || agentTrajectoryCursor.value <= 0;
       let incoming: any[] = [];
       if (fetchAll) {
-        let cursor = 0;
-        const collected: any[] = [];
-        for (let page = 0; page < 20; page++) {
-          const response = await workspaceApi<{ events: any[] }>(
-            base, token,
-            '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events?after=' + cursor + '&limit=500',
-          );
-          const pageEvents = Array.isArray(response.events) ? response.events : [];
-          collected.push(...pageEvents);
-          if (pageEvents.length < 500) break;
-          cursor = pageEvents.reduce((max, item) => Math.max(max, Number(item?.eventId) || 0), cursor);
-          if (collected.length >= 5000) break;
-        }
-        incoming = collected;
+        // Load the newest event window. Paging from after=0 and stopping at 5,000 rows
+        // can omit newer terminal events, leaving a completed/failed task shown as active.
+        const response = await workspaceApi<{ events: any[] }>(
+          base, token,
+          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/events?after=0&limit=5000&latest=true',
+        );
+        incoming = Array.isArray(response.events) ? response.events : [];
       } else {
         const response = await workspaceApi<{ events: any[] }>(
           base, token,
