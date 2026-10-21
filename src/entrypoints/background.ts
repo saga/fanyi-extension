@@ -30,6 +30,8 @@ import type {
   GetPageContextResponse,
   RelayToContentMessage,
   RelayToContentResponse,
+  FetchRemoteCssMessage,
+  FetchRemoteCssResponse,
   PageContext,
 } from '../types/messages';
 import { chatStream, buildChatSystem, type ChatMessage, type ChatUsage } from './service/chat';
