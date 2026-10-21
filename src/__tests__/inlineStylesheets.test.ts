@@ -1,4 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('webextension-polyfill', () => ({
+  default: { runtime: { sendMessage: vi.fn() } },
+}));
+
+import browser from 'webextension-polyfill';
 import { inlineStylesheetsInClone } from '../entrypoints/content/inlineStylesheets';
 
 /**
@@ -39,6 +45,32 @@ describe('inlineStylesheetsInClone', () => {
     expect(style?.textContent).toBe('body{color:red}');
     expect(style?.getAttribute('data-fanyi-inlined-css')).toBe('https://www.example.com/assets/app.css');
     expect(root.querySelector('link')).toBeNull();
+    root.remove();
+  });
+
+  it('跨域 stylesheet 通过 extension background 获取，不受页面 CORS 限制', async () => {
+    const root = makeRoot('<link rel="stylesheet" href="https://a0.awsstatic.com/libra-css/css/test.css"><p>x</p>');
+    const sendMessage = vi.mocked(browser.runtime.sendMessage);
+    sendMessage.mockReset();
+    sendMessage.mockResolvedValueOnce({
+      success: true,
+      url: 'https://a0.awsstatic.com/libra-css/css/test.css',
+      status: 200,
+      css: 'body{color:red}',
+    } as never);
+
+    const result = await inlineStylesheetsInClone(root, {
+      baseUri: 'https://aws.amazon.com/blogs/ml/',
+      onError: vi.fn(),
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      action: 'fetchRemoteCss',
+      url: 'https://a0.awsstatic.com/libra-css/css/test.css',
+    });
+    expect(result.complete).toBe(true);
+    expect(root.querySelector('style')?.textContent).toBe('body{color:red}');
+    expect(root.querySelector('link[rel=stylesheet]')).toBeNull();
     root.remove();
   });
 
