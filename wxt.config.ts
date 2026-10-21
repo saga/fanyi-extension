@@ -34,6 +34,8 @@ export default defineConfig({
         'activeTab',
         'scripting',
         'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*',
+        // Cross-origin CSS is fetched by the background context to bypass page CORS.
+        'https://*/*', 'http://*/*',
         'http://127.0.0.1:8789/*', 'http://localhost:8789/*', 'file:///*'];
       manifest.browser_specific_settings = {
         gecko: {
