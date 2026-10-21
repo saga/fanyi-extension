@@ -386,6 +386,65 @@ export default defineBackground({
       return true;
     }) as browser.Runtime.OnMessageListener);
 
+    /**
+     * Download stylesheet text from the extension context. Content-script fetches are subject
+     * to the host page's CORS policy, while this request runs under extension host permissions.
+     * The request is deliberately credential-free and bounded so a page cannot make the
+     * background download an unbounded response.
+     */
+    async function handleFetchRemoteCss(
+      message: FetchRemoteCssMessage,
+      sendResponse: (response: FetchRemoteCssResponse) => void,
+    ): Promise<void> {
+      let url: URL;
+      try {
+        url = new URL(message.url);
+      } catch {
+        sendResponse({ success: false, error: 'Invalid stylesheet URL' });
+        return;
+      }
+      if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) {
+        sendResponse({ success: false, error: 'Only credential-free HTTP(S) stylesheet URLs are allowed' });
+        return;
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6500);
+      try {
+        const response = await fetch(url.href, {
+          signal: controller.signal,
+          credentials: 'omit',
+          redirect: 'follow',
+        });
+        const contentLength = Number(response.headers.get('content-length') || 0);
+        const maxCssBytes = 512 * 1024;
+        if (contentLength > maxCssBytes) {
+          sendResponse({ success: false, error: 'Stylesheet exceeds 512 KiB limit' });
+          return;
+        }
+        const css = response.ok ? await response.text() : '';
+        if (new TextEncoder().encode(css).byteLength > maxCssBytes) {
+          sendResponse({ success: false, error: 'Stylesheet exceeds 512 KiB limit' });
+          return;
+        }
+        sendResponse({
+          success: true,
+          url: response.url || url.href,
+          status: response.status,
+          css,
+        });
+      } catch (error) {
+        sendResponse({
+          success: false,
+          error: controller.signal.aborted
+            ? 'Stylesheet request timed out'
+            : error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     async function handleTranslateChunk(
       message: TranslateChunkMessage,
       sendResponse: (response: TranslateChunkResponse) => void
