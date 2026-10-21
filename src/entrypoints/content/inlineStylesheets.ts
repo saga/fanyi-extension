@@ -193,6 +193,28 @@ function resolveHttpUrl(value: string, baseUrl: string): string | null {
 }
 
 /**
+ * Background/service-worker fetch avoids the page-origin CORS restriction that causes
+ * "Failed to fetch" for cross-origin CSS links such as a0.awsstatic.com.
+ */
+async function fetchCssThroughBackground(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (init?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+  const url = String(input);
+  const response = (await browser.runtime.sendMessage({
+    action: 'fetchRemoteCss',
+    url,
+  })) as FetchRemoteCssResponse;
+  if (init?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+  if (!response?.success) throw new TypeError(response?.error || 'Failed to fetch');
+
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    url: response.url || url,
+    text: async () => response.css || '',
+  } as Response;
+}
+
+/**
  * 获取 CSS 并展开其 @import。ancestors 用来识别递归环；完整 URL 缓存用于复用
  * 已完成的 imports，避免多个顶层 stylesheet 重复下载同一依赖。
  */
