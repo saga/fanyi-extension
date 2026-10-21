@@ -1,3 +1,5 @@
+import browser from 'webextension-polyfill';
+import type { FetchRemoteCssResponse } from '../../types/messages';
 import { logger } from '../../utils/logger';
 
 /**
