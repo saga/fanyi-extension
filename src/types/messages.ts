@@ -152,6 +152,17 @@ export interface RelayToContentMessage {
   message: ContentMessage;
 }
 
+/** Cross-origin stylesheet fetch must run in the extension background context, not the page content script. */
+export interface FetchRemoteCssMessage {
+  action: 'fetchRemoteCss';
+  url: string;
+}
+
+/** CSS payload is intentionally bounded by the background handler. */
+export type FetchRemoteCssResponse =
+  | { success: true; url: string; status: number; css: string }
+  | { success: false; error: string };
+
 /** 发往 background 的所有消息类型。 */
 export type BackgroundMessage =
   | TranslateChunkMessage
@@ -160,7 +171,8 @@ export type BackgroundMessage =
   | ClearCacheMessage
   | CheckConfigMessage
   | GetPageContextMessage
-  | RelayToContentMessage;
+  | RelayToContentMessage
+  | FetchRemoteCssMessage;
 
 // ============================================================
 // Content-script-bound messages (background → content script)
