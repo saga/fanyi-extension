@@ -371,6 +371,8 @@ export default defineBackground({
             await handleGetPageContext(message, sendResponse as (r: GetPageContextResponse) => void);
           } else if (message.action === 'relayToContent') {
             await handleRelayToContent(message, sendResponse as (r: RelayToContentResponse) => void);
+          } else if (message.action === 'fetchRemoteCss') {
+            await handleFetchRemoteCss(message, sendResponse as (r: FetchRemoteCssResponse) => void);
           } else {
             // Unknown action, don't keep port open
             sendResponse({ success: false, error: 'Unknown action' });
