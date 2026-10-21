@@ -342,7 +342,8 @@ export type BackgroundResponse =
   | ClearCacheResponse
   | CheckConfigResponse
   | GetPageContextResponse
-  | RelayToContentResponse;
+  | RelayToContentResponse
+  | FetchRemoteCssResponse;
 
 // ============================================================
 // Listener 签名（替换 onMessage.addListener 的 `any` 入参）
