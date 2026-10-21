@@ -102,7 +102,9 @@ export async function inlineStylesheetsInClone(
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxBytesPerSheet,
     maxImportDepth: opts.maxImportDepth ?? DEFAULT_MAX_IMPORT_DEPTH,
-    fetchFn: opts.fetchFn ?? fetch.bind(globalThis),
+    // Content scripts still obey the page's cross-origin restrictions. The extension
+    // background has host permissions and can fetch third-party CSS without page CORS.
+    fetchFn: opts.fetchFn ?? fetchCssThroughBackground,
     onError,
     cache: new Map<string, CssResult>(),
   };
