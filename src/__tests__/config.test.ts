@@ -175,3 +175,19 @@ describe('config', () => {
     });
   });
 });
+
+describe('CodeBuddy context-window configuration', () => {
+  it('keeps the default untouched unless a positive integer tier was explicitly saved', async () => {
+    const defaults = await getConfig();
+    expect(defaults.documentCodeBuddyTaskProfiles.translation.contextWindow).toBeUndefined();
+    store['local:config'] = {
+      documentCodeBuddyTaskProfiles: {
+        translation: { ...DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES.translation, contextWindow: '1000000' },
+        accuracyReview: { ...DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES.accuracyReview, contextWindow: '1M' },
+      },
+    };
+    const normalized = await getConfig();
+    expect(normalized.documentCodeBuddyTaskProfiles.translation.contextWindow).toBe(1_000_000);
+    expect(normalized.documentCodeBuddyTaskProfiles.accuracyReview.contextWindow).toBeUndefined();
+  });
+});

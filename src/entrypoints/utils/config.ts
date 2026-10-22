@@ -25,6 +25,8 @@ export interface DocumentCodeBuddyTaskProfile {
   systemPromptAppendix: string;
   /** Optional task-specific wrapper. {{CONTENT}} receives the built-in task input. */
   userPromptTemplate: string;
+  /** Optional context-window tier in tokens; omitted keeps the model's defaultLength unchanged. */
+  contextWindow?: number;
 }
 export type DocumentCodeBuddyTaskProfiles = Record<DocumentCodeBuddyTaskKey, DocumentCodeBuddyTaskProfile>;
 
@@ -138,12 +140,22 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
     const rawBudget = Number(value.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens);
     const model = typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model;
     const fallbackModel = typeof value.fallbackModel === 'string' ? value.fallbackModel.trim().slice(0, 200) : defaults.fallbackModel;
+    const contextWindowRaw = value.contextWindow;
+    const contextWindowNumber = typeof contextWindowRaw === 'number'
+      ? contextWindowRaw
+      : typeof contextWindowRaw === 'string' && /^\\d+$/.test(contextWindowRaw.trim())
+        ? Number(contextWindowRaw.trim())
+        : Number.NaN;
+    const contextWindow = Number.isSafeInteger(contextWindowNumber) && contextWindowNumber > 0
+      ? contextWindowNumber
+      : undefined;
     result[task] = {
       model: model.toLowerCase() === 'auto' ? '' : model,
       fallbackModel: fallbackModel.toLowerCase() === 'auto' ? '' : fallbackModel,
       thinkingMode,
       thinkingBudgetTokens: Number.isFinite(rawBudget) ? Math.max(1024, Math.min(65536, Math.round(rawBudget))) : defaults.thinkingBudgetTokens,
       effort,
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
       systemPromptAppendix: typeof value.systemPromptAppendix === 'string' ? value.systemPromptAppendix.slice(0, 12000) : defaults.systemPromptAppendix,
       userPromptTemplate: typeof value.userPromptTemplate === 'string' ? value.userPromptTemplate.slice(0, 30000) : defaults.userPromptTemplate,
     };
