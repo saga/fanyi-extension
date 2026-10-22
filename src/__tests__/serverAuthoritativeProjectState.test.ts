@@ -1,9 +1,12 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const app = readFileSync(new URL('../entrypoints/document/App.vue', import.meta.url), 'utf8');
-const workspace = readFileSync(new URL('../entrypoints/document/DocumentAgentWorkspace.vue', import.meta.url), 'utf8');
-const contextGraph = readFileSync(new URL('../entrypoints/document/useContextGraph.ts', import.meta.url), 'utf8');
+// Vitest can expose a transformed URL rather than a file: URL in CI; resolve source paths
+// from the repository root instead of relying on new URL(..., import.meta.url).
+const app = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/App.vue'), 'utf8');
+const workspace = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/DocumentAgentWorkspace.vue'), 'utf8');
+const contextGraph = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/useContextGraph.ts'), 'utf8');
 
 describe('server-authoritative document project state', () => {
   it('does not disable normal translation controls based on client preprocessing readiness', () => {

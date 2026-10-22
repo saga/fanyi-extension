@@ -12,6 +12,11 @@ vi.mock('../entrypoints/utils/translationDisplay', () => ({
   applyBlockTranslation: vi.fn(),
 }));
 
+// The test covers translation/cache behavior, not the browser-only CSS bridge.
+vi.mock('../entrypoints/content/inlineStylesheets', () => ({
+  inlineStylesheetsInClone: vi.fn().mockResolvedValue({ inlined: 0, bytes: 0, complete: true, failed: 0 }),
+}));
+
 import { applyBlockTranslation } from '../entrypoints/utils/translationDisplay';
 
 const baseConfig: Config = {
