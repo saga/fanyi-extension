@@ -143,7 +143,7 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
     const contextWindowRaw = value.contextWindow;
     const contextWindowNumber = typeof contextWindowRaw === 'number'
       ? contextWindowRaw
-      : typeof contextWindowRaw === 'string' && /^\\d+$/.test(contextWindowRaw.trim())
+      : typeof contextWindowRaw === 'string' && /^\d+$/.test(contextWindowRaw.trim())
         ? Number(contextWindowRaw.trim())
         : Number.NaN;
     const contextWindow = Number.isSafeInteger(contextWindowNumber) && contextWindowNumber > 0

@@ -510,7 +510,7 @@ async function onContextWindowChange(task: DocumentCodeBuddyTaskKey, event: Even
   if (!(target instanceof HTMLSelectElement)) return;
   const profile = config.value.documentCodeBuddyTaskProfiles[task];
   const raw = target.value;
-  const value = /^\\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (raw === '') delete profile.contextWindow;
   else if (Number.isSafeInteger(value) && value > 0) profile.contextWindow = value;
   else return;

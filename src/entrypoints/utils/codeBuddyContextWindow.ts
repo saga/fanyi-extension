@@ -15,7 +15,7 @@ export function normalizeContextWindowOption(input: unknown): CodeBuddyContextWi
   const values = new Set<string>();
   const options: Array<{ value: string; name: string }> = [];
   for (const item of option.options) {
-    if (!item || typeof item.value !== 'string' || !/^\\d+$/.test(item.value)
+    if (!item || typeof item.value !== 'string' || !/^\d+$/.test(item.value)
       || !Number.isSafeInteger(Number(item.value)) || Number(item.value) <= 0
       || typeof item.name !== 'string' || !item.name.trim() || values.has(item.value)) return undefined;
     values.add(item.value);
