@@ -85,7 +85,7 @@
       <label class="setting-field">
         <span>模型覆盖（可选）</span>
         <input v-model="config.documentLocalAgentModel" placeholder="auto；或 provider/model"
-          @change="saveConfig('documentLocalAgentModel')" />
+          @change="onDocumentLocalAgentModelChange" />
         <small class="muted">auto 优先使用本机服务环境变量；OpenCode 示例：openai/gpt-5.4。</small>
       </label>
       <label class="setting-field">
@@ -106,6 +106,7 @@
         <p class="muted small">
           初译、准确性/术语审校、人物声音/文风审校、文学分析、全书预处理分别保存。
           思考模式、effort 和 fallback model 使用 CodeBuddy SDK 的 query() 正式选项；预算只在“指定预算”模式生效。
+          对声明了多档 context window 的模型，额外显示本任务的上下文窗口档位；留空仍使用模型 defaultLength，不改变默认设置。
           为确保参数生效，这些任务使用单次 query，而非复用 V2 Session；批量任务会有额外 CLI 启动开销，高 effort/大预算也会更慢。
         </p>
         <article v-for="task in codeBuddyTaskOptions" :key="task.key" class="task-profile-card">
@@ -120,13 +121,28 @@
               <label class="setting-field">
                 <span>本任务模型覆盖（可选）</span>
                 <select v-model="config.documentCodeBuddyTaskProfiles[task.key].model"
-                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
+                  @change="onTaskModelChange(task.key)">
                   <option value="">留空继承上面的模型覆盖</option>
                   <option v-for="model in codeBuddyModels" :key="model.id" :value="model.id">
                     {{ model.id }}{{ model.credits != null ? '（' + model.credits + ' credits）' : '' }}
                   </option>
                 </select>
                 <small class="muted">选择 CodeBuddy SDK 可识别的模型；列表来自本机服务 /api/codebuddy/models。</small>
+              </label>
+              <label v-if="codeBuddyContextWindowOptions[task.key]?.options.length >= 2" class="setting-field">
+                <span>上下文窗口档位（可选）</span>
+                <select :value="String(config.documentCodeBuddyTaskProfiles[task.key].contextWindow ?? '')"
+                  @change="onContextWindowChange(task.key, $event)">
+                  <option value="">默认（模型 defaultLength）</option>
+                  <option v-for="option in codeBuddyContextWindowOptions[task.key]?.options || []"
+                    :key="option.value" :value="option.value">
+                    {{ option.name }}
+                  </option>
+                </select>
+                <small class="muted">
+                  留空使用模型默认档位；仅当模型声明多档窗口且每档不超过 maxInputTokens 时显示。
+                  此设置不更改模型物理上限，也不等同于 autoCompactWindow。
+                </small>
               </label>
               <label class="setting-field">
                 <span>Fallback Model（可选）</span>
@@ -330,6 +346,7 @@
 import { onMounted, ref, watch } from 'vue';
 import { DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES, getConfig, setConfig, type Config, type DocumentCodeBuddyTaskKey } from '@/entrypoints/utils/config';
 import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
+import { normalizeContextWindowOption, type CodeBuddyContextWindowOption } from '@/entrypoints/utils/codeBuddyContextWindow';
 
 const props = defineProps<{
   activeSourceLang?: string;
@@ -400,6 +417,8 @@ const configStatusDetail = ref('');
 const builtInTaskPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
 const builtInTaskUserPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
 const codeBuddyModels = ref<Array<{ id: string; credits?: number | null }>>([]);
+const codeBuddyContextWindowOptions = ref<Partial<Record<DocumentCodeBuddyTaskKey, CodeBuddyContextWindowOption>>>({});
+const codeBuddyContextOptionsRequestVersion = ref(0);
 const promptPreviewLoading = ref(false);
 const promptPreviewError = ref('');
 
@@ -416,6 +435,17 @@ watch(
   () => [props.activeSourceLang, props.activeTargetLang],
   () => {
     if (initialized.value) applyActiveDocumentLanguages();
+  },
+);
+
+watch(
+  () => [
+    config.value.documentLocalAgentModel,
+    config.value.documentLocalAgentProvider,
+    ...codeBuddyTaskOptions.map((task) => config.value.documentCodeBuddyTaskProfiles[task.key].model),
+  ],
+  () => {
+    if (initialized.value && localStatus.value === 'ok') void loadCodeBuddyContextWindowOptions();
   },
 );
 
@@ -451,6 +481,41 @@ async function saveConfig(...fields: (keyof Config)[]) {
   }
 }
 
+async function onTaskModelChange(task: DocumentCodeBuddyTaskKey) {
+  // Context-window tiers belong to a model; clear a value that may not exist on the new model.
+  delete config.value.documentCodeBuddyTaskProfiles[task].contextWindow;
+  await saveConfig('documentCodeBuddyTaskProfiles');
+  if (localStatus.value === 'ok') void loadCodeBuddyContextWindowOptions();
+}
+
+async function onDocumentLocalAgentModelChange() {
+  let changedProfiles = false;
+  for (const task of codeBuddyTaskOptions) {
+    const profile = config.value.documentCodeBuddyTaskProfiles[task.key];
+    if (!profile.model && profile.contextWindow !== undefined) {
+      delete profile.contextWindow;
+      changedProfiles = true;
+    }
+  }
+  if (changedProfiles) {
+    await saveConfig('documentLocalAgentModel', 'documentCodeBuddyTaskProfiles');
+  } else {
+    await saveConfig('documentLocalAgentModel');
+  }
+  if (localStatus.value === 'ok') void loadCodeBuddyContextWindowOptions();
+}
+
+async function onContextWindowChange(task: DocumentCodeBuddyTaskKey, event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLSelectElement)) return;
+  const profile = config.value.documentCodeBuddyTaskProfiles[task];
+  const raw = target.value;
+  const value = /^\\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (raw === '') delete profile.contextWindow;
+  else if (Number.isSafeInteger(value) && value > 0) profile.contextWindow = value;
+  else return;
+  await saveConfig('documentCodeBuddyTaskProfiles');
+}
 async function onLocalAgentToggle() {
   config.value.documentAutoSelectLocalAgent = config.value.documentUseLocalAgent;
   if (config.value.documentUseLocalAgent) {
@@ -481,6 +546,9 @@ async function checkLocalService() {
     if (available) {
       await loadBuiltInTaskPrompts();
       await loadCodeBuddyModels();
+    } else {
+      codeBuddyModels.value = [];
+      codeBuddyContextWindowOptions.value = {};
     }
     if (available && config.value.documentAutoSelectLocalAgent && !config.value.documentUseLocalAgent) {
       config.value.documentUseLocalAgent = true;
@@ -546,6 +614,61 @@ async function loadCodeBuddyModels() {
     codeBuddyModels.value = Array.isArray(data.data) ? data.data.map((item) => ({ id: item.id, credits: item.credits ?? null })) : [];
   } catch {
     codeBuddyModels.value = [];
+  }
+  if (localStatus.value === 'ok') await loadCodeBuddyContextWindowOptions();
+}
+
+async function loadCodeBuddyContextWindowOptions() {
+  const requestVersion = ++codeBuddyContextOptionsRequestVersion.value;
+  if (config.value.documentLocalAgentProvider !== 'workbuddy') {
+    codeBuddyContextWindowOptions.value = {};
+    return;
+  }
+  const next: Partial<Record<DocumentCodeBuddyTaskKey, CodeBuddyContextWindowOption>> = {};
+  let couldValidateStoredSelections = false;
+  const invalidStoredValues: DocumentCodeBuddyTaskKey[] = [];
+  await Promise.all(codeBuddyTaskOptions.map(async (task) => {
+    const profile = config.value.documentCodeBuddyTaskProfiles[task.key];
+    const model = profile.model.trim() || config.value.documentLocalAgentModel.trim() || 'auto';
+    try {
+      const url = new URL(config.value.documentLocalAgentUrl || 'http://127.0.0.1:8789');
+      url.pathname = '/api/codebuddy/config-options';
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('model', model);
+      if (profile.contextWindow !== undefined) url.searchParams.set('currentValue', String(profile.contextWindow));
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          ...(config.value.documentLocalAgentToken
+            ? { Authorization: 'Bearer ' + config.value.documentLocalAgentToken }
+            : {}),
+        },
+      });
+      if (!response.ok) return;
+      couldValidateStoredSelections = true;
+      const payload = await response.json() as { configOptions?: unknown };
+      const rawOption = Array.isArray(payload.configOptions) ? payload.configOptions[0] : undefined;
+      const option = normalizeContextWindowOption(rawOption);
+      if (option) {
+        next[task.key] = option;
+        if (profile.contextWindow !== undefined && !option.options.some((entry) => entry.value === String(profile.contextWindow))) {
+          invalidStoredValues.push(task.key);
+        }
+      } else if (profile.contextWindow !== undefined) {
+        // Successful response with no selector means this model no longer exposes multiple tiers.
+        invalidStoredValues.push(task.key);
+      }
+    } catch {
+      // The service may not yet expose this endpoint; retain user data and never infer tiers from /models.
+    }
+  }));
+  if (requestVersion !== codeBuddyContextOptionsRequestVersion.value) return;
+  codeBuddyContextWindowOptions.value = next;
+  if (couldValidateStoredSelections && invalidStoredValues.length) {
+    for (const task of invalidStoredValues) delete config.value.documentCodeBuddyTaskProfiles[task].contextWindow;
+    await saveConfig('documentCodeBuddyTaskProfiles');
   }
 }
 
