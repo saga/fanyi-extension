@@ -1,4 +1,5 @@
 import { prepareDocument, createOverlayHider, type OverlayHider } from '../utils/contentHelper';
+import { getDomainParkingPageMessage } from '../utils/domainParkingGuard';
 import { buildNodeMap } from '../utils/blockExtractor';
 import { buildChunks } from '../utils/chunkBuilder';
 import { getConfig } from '../utils/config';
@@ -216,6 +217,13 @@ async function handleFullTranslation(
   setObserver: (obs: DOMObserverManager | null) => void,
   setOverlayHider: (h: OverlayHider | null) => void,
 ): Promise<TranslationResult> {
+  // Guard every provider route, including direct DeepSeek mode that bypasses Vocal Saga.
+  const parkingPageMessage = getDomainParkingPageMessage(document, window.location.href);
+  if (parkingPageMessage) {
+    logger.warn('[ContentScript] Refusing to translate a likely domain-parking page:', parkingPageMessage);
+    throw new Error(parkingPageMessage);
+  }
+
   // 防御性检查：即使 start() 已经判断过，在真正发送请求前再确认一次，
   // 防止 content script 重新注入、或多入口同时触发导致重复翻译。
   if (isPageTranslated()) {
