@@ -160,6 +160,12 @@ export function createTranslationController(
         }
       } catch (error) {
         logger.error('Translation failed:', error);
+        // Failure can happen before the normal cleanup point (for example, an empty page
+        // or a failed server request). Do not leave a MutationObserver hiding future dialogs
+        // or walker attributes that can contaminate the next extraction.
+        overlayHider?.stop();
+        overlayHider = null;
+        cleanupTempAttrs();
         showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
       } finally {
         isTranslating = false;
