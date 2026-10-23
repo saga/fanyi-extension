@@ -47,6 +47,22 @@ async function prepareHtmlForServer(): Promise<string> {
   // 清理 clone 上的翻译标记，恢复成"已标记 block id 但未翻译"的状态。
   for (const node of Array.from(clone.querySelectorAll('.fanyi-translated'))) {
     const el = node as HTMLElement;
+
+    // Vocal Saga can render short blocks with inline-specific classes; unwrap them before
+    // resubmitting HTML or the old translation may be translated again as source text.
+    const inlineOriginal = el.querySelector('.fanyi-inline-original');
+    const inlineTranslation = el.querySelector('.fanyi-inline-translation');
+    if (inlineOriginal && inlineTranslation) {
+      const host = inlineOriginal.parentElement;
+      if (host) {
+        while (inlineOriginal.firstChild) {
+          host.insertBefore(inlineOriginal.firstChild, inlineOriginal);
+        }
+        inlineOriginal.remove();
+        inlineTranslation.remove();
+      }
+    }
+
     const originalSpan = el.querySelector('.fanyi-original');
     if (originalSpan) {
       while (originalSpan.firstChild) {
@@ -54,7 +70,7 @@ async function prepareHtmlForServer(): Promise<string> {
       }
       originalSpan.remove();
     }
-    el.querySelector('.fanyi-translation')?.remove();
+    el.querySelector('.fanyi-translation, .fanyi-inline-translation')?.remove();
     el.classList.remove('fanyi-translated');
     delete el.dataset.originalText;
   }
