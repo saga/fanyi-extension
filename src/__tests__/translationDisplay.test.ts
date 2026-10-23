@@ -122,6 +122,21 @@ describe('restoreBlock', () => {
     expect(p.querySelector('.fanyi-original')).toBeNull();
   });
 
+  it('restores Vocal Saga inline translation markup nested inside a link', () => {
+    const p = document.createElement('p');
+    p.classList.add('fanyi-translated');
+    p.dataset.originalText = 'Repository';
+    p.innerHTML = '<a href="https://example.com"><span class="fanyi-inline-original">Repository</span><span class="fanyi-inline-translation">代码仓库</span></a>';
+
+    restoreBlock(p);
+
+    expect(p.querySelector('a')?.textContent).toBe('Repository');
+    expect(p.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
+    expect(p.querySelector('.fanyi-inline-original')).toBeNull();
+    expect(p.querySelector('.fanyi-inline-translation')).toBeNull();
+    expect(p.classList.contains('fanyi-translated')).toBe(false);
+  });
+
 
   it('restores nested <a> links so they are clickable again', () => {
     const p = document.createElement('p');
@@ -166,6 +181,21 @@ describe('toggleBlockTranslation', () => {
 
     toggleBlockTranslation(p);
     expect(translationSpan.style.display).toBe('none');
+  });
+
+  it('toggles Vocal Saga inline translation without hiding the original', () => {
+    const p = document.createElement('p');
+    p.classList.add('fanyi-translated');
+    p.innerHTML = '<span class="fanyi-inline-original">Repository</span><span class="fanyi-inline-translation">代码仓库</span>';
+    const original = p.querySelector('.fanyi-inline-original') as HTMLElement;
+    const translated = p.querySelector('.fanyi-inline-translation') as HTMLElement;
+
+    toggleBlockTranslation(p);
+    expect(translated.style.display).toBe('none');
+    expect(original.style.display).toBe('');
+
+    toggleBlockTranslation(p);
+    expect(translated.style.display).toBe('');
   });
 
 });
