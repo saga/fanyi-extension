@@ -196,6 +196,8 @@ toggleTranslation → ctrl.toggle()
 
 **`handleFullTranslation()` 主流程**:
 
+开始提取和调用任何 Provider 前，公共网页翻译入口会检查明显的域名停放页（例如标题为 `<domain> - <keyword> Resources and Information`，或正文明确提示域名停放/出售）。命中时直接向用户显示错误并停止；该检查覆盖服务端翻译和扩展直连 Provider，不适用于独立的 EPUB/PDF 文档翻译流程。Vocal Saga 还会在服务端重复校验并阻止这类页面进入翻译缓存。
+
 ```
 1. 防御性检查 (isPageTranslated)
 2. 站点规则匹配 → forceDirectTranslation?
