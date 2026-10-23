@@ -425,9 +425,37 @@ export async function translateViaServer(
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
     logger.error('[ServerTranslation] server error body:', errorBody);
+
+    // Vocal Saga returns structured errors for rejected pages (for example, a registrar
+    // parking page). Show the actionable server message instead of a raw JSON blob.
+    let detail = errorBody.substring(0, 500);
+    if (errorBody) {
+      try {
+        const parsed: unknown = JSON.parse(errorBody);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const payload = parsed as Record<string, unknown>;
+          if (typeof payload.error === 'string' && payload.error.trim()) {
+            detail = payload.error.trim();
+            if (
+              typeof payload.detail === 'string' &&
+              payload.detail.trim() &&
+              payload.detail.trim() !== detail
+            ) {
+              detail += ` — ${payload.detail.trim().substring(0, 300)}`;
+            }
+            if (typeof payload.code === 'string' && payload.code.trim()) {
+              logger.warn('[ServerTranslation] server error code:', payload.code);
+            }
+          }
+        }
+      } catch {
+        // Non-JSON upstream errors remain visible as their plain response body.
+      }
+    }
+
     throw new ServerTranslationError(
       `服务端翻译失败: ${response.status} ${response.statusText}` +
-        (errorBody ? ` — ${errorBody.substring(0, 500)}` : ''),
+        (detail ? ` — ${detail}` : ''),
       response.status,
     );
   }
