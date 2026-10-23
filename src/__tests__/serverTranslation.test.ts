@@ -281,6 +281,27 @@ describe('translateViaServer', () => {
     );
   });
 
+
+  it('surfaces structured parking-page rejection details from Vocal Saga', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      statusText: 'Unprocessable Content',
+      text: async () => JSON.stringify({
+        code: 'DOMAIN_PARKING_PAGE',
+        error: 'Refusing to translate/cache a likely domain-parking page',
+      }),
+    });
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    await expect(translateViaServer(baseConfig, blocks, nodeMap)).rejects.toThrow(
+      'Refusing to translate/cache a likely domain-parking page',
+    );
+  });
 });
 
 describe('checkServerCache', () => {
