@@ -128,6 +128,33 @@ describe('translateViaServer', () => {
     expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '这是一个测试段落。');
   });
 
+  it('unwraps inline Vocal Saga markup before resubmitting the page', async () => {
+    document.documentElement.innerHTML = `
+      <html><body><article>
+        <p data-fanyi-block-id="b1" class="fanyi-translated">
+          <a href="https://example.com"><span class="fanyi-inline-original">Hello world</span><span class="fanyi-inline-translation">你好世界</span></a>
+        </p>
+      </article></body></html>
+    `;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<html><body><p data-fanyi-block-id="b1"><span class="fanyi-original">Hello world</span><span class="fanyi-translation">你好世界</span></p></body></html>',
+    });
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/p', tag: 'p', text: 'Hello world' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('p')!]]);
+
+    await translateViaServer(baseConfig, blocks, nodeMap);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).toContain('Hello world');
+    expect(body.html).not.toContain('fanyi-inline-original');
+    expect(body.html).not.toContain('fanyi-inline-translation');
+    expect(body.html).not.toContain('你好世界');
+  });
+
 
 
   // 站点（如 sigarch.org 的 FeedBlitz 订阅表单）可能在运行时被 JS 把
