@@ -76,6 +76,22 @@ export function applyBlockTranslation(
 
 export function restoreBlock(node: HTMLElement): void {
   const originalText = node.dataset.originalText;
+
+  // Also restore Vocal Saga's inline markup. The original wrappers can live on a
+  // descendant text host (for example inside an anchor), not directly on node.
+  const inlineOriginal = node.querySelector('.fanyi-inline-original');
+  const inlineTranslation = node.querySelector('.fanyi-inline-translation');
+  if (inlineOriginal && inlineTranslation) {
+    const host = inlineOriginal.parentElement;
+    if (host) {
+      while (inlineOriginal.firstChild) {
+        host.insertBefore(inlineOriginal.firstChild, inlineOriginal);
+      }
+      inlineOriginal.remove();
+      inlineTranslation.remove();
+    }
+  }
+
   const originalSpan = node.querySelector('.fanyi-original');
   if (originalSpan) {
     // Move original children back to the parent so links/formatting work again.
@@ -98,10 +114,10 @@ export function restoreBlock(node: HTMLElement): void {
 }
 
 export function toggleBlockTranslation(node: HTMLElement): void {
-  const translationSpan = node.querySelector('.fanyi-translation');
+  const translationSpan =
+    node.querySelector('.fanyi-translation, .fanyi-inline-translation') as HTMLElement | null;
   if (translationSpan) {
-    const el = translationSpan as HTMLElement;
-    el.style.display = el.style.display === 'none' ? '' : 'none';
+    translationSpan.style.display = translationSpan.style.display === 'none' ? '' : 'none';
   }
 }
 
@@ -115,6 +131,20 @@ export function toggleBlockTranslation(node: HTMLElement): void {
 export function cleanupTranslationMarks(): void {
   for (const node of Array.from(document.querySelectorAll('.fanyi-translated'))) {
     const el = node as HTMLElement;
+
+    const inlineOriginal = el.querySelector('.fanyi-inline-original');
+    const inlineTranslation = el.querySelector('.fanyi-inline-translation');
+    if (inlineOriginal && inlineTranslation) {
+      const host = inlineOriginal.parentElement;
+      if (host) {
+        while (inlineOriginal.firstChild) {
+          host.insertBefore(inlineOriginal.firstChild, inlineOriginal);
+        }
+        inlineOriginal.remove();
+        inlineTranslation.remove();
+      }
+    }
+
     const originalSpan = el.querySelector('.fanyi-original');
     if (originalSpan) {
       while (originalSpan.firstChild) {
@@ -122,7 +152,7 @@ export function cleanupTranslationMarks(): void {
       }
       originalSpan.remove();
     }
-    el.querySelector('.fanyi-translation')?.remove();
+    el.querySelector('.fanyi-translation, .fanyi-inline-translation')?.remove();
     el.classList.remove('fanyi-translated');
     delete el.dataset.originalText;
   }
