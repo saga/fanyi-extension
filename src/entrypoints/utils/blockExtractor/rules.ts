@@ -832,3 +832,57 @@ export function isOverlayElement(el: Element): boolean {
   }
   return false;
 }
+
+/** 与 aside 同级出现时，说明它夹在正文流里（而非布局侧栏）的块级标签。 */
+const PROSE_FLOW_TAGS = new Set([
+  'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'ul', 'ol', 'blockquote', 'pre', 'figure', 'table', 'picture',
+]);
+
+/**
+ * `<aside>` 是否其实是文章正文的一部分（Key takeaways / TL;DR / 结论卡）。
+ *
+ * 编辑类站点（cube.dev、多数 Next.js 博客）用 `<aside>` 承载正文内的要点框，
+ * 语义上不属于页面 chrome。无条件整棵拒绝会让这些卡片完全不翻译。
+ *
+ * 判定为正文需同时满足：
+ *   1. 不在 nav / footer / dialog 内；
+ *   2. 自身 class/id 不命中广告、推荐、分享、侧栏等噪声模式；
+ *   3. 处于文章区域（article/main/role，或祖先 class 含 article/post/story/content…）；
+ *   4. 夹在正文流中（同级存在 p/h2/ul 等正文块），或自身文本 ≥ 200 字符。
+ *
+ * 任一不满足则维持原语义（整棵拒绝），避免把真正的侧栏 / 相关阅读当成正文。
+ */
+export function isContentAside(el: Element): boolean {
+  if (el.tagName.toLowerCase() !== 'aside') return false;
+  if (el.closest('nav, footer, dialog')) return false;
+
+  // 噪声类名优先否决（跳过纯标签规则：aside 本身必然命中 { tag: 'aside' }）
+  for (const rule of LOW_PRIORITY_SELECTORS) {
+    if (rule.tag) continue;
+    if (matchSelectorRule(el, rule)) return false;
+  }
+
+  let inArticleRegion =
+    el.closest('article, main, [role="main"], [role="article"]') !== null;
+  if (!inArticleRegion) {
+    let cur: Element | null = el.parentElement;
+    while (cur) {
+      if (hasContentTokens(cur)) {
+        inArticleRegion = true;
+        break;
+      }
+      cur = cur.parentElement;
+    }
+  }
+
+  const inProseFlow = Array.from(el.parentElement?.children ?? []).some(
+    (sib) => sib !== el && PROSE_FLOW_TAGS.has(sib.tagName.toLowerCase()),
+  );
+
+  if (!inArticleRegion && !inProseFlow) return false;
+
+  if (normalizeBlockText(el.textContent ?? '').length >= 200) return true;
+
+  return inProseFlow && el.querySelector('p, li, blockquote, h1, h2, h3, h4, h5, h6') !== null;
+}
