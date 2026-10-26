@@ -8,6 +8,8 @@ export type LiteraryEntityKind = 'person' | 'place' | 'object' | 'organization' 
 
 /** 记录启用依据，而不是把机器证据误称为用户确认。 */
 export type LiteraryConfirmationSource = 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
+export type LiteraryTargetConfidence = 'candidate' | 'corroborated';
+export interface LiteraryTargetEvidenceRef { segmentId: string; sourceQuote: string; targetSurface: string }
 
 export interface LiteraryEntity {
   source: string;
@@ -18,6 +20,9 @@ export interface LiteraryEntity {
   evidence?: string;
   /** 服务端动态上下文候选的来源定位；用于防止后文证据泄漏到前文。 */
   evidenceRefs?: Array<{ segmentId: string; sourceQuote: string }>;
+  /** 目标译名必须有独立已接受译文支撑；与原文引文有效性分开保存。 */
+  targetEvidenceRefs?: LiteraryTargetEvidenceRef[];
+  targetConfidence?: LiteraryTargetConfidence;
   reviewStatus?: 'suggested' | 'confirmed';
   /** confirmed 是运行强度；此字段记录该状态的来源。旧数据缺失时为 legacy-unknown。 */
   confirmationSource?: LiteraryConfirmationSource;
@@ -281,8 +286,13 @@ function mergeEntityRecord(prior: LiteraryEntity, candidate: LiteraryEntity): Li
     // Earlier canonical translation wins. A conflicting later target is never silently adopted.
     aliases: Array.from(aliasMap.values()).slice(0, 8),
     ...(evidenceRefs.length ? { evidenceRefs } : {}),
+    targetEvidenceRefs: [...(prior.targetEvidenceRefs || []), ...(candidate.targetEvidenceRefs || [])]
+      .filter((item, index, all) => all.findIndex((other) => other.segmentId === item.segmentId) === index).slice(-8),
+    targetConfidence: new Set([...(prior.targetEvidenceRefs || []), ...(candidate.targetEvidenceRefs || [])]
+      .map((item) => item.segmentId).filter(Boolean)).size >= 2 ? 'corroborated' as const : 'candidate' as const,
     ...(sameTarget && prior.reviewStatus !== 'confirmed' && candidate.reviewStatus === 'confirmed'
-      ? { reviewStatus: 'confirmed' as const }
+      && candidate.confirmationSource === 'user-confirmed'
+      ? { reviewStatus: 'confirmed' as const, confirmationSource: 'user-confirmed' as const }
       : {}),
     ...(sameTarget && (prior.reviewStatus === 'confirmed' || candidate.reviewStatus === 'confirmed')
       ? { confirmationSource: mergeConfirmationSource(prior.confirmationSource, candidate.confirmationSource) }
@@ -368,15 +378,28 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         const sourceQuote = safeText(ref.sourceQuote, 240);
         return segmentId && sourceQuote ? [{ segmentId, sourceQuote }] : [];
       }) : [];
+      const targetEvidenceRefs = Array.isArray(entity.targetEvidenceRefs) ? entity.targetEvidenceRefs.slice(-8).flatMap((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const ref = item as Record<string, unknown>;
+        const segmentId = safeText(ref.segmentId, 160);
+        const sourceQuote = safeText(ref.sourceQuote, 240);
+        const targetSurface = safeText(ref.targetSurface, 120);
+        return segmentId && sourceQuote && targetSurface ? [{ segmentId, sourceQuote, targetSurface }] : [];
+      }) : [];
+      const targetConfidence = entity.targetConfidence === 'corroborated' &&
+        new Set(targetEvidenceRefs.map((item) => item.segmentId)).size >= 2 ? 'corroborated' : 'candidate';
+      const resolvedConfirmationSource = confirmationSource(entity.confirmationSource, entity.reviewStatus === 'confirmed');
+      const isUserConfirmed = entity.reviewStatus === 'confirmed' && resolvedConfirmationSource === 'user-confirmed';
       entities.push({
         source, target, kind: entityKind(entity.kind),
         ...(aliases.length ? { aliases } : {}),
         ...(safeText(entity.description, 200) ? { description: safeText(entity.description, 200) } : {}),
         ...(safeText(entity.evidence, 160) ? { evidence: safeText(entity.evidence, 160) } : {}),
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
-        reviewStatus: entity.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
-        ...(confirmationSource(entity.confirmationSource, entity.reviewStatus === 'confirmed')
-          ? { confirmationSource: confirmationSource(entity.confirmationSource, entity.reviewStatus === 'confirmed') } : {}),
+        ...(targetEvidenceRefs.length ? { targetEvidenceRefs } : {}),
+        targetConfidence,
+        reviewStatus: isUserConfirmed ? 'confirmed' : 'suggested',
+        ...(resolvedConfirmationSource ? { confirmationSource: resolvedConfirmationSource } : {}),
       });
     }
   }
@@ -777,9 +800,15 @@ export function autoConfirmLiteraryMemory(
   // with that stable ID contains the quoted evidence. The Local Agent service repeats this check
   // against its immutable current source revision before persisting the memory.
   for (const entity of memory.entities) {
-    if (entity.reviewStatus !== 'confirmed' && entity.source && entity.target && refsMatchSource(entity.evidenceRefs)) {
-      entity.reviewStatus = 'confirmed';
+    if (entity.source && entity.target && refsMatchSource(entity.evidenceRefs) &&
+        entity.confirmationSource !== 'user-confirmed') {
+      // Source quotes prove that a name exists; they do not prove that its proposed translation is correct.
       entity.confirmationSource = 'evidence-verified';
+      if (entity.targetConfidence !== 'corroborated' ||
+          new Set((entity.targetEvidenceRefs || []).map((ref) => ref.segmentId)).size < 2) {
+        entity.reviewStatus = 'suggested';
+        entity.targetConfidence = 'candidate';
+      }
     }
   }
   for (const relation of memory.relationships) {
