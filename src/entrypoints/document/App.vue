@@ -468,7 +468,7 @@
             <p class="muted small">当前版本的完整预处理文风会自动进入初译和两类 Reviewer 的 TranslationBrief；编辑器会自动补齐空字段。用户确认的自定义文风优先，风格上下文不得用于推断剧情。</p>
           </div>
           <span class="entity-status" :class="literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? 'is-confirmed' : contextGraphState.styleGuideReady ? 'is-confirmed' : 'is-pending'">
-            {{ literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? '用户已确认并注入' : contextGraphState.styleGuideReady && !literaryMemory.styleGuideAutoDisabled ? '机器基准自动应用' : literaryMemory.styleGuideAutoDisabled ? '机器基准已停用' : '预处理未就绪' }}
+            {{ literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? '用户已确认并注入' : literaryMemory.styleGuideOrigin === 'user-edited' ? '用户编辑的文风生效' : contextGraphState.styleGuideReady && !literaryMemory.styleGuideAutoDisabled ? '机器基准自动应用' : literaryMemory.styleGuideAutoDisabled ? '机器基准已停用' : '预处理未就绪' }}
           </span>
         </div>
         <div class="settings-actions">
