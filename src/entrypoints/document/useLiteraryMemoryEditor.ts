@@ -44,6 +44,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   const allNonPersonEntities = computed(() => literaryMemory.value.entities.filter((entity) => entity.kind !== 'person'));
   const isSuppressedEntity = (entity: LiteraryEntity) => ['low-value', 'invalid-target', 'compound-name'].includes(String(entity.canonicalMappingDisposition || ''));
   const suppressedEntityCount = computed(() => allNonPersonEntities.value.filter(isSuppressedEntity).length);
+  function toggleSuppressedEntities() { showSuppressedEntities.value = !showSuppressedEntities.value; }
   const nonPersonEntities = computed(() => allNonPersonEntities.value.filter((entity) => !isSuppressedEntity(entity)));
   const pendingEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus !== 'confirmed').length);
   const confirmedEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus === 'confirmed').length);
