@@ -271,7 +271,7 @@ describe('文学书籍记忆', () => {
     expect(memory.entities[0]?.target).not.toContain('\n');
   });
 
-  it('入库自动确认有原文依据的规范项，无依据的保持待确认', () => {
+  it('原文依据可自动记录，但不单独确认实体译名', () => {
     const memory = autoConfirmLiteraryMemory({
       entities: [
         { source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice said',
@@ -287,7 +287,7 @@ describe('文学书籍记忆', () => {
       { id: 's1', text: 'Alice said hello.' },
       { id: 's2', text: 'She is her sister.' },
     ]);
-    expect(memory.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
     expect(memory.entities.find((entity) => entity.source === 'Bob')?.reviewStatus).toBe('suggested');
     expect(memory.relationships.find((rel) => rel.predicate === 'sister of')?.reviewStatus).toBe('confirmed');
     expect(memory.relationships.find((rel) => rel.predicate === 'likes')?.reviewStatus).toBe('suggested');
@@ -492,7 +492,7 @@ describe('文学书籍记忆', () => {
       entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice smiled',
         evidenceRefs: [{ segmentId: 's1', sourceQuote: 'Alice smiled at Bob.' }] }],
     }, [{ id: 's1', text: 'Alice smiled at Bob.' }]));
-    expect(corroborated.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
+    expect(corroborated.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
     const conflicted = mergeLiteraryMemory(first, autoConfirmLiteraryMemory({
       entities: [{ source: 'Alice', target: '爱丽斯', kind: 'person', evidence: 'Alice nodded',
         evidenceRefs: [{ segmentId: 's2', sourceQuote: 'Alice nodded slowly.' }] }],
