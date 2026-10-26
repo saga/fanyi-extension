@@ -19,6 +19,8 @@ export interface LiteraryEntity {
   kind: LiteraryEntityKind;
   aliases?: string[];
   description?: string;
+  /** 服务端仅在有跨章节证据的书内专属概念上设置；不是用户确认。 */
+  bookSpecificMeaning?: boolean;
   evidence?: string;
   /** 服务端动态上下文候选的来源定位；用于防止后文证据泄漏到前文。 */
   evidenceRefs?: Array<{ segmentId: string; sourceQuote: string }>;
@@ -403,6 +405,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       const isUserConfirmed = entity.reviewStatus === 'confirmed' && resolvedConfirmationSource === 'user-confirmed';
       entities.push({
         source, target, kind: entityKind(entity.kind),
+        bookSpecificMeaning: entity.bookSpecificMeaning === true,
         ...(aliases.length ? { aliases } : {}),
         ...(safeText(entity.description, 200) ? { description: safeText(entity.description, 200) } : {}),
         ...(safeText(entity.evidence, 160) ? { evidence: safeText(entity.evidence, 160) } : {}),
