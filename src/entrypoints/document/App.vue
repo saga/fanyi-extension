@@ -465,17 +465,17 @@
         <div class="dictionary-heading">
           <div>
             <h3>全书文风基准</h3>
-            <p class="muted small">预处理得到的全书文风只作为候选。确认后才会进入初译和两类 Reviewer 的 TranslationBrief；本面板不存放剧情摘要。</p>
+            <p class="muted small">当前版本的完整预处理文风会自动进入初译和两类 Reviewer 的 TranslationBrief；编辑器会自动补齐空字段。用户确认的自定义文风优先，风格上下文不得用于推断剧情。</p>
           </div>
-          <span class="entity-status" :class="literaryMemory.styleGuideStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
-            {{ literaryMemory.styleGuideStatus === 'confirmed' ? '已确认并注入' : '候选 · 尚未注入' }}
+          <span class="entity-status" :class="literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? 'is-confirmed' : contextGraphState.styleGuideReady ? 'is-confirmed' : 'is-pending'">
+            {{ literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? '用户已确认并注入' : contextGraphState.styleGuideReady ? '机器基准自动应用' : '预处理未就绪' }}
           </span>
         </div>
         <div class="settings-actions">
           <button class="btn" type="button"
-            :disabled="!contextGraphOverview.narrativeStyle && !contextGraphOverview.styleRegister && !contextGraphOverview.styleRhythm && !contextGraphOverview.styleDialogue && !contextGraphOverview.styleDiction && !contextGraphOverview.styleRules.length && !contextGraphOverview.styleAvoid.length"
-            @click="importContextGraphStyleGuide">载入预处理文风建议</button>
-          <span class="muted small">导入后仍是候选，需要检查并确认；后续可以随时撤销确认。</span>
+            :disabled="!contextGraphState.styleGuideReady"
+            @click="importContextGraphStyleGuide">用当前预处理结果覆盖字段</button>
+          <span class="muted small">正常翻译无需点击此按钮；仅在需要显式替换编辑器里的已有字段时使用。机器自动应用不代表用户确认。</span>
         </div>
         <div class="literary-style-grid">
           <label class="field">
