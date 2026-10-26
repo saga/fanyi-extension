@@ -216,8 +216,8 @@
 
       <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
       <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
-        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(1)">翻译下一页</button>
-        <button class="quick-action" :disabled="state.running || (!currentPagePending && currentPageIndex >= pages.length - 1)" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action" :disabled="state.running || !hasPendingPageAhead" @click="translatePages(1)">翻译下一页</button>
+        <button class="quick-action" :disabled="state.running || !hasPendingPageAhead" @click="translatePages(3)">翻译下三页</button>
         <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
       </div>
 
@@ -1093,7 +1093,7 @@ import {
   type ExportFormat,
 } from '@/entrypoints/utils/document';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
-import { buildDocumentPages } from '@/entrypoints/utils/document/pagination';
+import { buildDocumentPages, nextUntranslatedPageWindow } from '@/entrypoints/utils/document/pagination';
 import {
   clearActiveDocumentSession,
   createActiveDocumentSession,
@@ -1198,7 +1198,14 @@ const {
 const pages = computed(() => doc.value ? buildDocumentPages(doc.value) : []);
 const currentPage = computed(() => pages.value[currentPageIndex.value] ?? null);
 const visibleSegments = computed(() => currentPage.value?.segments ?? []);
-const currentPagePending = computed(() => visibleSegments.value.some((segment) => !state.value.translations.get(segment.id)?.trim()));
+/** 片段是否已有非空译文；分页推进与按钮状态共用同一判据。 */
+function isSegmentTranslated(segmentId: string): boolean {
+  return !!state.value.translations.get(segmentId)?.trim();
+}
+const currentPagePending = computed(() => visibleSegments.value.some((segment) => !isSegmentTranslated(segment.id)));
+/** 当前阅读位置（含当前页）之后是否还有未译页面：决定预翻译按钮是否可用。 */
+const hasPendingPageAhead = computed(() =>
+  nextUntranslatedPageWindow(pages.value, currentPageIndex.value, 1, isSegmentTranslated).length > 0);
 const hasPendingDocument = computed(() =>
   doc.value?.segments.some((segment) => !state.value.translations.get(segment.id)?.trim()) ?? false,
 );
@@ -3346,24 +3353,23 @@ function displayTranslation(segmentId: string): string {
 }
 
 /**
- * 预翻译当前阅读位置附近的页面，不修改 currentPageIndex。
- * 当前页仍有待译片段时，把当前页计入范围： “下一页”= 当前页 + 后 1 页，
- * “下三页”= 当前页 + 后 3 页。当前页已译完时，仍只预翻译后续 N 页。
+ * 预翻译当前阅读位置之后的页面，不修改 currentPageIndex。
+ *
+ * 锚点是已译区域的末端而不是固定的当前页：从当前页起跳过已经译完的页面，向后收集
+ * pageCount 个仍有待译片段的页面。连续点击会持续向后推进（3 页 → 6 页 → 9 页），
+ * 不会在同一窗口空转。当前页未译完时它就在窗口内，所以「翻译下三页」共 3 页。
  */
 async function translatePages(pageCount: number) {
   if (!doc.value || state.value.running || pageCount < 1) return;
 
-  // 当前页存在任何待译片段时，必须先把当前页纳入范围，不能直接跳到下一页。
-  // pageCount 表示按钮要求的后续页数，因此当前页待译时总范围是 1 + pageCount 页。
-  const includeCurrentPage = currentPagePending.value;
-  const firstTargetIndex = currentPageIndex.value + (includeCurrentPage ? 0 : 1);
-  const targetPageCount = pageCount + (includeCurrentPage ? 1 : 0);
-  const targetPages = pages.value.slice(firstTargetIndex, firstTargetIndex + targetPageCount);
+  const targetPages = nextUntranslatedPageWindow(
+    pages.value, currentPageIndex.value, pageCount, isSegmentTranslated,
+  );
   if (!targetPages.length) return;
 
   const pendingSegments = targetPages
     .flatMap((page) => page.segments)
-    .filter((segment) => !state.value.translations.get(segment.id)?.trim());
+    .filter((segment) => !isSegmentTranslated(segment.id));
   if (!pendingSegments.length) return;
 
   const ids = pendingSegments.map((segment) => segment.id);

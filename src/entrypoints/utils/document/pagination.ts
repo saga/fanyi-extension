@@ -62,6 +62,34 @@ function splitGroup(
 }
 
 /**
+ * 计算「继续预翻译」的目标页窗口。
+ *
+ * 锚点是**已译区域的末端**，不是固定的当前页：从当前页起跳过已经译完的页面，
+ * 再向后收集 pageCount 个仍有待译片段的页面。这样连续点击会持续向后推进
+ * （3 页 → 6 页 → 9 页），而不是每次都落在同一个窗口上空转。
+ *
+ * 当前页尚未译完时它就在窗口内，所以「翻译下三页」的范围包含当前页，共 3 页。
+ * 已译完的页面不会进入窗口，也就不会被重新提交一遍。
+ */
+export function nextUntranslatedPageWindow(
+  pages: DocumentReaderPage[],
+  currentIndex: number,
+  pageCount: number,
+  isSegmentTranslated: (segmentId: string) => boolean,
+): DocumentReaderPage[] {
+  if (!pages.length || pageCount < 1) return [];
+  const pageHasPending = (page: DocumentReaderPage) =>
+    page.segments.some((segment) => !isSegmentTranslated(segment.id));
+  const start = Math.max(0, Math.min(Math.floor(currentIndex) || 0, pages.length));
+  const window: DocumentReaderPage[] = [];
+  for (let index = start; index < pages.length && window.length < pageCount; index++) {
+    const page = pages[index]!;
+    if (pageHasPending(page)) window.push(page);
+  }
+  return window;
+}
+
+/**
  * 生成阅读器的虚拟分页，不修改文档原始 segment 顺序或稳定 ID。
  * EPUB 先按 spine path 分章再按字符数切长章；PDF 尽量按原始页码；其余格式按阅读预算切页。
  */
