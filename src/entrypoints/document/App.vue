@@ -567,7 +567,7 @@
             </button>
           </div>
           <div class="dictionary-actions">
-            <button v-if="suppressedEntityCount" class="btn" type="button" @click="showSuppressedEntities = !showSuppressedEntities">
+            <button v-if="suppressedEntityCount" class="btn" type="button" @click="toggleSuppressedEntities">
               {{ showSuppressedEntities ? '隐藏低价值/异常项' : '展开低价值/异常项' }}（{{ suppressedEntityCount }}）
             </button>
             <button class="btn primary" @click="addEntity">添加实体映射</button>
@@ -1247,6 +1247,7 @@ const {
   nonPersonEntities,
   suppressedEntityCount,
   showSuppressedEntities,
+  toggleSuppressedEntities,
   pendingEntityCount,
   confirmedEntityCount,
   managedPeople,
