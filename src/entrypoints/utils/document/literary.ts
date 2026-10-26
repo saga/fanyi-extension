@@ -4,7 +4,8 @@
  * 只由 EPUB/PDF 文档翻译工作流使用；不接入普通网页翻译的默认 prompt。
  * 记忆对象会在每个章节结束后合并，给后续段落的术语、实体关系、角色声音与文风校准使用。
  */
-export type LiteraryEntityKind = 'person' | 'place' | 'object' | 'organization' | 'concept' | 'other';
+export type LiteraryEntityKind = 'person' | 'place' | 'object' | 'organization' | 'concept' | 'work' | 'artifact' | 'title' | 'other';
+export type CanonicalMappingDisposition = 'eligible' | 'low-value' | 'invalid-target' | 'compound-name';
 
 /** 记录启用依据，而不是把机器证据误称为用户确认。 */
 export type LiteraryConfirmationSource = 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
@@ -24,6 +25,8 @@ export interface LiteraryEntity {
   targetEvidenceRefs?: LiteraryTargetEvidenceRef[];
   targetConfidence?: LiteraryTargetConfidence;
   reviewStatus?: 'suggested' | 'confirmed';
+  /** 服务端派生的目录展示状态，不是用户确认，也不参与模型权威等级。 */
+  canonicalMappingDisposition?: CanonicalMappingDisposition;
   /** confirmed 是运行强度；此字段记录该状态的来源。旧数据缺失时为 legacy-unknown。 */
   confirmationSource?: LiteraryConfirmationSource;
 }
@@ -234,7 +237,8 @@ function safeText(value: unknown, max = 320): string {
 }
 function entityKind(value: unknown): LiteraryEntityKind {
   return value === 'person' || value === 'place' || value === 'object' ||
-    value === 'organization' || value === 'concept' || value === 'other'
+    value === 'organization' || value === 'concept' || value === 'work' ||
+    value === 'artifact' || value === 'title' || value === 'other'
     ? value
     : 'other';
 }
@@ -398,6 +402,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
         ...(targetEvidenceRefs.length ? { targetEvidenceRefs } : {}),
         targetConfidence,
+        ...(entity.canonicalMappingDisposition === 'eligible' || entity.canonicalMappingDisposition === 'low-value' ||
+            entity.canonicalMappingDisposition === 'invalid-target' || entity.canonicalMappingDisposition === 'compound-name'
+          ? { canonicalMappingDisposition: entity.canonicalMappingDisposition } : {}),
         reviewStatus: isUserConfirmed ? 'confirmed' : 'suggested',
         ...(resolvedConfirmationSource ? { confirmationSource: resolvedConfirmationSource } : {}),
       });
