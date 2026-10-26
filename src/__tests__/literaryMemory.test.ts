@@ -90,6 +90,40 @@ describe('literary memory source evidence', () => {
 });
 
 
+describe('literary style provenance and long fields', () => {
+  it('preserves long style dimensions and machine/user provenance without truncation', () => {
+    const longDialogue = '对白节奏'.repeat(180);
+    const longDiction = '词汇选择'.repeat(180);
+    const memory = sanitizeLiteraryMemory({
+      styleGuide: { dialogue: longDialogue, diction: longDiction },
+      styleGuideStatus: 'candidate',
+      styleGuideOrigin: 'context-graph',
+      styleGuideAnalysisVersion: 'context-graph-v9-canonical-entity-quality',
+      styleGuideSourceRevisionId: 'source-revision-1',
+      styleGuideAutoDisabled: true,
+    });
+
+    expect(memory.styleGuide.dialogue).toBe(longDialogue);
+    expect(memory.styleGuide.diction).toBe(longDiction);
+    expect(memory.styleGuideOrigin).toBe('context-graph');
+    expect(memory.styleGuideAnalysisVersion).toBe('context-graph-v9-canonical-entity-quality');
+    expect(memory.styleGuideSourceRevisionId).toBe('source-revision-1');
+    expect(memory.styleGuideAutoDisabled).toBe(true);
+    expect(memory.styleGuideConfirmationSource).toBeUndefined();
+  });
+
+  it('keeps a user-edited style distinct from a user-confirmed style', () => {
+    const memory = sanitizeLiteraryMemory({
+      styleGuide: { narrativeVoice: '冷静克制。' },
+      styleGuideStatus: 'candidate',
+      styleGuideOrigin: 'user-edited',
+    });
+    expect(memory.styleGuideOrigin).toBe('user-edited');
+    expect(memory.styleGuideStatus).toBe('candidate');
+    expect(memory.styleGuideConfirmationSource).toBeUndefined();
+  });
+});
+
 describe('automatic canonical entity activation', () => {
   it('records source evidence without treating it as target translation confirmation', () => {
     const memory = autoConfirmLiteraryMemory({
