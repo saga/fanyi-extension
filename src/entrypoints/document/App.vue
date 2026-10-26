@@ -468,14 +468,18 @@
             <p class="muted small">当前版本的完整预处理文风会自动进入初译和两类 Reviewer 的 TranslationBrief；编辑器会自动补齐空字段。用户确认的自定义文风优先，风格上下文不得用于推断剧情。</p>
           </div>
           <span class="entity-status" :class="literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? 'is-confirmed' : contextGraphState.styleGuideReady ? 'is-confirmed' : 'is-pending'">
-            {{ literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? '用户已确认并注入' : contextGraphState.styleGuideReady ? '机器基准自动应用' : '预处理未就绪' }}
+            {{ literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? '用户已确认并注入' : contextGraphState.styleGuideReady && !literaryMemory.styleGuideAutoDisabled ? '机器基准自动应用' : literaryMemory.styleGuideAutoDisabled ? '机器基准已停用' : '预处理未就绪' }}
           </span>
         </div>
         <div class="settings-actions">
           <button class="btn" type="button"
             :disabled="!contextGraphState.styleGuideReady"
             @click="importContextGraphStyleGuide">用当前预处理结果覆盖字段</button>
-          <span class="muted small">正常翻译无需点击此按钮；仅在需要显式替换编辑器里的已有字段时使用。机器自动应用不代表用户确认。</span>
+          <button v-if="contextGraphState.styleGuideReady" class="btn" type="button"
+            @click="setStyleGuideAutoDisabled(!literaryMemory.styleGuideAutoDisabled)">
+            {{ literaryMemory.styleGuideAutoDisabled ? '恢复机器文风基准' : '停用机器文风基准' }}
+          </button>
+          <span class="muted small">正常翻译无需导入或确认；机器基准有版本并自动应用。用户确认的文风优先，机器应用不代表人工确认。</span>
         </div>
         <div class="literary-style-grid">
           <label class="field">
@@ -1248,6 +1252,7 @@ const {
   suppressedEntityCount,
   showSuppressedEntities,
   toggleSuppressedEntities,
+  setStyleGuideAutoDisabled,
   pendingEntityCount,
   confirmedEntityCount,
   managedPeople,
