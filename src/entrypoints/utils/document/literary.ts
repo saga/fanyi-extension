@@ -9,6 +9,7 @@ export type CanonicalMappingDisposition = 'eligible' | 'low-value' | 'invalid-ta
 
 /** 记录启用依据，而不是把机器证据误称为用户确认。 */
 export type LiteraryConfirmationSource = 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
+export type LiteraryStyleGuideOrigin = 'context-graph' | 'user-edited' | 'user-confirmed' | 'legacy-unknown';
 export type LiteraryTargetConfidence = 'candidate' | 'corroborated';
 export interface LiteraryTargetEvidenceRef { segmentId: string; sourceQuote: string; targetSurface: string }
 
@@ -134,6 +135,12 @@ export interface LiteraryVoiceContext {
   styleGuide: LiteraryStyleGuide;
   styleGuideStatus: 'candidate' | 'confirmed';
   styleGuideConfirmationSource?: LiteraryConfirmationSource;
+  /** 文风内容来源与机器基准版本；与“用户已确认”状态分开。 */
+  styleGuideOrigin?: LiteraryStyleGuideOrigin;
+  styleGuideAnalysisVersion?: string;
+  styleGuideSourceRevisionId?: string;
+  /** 用户可停用自动机器基准，而不删除候选或覆盖用户自定义文风。 */
+  styleGuideAutoDisabled?: boolean;
   /** 当前批所在章节与片段位置；这里只传可验证的结构信息，不推测人物情绪或说话人。 */
   scene: { chapterTitle?: string; contextPaths: string[]; segmentIds: string[] };
   /** 与当前批有关的确认实体译名和剧情关系，不能被角色声线替代。 */
@@ -243,7 +250,7 @@ function entityKind(value: unknown): LiteraryEntityKind {
     : 'other';
 }
 export function createEmptyLiteraryMemory(): LiteraryBookMemory {
-  return { version: 2, entities: [], relationships: [], styleGuide: {}, styleGuideStatus: 'candidate', chapterSummaries: [], recentExamples: [], characterVoices: [], relationshipVoiceRules: [], voiceAnchors: [] };
+  return { version: 2, entities: [], relationships: [], styleGuide: {}, styleGuideStatus: 'candidate', styleGuideAutoDisabled: false, chapterSummaries: [], recentExamples: [], characterVoices: [], relationshipVoiceRules: [], voiceAnchors: [] };
 }
 
 function confirmationSource(value: unknown, active: boolean): LiteraryConfirmationSource | undefined {
@@ -454,6 +461,16 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
   }
   const styleGuideStatus = raw.styleGuideStatus === 'confirmed' ? 'confirmed' : 'candidate';
   const styleGuideConfirmationSource = confirmationSource(raw.styleGuideConfirmationSource, styleGuideStatus === 'confirmed');
+  const rawStyleOrigin = raw.styleGuideOrigin;
+  const styleGuideOrigin: LiteraryStyleGuideOrigin =
+    rawStyleOrigin === 'context-graph' || rawStyleOrigin === 'user-edited' ||
+    rawStyleOrigin === 'user-confirmed' || rawStyleOrigin === 'legacy-unknown'
+      ? rawStyleOrigin
+      : styleGuideConfirmationSource === 'user-confirmed' ? 'user-confirmed'
+      : Object.keys(styleGuide).length ? 'legacy-unknown' : 'legacy-unknown';
+  const styleGuideAnalysisVersion = safeText(raw.styleGuideAnalysisVersion, 120);
+  const styleGuideSourceRevisionId = safeText(raw.styleGuideSourceRevisionId, 200);
+  const styleGuideAutoDisabled = raw.styleGuideAutoDisabled === true;
   const chapterSummaries = Array.isArray(raw.chapterSummaries)
     ? raw.chapterSummaries.slice(-MAX_SUMMARIES).flatMap((item) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
@@ -619,6 +636,10 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
     styleGuide, styleGuideStatus,
     ...(styleGuideConfirmationSource ? { styleGuideConfirmationSource } : {}),
+    styleGuideOrigin,
+    ...(styleGuideAnalysisVersion ? { styleGuideAnalysisVersion } : {}),
+    ...(styleGuideSourceRevisionId ? { styleGuideSourceRevisionId } : {}),
+    styleGuideAutoDisabled,
     chapterSummaries, recentExamples,
     characterVoices: validVoices,
     relationshipVoiceRules: relationshipVoiceRules.filter((rule) => validCharacterIds.has(rule.speakerId) && validCharacterIds.has(rule.addresseeId)).slice(0, MAX_VOICE_RULES),
@@ -648,6 +669,15 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     styleGuideConfirmationSource: existing.styleGuideStatus === 'confirmed'
       ? mergeConfirmationSource(existing.styleGuideConfirmationSource, incoming.styleGuideConfirmationSource)
       : incoming.styleGuideConfirmationSource,
+    styleGuideOrigin: existing.styleGuideOrigin === 'user-edited' ||
+      (existing.styleGuideStatus === 'confirmed' && existing.styleGuideConfirmationSource === 'user-confirmed')
+      ? existing.styleGuideOrigin
+      : incoming.styleGuideOrigin === 'context-graph' ? 'context-graph' : existing.styleGuideOrigin || incoming.styleGuideOrigin,
+    styleGuideAnalysisVersion: incoming.styleGuideOrigin === 'context-graph'
+      ? incoming.styleGuideAnalysisVersion : existing.styleGuideAnalysisVersion,
+    styleGuideSourceRevisionId: incoming.styleGuideOrigin === 'context-graph'
+      ? incoming.styleGuideSourceRevisionId : existing.styleGuideSourceRevisionId,
+    styleGuideAutoDisabled: existing.styleGuideAutoDisabled,
     chapterSummaries: Array.from(summaries.values()).slice(-MAX_SUMMARIES),
     recentExamples: [...existing.recentExamples, ...incoming.recentExamples].slice(-MAX_EXAMPLES),
     characterVoices: mergeCharacterVoices(existing.characterVoices, incoming.characterVoices),
