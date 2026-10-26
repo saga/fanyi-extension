@@ -35,7 +35,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     } = deps;
 
   const contextGraphState = ref<any>({
-    projectId: '', sourceRevisionId: '', segmentCount: 0,
+    projectId: '', sourceRevisionId: '', segmentCount: 0, analysisVersion: '', styleGuideReady: false, styleMissingFields: [], styleGuideUpdatedAt: null,
     counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
     status: 'not-started', phase: 'not-started', progress: {}, runId: '',
     startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
@@ -44,7 +44,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
   // 排队、运行和“正在提交启动请求”都算 busy；按钮与文案统一使用这个状态。
   const contextGraphBusy = computed(() =>
     isContextGraphBusy(contextGraphState.value.status, contextGraphAnalyzing.value));
-  const contextGraphOverview = ref<{ narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[] }>({ narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [] });
+  const contextGraphOverview = ref<{ narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[]; styleGuideReady: boolean; styleMissingFields: string[]; analysisVersion: string; sourceRevisionId: string; styleGuideUpdatedAt: string | null }>({ narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [], styleGuideReady: false, styleMissingFields: [], analysisVersion: '', sourceRevisionId: '', styleGuideUpdatedAt: null });
   let contextGraphPollTimer: number | null = null;
   const contextGraphStatusLabel = computed(() => ({
     'not-started': '尚未运行', queued: '等待执行', running: '运行中',
@@ -155,6 +155,11 @@ export function useContextGraph(deps: ContextGraphDeps) {
       styleDiction: typeof graph.overview?.styleDiction === 'string' ? graph.overview.styleDiction : '',
       styleRules: Array.isArray(graph.overview?.styleRules) ? graph.overview.styleRules.filter((item: unknown): item is string => typeof item === 'string') : [],
       styleAvoid: Array.isArray(graph.overview?.styleAvoid) ? graph.overview.styleAvoid.filter((item: unknown): item is string => typeof item === 'string') : [],
+      styleGuideReady: graph.styleGuideReady === true,
+      styleMissingFields: Array.isArray(graph.styleMissingFields) ? graph.styleMissingFields.filter((item: unknown): item is string => typeof item === 'string') : [],
+      analysisVersion: typeof graph.analysisVersion === 'string' ? graph.analysisVersion : '',
+      sourceRevisionId: typeof graph.sourceRevisionId === 'string' ? graph.sourceRevisionId : '',
+      styleGuideUpdatedAt: typeof graph.styleGuideUpdatedAt === 'string' ? graph.styleGuideUpdatedAt : null,
     };
     const run = Array.isArray(graph.runs) ? graph.runs[0] : null;
     const status = run?.status || 'not-started';
@@ -162,6 +167,10 @@ export function useContextGraph(deps: ContextGraphDeps) {
       projectId,
       sourceRevisionId: graph.sourceRevisionId || '',
       segmentCount: Number(graph.segmentCount || 0),
+      analysisVersion: typeof graph.analysisVersion === 'string' ? graph.analysisVersion : '',
+      styleGuideReady: graph.styleGuideReady === true,
+      styleMissingFields: Array.isArray(graph.styleMissingFields) ? graph.styleMissingFields : [],
+      styleGuideUpdatedAt: graph.styleGuideUpdatedAt || null,
       counts: {
         characters: Number(graph.counts?.characters || 0),
         entities: Number(graph.counts?.entities || 0),
@@ -289,12 +298,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
       if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
       contextGraphPollTimer = null;
       contextGraphState.value = {
-        projectId: '', sourceRevisionId: '', segmentCount: 0,
+        projectId: '', sourceRevisionId: '', segmentCount: 0, analysisVersion: '', styleGuideReady: false, styleMissingFields: [], styleGuideUpdatedAt: null,
         counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
         status: 'not-started', phase: 'not-started', progress: {}, runId: '',
         startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
       };
-      contextGraphOverview.value = { narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [] };
+      contextGraphOverview.value = { narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [], styleGuideReady: false, styleMissingFields: [], analysisVersion: '', sourceRevisionId: '', styleGuideUpdatedAt: null };
     }
 
   return {
