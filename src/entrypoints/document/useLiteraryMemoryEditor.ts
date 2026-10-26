@@ -519,6 +519,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
 
   function markStyleGuideCandidate() {
     literaryMemory.value.styleGuideStatus = 'candidate';
+    literaryMemory.value.styleGuideOrigin = 'user-edited';
     delete literaryMemory.value.styleGuideConfirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存全书文风基准失败：' + (error instanceof Error ? error.message : String(error));
@@ -534,26 +535,21 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   function importContextGraphStyleGuide() {
-    const style = literaryMemory.value.styleGuide || {};
     const overview = deps.getContextGraphOverview();
-    const narrativeVoice = overview.narrativeStyle.trim();
-    const register = overview.styleRegister.trim();
-    const rhythm = overview.styleRhythm.trim();
-    const dialogue = overview.styleDialogue.trim();
-    const diction = overview.styleDiction.trim();
-    const rules = overview.styleRules.slice(0, 16);
-    const avoid = overview.styleAvoid.slice(0, 12);
+    if (overview.styleGuideReady !== true || !overview.analysisVersion) return;
     literaryMemory.value.styleGuide = {
-      ...style,
-      ...(narrativeVoice ? { narrativeVoice } : {}),
-      ...(register ? { register } : {}),
-      ...(rhythm ? { rhythm } : {}),
-      ...(dialogue ? { dialogue } : {}),
-      ...(diction ? { diction } : {}),
-      ...(rules.length ? { rules } : {}),
-      ...(avoid.length ? { avoid } : {}),
+      narrativeVoice: overview.narrativeStyle.trim(),
+      register: overview.styleRegister.trim(),
+      rhythm: overview.styleRhythm.trim(),
+      dialogue: overview.styleDialogue.trim(),
+      diction: overview.styleDiction.trim(),
+      rules: overview.styleRules.slice(0, 24),
+      avoid: overview.styleAvoid.slice(0, 16),
     };
     literaryMemory.value.styleGuideStatus = 'candidate';
+    literaryMemory.value.styleGuideOrigin = 'context-graph';
+    literaryMemory.value.styleGuideAnalysisVersion = overview.analysisVersion;
+    literaryMemory.value.styleGuideSourceRevisionId = overview.sourceRevisionId || '';
     delete literaryMemory.value.styleGuideConfirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存预处理文风候选失败：' + (error instanceof Error ? error.message : String(error));
@@ -563,16 +559,20 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   async function setStyleGuideStatus(status: 'candidate' | 'confirmed') {
     if (status === 'confirmed' && !hasStyleGuideContent.value) return;
     literaryMemory.value.styleGuideStatus = status;
-    if (status === 'confirmed') literaryMemory.value.styleGuideConfirmationSource = 'user-confirmed';
-    else delete literaryMemory.value.styleGuideConfirmationSource;
+    if (status === 'confirmed') {
+      literaryMemory.value.styleGuideConfirmationSource = 'user-confirmed';
+      literaryMemory.value.styleGuideOrigin = 'user-confirmed';
+    } else {
+      delete literaryMemory.value.styleGuideConfirmationSource;
+      if (literaryMemory.value.styleGuideOrigin === 'user-confirmed') literaryMemory.value.styleGuideOrigin = 'user-edited';
+    }
     await persistLiteraryMemoryToWorkspace();
     persistenceMessage.value = status === 'confirmed'
       ? '全书文风基准已确认，后续文学翻译与 Reviewer 会注入这组风格规则。'
-      : '全书文风基准已恢复为候选，不再注入后续翻译。';
+      : '已撤销用户确认；若当前全书预处理文风完整，机器基准仍可自动应用。';
   }
 
-  // 当前图谱文风完整时，自动补齐编辑面板里的空字段。既有非空内容不被静默覆盖；
-  // 真正的运行时注入由服务端 TranslationBrief 直接使用当前版本的图谱基准。
+  // 当前图谱版本变化时刷新机器导入的文风；用户编辑/确认过的字段不被静默覆盖。
   watch(() => {
     const overview = deps.getContextGraphOverview();
     return [
@@ -590,38 +590,69 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     if (currentSourceRevisionId && overview.sourceRevisionId && currentSourceRevisionId !== overview.sourceRevisionId) return;
     if (literaryMemory.value.styleGuideStatus === 'confirmed' &&
         literaryMemory.value.styleGuideConfirmationSource === 'user-confirmed') return;
+
     const style = literaryMemory.value.styleGuide || {};
-    const next = { ...style };
-    let changed = false;
-    const fields = [
-      ['narrativeVoice', overview.narrativeStyle],
-      ['register', overview.styleRegister],
-      ['rhythm', overview.styleRhythm],
-      ['dialogue', overview.styleDialogue],
-      ['diction', overview.styleDiction],
-    ] as const;
-    for (const [field, proposed] of fields) {
-      if (!String(next[field] || '').trim() && proposed.trim()) {
-        (next as any)[field] = proposed;
+    const oldVersion = literaryMemory.value.styleGuideAnalysisVersion || '';
+    const oldSourceRevision = literaryMemory.value.styleGuideSourceRevisionId || '';
+    const origin = literaryMemory.value.styleGuideOrigin || 'legacy-unknown';
+    const sourceChanged = !!oldSourceRevision && !!overview.sourceRevisionId && oldSourceRevision !== overview.sourceRevisionId;
+    const analysisChanged = !!oldVersion && oldVersion !== overview.analysisVersion;
+    const replaceMachineBaseline = origin === 'context-graph' && (sourceChanged || analysisChanged);
+
+    const next: typeof style = replaceMachineBaseline ? {
+      narrativeVoice: overview.narrativeStyle.trim(),
+      register: overview.styleRegister.trim(),
+      rhythm: overview.styleRhythm.trim(),
+      dialogue: overview.styleDialogue.trim(),
+      diction: overview.styleDiction.trim(),
+      rules: overview.styleRules.slice(0, 24),
+      avoid: overview.styleAvoid.slice(0, 16),
+    } : { ...style };
+    let changed = replaceMachineBaseline;
+    if (!replaceMachineBaseline) {
+      const fields = [
+        ['narrativeVoice', overview.narrativeStyle],
+        ['register', overview.styleRegister],
+        ['rhythm', overview.styleRhythm],
+        ['dialogue', overview.styleDialogue],
+        ['diction', overview.styleDiction],
+      ] as const;
+      for (const [field, proposed] of fields) {
+        if (!String(next[field] || '').trim() && proposed.trim()) {
+          (next as any)[field] = proposed;
+          changed = true;
+        }
+      }
+      if (!(next.rules || []).length && overview.styleRules.length) {
+        next.rules = [...overview.styleRules];
+        changed = true;
+      }
+      if (!(next.avoid || []).length && overview.styleAvoid.length) {
+        next.avoid = [...overview.styleAvoid];
         changed = true;
       }
     }
-    if (!(next.rules || []).length && overview.styleRules.length) {
-      next.rules = [...overview.styleRules];
-      changed = true;
-    }
-    if (!(next.avoid || []).length && overview.styleAvoid.length) {
-      next.avoid = [...overview.styleAvoid];
-      changed = true;
-    }
     if (!changed) return;
     literaryMemory.value.styleGuide = next;
+    if (replaceMachineBaseline || origin === 'context-graph') {
+      literaryMemory.value.styleGuideOrigin = 'context-graph';
+      literaryMemory.value.styleGuideAnalysisVersion = overview.analysisVersion;
+      literaryMemory.value.styleGuideSourceRevisionId = overview.sourceRevisionId || '';
+    }
     literaryMemory.value.styleGuideStatus = 'candidate';
     delete literaryMemory.value.styleGuideConfirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '自动补全文风字段失败：' + (error instanceof Error ? error.message : String(error));
+      persistenceMessage.value = '自动同步/补全文风字段失败：' + (error instanceof Error ? error.message : String(error));
     });
   }, { immediate: true });
+
+  async function setStyleGuideAutoDisabled(disabled: boolean) {
+    literaryMemory.value.styleGuideAutoDisabled = disabled;
+    await persistLiteraryMemoryToWorkspace();
+    persistenceMessage.value = disabled
+      ? '已停用机器自动文风基准；已确认的用户自定义文风仍保留。'
+      : '已恢复当前版本的机器自动文风基准。';
+  }
 
     /** 等待排队中的记忆写入完成（翻译前保证最新 Voice Bible 已落库）。 */
     function awaitLiteraryMemoryWrites(): Promise<void> {
