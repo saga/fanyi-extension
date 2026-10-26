@@ -411,15 +411,15 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     : {};
   const styleGuide: LiteraryStyleGuide = {};
   for (const key of ['narrativeVoice', 'register', 'rhythm', 'dialogue', 'diction'] as const) {
-    const value = safeText(styleRaw[key], 500);
+    const value = safeText(styleRaw[key], 1000);
     if (value) styleGuide[key] = value;
   }
   if (Array.isArray(styleRaw.rules)) {
-    const rules = Array.from(new Set(styleRaw.rules.map((value) => safeText(value, 240)).filter(Boolean))).slice(0, 16);
+    const rules = Array.from(new Set(styleRaw.rules.map((value) => safeText(value, 240)).filter(Boolean))).slice(0, 24);
     if (rules.length) styleGuide.rules = rules;
   }
   if (Array.isArray(styleRaw.avoid)) {
-    const avoid = Array.from(new Set(styleRaw.avoid.map((value) => safeText(value, 100)).filter(Boolean))).slice(0, 12);
+    const avoid = Array.from(new Set(styleRaw.avoid.map((value) => safeText(value, 240)).filter(Boolean))).slice(0, 16);
     if (avoid.length) styleGuide.avoid = avoid;
   }
   const styleGuideStatus = raw.styleGuideStatus === 'confirmed' ? 'confirmed' : 'candidate';
