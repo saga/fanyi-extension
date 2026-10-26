@@ -91,7 +91,7 @@ describe('literary memory source evidence', () => {
 
 
 describe('automatic canonical entity activation', () => {
-  it('automatically activates evidence-backed name mappings and leaves unsupported entries pending', () => {
+  it('records source evidence without treating it as target translation confirmation', () => {
     const memory = autoConfirmLiteraryMemory({
       entities: [
         {
@@ -115,7 +115,7 @@ describe('automatic canonical entity activation', () => {
       ],
     }, [{ id: 's1', text: 'But Timsen was much too clever to allow the King to see through him.' }]);
 
-    expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('suggested');
     expect(memory.entities.find((entity) => entity.source === 'the King')?.confirmationSource).toBe('evidence-verified');
     expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.reviewStatus).toBe('suggested');
     expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.confirmationSource).toBeUndefined();
