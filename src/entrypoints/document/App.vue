@@ -549,7 +549,7 @@
             <h3>实体译名表</h3>
             <p class="muted small">这里只管理地点、组织、物品、概念等非人物实体。人物的规范名、译名、别名和角色/声音信息统一在下方「人物管理」中编辑。其他实体有原文依据且译名明确时会自动纳入规范。</p>
           </div>
-          <span class="chip">共 {{ nonPersonEntities.length }} 项</span>
+          <span class="chip">规范候选 {{ nonPersonEntities.length }} 项</span><span v-if="suppressedEntityCount" class="chip">已折叠 {{ suppressedEntityCount }} 项</span>
         </div>
 
         <div class="dictionary-toolbar">
@@ -567,6 +567,9 @@
             </button>
           </div>
           <div class="dictionary-actions">
+            <button v-if="suppressedEntityCount" class="btn" type="button" @click="showSuppressedEntities = !showSuppressedEntities">
+              {{ showSuppressedEntities ? '隐藏低价值/异常项' : '展开低价值/异常项' }}（{{ suppressedEntityCount }}）
+            </button>
             <button class="btn primary" @click="addEntity">添加实体映射</button>
           </div>
         </div>
@@ -1242,6 +1245,8 @@ const {
   entityFilter,
   personSearch,
   nonPersonEntities,
+  suppressedEntityCount,
+  showSuppressedEntities,
   pendingEntityCount,
   confirmedEntityCount,
   managedPeople,
