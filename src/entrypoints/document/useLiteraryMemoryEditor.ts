@@ -40,7 +40,11 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   const entitySearch = ref('');
   const entityFilter = ref<'all' | 'pending' | 'confirmed'>('all');
   const personSearch = ref('');
-  const nonPersonEntities = computed(() => literaryMemory.value.entities.filter((entity) => entity.kind !== 'person'));
+  const showSuppressedEntities = ref(false);
+  const allNonPersonEntities = computed(() => literaryMemory.value.entities.filter((entity) => entity.kind !== 'person'));
+  const isSuppressedEntity = (entity: LiteraryEntity) => ['low-value', 'invalid-target', 'compound-name'].includes(String(entity.canonicalMappingDisposition || ''));
+  const suppressedEntityCount = computed(() => allNonPersonEntities.value.filter(isSuppressedEntity).length);
+  const nonPersonEntities = computed(() => allNonPersonEntities.value.filter((entity) => !isSuppressedEntity(entity)));
   const pendingEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus !== 'confirmed').length);
   const confirmedEntityCount = computed(() => nonPersonEntities.value.filter((entity) => entity.reviewStatus === 'confirmed').length);
   function normalizeManagedPersonName(value: unknown): string {
@@ -111,9 +115,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   });
   const filteredLiteraryEntities = computed(() => {
     const query = entitySearch.value.toLocaleLowerCase();
-    return literaryMemory.value.entities
-      .map((entity, index) => ({ entity, index }))
-      .filter(({ entity }) => entity.kind !== 'person')
+    return (showSuppressedEntities.value ? allNonPersonEntities.value : nonPersonEntities.value)
+      .map((entity) => ({ entity, index: literaryMemory.value.entities.indexOf(entity) }))
       .filter(({ entity }) => {
         if (entityFilter.value === 'pending' && entity.reviewStatus === 'confirmed') return false;
         if (entityFilter.value === 'confirmed' && entity.reviewStatus !== 'confirmed') return false;
@@ -275,6 +278,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   function markEntitySuggested(entity: LiteraryEntity) {
+    // 编辑名称即代表用户正在处理这一项；旧的服务端过滤标签不能继续隐藏它。
+    delete entity.canonicalMappingDisposition;
     const previousSource = entitySourceBeforeEdit.get(entity) || '';
     entitySourceBeforeEdit.delete(entity);
     syncEntityMappingToVoiceProfiles(entity, previousSource);
@@ -294,6 +299,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   function setEntityAliases(entity: LiteraryEntity, event: Event) {
+    delete entity.canonicalMappingDisposition;
     const value = (event.target as HTMLInputElement | null)?.value ?? '';
     entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
     syncEntityMappingToVoiceProfiles(entity);
