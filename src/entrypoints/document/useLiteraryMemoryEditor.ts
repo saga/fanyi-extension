@@ -293,7 +293,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
   function entityKindLabel(kind: LiteraryEntity['kind']) {
     const labels: Record<LiteraryEntity['kind'], string> = {
-      person: '人物', place: '地点', object: '物品', organization: '组织', concept: '概念', other: '其他实体',
+      person: '人物', place: '地点', object: '物品', organization: '组织', concept: '概念', work: '作品', artifact: '专有器物', title: '称谓/头衔', other: '其他实体',
     };
     return labels[kind] || '其他实体';
   }
