@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue';
+import { computed, ref, watch, type Ref } from 'vue';
 import { getConfig, type Config } from '@/entrypoints/utils/config';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
 import {
@@ -19,7 +19,7 @@ export interface LiteraryMemoryEditorDeps {
   persistenceMessage: Ref<string>;
   persistSession: () => Promise<void>;
   /** 延迟读取：Context Graph 状态由 `useContextGraph` 持有，避免两个 composable 循环依赖。 */
-  getContextGraphOverview: () => { narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[] };
+  getContextGraphOverview: () => { narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[]; styleGuideReady?: boolean; styleMissingFields?: string[]; analysisVersion?: string; sourceRevisionId?: string; styleGuideUpdatedAt?: string | null };
 }
 
 /**
@@ -563,6 +563,58 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       ? '全书文风基准已确认，后续文学翻译与 Reviewer 会注入这组风格规则。'
       : '全书文风基准已恢复为候选，不再注入后续翻译。';
   }
+
+  // 当前图谱文风完整时，自动补齐编辑面板里的空字段。既有非空内容不被静默覆盖；
+  // 真正的运行时注入由服务端 TranslationBrief 直接使用当前版本的图谱基准。
+  watch(() => {
+    const overview = deps.getContextGraphOverview();
+    return [
+      overview.styleGuideReady === true,
+      overview.analysisVersion || '',
+      overview.sourceRevisionId || '',
+      overview.narrativeStyle, overview.styleRegister, overview.styleRhythm,
+      overview.styleDialogue, overview.styleDiction,
+      JSON.stringify(overview.styleRules || []), JSON.stringify(overview.styleAvoid || []),
+    ] as const;
+  }, () => {
+    const overview = deps.getContextGraphOverview();
+    if (overview.styleGuideReady !== true || !overview.analysisVersion) return;
+    const currentSourceRevisionId = String(workspaceProject.value?.currentSourceRevisionId || '');
+    if (currentSourceRevisionId && overview.sourceRevisionId && currentSourceRevisionId !== overview.sourceRevisionId) return;
+    if (literaryMemory.value.styleGuideStatus === 'confirmed' &&
+        literaryMemory.value.styleGuideConfirmationSource === 'user-confirmed') return;
+    const style = literaryMemory.value.styleGuide || {};
+    const next = { ...style };
+    let changed = false;
+    const fields = [
+      ['narrativeVoice', overview.narrativeStyle],
+      ['register', overview.styleRegister],
+      ['rhythm', overview.styleRhythm],
+      ['dialogue', overview.styleDialogue],
+      ['diction', overview.styleDiction],
+    ] as const;
+    for (const [field, proposed] of fields) {
+      if (!String(next[field] || '').trim() && proposed.trim()) {
+        (next as any)[field] = proposed;
+        changed = true;
+      }
+    }
+    if (!(next.rules || []).length && overview.styleRules.length) {
+      next.rules = [...overview.styleRules];
+      changed = true;
+    }
+    if (!(next.avoid || []).length && overview.styleAvoid.length) {
+      next.avoid = [...overview.styleAvoid];
+      changed = true;
+    }
+    if (!changed) return;
+    literaryMemory.value.styleGuide = next;
+    literaryMemory.value.styleGuideStatus = 'candidate';
+    delete literaryMemory.value.styleGuideConfirmationSource;
+    void persistLiteraryMemoryToWorkspace().catch((error) => {
+      persistenceMessage.value = '自动补全文风字段失败：' + (error instanceof Error ? error.message : String(error));
+    });
+  }, { immediate: true });
 
     /** 等待排队中的记忆写入完成（翻译前保证最新 Voice Bible 已落库）。 */
     function awaitLiteraryMemoryWrites(): Promise<void> {
