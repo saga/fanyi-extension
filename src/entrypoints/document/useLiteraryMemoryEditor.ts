@@ -548,6 +548,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     };
     literaryMemory.value.styleGuideStatus = 'candidate';
     literaryMemory.value.styleGuideOrigin = 'context-graph';
+    literaryMemory.value.styleGuideAutoDisabled = false;
     literaryMemory.value.styleGuideAnalysisVersion = overview.analysisVersion;
     literaryMemory.value.styleGuideSourceRevisionId = overview.sourceRevisionId || '';
     delete literaryMemory.value.styleGuideConfirmationSource;
