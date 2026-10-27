@@ -375,9 +375,12 @@
                 <span class="agent-finding-id">{{ finding.segmentId }}</span>
                 <p>{{ finding.finding?.reason || finding.finding?.suggestion || '审校建议' }}</p>
                 <div v-if="finding.finding?.proposedTranslation" class="agent-style-proposal">
-                  <strong>文风候选译文</strong>
+                  <strong>{{ finding.category === 'style' ? '文风候选译文' : '审校建议译文' }}</strong>
                   <p>{{ finding.finding.proposedTranslation }}</p>
-                  <div class="agent-style-proposal-actions">
+                  <p v-if="finding.status === 'resolved'" class="agent-detail-description">
+                    已由采纳的修订译文解决。
+                  </p>
+                  <div v-else-if="finding.category === 'style'" class="agent-style-proposal-actions">
                     <button class="agent-button agent-button-primary"
                       :disabled="busy || finding.status === 'applied' || finding.finding?.applicationStatus === 'applied'"
                       @click="applyStyleFinding(finding)">
@@ -387,6 +390,9 @@
                       :disabled="busy || finding.status === 'dismissed' || finding.finding?.applicationStatus === 'dismissed' || finding.status === 'applied'"
                       @click="dismissStyleFinding(finding)">保留当前译文</button>
                   </div>
+                  <p v-else class="agent-detail-description">
+                    准确性与术语建议不会通过文风操作按钮直接应用；当采纳的译文与建议文本完全一致时，服务端会自动标记为已解决。
+                  </p>
                 </div>
               </div>
             </div>
