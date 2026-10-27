@@ -4,6 +4,31 @@ import type { ParsedDocument } from '@/entrypoints/utils/document/types';
 import { assessContextGraphReadiness, isContextGraphBusy } from './documentPreprocessing';
 import { workspaceApi } from './documentWorkspaceClient';
 
+/** 预处理产出的文风基准（阅读页「全书文风基准」编辑区读取）。 */
+export interface ContextGraphOverview {
+  narrativeStyle: string;
+  styleRegister: string;
+  styleRhythm: string;
+  styleDialogue: string;
+  styleDiction: string;
+  styleRules: string[];
+  styleAvoid: string[];
+  styleGuideReady: boolean;
+  styleMissingFields: string[];
+  analysisVersion: string;
+  sourceRevisionId: string;
+  styleGuideUpdatedAt: string | null;
+}
+
+export function createEmptyContextGraphOverview(): ContextGraphOverview {
+  return {
+    narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '',
+    styleDiction: '', styleRules: [], styleAvoid: [], styleGuideReady: false,
+    styleMissingFields: [], analysisVersion: '', sourceRevisionId: '',
+    styleGuideUpdatedAt: null,
+  };
+}
+
 export interface ContextGraphDeps {
   readerConfig: Ref<Config | null>;
   workspaceProject: Ref<any>;
@@ -14,6 +39,14 @@ export interface ContextGraphDeps {
   persistenceMessage: Ref<string>;
   activeTab: Ref<string>;
   ensureWorkspace: () => Promise<any | null>;
+  /**
+   * 由调用方创建并共享的 ref。
+   *
+   * 必须在 `useLiteraryMemoryEditor()` 之前创建：那边的 watcher 会在 setup 阶段
+   * 立即读取一次，若这个 ref 由本 composable 内部 `const` 声明，而编辑器先执行，
+   * 就会命中 TDZ（`Cannot access 'contextGraphOverview' before initialization`）。
+   */
+  contextGraphOverview: Ref<ContextGraphOverview>;
 }
 
 /**
@@ -32,6 +65,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
       effectiveDocumentTranslationMode,
       persistenceMessage,
       activeTab,
+      contextGraphOverview,
     } = deps;
 
   const contextGraphState = ref<any>({
@@ -44,7 +78,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
   // 排队、运行和“正在提交启动请求”都算 busy；按钮与文案统一使用这个状态。
   const contextGraphBusy = computed(() =>
     isContextGraphBusy(contextGraphState.value.status, contextGraphAnalyzing.value));
-  const contextGraphOverview = ref<{ narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[]; styleGuideReady: boolean; styleMissingFields: string[]; analysisVersion: string; sourceRevisionId: string; styleGuideUpdatedAt: string | null }>({ narrativeStyle: '', styleRegister: '', styleRhythm: '', styleDialogue: '', styleDiction: '', styleRules: [], styleAvoid: [], styleGuideReady: false, styleMissingFields: [], analysisVersion: '', sourceRevisionId: '', styleGuideUpdatedAt: null });
   let contextGraphPollTimer: number | null = null;
   const contextGraphStatusLabel = computed(() => ({
     'not-started': '尚未运行', queued: '等待执行', running: '运行中',

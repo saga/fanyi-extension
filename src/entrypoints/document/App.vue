@@ -1052,7 +1052,7 @@ import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
 import { useAgentTrajectory } from './useAgentTrajectory';
 import { useLiteraryMemoryEditor } from './useLiteraryMemoryEditor';
-import { useContextGraph } from './useContextGraph';
+import { createEmptyContextGraphOverview, useContextGraph } from './useContextGraph';
 import {
   BUILT_IN_USER_PROMPT_TEMPLATE,
   FORMAT_LABEL,
@@ -1244,6 +1244,10 @@ const effectiveDocumentTranslationMode = computed(() =>
 /** 阅读、配置、人物/预处理、Agent 工作区和轨迹分区相互独立。 */
 const activeTab = ref<SavedDocumentTab>('reading');
 
+// 预处理文风基准由两个 composable 共享，必须在这里先创建：
+// `useLiteraryMemoryEditor` 的 watcher 会在 setup 阶段立即读取一次。
+const contextGraphOverview = ref(createEmptyContextGraphOverview());
+
 const {
   entitySearch,
   entityFilter,
@@ -1301,14 +1305,13 @@ const {
   ensureWorkspace: ensureDocumentWorkspace,
   persistenceMessage,
   persistSession: persistCurrentSession,
-  getContextGraphOverview: () => contextGraphOverview.value,
+  contextGraphOverview,
 });
 
 const {
   contextGraphState,
   contextGraphAnalyzing,
   contextGraphBusy,
-  contextGraphOverview,
   contextGraphStatusLabel,
   contextGraphPhaseLabel,
   contextGraphProgressPercent,
@@ -1332,6 +1335,7 @@ const {
   persistenceMessage,
   activeTab,
   ensureWorkspace: ensureDocumentWorkspace,
+  contextGraphOverview,
 });
 
 async function cancelTranslationRunAndReanalyzeContextGraph() {

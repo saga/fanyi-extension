@@ -8,6 +8,7 @@ import {
   type LiteraryRelationship,
 } from '@/entrypoints/utils/document/literary';
 import { workspaceApi } from './documentWorkspaceClient';
+import type { ContextGraphOverview } from './useContextGraph';
 
 export interface LiteraryMemoryEditorDeps {
   literaryMemory: Ref<LiteraryBookMemory>;
@@ -18,8 +19,14 @@ export interface LiteraryMemoryEditorDeps {
   ensureWorkspace: () => Promise<any | null>;
   persistenceMessage: Ref<string>;
   persistSession: () => Promise<void>;
-  /** 延迟读取：Context Graph 状态由 `useContextGraph` 持有，避免两个 composable 循环依赖。 */
-  getContextGraphOverview: () => { narrativeStyle: string; styleRegister: string; styleRhythm: string; styleDialogue: string; styleDiction: string; styleRules: string[]; styleAvoid: string[]; styleGuideReady?: boolean; styleMissingFields?: string[]; analysisVersion?: string; sourceRevisionId?: string; styleGuideUpdatedAt?: string | null };
+  /**
+   * 预处理文风基准。由调用方在**两个 composable 之前**创建并共享。
+   *
+   * 不要改成惰性 getter：本 composable 的 watcher 会在 setup 阶段立即读取一次，
+   * 若此时该值仍是未初始化的 `const`，会抛 TDZ 错误
+   * （`Cannot access 'contextGraphOverview' before initialization`）。
+   */
+  contextGraphOverview: Ref<ContextGraphOverview>;
 }
 
 /**
@@ -535,7 +542,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   function importContextGraphStyleGuide() {
-    const overview = deps.getContextGraphOverview();
+    const overview = deps.contextGraphOverview.value;
     if (overview.styleGuideReady !== true || !overview.analysisVersion) return;
     literaryMemory.value.styleGuide = {
       narrativeVoice: overview.narrativeStyle.trim(),
@@ -575,7 +582,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
 
   // 当前图谱版本变化时刷新机器导入的文风；用户编辑/确认过的字段不被静默覆盖。
   watch(() => {
-    const overview = deps.getContextGraphOverview();
+    const overview = deps.contextGraphOverview.value;
     return [
       overview.styleGuideReady === true,
       overview.analysisVersion || '',
@@ -585,7 +592,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       JSON.stringify(overview.styleRules || []), JSON.stringify(overview.styleAvoid || []),
     ] as const;
   }, () => {
-    const overview = deps.getContextGraphOverview();
+    const overview = deps.contextGraphOverview.value;
     if (overview.styleGuideReady !== true || !overview.analysisVersion) return;
     const currentSourceRevisionId = String(workspaceProject.value?.currentSourceRevisionId || '');
     if (currentSourceRevisionId && overview.sourceRevisionId && currentSourceRevisionId !== overview.sourceRevisionId) return;
@@ -665,6 +672,10 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     entityFilter,
     personSearch,
     nonPersonEntities,
+    suppressedEntityCount,
+    showSuppressedEntities,
+    toggleSuppressedEntities,
+    setStyleGuideAutoDisabled,
     pendingEntityCount,
     confirmedEntityCount,
     managedPeople,

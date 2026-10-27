@@ -186,6 +186,12 @@ export interface LiteraryBookMemory {
   styleGuide: LiteraryStyleGuide;
   styleGuideStatus: 'candidate' | 'confirmed';
   styleGuideConfirmationSource?: LiteraryConfirmationSource;
+  /** 文风内容来源与机器基准版本；与“用户已确认”状态分开（见 LiteraryVoiceContext 同名字段）。 */
+  styleGuideOrigin?: LiteraryStyleGuideOrigin;
+  styleGuideAnalysisVersion?: string;
+  styleGuideSourceRevisionId?: string;
+  /** 用户可停用自动机器基准，而不删除候选或覆盖用户自定义文风。 */
+  styleGuideAutoDisabled?: boolean;
   chapterSummaries: Array<{ chapter: string; summary: string }>;
   recentExamples: LiteraryExample[];
   characterVoices: CharacterVoiceProfile[];
