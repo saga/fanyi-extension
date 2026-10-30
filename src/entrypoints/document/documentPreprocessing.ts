@@ -184,6 +184,24 @@ export function preprocessingGateTitle(reason: PreprocessingBlockReason | string
   }
 }
 
+/**
+ * 「全书文风基准」徽章。
+ *
+ * 机器基准由 TranslationBrief 自动注入（`contextGraph.styleGuide`），用户改动通过
+ * `styleGuideOrigin='user-edited'` 同样自动生效，两者都不需要手动确认。
+ * 徽章只描述「当前实际在用哪一份」，不再暗示还需要一步操作。
+ */
+export function styleGuideBadge(input: {
+  autoDisabled: boolean;
+  origin: string;
+  graphReady: boolean;
+}): { label: string; tone: 'active' | 'inactive' } {
+  if (input.autoDisabled) return { label: '机器基准已停用', tone: 'inactive' };
+  if (input.origin === 'user-edited') return { label: '你的编辑已生效', tone: 'active' };
+  if (input.graphReady) return { label: '已自动应用', tone: 'active' };
+  return { label: '预处理未就绪', tone: 'inactive' };
+}
+
 export function contextGraphSnapshotFromResponse(
   projectId: string,
   graph: Record<string, any> | null | undefined,

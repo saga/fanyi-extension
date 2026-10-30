@@ -457,21 +457,20 @@
         <div class="dictionary-heading">
           <div>
             <h3>全书文风基准</h3>
-            <p class="muted small">当前版本的完整预处理文风会自动进入初译和两类 Reviewer 的 TranslationBrief；编辑器会自动补齐空字段。用户确认的自定义文风优先，风格上下文不得用于推断剧情。</p>
+            <p class="muted small">当前预处理版本的文风基准会直接进入初译和两类 Reviewer，不需要确认。改动任一字段后立即生效；整块可以停用。文风只约束语气、句法和用词，不用来推断剧情。</p>
           </div>
-          <span class="entity-status" :class="literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? 'is-confirmed' : contextGraphState.styleGuideReady ? 'is-confirmed' : 'is-pending'">
-            {{ literaryMemory.styleGuideStatus === 'confirmed' && literaryMemory.styleGuideConfirmationSource === 'user-confirmed' ? '用户已确认并注入' : literaryMemory.styleGuideOrigin === 'user-edited' ? '用户编辑的文风生效' : contextGraphState.styleGuideReady && !literaryMemory.styleGuideAutoDisabled ? '机器基准自动应用' : literaryMemory.styleGuideAutoDisabled ? '机器基准已停用' : '预处理未就绪' }}
+          <span class="entity-status" :class="styleGuideBadge.tone === 'active' ? 'is-confirmed' : 'is-pending'">
+            {{ styleGuideBadge.label }}
           </span>
         </div>
         <div class="settings-actions">
           <button class="btn" type="button"
             :disabled="!contextGraphState.styleGuideReady"
-            @click="importContextGraphStyleGuide">用当前预处理结果覆盖字段</button>
+            @click="importContextGraphStyleGuide">用预处理结果重置字段</button>
           <button v-if="contextGraphState.styleGuideReady" class="btn" type="button"
             @click="setStyleGuideAutoDisabled(!literaryMemory.styleGuideAutoDisabled)">
             {{ literaryMemory.styleGuideAutoDisabled ? '恢复机器文风基准' : '停用机器文风基准' }}
           </button>
-          <span class="muted small">正常翻译无需导入或确认；机器基准有版本并自动应用。用户确认的文风优先，机器应用不代表人工确认。</span>
         </div>
         <div class="literary-style-grid">
           <label class="field">
@@ -505,13 +504,7 @@
               @change="setStyleGuideLines('avoid', $event)"></textarea>
           </label>
         </div>
-        <div class="settings-actions">
-          <button class="btn primary" :disabled="!hasStyleGuideContent || literaryMemory.styleGuideStatus === 'confirmed'"
-            @click="setStyleGuideStatus('confirmed')">确认并注入后续翻译</button>
-          <button class="btn" :disabled="literaryMemory.styleGuideStatus !== 'confirmed'"
-            @click="setStyleGuideStatus('candidate')">撤销确认</button>
-          <span class="muted small">已确认规则属于风格约束，不应包含人物身份、秘密或剧情结论。</span>
-        </div>
+        <p class="muted small">这里只放风格约束，不要写人物身份、秘密或剧情结论。</p>
       </section>
 
       <details v-if="literaryStatus.enabled" class="panel literary-diagnostics">
@@ -1080,7 +1073,7 @@ import {
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
-import { preprocessingGateTitle, resolveDocumentTranslationMode } from './documentPreprocessing';
+import { preprocessingGateTitle, resolveDocumentTranslationMode, styleGuideBadge as computeStyleGuideBadge } from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
@@ -1257,7 +1250,6 @@ const {
   pendingCharacterVoiceCount,
   confirmedCharacterVoiceCount,
   confirmableRelationshipCount,
-  hasStyleGuideContent,
   filteredLiteraryEntities,
   rememberEntitySource,
   managedPersonSource,
@@ -1287,7 +1279,6 @@ const {
   markStyleGuideCandidate,
   setStyleGuideLines,
   importContextGraphStyleGuide,
-  setStyleGuideStatus,
 } = useLiteraryMemoryEditor({
   literaryMemory,
   doc,
@@ -1299,6 +1290,13 @@ const {
   persistSession: persistCurrentSession,
   contextGraphOverview,
 });
+
+// 文风基准默认生效，徽章只陈述当前在用的版本，不暗示还需要确认。
+const styleGuideBadge = computed(() => computeStyleGuideBadge({
+  autoDisabled: literaryMemory.value.styleGuideAutoDisabled === true,
+  origin: String(literaryMemory.value.styleGuideOrigin || ''),
+  graphReady: contextGraphOverview.value.styleGuideReady === true,
+}));
 
 const {
   contextGraphState,

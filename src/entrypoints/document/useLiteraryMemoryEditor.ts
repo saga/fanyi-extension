@@ -114,13 +114,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   const confirmableRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) =>
     relation.reviewStatus !== 'confirmed' && !!relation.subject.trim() && !!relation.predicate.trim() && !!relation.object.trim(),
   ).length);
-  const hasStyleGuideContent = computed(() => {
-    const style = literaryMemory.value.styleGuide || {};
-    return [style.narrativeVoice, style.register, style.rhythm, style.dialogue, style.diction]
-      .some((value) => typeof value === 'string' && value.trim()) ||
-      (style.rules || []).some((value) => value.trim()) ||
-      (style.avoid || []).some((value) => value.trim());
-  });
   const filteredLiteraryEntities = computed(() => {
     const query = entitySearch.value.toLocaleLowerCase();
     return (showSuppressedEntities.value ? allNonPersonEntities.value : nonPersonEntities.value)
@@ -564,22 +557,9 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     });
   }
 
-  async function setStyleGuideStatus(status: 'candidate' | 'confirmed') {
-    if (status === 'confirmed' && !hasStyleGuideContent.value) return;
-    literaryMemory.value.styleGuideStatus = status;
-    if (status === 'confirmed') {
-      literaryMemory.value.styleGuideConfirmationSource = 'user-confirmed';
-      literaryMemory.value.styleGuideOrigin = 'user-confirmed';
-    } else {
-      delete literaryMemory.value.styleGuideConfirmationSource;
-      if (literaryMemory.value.styleGuideOrigin === 'user-confirmed') literaryMemory.value.styleGuideOrigin = 'user-edited';
-    }
-    await persistLiteraryMemoryToWorkspace();
-    persistenceMessage.value = status === 'confirmed'
-      ? '全书文风基准已确认，后续文学翻译与 Reviewer 会注入这组风格规则。'
-      : '已撤销用户确认；若当前全书预处理文风完整，机器基准仍可自动应用。';
-  }
-
+  // 文风基准默认生效：机器产出走 TranslationBrief 的 contextGraph.styleGuide，
+  // 用户改动走 styleGuideOrigin='user-edited'。两者都不需要额外的「确认」动作，
+  // 所以这里不再提供确认/撤销入口。
   // 当前图谱版本变化时刷新机器导入的文风；用户编辑/确认过的字段不被静默覆盖。
   watch(() => {
     const overview = deps.contextGraphOverview.value;
@@ -684,7 +664,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     pendingCharacterVoiceCount,
     confirmedCharacterVoiceCount,
     confirmableRelationshipCount,
-    hasStyleGuideContent,
     filteredLiteraryEntities,
     rememberEntitySource,
     managedPersonSource,
@@ -714,6 +693,5 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     markStyleGuideCandidate,
     setStyleGuideLines,
     importContextGraphStyleGuide,
-    setStyleGuideStatus,
   };
 }

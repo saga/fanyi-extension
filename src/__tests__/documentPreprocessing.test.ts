@@ -5,6 +5,7 @@ import {
   isContextGraphBusy,
   preprocessingGateTitle,
   resolveDocumentTranslationMode,
+  styleGuideBadge,
 } from '../entrypoints/document/documentPreprocessing';
 
 const baseInput = {
@@ -144,8 +145,7 @@ describe('literary preprocessing status projection (informational only)', () => 
     });
   });
 
-  it('gives every block reason its own banner title', () => {
-    // 回归点：旧模板只判了 4 个 reason，其余全部落到「尚无可用的全书预处理记录」，
+  it('gives every block reason its own banner title', () => {    // 回归点：旧模板只判了 4 个 reason，其余全部落到「尚无可用的全书预处理记录」，
     // 于是「预处理完成」的运行也会显示成「没有记录」。
     const reasons = [
       'queued', 'running', 'failed', 'language', 'version',
@@ -195,5 +195,26 @@ describe('document translation mode resolution', () => {
     expect(resolveDocumentTranslationMode(false, 'technical')).toBe('technical');
     expect(resolveDocumentTranslationMode(false, undefined)).toBe('technical');
     expect(resolveDocumentTranslationMode(false, null)).toBe('technical');
+  });
+});
+
+describe('style guide badge', () => {
+  it('says the machine baseline is already applied, with no confirmation step', () => {
+    // 回归点：机器基准一直由 TranslationBrief 自动注入，但徽章与「确认并注入」按钮
+    // 让用户以为还要手动确认一次。
+    const badge = styleGuideBadge({ autoDisabled: false, origin: 'legacy-unknown', graphReady: true });
+    expect(badge).toEqual({ label: '已自动应用', tone: 'active' });
+  });
+
+  it('reports user edits and the disabled state truthfully', () => {
+    expect(styleGuideBadge({ autoDisabled: false, origin: 'user-edited', graphReady: true }).label)
+      .toBe('你的编辑已生效');
+    const disabled = styleGuideBadge({ autoDisabled: true, origin: 'user-edited', graphReady: true });
+    expect(disabled).toEqual({ label: '机器基准已停用', tone: 'inactive' });
+  });
+
+  it('does not claim an active baseline before preprocessing is ready', () => {
+    const badge = styleGuideBadge({ autoDisabled: false, origin: 'legacy-unknown', graphReady: false });
+    expect(badge).toEqual({ label: '预处理未就绪', tone: 'inactive' });
   });
 });
