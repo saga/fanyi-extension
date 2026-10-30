@@ -69,7 +69,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
     } = deps;
 
   const contextGraphState = ref<any>({
-    projectId: '', sourceRevisionId: '', segmentCount: 0, analysisVersion: '', styleGuideReady: false, styleMissingFields: [], styleGuideUpdatedAt: null,
+    projectId: '', sourceRevisionId: '', segmentCount: 0, analysisVersion: '', currentAnalysisVersion: '',
+    styleGuideReady: false, styleMissingFields: [], styleGuideUpdatedAt: null,
     counts: { characters: 0, entities: 0, relationships: 0, chapters: 0, evidencedNodes: 0 },
     status: 'not-started', phase: 'not-started', progress: {}, runId: '',
     startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
@@ -149,6 +150,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
     ready: translationPreprocessingReadiness.value.ready,
     reason: translationPreprocessingReadiness.value.reason,
     message: translationPreprocessingReadiness.value.message,
+    // 阶段名由这里统一翻译成中文；面板不要再直接显示 phase 的英文内部值。
+    phaseLabel: contextGraphPhaseLabel.value,
     progressPercent: contextGraphProgressPercent.value,
     expectedProjectId: workspaceProject.value?.projectId || '',
     expectedSourceRevisionId: workspaceProject.value?.currentSourceRevisionId || '',
@@ -201,6 +204,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
       sourceRevisionId: graph.sourceRevisionId || '',
       segmentCount: Number(graph.segmentCount || 0),
       analysisVersion: typeof graph.analysisVersion === 'string' ? graph.analysisVersion : '',
+      // 服务端当前的预处理版本；与上面这条记录自身的版本比较，扩展不再保存版本号副本。
+      currentAnalysisVersion: typeof graph.currentAnalysisVersion === 'string' ? graph.currentAnalysisVersion : '',
       styleGuideReady: graph.styleGuideReady === true,
       styleMissingFields: Array.isArray(graph.styleMissingFields) ? graph.styleMissingFields : [],
       styleGuideUpdatedAt: graph.styleGuideUpdatedAt || null,

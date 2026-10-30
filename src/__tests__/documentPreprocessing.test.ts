@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CONTEXT_GRAPH_ANALYSIS_VERSION,
   assessContextGraphReadiness,
   contextGraphSnapshotFromResponse,
   isContextGraphBusy,
+  preprocessingGateTitle,
   resolveDocumentTranslationMode,
 } from '../entrypoints/document/documentPreprocessing';
 
@@ -17,19 +17,40 @@ const baseInput = {
 const completedSnapshot = {
   projectId: 'project-1',
   sourceRevisionId: 'source-2',
+  // 服务端当前版本与记录版本一致时才算就绪。
+  currentAnalysisVersion: 'context-graph-v9-current',
   status: 'completed',
   phase: 'completed',
   runId: 'preprocess-run',
   progress: {
-    analysisVersion: CONTEXT_GRAPH_ANALYSIS_VERSION,
+    analysisVersion: 'context-graph-v9-current',
     sourceLang: 'en',
     targetLang: 'zh',
   },
 };
 
 describe('literary preprocessing status projection (informational only)', () => {
-  it('uses the same analysis version as local-agent-service Context Graph', () => {
-    expect(CONTEXT_GRAPH_ANALYSIS_VERSION).toBe('context-graph-v7-workflow-ab-style-required');
+  it('compares the record version against the version reported by the service', () => {
+    // 回归点：扩展曾硬编码 v7，服务端升到 v9 后所有已完成的记录都被误判为「版本过旧」。
+    // 版本号只允许来自服务端响应，任何本地常量都会再次漂移。
+    const matched = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, currentAnalysisVersion: 'context-graph-v10-next' },
+    });
+    expect(matched.reason).toBe('version');
+    expect(matched.message).toContain('context-graph-v10-next');
+
+    const aligned = assessContextGraphReadiness({ ...baseInput, snapshot: completedSnapshot });
+    expect(aligned.ready).toBe(true);
+  });
+
+  it('does not claim a stale record when the service did not report its current version', () => {
+    // 服务端未下发版本时不做判断：显示投影不猜版本，真正的门禁在服务端 Run。
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, currentAnalysisVersion: undefined },
+    });
+    expect(result.ready).toBe(true);
   });
 
   it('marks non-literary or non-local translation as not requiring this status', () => {
@@ -105,6 +126,7 @@ describe('literary preprocessing status projection (informational only)', () => 
   it('normalizes the API response into the same snapshot shape for both UI entry points', () => {
     const snapshot = contextGraphSnapshotFromResponse('project-1', {
       sourceRevisionId: 'source-2',
+      currentAnalysisVersion: 'context-graph-v9-current',
       runs: [{
         runId: 'preprocess-run',
         status: 'running',
@@ -115,10 +137,28 @@ describe('literary preprocessing status projection (informational only)', () => 
     expect(snapshot).toMatchObject({
       projectId: 'project-1',
       sourceRevisionId: 'source-2',
+      currentAnalysisVersion: 'context-graph-v9-current',
       runId: 'preprocess-run',
       status: 'running',
       phase: 'model-analysis',
     });
+  });
+
+  it('gives every block reason its own banner title', () => {
+    // 回归点：旧模板只判了 4 个 reason，其余全部落到「尚无可用的全书预处理记录」，
+    // 于是「预处理完成」的运行也会显示成「没有记录」。
+    const reasons = [
+      'queued', 'running', 'failed', 'language', 'version',
+      'missing', 'source-revision', 'project', 'checking',
+    ] as const;
+    const titles = reasons.map((reason) => preprocessingGateTitle(reason));
+    expect(titles.every((title) => title.length > 0)).toBe(true);
+    // queued/running 共用一条「正在准备」文案是刻意的；其余每个 reason 必须能区分开。
+    const distinctReasons = reasons.filter((reason) => reason !== 'running');
+    const distinctTitles = distinctReasons.map((reason) => preprocessingGateTitle(reason));
+    expect(new Set(distinctTitles).size).toBe(distinctReasons.length);
+    expect(preprocessingGateTitle('version')).not.toContain('没有');
+    expect(preprocessingGateTitle('missing')).toContain('没有完成');
   });
 });
 

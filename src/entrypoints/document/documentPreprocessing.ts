@@ -1,6 +1,8 @@
-/** Must stay in sync with local-agent-service/src/documents/contextGraph.ts. */
-export const CONTEXT_GRAPH_ANALYSIS_VERSION = 'context-graph-v7-workflow-ab-style-required';
-
+/**
+ * 预处理版本号只有一个来源：local-agent-service 的 `/context-graph/status` 响应
+ * （`currentAnalysisVersion` 是服务端当前版本，`run.progress.analysisVersion` 是这条记录的产出
+ * 版本）。扩展不保存任何本地副本——硬编码副本在服务端升版后会一直误报「版本过旧」。
+ */
 export type DocumentTranslationMode = 'literary' | 'technical';
 
 /**
@@ -27,6 +29,8 @@ export function resolveDocumentTranslationMode(
 export interface ContextGraphPreprocessingSnapshot {
   projectId?: string;
   sourceRevisionId?: string;
+  /** 服务端当前的预处理版本（`currentAnalysisVersion`）。 */
+  currentAnalysisVersion?: string;
   status?: string;
   phase?: string;
   runId?: string;
@@ -127,10 +131,15 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
   }
 
   const progress = snapshot.progress || {};
-  if (progress.analysisVersion !== CONTEXT_GRAPH_ANALYSIS_VERSION) {
+  // 版本比较必须用服务端下发的 currentAnalysisVersion，不能和扩展内的常量比。
+  // 服务端没下发版本时不做判断：这里只是显示投影，真正的门禁由服务端 Run 负责，
+  // 宁可不提示，也不要凭空断言「版本过旧」把用户骗去重跑一次 8 分钟的全书分析。
+  const currentAnalysisVersion = String(snapshot.currentAnalysisVersion || '');
+  if (currentAnalysisVersion && String(progress.analysisVersion || '') !== currentAnalysisVersion) {
     return {
       required: true, ready: false, reason: 'version',
-      message: '全书预处理版本过旧或不兼容。服务端会在文学 Run 中重新检查并按需分析；也可以手动重新分析。',
+      message: '这条预处理记录由旧版分析产出（' + (progress.analysisVersion || '未知版本') + '，当前 ' +
+        currentAnalysisVersion + '）。服务端会在文学 Run 中自动重新分析；也可以手动重新分析。',
     };
   }
   const sourceLang = input.sourceLang || 'auto';
@@ -146,6 +155,35 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
   return { required: true, ready: true, reason: 'not-required', message: '' };
 }
 
+/**
+ * 阅读页预处理提示卡的标题。
+ *
+ * 每个 reason 必须有独立文案：`version`（记录由旧版产出）、`missing`（确实没有记录）和
+ * `checking`（还没读到状态）是三种完全不同的情况，统一显示成「尚无可用的全书预处理记录」
+ * 会和同一张卡片里的「全书预处理完成」自相矛盾。
+ */
+export function preprocessingGateTitle(reason: PreprocessingBlockReason | string): string {
+  switch (reason) {
+    case 'queued':
+    case 'running':
+      return '本机服务正在准备全书上下文';
+    case 'failed':
+      return '上次全书预处理失败';
+    case 'language':
+      return '将按当前语言设置准备全书上下文';
+    case 'version':
+      return '预处理记录版本已更新，翻译时会自动重新分析';
+    case 'missing':
+      return '当前原文版本还没有完成全书预处理';
+    case 'source-revision':
+      return '正在同步当前文档的原文版本';
+    case 'project':
+      return '正在同步当前文档的本机项目状态';
+    default:
+      return '正在确认全书预处理状态';
+  }
+}
+
 export function contextGraphSnapshotFromResponse(
   projectId: string,
   graph: Record<string, any> | null | undefined,
@@ -155,6 +193,7 @@ export function contextGraphSnapshotFromResponse(
   return {
     projectId,
     sourceRevisionId: typeof graph?.sourceRevisionId === 'string' ? graph.sourceRevisionId : '',
+    currentAnalysisVersion: typeof graph?.currentAnalysisVersion === 'string' ? graph.currentAnalysisVersion : '',
     status: typeof run?.status === 'string' ? run.status : 'not-started',
     phase: typeof run?.phase === 'string' ? run.phase : 'not-started',
     runId: typeof run?.runId === 'string' ? run.runId : '',

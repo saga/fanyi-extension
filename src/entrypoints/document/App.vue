@@ -100,15 +100,7 @@
         aria-live="polite"
       >
         <div class="preprocessing-gate-copy">
-          <strong>
-            {{ translationPreprocessingReadiness.reason === 'queued' || translationPreprocessingReadiness.reason === 'running'
-              ? '本机服务正在准备全书上下文'
-              : translationPreprocessingReadiness.reason === 'failed'
-                ? '上次全书预处理失败'
-                : translationPreprocessingReadiness.reason === 'language'
-                  ? '将按当前语言设置准备全书上下文'
-                  : '当前原文版本尚无可用的全书预处理记录' }}
-          </strong>
+          <strong>{{ preprocessingGateTitle(translationPreprocessingReadiness.reason) }}</strong>
           <p>点击开始文学翻译后，local-agent-service 会核对原文版本、分析版本和语言，并在服务端自动启动或等待预处理。全书分析、原文证据和章节摘要不会复制进扩展的 LiteraryMemory。</p>
           <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
             预处理任务 {{ contextGraphState.runId }}
@@ -450,7 +442,7 @@
         </p>
         <p class="warn" v-if="contextGraphState.error">{{ contextGraphState.error }}</p>
         <p class="warn" v-else-if="contextGraphState.status === 'completed' && translationPreprocessingReadiness.reason === 'version'">
-          这是一轮旧版预处理记录，未包含当前版本要求的完整文风维度。点击“重新分析全书”后会使用新的分阶段/单次 A/B 策略重新生成；已有译文不会被改写。
+          这条记录由旧版预处理产出（{{ contextGraphState.analysisVersion || '未知版本' }}），当前服务端版本是 {{ contextGraphState.currentAnalysisVersion }}。翻译 Run 会自动按当前版本重新分析；也可以点击“重新分析全书”。已有译文不会被改写。
         </p>
         <p class="warn" v-else-if="contextGraphState.status === 'completed' && contextGraphState.counts.characters + contextGraphState.counts.entities === 0">
           预处理已结束，但没有保存任何有原文证据的人物或实体。请检查本轮模型响应、抽样内容与证据校验计数；可重新分析。
@@ -1088,7 +1080,7 @@ import {
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
-import { resolveDocumentTranslationMode } from './documentPreprocessing';
+import { preprocessingGateTitle, resolveDocumentTranslationMode } from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';

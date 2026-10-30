@@ -1,11 +1,9 @@
 <template>
   <section class="document-agent-workspace">
     <header class="agent-hero">
-      <div class="agent-kicker">文档翻译 · Agent</div>
       <div class="agent-hero-main">
         <div class="agent-title-copy">
           <h2>{{ title }}</h2>
-          <p>翻译、审校、保存进度会自动完成。你可以随时回到阅读页查看结果。</p>
         </div>
         <span class="agent-format">{{ format.toUpperCase() }}</span>
       </div>
@@ -19,8 +17,8 @@
     </header>
 
     <section v-if="!useLocalAgent" class="agent-notice">
-      <strong>启用本机 Agent 后即可开始</strong>
-      <p>请先到“设置与记忆”启用 Workbuddy 或 OpenCode。启用后，Agent 会自动建立项目、翻译内容并保存进度。</p>
+      <strong>需要先启用本机 Agent</strong>
+      <p>在“设置与记忆”里启用 Workbuddy 或 OpenCode 后即可开始。</p>
     </section>
 
     <section
@@ -31,16 +29,11 @@
       aria-live="polite"
     >
       <div class="agent-preprocessing-copy">
-        <strong>
-          {{ ['queued', 'running'].includes(preprocessingState.status)
-            ? '本机服务正在准备全书上下文'
-            : preprocessingState.reason === 'failed'
-              ? '上次全书预处理失败'
-              : '当前预处理状态尚未就绪' }}
-        </strong>
+        <strong>{{ preprocessingGateTitle(preprocessingState.reason) }}</strong>
         <p>{{ preprocessingState.message }}</p>
         <p v-if="preprocessingState.runId" class="agent-footnote">
-          预处理任务 {{ preprocessingState.runId }} · {{ preprocessingState.phase || '等待状态' }}
+          预处理任务 {{ preprocessingState.runId.slice(0, 8) }}
+          <template v-if="preprocessingState.phaseLabel"> · {{ preprocessingState.phaseLabel }}</template>
         </p>
         <div
           v-if="['queued', 'running'].includes(preprocessingState.status)"
@@ -54,7 +47,7 @@
         </div>
       </div>
       <button class="agent-button agent-button-secondary" type="button" @click="emit('openPreprocessing')">
-        {{ ['queued', 'running'].includes(preprocessingState.status) ? '查看预处理进度' : '打开预处理状态' }}
+        {{ ['queued', 'running'].includes(preprocessingState.status) ? '查看进度' : '查看预处理' }}
       </button>
     </section>
 
@@ -80,7 +73,7 @@
         <div class="agent-state-mark" aria-hidden="true">文</div>
         <div class="agent-ready-copy">
           <h3>准备好开始翻译</h3>
-          <p>首次运行会自动建立本机项目。之后直接续译未完成内容，不会要求你手动填写译文。</p>
+          <p>首次运行会自动建立本机项目，之后直接从上次的位置继续。</p>
         </div>
         <button
           class="agent-button agent-button-primary agent-button-large"
@@ -105,26 +98,23 @@
       <section v-else class="agent-work-card agent-progress-card">
         <div class="agent-progress-heading">
           <div class="agent-progress-copy">
-            <div class="agent-section-kicker">{{ isRunning ? '正在处理' : pendingSegmentCount > 0 ? '等待继续' : '翻译状态' }}</div>
-            <h3>{{ isRunning ? 'Agent 正在翻译这份文档' : pendingSegmentCount > 0 ? '继续完成这份文档' : '这份文档已完成' }}</h3>
-            <p v-if="isRunning">翻译结果会自动保存。关闭此页面也不会删除已经记录的进度。</p>
-            <p v-else-if="pendingSegmentCount > 0">Agent 会自动处理所有未完成或已过期的内容，并保留已完成的人工修订。</p>
-            <p v-else>所有段落都已有当前有效译文。可以返回阅读，或在“更多选项”中重新翻译。</p>
+            <div class="agent-section-kicker">{{ progressCopy.kicker }}</div>
+            <h3>{{ progressCopy.title }}</h3>
+            <p>{{ progressCopy.description }}</p>
           </div>
-          <div class="agent-progress-number" :class="{ 'is-complete': pendingSegmentCount === 0 && !isRunning }">
+          <div v-if="progressCopy.showProgress" class="agent-progress-number" :class="{ 'is-complete': progressCopy.phase === 'complete' }">
             <strong>{{ isRunning ? runProgressPercent : documentProgressPercent }}%</strong>
-            <span>{{ isRunning ? '本次任务' : '全书完成度' }}</span>
+            <span>{{ progressCopy.percentLabel }}</span>
           </div>
         </div>
 
-        <div class="agent-progress-track" role="progressbar" :aria-valuenow="isRunning ? runProgressPercent : documentProgressPercent" aria-valuemin="0" aria-valuemax="100">
+        <div v-if="progressCopy.showProgress" class="agent-progress-track" role="progressbar" :aria-valuenow="isRunning ? runProgressPercent : documentProgressPercent" aria-valuemin="0" aria-valuemax="100">
           <div class="agent-progress-fill" :style="{ width: (isRunning ? runProgressPercent : documentProgressPercent) + '%' }"></div>
         </div>
 
-        <div class="agent-progress-foot">
-          <span>{{ acceptedSegmentCount.toLocaleString() }} / {{ totalSegmentCount.toLocaleString() }} 段已采用</span>
-          <span v-if="pendingSegmentCount > 0">{{ pendingSegmentCount.toLocaleString() }} 段待处理</span>
-          <span v-else>没有待处理段落</span>
+        <div v-if="progressCopy.phase !== 'idle'" class="agent-progress-foot">
+          <span>已翻译 {{ acceptedSegmentCount.toLocaleString() }} / {{ totalSegmentCount.toLocaleString() }} 段</span>
+          <span v-if="pendingSegmentCount > 0">还有 {{ pendingSegmentCount.toLocaleString() }} 段</span>
         </div>
 
         <div class="agent-main-actions">
@@ -134,28 +124,28 @@
             disabled
           >
             <span class="agent-spinner" aria-hidden="true"></span>
-            正在翻译…
+            {{ progressCopy.actionLabel }}
           </button>
           <button
-            v-else-if="pendingSegmentCount > 0"
+            v-else-if="progressCopy.actionLabel"
             class="agent-button agent-button-primary agent-button-large"
             :disabled="busy || sourceChanged"
             @click="startRun('stale')"
           >
-            {{ busy ? '正在准备…' : acceptedSegmentCount > 0 ? '继续翻译' : '开始翻译' }}
-            <span v-if="pendingSegmentCount > 0" class="agent-button-count">{{ pendingSegmentCount.toLocaleString() }}</span>
+            {{ busy ? '正在准备…' : progressCopy.actionLabel }}
+            <span v-if="progressCopy.phase === 'idle'" class="agent-button-count">{{ totalSegmentCount.toLocaleString() }}</span>
           </button>
           <span v-else class="agent-complete-label"><span aria-hidden="true">✓</span> 翻译已完成</span>
           <button v-if="isRunning" class="agent-button agent-button-secondary" :disabled="busy" @click="cancelRun">停止</button>
         </div>
 
         <div v-if="autoAcceptingRunId && autoAcceptingRunId === activeRun?.runId" class="agent-inline-status">
-          正在自动保存译文并同步到阅读页…
+          正在保存译文…
         </div>
-        <div v-else-if="activeRun && !isRunning && (activeRun.counts?.candidate || 0) > 0" class="agent-pending-output">
+        <div v-else-if="autoAcceptable" class="agent-pending-output">
           <div>
-            <strong>{{ autoAcceptError ? '自动保存失败' : '译文已生成，正在保存' }}</strong>
-            <p>{{ autoAcceptError || '正在把已生成的译文写入项目并同步到阅读页；不需要重新翻译。' }}</p>
+            <strong>{{ autoAcceptError ? '保存失败' : '译文已生成，等待保存' }}</strong>
+            <p>{{ autoAcceptError ? humanizeAgentError(autoAcceptError) : '这批译文已经生成，保存后会同步到阅读页，不需要重新翻译。' }}</p>
           </div>
           <button class="agent-button agent-button-secondary" :disabled="busy || !!autoAcceptingRunId" @click="autoAcceptReadyCandidates">
             {{ autoAcceptError ? '重试保存' : '立即保存' }}
@@ -167,9 +157,9 @@
           <span>{{ runStatusLabel(activeRun.status) }}</span>
           <span class="agent-meta-dot">·</span>
           <span>最近运行 {{ new Date(activeRun.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</span>
-          <span v-if="activeRun.counts?.failed" class="agent-run-failure">{{ activeRun.counts.failed }} 段未完成，可仅重试这些片段</span>
+          <span v-if="activeRun.counts?.failed" class="agent-run-failure">{{ activeRun.counts.failed }} 段未完成，可只重试这些片段</span>
         </div>
-        <p v-if="activeRun.error" class="agent-failed-segment-error agent-run-error">{{ activeRun.error }}</p>
+        <p v-if="runErrorCopy" class="agent-failed-segment-error agent-run-error">{{ runErrorCopy }}</p>
         <details v-if="failedRunSegments.length" class="agent-failed-segments">
           <summary>查看未完成片段的原因（{{ failedRunSegments.length }} 段）</summary>
           <p class="agent-detail-description">这里列出每个未完成片段最后一次记录的原因、尝试次数和原文摘要。若提示“模型未返回完整的片段集合”，请展开“Agent 执行轨迹”，查看模型调用与重试事件。</p>
@@ -191,7 +181,7 @@
       <details class="agent-options">
         <summary>
           <span>更多选项</span>
-          <span class="agent-options-hint">手动修订、重试、重新翻译与历史记录</span>
+          <span class="agent-options-hint">重试、重译与历史记录</span>
         </summary>
         <div class="agent-options-content">
           <section class="agent-option-group">
@@ -416,6 +406,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
+  agentProgressCopy,
+  canAutoAcceptRun,
+  humanizeAgentError,
+  pickInitialRun,
+} from './documentAgentPresentation';
+import { preprocessingGateTitle } from './documentPreprocessing';
+import {
   backupWorkspaceSourceFile,
   importDocumentFileViaLocalAgent,
   importWorkspaceTranslations,
@@ -483,6 +480,8 @@ const props = defineProps<{
     message: string;
     status: string;
     phase: string;
+    /** 父组件给出的中文阶段名；缺失时只显示 runId。 */
+    phaseLabel?: string;
     runId: string;
     progressPercent: number;
     projectId: string;
@@ -560,6 +559,16 @@ const pendingSegmentCount = computed(() => {
 const documentProgressPercent = computed(() => totalSegmentCount.value
   ? Math.round(Math.min(100, acceptedSegmentCount.value / totalSegmentCount.value * 100))
   : 100);
+// 主卡片文案与三态判定集中在这里，避免模板里堆嵌套三元。
+const progressCopy = computed(() => agentProgressCopy({
+  isRunning: isRunning.value,
+  acceptedSegments: acceptedSegmentCount.value,
+  totalSegments: totalSegmentCount.value,
+  pendingSegments: pendingSegmentCount.value,
+}));
+// 只有可结算的 Run 才显示「保存」区块；failed/paused 里的候选要先把 Run 恢复。
+const autoAcceptable = computed(() => !isRunning.value && canAutoAcceptRun(activeRun.value));
+const runErrorCopy = computed(() => humanizeAgentError(activeRun.value?.error));
 const runProgressPercent = computed(() => {
   const counts = activeRun.value?.counts;
   if (!counts || !Number(counts.total)) return documentProgressPercent.value;
@@ -919,7 +928,8 @@ async function loadExistingProject() {
 
     // Existing service projects are read-only during discovery. Do not push cached Prompt,
     // accepted translations or literary-memory snapshots over the authoritative SQLite state.
-    const active = runs.value.find((run) => ['queued', 'running', 'paused', 'awaiting_acceptance', 'partial'].includes(run.status)) || runs.value[0];
+    // 自动修复子 Run 会出现在 runs[0]，但它不是用户发起的任务；优先选正在跑的或最近一次人工 Run。
+    const active = pickInitialRun(runs.value);
     if (active) await selectRun(active.runId);
     if (!isCurrent()) return;
     // A previous session may have ended after candidates were saved but before they were applied.
@@ -1407,8 +1417,10 @@ async function autoAcceptReadyCandidates() {
   autoAcceptError.value = '';
   try {
     const succeeded = await acceptCandidates(undefined, true);
-    if (isCurrent() && !succeeded && activeRun.value?.runId === runId && Number(activeRun.value.counts?.candidate || 0) > 0) {
-      autoAcceptError.value = error.value || '保存接口未能确认候选已写入。请重试保存；原始模型结果仍保存在运行记录中。';
+    if (isCurrent() && !succeeded && !autoAcceptError.value &&
+        activeRun.value?.runId === runId && Number(activeRun.value.counts?.candidate || 0) > 0) {
+      // acceptCandidates 已写具体原因时不要覆盖；这里只兜「没有失败也没有写入」的情况。
+      autoAcceptError.value = '保存没有完成，请重试。译文仍保存在运行记录里，不会丢。';
     }
   } finally {
     if (isCurrent() && autoAcceptingRunId.value === runId) autoAcceptingRunId.value = '';
@@ -1480,14 +1492,17 @@ async function acceptCandidates(segmentIds?: string[], automatic = false): Promi
     .map((segment: any) => ({ id: segment.id as string, text: segment.candidateTranslation as string }));
   const requested = segmentIds?.length ? new Set(segmentIds) : new Set(candidates.map((item) => item.id));
   if (!requested.size) {
-    error.value = '运行记录显示有候选数量，但没有读取到对应的候选片段。正在重新读取运行详情，请稍后重试。';
+    const reason = '这次运行没有留下可保存的译文。';
     if (automatic) {
+      autoAcceptError.value = reason;
       try {
         const latest = await api('/api/documents/projects/' + encodeURIComponent(projectId) + '/runs/' + encodeURIComponent(runId));
         if (isCurrent() && project.value?.projectId === projectId && activeRun.value?.runId === runId) activeRun.value = latest.run;
       } catch (e) {
-        error.value += '读取运行详情失败：' + (e instanceof Error ? e.message : String(e));
+        autoAcceptError.value = reason + '刷新运行详情也失败了：' + (e instanceof Error ? e.message : String(e));
       }
+    } else {
+      error.value = reason + '请刷新状态后重试。';
     }
     return false;
   }
@@ -1513,8 +1528,9 @@ async function acceptCandidates(segmentIds?: string[], automatic = false): Promi
     return true;
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    if (isCurrent()) error.value = detail;
-    if (isCurrent() && automatic) autoAcceptError.value = '自动保存失败：' + detail;
+    // 自动保存在卡片内单独提示；同时写全局 error 会让同一句话在页面底部再出现一次。
+    if (isCurrent() && automatic) autoAcceptError.value = detail;
+    else if (isCurrent()) error.value = detail;
     return false;
   } finally {
     if (isCurrent()) busy.value = false;
@@ -1606,7 +1622,7 @@ onUnmounted(() => {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif;
 }
 .agent-hero { padding: .25rem .1rem .5rem; }
-.agent-kicker, .agent-section-kicker {
+.agent-section-kicker {
   color: var(--agent-secondary);
   font-size: .76rem;
   font-weight: 650;
@@ -1627,13 +1643,6 @@ onUnmounted(() => {
   font-weight: 680;
   letter-spacing: -.035em;
   overflow-wrap: anywhere;
-}
-.agent-title-copy p {
-  max-width: 42rem;
-  margin: .55rem 0 0;
-  color: var(--agent-secondary);
-  line-height: 1.6;
-  font-size: .94rem;
 }
 .agent-format {
   flex-shrink: 0;
