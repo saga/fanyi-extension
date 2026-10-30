@@ -1064,6 +1064,7 @@ import {
   backupWorkspaceSourceFile,
   importDocumentFileViaLocalAgent,
   importWorkspaceTranslations,
+  isServiceUnreachableError,
   loadWorkspaceAcceptedTranslations,
   loadWorkspaceParsedDocument,
   parsedDocumentFromLocalAgentPreview,
@@ -1521,6 +1522,7 @@ watch(
 onUnmounted(() => {
   clearContextGraphPoll();
   stopAgentTrajectoryPolling();
+  clearServiceReconnectProbe();
   if (preprocessingClockTimer !== null) {
     window.clearInterval(preprocessingClockTimer);
     preprocessingClockTimer = null;
@@ -3106,6 +3108,92 @@ async function autoAcceptWorkspaceRunCandidates(
 }
 
 /**
+ * 本机服务重启（`tsx watch` 改一个文件就会重启）期间，轮询里的某一次请求必然拿不到响应。
+ *
+ * 以前这里直接让错误冒泡，整条轮询链就此结束：服务几十秒后恢复了，界面却永远停在
+ * 「无法连接本机服务」，因为已经没有东西会再去问它一次。现在只在连续失败超过上限后
+ * 才真正放弃，期间把阶段文案换成"正在重连"，让用户看到它还在努力。
+ */
+const WORKSPACE_RECONNECT_MAX_ATTEMPTS = 20;
+const WORKSPACE_RECONNECT_DELAY_MS = 3_000;
+
+async function workspaceApiWithReconnect<T>(
+  call: () => Promise<T>,
+  options: { shouldContinue?: () => boolean; onWaiting?: (attempt: number) => void } = {},
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      const retryable = isServiceUnreachableError(error) &&
+        attempt <= WORKSPACE_RECONNECT_MAX_ATTEMPTS &&
+        (options.shouldContinue ? options.shouldContinue() : true);
+      if (!retryable) throw error;
+      options.onWaiting?.(attempt);
+      await new Promise((resolve) => setTimeout(resolve, WORKSPACE_RECONNECT_DELAY_MS));
+    }
+  }
+}
+
+/**
+ * 轮询结束后残留的连接类错误需要有人清掉。
+ *
+ * 这条文案是上一轮轮询写的，而那一轮已经结束，所以服务恢复后没有任何代码会再碰它。
+ * 只要当前显示的错误仍然是"连不上"，就用最便宜的列表接口有限次重探，一应答就抹掉文案。
+ */
+const SERVICE_RECONNECT_PROBE_DELAY_MS = 3_000;
+const SERVICE_RECONNECT_PROBE_MAX_ATTEMPTS = 60;
+let serviceReconnectProbeTimer: ReturnType<typeof setTimeout> | null = null;
+let serviceReconnectProbeAttempts = 0;
+let serviceUnreachableMessage = '';
+
+function clearServiceReconnectProbe() {
+  if (serviceReconnectProbeTimer !== null) clearTimeout(serviceReconnectProbeTimer);
+  serviceReconnectProbeTimer = null;
+  serviceReconnectProbeAttempts = 0;
+  serviceUnreachableMessage = '';
+}
+
+function scheduleServiceReconnectProbe() {
+  if (serviceReconnectProbeTimer !== null) return;
+  serviceReconnectProbeTimer = setTimeout(async () => {
+    serviceReconnectProbeTimer = null;
+    // 用户已经做了别的操作（文案被清空或被换成新内容），就不该再动这条错误。
+    if (!serviceUnreachableMessage || state.value.error !== serviceUnreachableMessage) {
+      clearServiceReconnectProbe();
+      return;
+    }
+    if (serviceReconnectProbeAttempts >= SERVICE_RECONNECT_PROBE_MAX_ATTEMPTS) return;
+    serviceReconnectProbeAttempts++;
+    try {
+      await workspaceApi(
+        readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+        readerConfig.value?.documentLocalAgentToken || '',
+        '/api/documents/projects',
+      );
+      const staleMessage = serviceUnreachableMessage;
+      clearServiceReconnectProbe();
+      if (state.value.error === staleMessage) {
+        state.value.error = '';
+        await persistCurrentSession();
+      }
+    } catch {
+      scheduleServiceReconnectProbe();
+    }
+  }, SERVICE_RECONNECT_PROBE_DELAY_MS);
+}
+
+/** 只在确实是"连不上"时才启动重探；404/409 这类服务已应答的错误不重试。 */
+function reportWorkspaceConnectionFailure(prefix: string, error: unknown) {
+  const message = prefix + (error instanceof Error ? error.message : String(error));
+  state.value.error = message;
+  if (!isServiceUnreachableError(error)) return;
+  clearServiceReconnectProbe();
+  serviceUnreachableMessage = message;
+  scheduleServiceReconnectProbe();
+}
+
+/**
  * 当用户从 Agent Tab 回到阅读页时，接管同一条已经存在的运行记录。
  * 两个界面遵守相同规则：后台运行完成后自动保存译文，不再要求用户逐条采纳。
  */
@@ -3128,10 +3216,18 @@ async function followWorkspaceRun(project: any, initialRun: any) {
   try {
     let run = initialRun;
     while (workspaceRunId.value === runId && workspaceRunGeneration.value === generation) {
-      const current = await workspaceApi<{ run: any }>(
-        readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-        readerConfig.value?.documentLocalAgentToken || '',
-        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
+      const current = await workspaceApiWithReconnect(
+        () => workspaceApi<{ run: any }>(
+          readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+          readerConfig.value?.documentLocalAgentToken || '',
+          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
+        ),
+        {
+          shouldContinue: () => workspaceRunId.value === runId && workspaceRunGeneration.value === generation,
+          onWaiting: (attempt) => {
+            state.value.workStage = '本机服务暂时不可达，正在重连（第 ' + attempt + ' 次）';
+          },
+        },
       );
       run = current.run;
       workspaceActiveRun.value = run;
@@ -3186,7 +3282,10 @@ async function followWorkspaceRun(project: any, initialRun: any) {
       state.value.error = run.error || 'workspace 运行尚未全部完成，可到“翻译 Agent”继续或重试。';
     }
   } catch (error) {
-    state.value.error = '读取 workspace 运行状态失败：' + (error instanceof Error ? error.message : String(error));
+    // 用户主动停止会改动 generation，这时不该把"已取消"显示成失败。
+    if (workspaceRunGeneration.value === generation) {
+      reportWorkspaceConnectionFailure('读取 workspace 运行状态失败：', error);
+    }
   } finally {
     if (workspaceRunGeneration.value === generation && workspaceRunId.value === runId) {
       state.value.running = false;

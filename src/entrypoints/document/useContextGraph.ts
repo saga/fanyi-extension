@@ -2,7 +2,7 @@ import { computed, ref, type Ref } from 'vue';
 import { getConfig, type Config } from '@/entrypoints/utils/config';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
 import { assessContextGraphReadiness, isContextGraphBusy } from './documentPreprocessing';
-import { workspaceApi } from './documentWorkspaceClient';
+import { isServiceUnreachableError, workspaceApi } from './documentWorkspaceClient';
 
 /** 预处理产出的文风基准（阅读页「全书文风基准」编辑区读取）。 */
 export interface ContextGraphOverview {
@@ -80,6 +80,9 @@ export function useContextGraph(deps: ContextGraphDeps) {
   const contextGraphBusy = computed(() =>
     isContextGraphBusy(contextGraphState.value.status, contextGraphAnalyzing.value));
   let contextGraphPollTimer: number | null = null;
+  /** 服务不可达时的连续重连上限，避免本机服务长期离线时无限轮询。 */
+  const CONTEXT_GRAPH_RECONNECT_MAX_ATTEMPTS = 20;
+  let contextGraphReconnectAttempts = 0;
   const contextGraphStatusLabel = computed(() => ({
     'not-started': '尚未运行', queued: '等待执行', running: '运行中',
     completed: '已完成', failed: '失败',
@@ -241,6 +244,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
     try {
       await loadContextGraph(project, schedulePoll);
+      contextGraphReconnectAttempts = 0;
       // Status is a display projection only. Graph entities/evidence never get copied into UI memory.
     } catch (error) {
       contextGraphState.value = {
@@ -250,6 +254,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
         checkedAt: new Date().toISOString(),
         error: error instanceof Error ? error.message : String(error),
       };
+      // 服务重启期间的单次失败不该终止状态刷新，否则服务恢复后预处理面板永远停在错误上。
+      if (schedulePoll && isServiceUnreachableError(error) &&
+          contextGraphReconnectAttempts < CONTEXT_GRAPH_RECONNECT_MAX_ATTEMPTS) {
+        contextGraphReconnectAttempts++;
+        scheduleContextGraphPoll(project.projectId);
+      }
     }
   }
 

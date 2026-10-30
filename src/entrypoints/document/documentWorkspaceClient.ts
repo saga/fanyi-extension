@@ -265,6 +265,17 @@ export class WorkspaceApiError extends Error {
 }
 
 /**
+ * 传输层失败：请求没有拿到任何 HTTP 响应（服务进程没起来、正在重启、端口暂时不监听）。
+ *
+ * `workspaceApi` 已经把这类失败统一收敛成 status=0，所以调用方可以按状态码判断，
+ * 不必去匹配「无法连接本机服务」这类会随文案改动的字符串。必须和 404/409/500 区分开：
+ * 服务已经应答的业务错误重连多少次都没用，而 status=0 恰恰是唯一值得重连的情况。
+ */
+export function isServiceUnreachableError(error: unknown): boolean {
+  return error instanceof WorkspaceApiError && error.status === 0;
+}
+
+/**
  * 本机服务的错误体有两种形状，必须都解析出可读文案：
  *   - 401 / 404 走 OpenAI 风格嵌套：{ error: { message, type } }
  *   - 其余端点走扁平字符串：{ error: '...' }

@@ -416,6 +416,7 @@ import {
   backupWorkspaceSourceFile,
   importDocumentFileViaLocalAgent,
   importWorkspaceTranslations,
+  isServiceUnreachableError,
   loadWorkspaceAcceptedTranslations,
   lookupWorkspaceProject,
   rememberWorkspaceProject,
@@ -517,6 +518,10 @@ const message = ref('');
 const selectedSegmentId = ref('');
 const manualText = ref('');
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
+/** 连续重连上限：约 20 × 1.2s ≈ 24s，足够覆盖一次 tsx watch 重启。 */
+const POLL_RECONNECT_MAX_ATTEMPTS = 20;
+let pollReconnectAttempts = 0;
+let pollErrorIsConnection = false;
 let disposed = false;
 /** Invalidates async responses when the parent switches the currently open document. */
 let workspaceSourceGeneration = 0;
@@ -1319,6 +1324,12 @@ function schedulePoll(runId: string) {
     if (!isCurrentWorkspaceGeneration(generation) || !projectId || project.value?.projectId !== projectId) return;
     try {
       await refreshRun(runId);
+      pollReconnectAttempts = 0;
+      // 服务恢复后，之前那条"连不上"的提示要自己消失，否则面板看起来像一直坏的。
+      if (pollErrorIsConnection) {
+        pollErrorIsConnection = false;
+        error.value = '';
+      }
       if (!isCurrentWorkspaceGeneration(generation) || project.value?.projectId !== projectId) return;
       if (isRunning.value) schedulePoll(runId);
       else {
@@ -1343,7 +1354,15 @@ function schedulePoll(runId: string) {
         await autoAcceptReadyCandidates();
       }
     } catch (e) {
-      if (isCurrentWorkspaceGeneration(generation)) error.value = e instanceof Error ? e.message : String(e);
+      if (!isCurrentWorkspaceGeneration(generation)) return;
+      error.value = e instanceof Error ? e.message : String(e);
+      // 本机服务重启（改文件触发 tsx watch 就会重启）期间的这一次失败不该终止轮询：
+      // 否则服务几十秒后恢复了，这个面板再也不会自己更新，只剩一条永远不消失的报错。
+      pollErrorIsConnection = isServiceUnreachableError(e);
+      if (pollErrorIsConnection && pollReconnectAttempts < POLL_RECONNECT_MAX_ATTEMPTS) {
+        pollReconnectAttempts++;
+        schedulePoll(runId);
+      }
     }
   }, 1200);
 }
