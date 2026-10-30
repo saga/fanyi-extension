@@ -276,6 +276,21 @@ export function isServiceUnreachableError(error: unknown): boolean {
 }
 
 /**
+ * 判断一段**已经落盘**的错误文案是否属于"连不上本机服务"。
+ *
+ * 新代码用 status=0 判断，不需要匹配文案；这个函数只用于清理历史快照：
+ * 阅读会话快照曾经把 `state.error` 一起存进 SQLite/IndexedDB，于是服务恢复、甚至换了
+ * 一台机器之后，用户每次打开文档都会被恢复一条「无法连接本机服务…」——它看起来像是
+ * 刚刚发生，实际是几小时前某次服务重启的残留，而且永远不会自己消失。
+ */
+const SERVICE_CONNECTIVITY_MESSAGE =
+  /无法连接本机服务|Failed to fetch|NetworkError|Load failed|在 \d+ 秒内没有响应/i;
+
+export function isServiceConnectivityMessage(value: unknown): boolean {
+  return typeof value === 'string' && SERVICE_CONNECTIVITY_MESSAGE.test(value);
+}
+
+/**
  * 本机服务的错误体有两种形状，必须都解析出可读文案：
  *   - 401 / 404 走 OpenAI 风格嵌套：{ error: { message, type } }
  *   - 其余端点走扁平字符串：{ error: '...' }

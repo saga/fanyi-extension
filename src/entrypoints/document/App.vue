@@ -1033,6 +1033,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
+import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
 import { useAgentTrajectory } from './useAgentTrajectory';
@@ -1064,6 +1065,7 @@ import {
   backupWorkspaceSourceFile,
   importDocumentFileViaLocalAgent,
   importWorkspaceTranslations,
+  isServiceConnectivityMessage,
   isServiceUnreachableError,
   loadWorkspaceAcceptedTranslations,
   loadWorkspaceParsedDocument,
@@ -1472,7 +1474,7 @@ watch(activeTab, async (nextTab, previousTab) => {
       await followWorkspaceRun(project, active);
     }
   } catch (error) {
-    state.value.error = '同步 workspace 状态失败：' + (error instanceof Error ? error.message : String(error));
+    reportWorkspaceConnectionFailure('同步 workspace 状态失败：', error);
   }
 });
 
@@ -1789,6 +1791,14 @@ async function refreshSavedSessionSummary() {
 }
 
 const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
+/**
+ * 阅读会话副本的读写必须自带超时。
+ *
+ * 端口被代理接管或服务假活时，fetch 既不成功也不失败，Promise 会一直悬着；
+ * `restoreLastSession` 在拿到结果前一直停在 parsing 状态，用户看到的就是"打开文档卡住"。
+ * 这些请求都是尽力而为的恢复副本，超时后按失败处理即可，不该拖住阅读页。
+ */
+const LOCAL_SESSION_REQUEST_TIMEOUT_MS = 8_000;
 let localSessionDocumentSaved = false;
 let localSessionDisabled = false;
 /** 只跟踪真正成功写入 SQLite 的译文，不能复用 IndexedDB 的持久化游标。 */
@@ -1810,6 +1820,7 @@ async function refreshLocalSessionSummary() {
         ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
       body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
+      signal: AbortSignal.timeout(LOCAL_SESSION_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return;
     const result = await response.json() as {
@@ -1864,7 +1875,9 @@ async function persistDocumentCheckpointToLocalService(input: {
         total: input.snapshot.total,
         done: input.snapshot.done,
         failedBatches: input.snapshot.failedBatches.slice(-100),
-        error: input.snapshot.error,
+        // 连接类错误不能进快照：它描述的是"此刻连不上"，一旦被持久化就会在每次打开文档时
+        // 被恢复成一条永远不消失的假报错。运行结果类错误（未完成/失败项）才值得保留。
+        error: isServiceConnectivityMessage(input.snapshot.error) ? '' : input.snapshot.error,
       },
       translationDelta: [],
     };
@@ -1883,6 +1896,7 @@ async function persistDocumentCheckpointToLocalService(input: {
         mergeExisting: false,
         payload,
       }),
+      signal: AbortSignal.timeout(LOCAL_SESSION_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
       console.debug('[document-reader] local SQLite reader pointer skipped:', response.status);
@@ -1920,6 +1934,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
         ...(token ? { Authorization: 'Bearer ' + token } : {}),
       },
       body: JSON.stringify({ sessionId: LOCAL_DOCUMENT_SESSION_ID }),
+      signal: AbortSignal.timeout(LOCAL_SESSION_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return null;
     const result = await response.json() as {
@@ -2006,7 +2021,9 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
       targetLang: typeof payload.targetLang === 'string' ? payload.targetLang : 'zh',
       viewMode: (['bilingual', 'translation', 'original'].includes(payload.viewMode) ? payload.viewMode : 'bilingual') as SavedViewMode,
       failedBatches: Array.isArray(snapshot.failedBatches) ? snapshot.failedBatches.filter(Number.isInteger) : [],
-      error: typeof snapshot.error === 'string' ? snapshot.error : '',
+      // 历史快照里存过连接类错误，恢复时直接丢掉：那条错误早已不成立，显示出来只会误导。
+      error: typeof snapshot.error === 'string' && !isServiceConnectivityMessage(snapshot.error)
+        ? snapshot.error : '',
       literaryMemory,
       literaryStatus,
       analyzedChapterKeys: Array.isArray(snapshot.analyzedChapterKeys)
@@ -2186,9 +2203,11 @@ async function restoreLastSession() {
       total: saved.total,
       done: saved.done,
       failedBatches: saved.failedBatches,
-      error: saved.error,
+      // 唯一的状态入口：不论来自 SQLite 还是 IndexedDB，连接类错误都不恢复。
+      // 这类文案描述的是"当时连不上"，被恢复出来就等于每次打开文档都伪造一次当前故障。
+      error: isServiceConnectivityMessage(saved.error) ? '' : saved.error,
       literaryMemory: saved.literaryMemory,
-      literaryStatus: saved.literaryStatus,
+      literaryStatus: withoutConnectivityWarnings(saved.literaryStatus),
       analyzedChapterKeys: saved.analyzedChapterKeys,
       lastRunSegmentIds: saved.lastRunSegmentIds,
     });
@@ -2275,6 +2294,7 @@ async function clearSavedSession() {
       headers: {
         ...(config.documentLocalAgentToken ? { Authorization: 'Bearer ' + config.documentLocalAgentToken } : {}),
       },
+      signal: AbortSignal.timeout(LOCAL_SESSION_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error('本机 SQLite 返回 HTTP ' + response.status);
     localSessionSummary.value = null;
@@ -2440,9 +2460,10 @@ async function loadFile(file: File) {
         total: previousSession.total,
         done: previousSession.done,
         failedBatches: previousSession.failedBatches,
-        error: previousSession.error,
+        // 与 restoreLastSession 一致：连接类错误不恢复，它描述的是过去某一刻的连接状态。
+        error: isServiceConnectivityMessage(previousSession.error) ? '' : previousSession.error,
         literaryMemory: previousSession.literaryMemory,
-        literaryStatus: previousSession.literaryStatus,
+        literaryStatus: withoutConnectivityWarnings(previousSession.literaryStatus),
         analyzedChapterKeys: previousSession.analyzedChapterKeys,
         lastRunSegmentIds: previousSession.lastRunSegmentIds,
       });
@@ -3165,20 +3186,20 @@ function scheduleServiceReconnectProbe() {
     }
     if (serviceReconnectProbeAttempts >= SERVICE_RECONNECT_PROBE_MAX_ATTEMPTS) return;
     serviceReconnectProbeAttempts++;
-    try {
-      await workspaceApi(
-        readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
-        readerConfig.value?.documentLocalAgentToken || '',
-        '/api/documents/projects',
-      );
-      const staleMessage = serviceUnreachableMessage;
-      clearServiceReconnectProbe();
-      if (state.value.error === staleMessage) {
-        state.value.error = '';
-        await persistCurrentSession();
-      }
-    } catch {
+    // 用 /health 而不是业务接口：它不需要 Token、不碰数据库，还会校验服务标识，
+    // 端口上恰好有别的服务在监听时不会被误判成"已经恢复"。
+    const available = await isLocalAgentServiceAvailable(
+      readerConfig.value?.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+    );
+    if (!available) {
       scheduleServiceReconnectProbe();
+      return;
+    }
+    const staleMessage = serviceUnreachableMessage;
+    clearServiceReconnectProbe();
+    if (state.value.error === staleMessage) {
+      state.value.error = '';
+      await persistCurrentSession();
     }
   }, SERVICE_RECONNECT_PROBE_DELAY_MS);
 }
@@ -3191,6 +3212,19 @@ function reportWorkspaceConnectionFailure(prefix: string, error: unknown) {
   clearServiceReconnectProbe();
   serviceUnreachableMessage = message;
   scheduleServiceReconnectProbe();
+}
+
+/**
+ * 书籍记忆的警告文案里会嵌原始错误（例如「全书预分析失败，将逐章补充实体记忆：无法连接本机服务…」）。
+ * 这些警告随快照落盘后同样会被反复恢复，和 `state.error` 是同一个毛病：描述的是当时，
+ * 却在每次打开文档时被当成现状展示。恢复时把连接类警告剔掉，其余（审校缺段等）保留。
+ */
+function withoutConnectivityWarnings(
+  status: ReturnType<typeof getSnapshot>['literaryStatus'],
+): ReturnType<typeof getSnapshot>['literaryStatus'] {
+  if (!status || !Array.isArray(status.warnings)) return status;
+  const warnings = status.warnings.filter((warning: unknown) => !isServiceConnectivityMessage(warning));
+  return warnings.length === status.warnings.length ? status : { ...status, warnings };
 }
 
 /**
@@ -3377,8 +3411,16 @@ async function runWorkspaceTranslation(options: {
     let terminalRun: any = response.run;
     while (workspaceRunId.value === runId && workspaceRunGeneration.value === generation) {
       await new Promise((resolve) => setTimeout(resolve, 800));
-      const current = await workspaceApi<{ run: any }>(
-        base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
+      const current = await workspaceApiWithReconnect(
+        () => workspaceApi<{ run: any }>(
+          base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
+        ),
+        {
+          shouldContinue: () => workspaceRunId.value === runId && workspaceRunGeneration.value === generation,
+          onWaiting: (attempt) => {
+            state.value.workStage = '本机服务暂时不可达，正在重连（第 ' + attempt + ' 次）';
+          },
+        },
       );
       terminalRun = current.run;
       workspaceActiveRun.value = terminalRun;
@@ -3409,7 +3451,10 @@ async function runWorkspaceTranslation(options: {
       }
     }
   } catch (error) {
-    state.value.error = error instanceof Error ? error.message : String(error);
+    // 与 followWorkspaceRun 一致：主动停止会改动 generation，不能把"已取消"显示成失败。
+    if (workspaceRunGeneration.value === generation) {
+      reportWorkspaceConnectionFailure('', error);
+    }
   } finally {
     if (workspaceRunGeneration.value === generation && workspaceRunId.value === runId) {
       state.value.running = false;
@@ -3438,7 +3483,8 @@ async function stopCurrentTranslation() {
         { method: 'POST', body: '{}' });
       workspaceActiveRun.value = response.run;
     } catch (error) {
-      state.value.error = '停止 workspace 运行失败：' + (error instanceof Error ? error.message : String(error));
+      // 停止请求没发出去通常是连接问题而不是运行状态问题；连接类错误会在服务回来后自动消失。
+      reportWorkspaceConnectionFailure('停止 workspace 运行失败：', error);
     }
     state.value.running = false;
     state.value.workStage = '';
@@ -3540,7 +3586,7 @@ async function startTranslate() {
         await replaceCurrentTranslations(accepted);
       }
     } catch (error) {
-      state.value.error = '无法准备文档 workspace：' + (error instanceof Error ? error.message : String(error));
+      reportWorkspaceConnectionFailure('无法准备文档 workspace：', error);
       return;
     }
   }

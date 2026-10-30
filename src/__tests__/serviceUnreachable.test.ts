@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isServiceUnreachableError, WorkspaceApiError } from '@/entrypoints/document/documentWorkspaceClient';
+import {
+  isServiceConnectivityMessage,
+  isServiceUnreachableError,
+  WorkspaceApiError,
+} from '@/entrypoints/document/documentWorkspaceClient';
 
 /**
  * 重连判定必须只看 status=0（传输层失败），不能匹配错误文案。
@@ -24,5 +28,32 @@ describe('isServiceUnreachableError', () => {
     expect(isServiceUnreachableError(new TypeError('Failed to fetch'))).toBe(false);
     expect(isServiceUnreachableError(null)).toBe(false);
     expect(isServiceUnreachableError('无法连接本机服务')).toBe(false);
+  });
+});
+
+/**
+ * 回归背景：阅读会话快照把 `state.error` 一起存进了 SQLite，于是某次服务重启产生的
+ * 「无法连接本机服务…」被永久保存，并在每次打开文档时恢复。用户看到的是一条"刚刚发生"
+ * 的故障，而服务其实早已恢复，刷新页面也没用——错误跟着快照一起回来了。
+ */
+describe('isServiceConnectivityMessage', () => {
+  const reported =
+    '读取 workspace 运行状态失败：无法连接本机服务 http://127.0.0.1:8789：' +
+    '服务可能未启动或正在重启，请确认服务运行后重试（原始错误：Failed to fetch）';
+
+  it('recognises connection failures that must not be persisted or restored', () => {
+    expect(isServiceConnectivityMessage(reported)).toBe(true);
+    expect(isServiceConnectivityMessage('无法连接本机服务 http://127.0.0.1:8789')).toBe(true);
+    expect(isServiceConnectivityMessage('本机服务 http://127.0.0.1:8789 在 20 秒内没有响应')).toBe(true);
+    expect(isServiceConnectivityMessage('TypeError: Failed to fetch')).toBe(true);
+  });
+
+  it('keeps run-result errors, which are still meaningful after a reload', () => {
+    expect(isServiceConnectivityMessage('部分片段尚未完成，可在“翻译 Agent”中继续或重试失败项。')).toBe(false);
+    expect(isServiceConnectivityMessage('运行仍包含待处理或执行中的片段，拒绝结束采纳事务。')).toBe(false);
+    expect(isServiceConnectivityMessage('找不到文档项目或项目已归档')).toBe(false);
+    expect(isServiceConnectivityMessage('')).toBe(false);
+    expect(isServiceConnectivityMessage(undefined)).toBe(false);
+    expect(isServiceConnectivityMessage(null)).toBe(false);
   });
 });

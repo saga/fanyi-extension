@@ -356,6 +356,13 @@ const emit = defineEmits<{
   updated: [config: Config, changedFields: (keyof Config)[]];
 }>();
 
+/**
+ * 设置页读的是"当前服务能力"（内置 Prompt、模型列表、上下文窗口）。
+ * 端口假活时 fetch 会一直悬着，按钮就永远停在"读取中…"，用户既看不到结果也看不到失败。
+ * 这些读取都是可重试的展示数据，超时按失败处理比无限等待更有用。
+ */
+const SETTINGS_REQUEST_TIMEOUT_MS = 8_000;
+
 const config = ref<Config>({
   sourceLang: 'auto',
   targetLang: 'zh',
@@ -579,6 +586,7 @@ async function loadBuiltInTaskPrompts() {
           ? { Authorization: 'Bearer ' + config.value.documentLocalAgentToken }
           : {}),
       },
+      signal: AbortSignal.timeout(SETTINGS_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error('读取内置 Prompt 失败（HTTP ' + response.status + '）');
     const data = await response.json() as {
@@ -608,6 +616,7 @@ async function loadCodeBuddyModels() {
           ? { Authorization: 'Bearer ' + config.value.documentLocalAgentToken }
           : {}),
       },
+      signal: AbortSignal.timeout(SETTINGS_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error('读取 CodeBuddy 模型列表失败（HTTP ' + response.status + '）');
     const data = await response.json() as { data?: Array<{ id: string; credits?: number | null }> };
@@ -645,6 +654,7 @@ async function loadCodeBuddyContextWindowOptions() {
             ? { Authorization: 'Bearer ' + config.value.documentLocalAgentToken }
             : {}),
         },
+        signal: AbortSignal.timeout(SETTINGS_REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) return;
       couldValidateStoredSelections = true;

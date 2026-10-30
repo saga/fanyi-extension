@@ -1,7 +1,6 @@
 <template>
   <div class="popup-container">
     <h2>简简单单翻译</h2>
-    <p class="hint-text">这里配置网页与选中文本翻译。EPUB/PDF 等文档翻译使用文档页里的独立配置。</p>
     <div class="settings">
       <div v-if="!config.useLocalAgent" class="input-item">
         <label>DeepSeek API Key</label>
@@ -42,9 +41,6 @@
           <option value="technical">科技/信息翻译</option>
           <option value="literary">文学翻译</option>
         </select>
-        <span class="hint-text">
-          科技模式优先准确、清晰和术语控制；文学模式优先文学表达、人物声音、节奏与实体一致性，并关闭自动术语表。
-        </span>
       </div>
 
       <div class="select-item">
