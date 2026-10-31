@@ -131,9 +131,24 @@
               <option value="original">仅原文</option>
             </select>
           </label>
-          <label v-if="literaryMode" class="field inline" title="关闭后每批减少一次审校调用；译文为初译水平，实际耗时取决于模型与文档">
+          <label v-if="literaryMode" class="field inline" title="关闭后每批减少一次审校调用；同时把 2 个槽位还给翻译，翻译并发从 2 提到 4">
             <span>审校</span>
             <input v-model="literaryReview" type="checkbox" />
+          </label>
+          <label v-if="readerConfig?.documentUseLocalAgent" class="field inline" title="关闭思考能显著缩短每批耗时（实测单批 46s→20s 级）；代价是长句断句与风格判断变弱">
+            <span>思考</span>
+            <select :value="translationThinkingMode" @change="onTranslationThinkingChange">
+              <option value="disabled">关闭</option>
+              <option value="adaptive">自适应</option>
+              <option value="enabled">指定预算</option>
+            </select>
+          </label>
+          <label v-if="literaryMode && literaryReview" class="field inline" title="审校和翻译共用 4 个会话槽位：审校 2 → 翻译只剩 2；审校 1 → 翻译能拿 3">
+            <span>审校并发</span>
+            <select :value="String(readerConfig?.documentReviewConcurrency ?? 2)" @change="onReviewConcurrencyChange">
+              <option value="1">1 · 翻译更快</option>
+              <option value="2">2 · 默认</option>
+            </select>
           </label>
           <button
             v-if="!state.running"
@@ -1097,7 +1112,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
+import {
+  DOCUMENT_REVIEW_STRENGTH_OPTIONS,
+  getConfig,
+  normalizeDocumentReviewStrength,
+  setConfig,
+  type Config,
+  type DocumentReviewStrength,
+} from '@/entrypoints/utils/config';
 import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 import DocumentTranslationSettings from './DocumentTranslationSettings.vue';
 import DocumentAgentWorkspace from './DocumentAgentWorkspace.vue';
@@ -1179,9 +1201,20 @@ const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
 const literaryMode = ref(false);
 /** 文学审校开关：关闭=快速模式，每批省一次审校 LLM 调用。 */
-const literaryReview = ref(true);
+const reviewStrength = ref<DocumentReviewStrength>('medium');
+const reviewStrengthOptions = DOCUMENT_REVIEW_STRENGTH_OPTIONS;
+/** 审校是否开启完全由强度档位决定：off 就是不开。 */
+const literaryReview = computed(() => reviewStrength.value !== 'off');
+const reviewStrengthHint = computed(() =>
+  reviewStrengthOptions.find((option) => option.value === reviewStrength.value)?.hint || '',
+);
 const currentPageIndex = ref(0);
 const readerConfig = ref<Config | null>(null);
+/** 阅读页「思考」旋钮的当前值：直接读任务配置，避免再存一份状态。 */
+const translationThinkingMode = computed<'disabled' | 'adaptive' | 'enabled'>(() => {
+  const mode = readerConfig.value?.documentCodeBuddyTaskProfiles?.translation?.thinkingMode;
+  return mode === 'adaptive' || mode === 'enabled' ? mode : 'disabled';
+});
 /** 当前文档对应的本机 workspace；阅读页与 Agent Tab 都从这里读写同一份 SQLite。 */
 const workspaceProject = ref<any>(null);
 const workspaceActiveRun = ref<any>(null);
@@ -1609,7 +1642,10 @@ onMounted(async () => {
   readerConfig.value = config;
   sourceLang.value = config.documentSourceLang || 'auto';
   targetLang.value = config.documentTargetLang || 'zh';
-  literaryReview.value = config.documentLiteraryReviewEnabled !== false;
+  // 旧配置只有 documentLiteraryReviewEnabled 布尔值：关掉的一律落到 off，开着的走强度默认值。
+  reviewStrength.value = config.documentLiteraryReviewEnabled === false
+    ? 'off'
+    : normalizeDocumentReviewStrength(config.documentReviewStrength);
   englishFontFamily.value = config.documentEnglishFontFamily || 'Georgia';
   chineseFontFamily.value = config.documentChineseFontFamily || 'Noto Serif CJK SC';
   englishFontSize.value = Number.isFinite(config.documentEnglishFontSize) ? config.documentEnglishFontSize : 17;
@@ -1769,8 +1805,13 @@ function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Conf
   if (changedFields.includes('documentTranslationMode')) {
     literaryMode.value = config.documentTranslationMode === 'literary';
   }
-  if (changedFields.includes('documentLiteraryReviewEnabled')) {
-    literaryReview.value = config.documentLiteraryReviewEnabled;
+  if (changedFields.includes('documentReviewStrength')) {
+    reviewStrength.value = normalizeDocumentReviewStrength(config.documentReviewStrength);
+  } else if (changedFields.includes('documentLiteraryReviewEnabled')) {
+    // 兼容旧设置面板：关闭布尔开关等价于把强度设为 off。
+    reviewStrength.value = config.documentLiteraryReviewEnabled === false
+      ? 'off'
+      : normalizeDocumentReviewStrength(config.documentReviewStrength);
   }
   if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
   if (!documentUserPromptTemplate.value) documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
@@ -1779,6 +1820,45 @@ function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Conf
 watch([sourceLang, targetLang, literaryMode], () => {
   if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
 });
+
+/**
+ * 阅读页的两个快捷速度旋钮（思考、审校并发）。
+ *
+ * 它们写的是全局文档配置，和设置页里那些项是同一份数据；区别只是不必翻两层折叠面板。
+ * 服务端在新建 Run 时读取这份配置，所以对**下一次**运行生效，正在跑的 Run 不受影响。
+ */
+async function saveDocumentSpeedSetting(patch: Partial<Config>) {
+  await setConfig(patch);
+  readerConfig.value = await getConfig();
+}
+
+async function onTranslationThinkingChange(event: Event) {
+  const raw = (event.target as HTMLSelectElement).value;
+  const mode = raw === 'adaptive' || raw === 'enabled' ? raw : 'disabled';
+  const profiles = readerConfig.value?.documentCodeBuddyTaskProfiles;
+  if (!profiles?.translation) return;
+  await saveDocumentSpeedSetting({
+    documentCodeBuddyTaskProfiles: {
+      ...profiles,
+      translation: {
+        ...profiles.translation,
+        thinkingMode: mode,
+        // 关掉思考时 effort 也要一起降下来：只关思考、留着 medium/high，省下的时间很有限。
+        // 「指定预算」保持用户已选的 effort，不替用户做决定。
+        ...(mode === 'enabled' ? {} : { effort: mode === 'disabled' ? 'low' : 'medium' }),
+      },
+    },
+  });
+  persistenceMessage.value = '翻译思考已改为' +
+    (mode === 'disabled' ? '关闭' : mode === 'adaptive' ? '自适应' : '指定预算') +
+    '，下一次运行生效。';
+}
+
+async function onReviewConcurrencyChange(event: Event) {
+  const value = Number((event.target as HTMLSelectElement).value) === 1 ? 1 : 2;
+  await saveDocumentSpeedSetting({ documentReviewConcurrency: value });
+  persistenceMessage.value = '审校并发已改为 ' + value + '，下一次运行生效。';
+}
 
 async function saveDocumentTypography() {
   await setConfig({
@@ -2897,7 +2977,10 @@ async function hydrateWorkspacePrompt(
     sourceLang.value = typeof promptConfig.sourceLang === 'string' ? promptConfig.sourceLang : sourceLang.value;
     targetLang.value = typeof promptConfig.targetLang === 'string' ? promptConfig.targetLang : targetLang.value;
     literaryMode.value = promptConfig.translationMode === 'literary';
-    literaryReview.value = promptConfig.literaryReview === true;
+    // 服务端是权威：它说没开审校，本地就落到 off；否则读回它保存的强度档位。
+    reviewStrength.value = promptConfig.literaryReview === true
+      ? normalizeDocumentReviewStrength(strategy.reviewStrength)
+      : 'off';
     if (promptConfig.glossary) glossary.value = promptConfig.glossary as Glossary;
     readerConfig.value = {
       ...(readerConfig.value || await getConfig()),
@@ -2908,6 +2991,7 @@ async function hydrateWorkspacePrompt(
       documentBatchMaxSourceChars: Number.isFinite(strategy.maxBatchSourceChars) ? strategy.maxBatchSourceChars : readerConfig.value?.documentBatchMaxSourceChars,
       documentTranslationConcurrency: Number.isFinite(strategy.translationConcurrency) ? strategy.translationConcurrency : readerConfig.value?.documentTranslationConcurrency,
       documentReviewConcurrency: Number.isFinite(strategy.reviewConcurrency) ? strategy.reviewConcurrency : readerConfig.value?.documentReviewConcurrency,
+      documentReviewStrength: normalizeDocumentReviewStrength(strategy.reviewStrength),
       documentPrecedingContextSegments: Number.isFinite(strategy.precedingContextSegments) ? strategy.precedingContextSegments : readerConfig.value?.documentPrecedingContextSegments,
       documentContextBudgetChars: Number.isFinite(strategy.contextBudgetChars) ? strategy.contextBudgetChars : readerConfig.value?.documentContextBudgetChars,
       documentMaxModelAttempts: Number.isFinite(strategy.maxModelAttempts) ? strategy.maxModelAttempts : readerConfig.value?.documentMaxModelAttempts,
@@ -3696,12 +3780,10 @@ async function startTranslate() {
       return;
     }
   }
-  // 本机文学书籍是全书级工作流：一次开始动作翻译全部待处理片段，不要求用户逐页点击。
-  // 技术文档和非本机模式仍保留当前页优先的阅读体验。
-  if (config.documentUseLocalAgent && effectiveDocumentTranslationMode.value === 'literary') {
-    await runWorkspaceTranslation({ scope: { type: 'stale' } });
-    return;
-  }
+  // 这个按钮的语义就是「翻译当前页」：文学模式同样只提交当前页的待译片段。
+  // 全书翻译是明确动作，放在 Agent 工作区的运行入口里；不能因为模式是文学就把一次翻页点击
+  // 悄悄放大成整本 700+ 段的 Run——那会让用户以为卡住，也白白消耗一次全书调用。
+  // 当前页已译完时，下面的逻辑会先跳到最近一个待译页。
 
   // 当前页已完成但文档尚未完成时，继续按钮自动跳到后面最近的待译页；走到末尾后再回绕查找。
   if (!currentPagePending.value) {

@@ -30,6 +30,42 @@ export interface DocumentCodeBuddyTaskProfile {
 }
 export type DocumentCodeBuddyTaskProfiles = Record<DocumentCodeBuddyTaskKey, DocumentCodeBuddyTaskProfile>;
 
+export type DocumentReviewStrength = 'strong' | 'medium' | 'weak' | 'off';
+
+export const DOCUMENT_REVIEW_STRENGTH_OPTIONS: ReadonlyArray<{
+  value: DocumentReviewStrength;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: 'strong',
+    label: '强',
+    hint: '文风审校 + 准确性审校，每批两次模型调用。最细，也最慢。',
+  },
+  {
+    value: 'medium',
+    label: '中',
+    hint: '每批一次合并审校：准确性 must_fix 优先，文风 finding 其次；短小片段直接跳过。',
+  },
+  {
+    value: 'weak',
+    label: '弱',
+    hint: '不发模型请求，只查数字、规范译名和英文残留。几乎零成本，只提示不修订。',
+  },
+  {
+    value: 'off',
+    label: '关闭',
+    hint: '完全不审校，只保留初译。',
+  },
+];
+
+export function normalizeDocumentReviewStrength(input: unknown): DocumentReviewStrength {
+  const value = typeof input === 'string' ? input.trim().toLowerCase() : '';
+  return DOCUMENT_REVIEW_STRENGTH_OPTIONS.some((option) => option.value === value)
+    ? value as DocumentReviewStrength
+    : 'medium';
+}
+
 export interface Config {
   sourceLang: string;
   targetLang: string;
@@ -88,6 +124,11 @@ export interface Config {
   documentBatchMaxSourceChars: number;
   documentTranslationConcurrency: number;
   documentReviewConcurrency: number;
+  /**
+   * 审校强度：strong=文风+准确性两次调用；medium=一次合并调用（默认）；
+   * weak=仅本地确定性检查，不发模型请求；off=不审校。
+   */
+  documentReviewStrength: DocumentReviewStrength;
   documentPrecedingContextSegments: number;
   documentContextBudgetChars: number;
   documentMaxModelAttempts: number;
@@ -205,6 +246,7 @@ const defaultConfig: Config = {
   documentBatchMaxSourceChars: 8000,
   documentTranslationConcurrency: 4,
   documentReviewConcurrency: 2,
+  documentReviewStrength: 'medium',
   documentPrecedingContextSegments: 4,
   documentContextBudgetChars: 18000,
   documentMaxModelAttempts: 2,
@@ -256,6 +298,7 @@ export async function getConfig(): Promise<Config> {
   merged.translationMode = merged.translationMode === 'literary' ? 'literary' : 'technical';
   merged.documentTranslationMode = merged.documentTranslationMode === 'literary' ? 'literary' : 'technical';
   merged.documentCodeBuddyTaskProfiles = normalizeDocumentCodeBuddyTaskProfiles(merged.documentCodeBuddyTaskProfiles);
+  merged.documentReviewStrength = normalizeDocumentReviewStrength(merged.documentReviewStrength);
   return merged;
 }
 

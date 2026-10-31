@@ -85,21 +85,20 @@ describe('document reader composable wiring', () => {
     expect(contextGraph.slice(orchestration)).toContain('timeoutMs');
   });
 
-  it('starts a full-book stale Run from one literary translation action', () => {
+  it('keeps one literary translation action scoped to the current page, not the whole book', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
       'utf8',
     );
     const start = source.indexOf('async function startTranslate');
-    const fullBookRun = source.indexOf(
-      "await runWorkspaceTranslation({ scope: { type: 'stale' } })",
-      start,
-    );
+    const end = source.indexOf('async function forceTranslateCurrentPage', start);
+    const body = source.slice(start, end);
     expect(start).toBeGreaterThan(-1);
-    expect(fullBookRun).toBeGreaterThan(start);
-    expect(source.slice(start, fullBookRun)).toContain(
-      "effectiveDocumentTranslationMode.value === 'literary'",
-    );
+    // 回归：这里曾经对文学模式无条件提交 { type: 'stale' }，一次翻页点击会变成整本 700+ 段的 Run。
+    expect(body).not.toContain("scope: { type: 'stale' }");
+    // 当前页语义：提交当前页里尚未翻译的片段 id。
+    expect(body).toContain('runWorkspaceTranslation({ ids })');
+    expect(body).toContain("filter((segment) => !state.value.translations.get(segment.id)?.trim())");
   });
 
   it('declares the shared ref in App.vue before both composables', () => {
@@ -119,5 +118,26 @@ describe('document reader composable wiring', () => {
     expect(decl).toBeLessThan(graph);
     // 禁止回退成惰性 getter：watcher 会在 setup 阶段立即读取它
     expect(source).not.toContain('getContextGraphOverview');
+  });
+});
+
+describe('reader toolbar speed knobs', () => {
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+    'utf8',
+  );
+
+  it('exposes thinking and review-concurrency next to the run controls', () => {
+    expect(source).toContain('@change="onTranslationThinkingChange"');
+    expect(source).toContain('@change="onReviewConcurrencyChange"');
+    expect(source).toContain('v-if="literaryMode && literaryReview"');
+  });
+
+  it('writes the same config keys the settings panel uses', () => {
+    // 关掉思考必须同时把 effort 降下来，否则只是少一段思考文本、耗时几乎不变。
+    expect(source).toContain("effort: mode === 'disabled' ? 'low' : 'medium'");
+    expect(source).toContain('documentReviewConcurrency: value');
+    // 两个旋钮都必须落盘，否则下次打开文档就丢了。
+    expect(source).toContain('await setConfig(patch)');
   });
 });
