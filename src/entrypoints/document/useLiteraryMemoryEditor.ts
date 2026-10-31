@@ -390,12 +390,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const names = new Set([
       managedPersonSource(item), ...(item.entity?.aliases || []), ...(item.profile?.aliases || []),
     ].map(normalizeManagedPersonName).filter(Boolean));
-    try {
-      await rejectContextGraphItemsByNames(names);
-    } catch (error) {
-      persistenceMessage.value = '无法持久拒绝对应的全书人物/关系记录，未执行删除：' + (error instanceof Error ? error.message : String(error));
-      return;
-    }
+    const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const entity = findManagedPersonEntity(item);
     if (entity) {
       const entityIndex = literaryMemory.value.entities.indexOf(entity);
@@ -413,10 +408,12 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       !names.has(normalizeManagedPersonName(relation.subject)) &&
       !names.has(normalizeManagedPersonName(relation.object)));
     try {
-      // 删除动作只有在 LiteraryMemory revision 也写入成功后才向调用方报告完成。
-      await persistLiteraryMemoryToWorkspace();
+      // Graph rejection and the resulting memory revision commit together in the service database.
+      await rejectContextGraphItemsByNames(names, literaryMemory.value);
     } catch (error) {
-      persistenceMessage.value = 'Context Graph 已拒绝该人物，但 LiteraryMemory 保存失败：' +
+      literaryMemory.value = sanitizeLiteraryMemory(snapshot);
+      await deps.persistSession().catch(() => undefined);
+      persistenceMessage.value = '无法原子保存人物删除与全书图谱拒绝，已恢复本地资料：' +
         (error instanceof Error ? error.message : String(error));
     }
   }
@@ -463,13 +460,16 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   async function removeEntity(index: number) {
     const entity = literaryMemory.value.entities[index];
     if (!entity) return;
+    const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const names = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
+    literaryMemory.value.entities.splice(index, 1);
     try {
-      await rejectContextGraphItemsByNames(names);
-      literaryMemory.value.entities.splice(index, 1);
-      await persistLiteraryMemoryToWorkspace();
+      await rejectContextGraphItemsByNames(names, literaryMemory.value);
     } catch (error) {
-      persistenceMessage.value = '无法持久拒绝对应的全书实体记录，未执行删除：' + (error instanceof Error ? error.message : String(error));
+      literaryMemory.value = sanitizeLiteraryMemory(snapshot);
+      await deps.persistSession().catch(() => undefined);
+      persistenceMessage.value = '无法原子保存实体删除与全书图谱拒绝，已恢复本地资料：' +
+        (error instanceof Error ? error.message : String(error));
     }
   }
   function markRelationshipModified(relation: LiteraryRelationship) {
@@ -543,12 +543,15 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   async function removeRelationship(index: number) {
     const relation = literaryMemory.value.relationships[index];
     if (!relation) return;
+    const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
+    literaryMemory.value.relationships.splice(index, 1);
     try {
-      await rejectContextGraphRelationship(relation.subject, relation.object, relation.predicate);
-      literaryMemory.value.relationships.splice(index, 1);
-      await persistLiteraryMemoryToWorkspace();
+      await rejectContextGraphRelationship(relation.subject, relation.object, relation.predicate, literaryMemory.value);
     } catch (error) {
-      persistenceMessage.value = '无法持久拒绝对应的全书关系记录，未执行删除：' + (error instanceof Error ? error.message : String(error));
+      literaryMemory.value = sanitizeLiteraryMemory(snapshot);
+      await deps.persistSession().catch(() => undefined);
+      persistenceMessage.value = '无法原子保存关系删除与全书图谱拒绝，已恢复本地资料：' +
+        (error instanceof Error ? error.message : String(error));
     }
   }
 
