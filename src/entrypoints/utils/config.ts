@@ -299,6 +299,9 @@ export async function getConfig(): Promise<Config> {
   merged.documentTranslationMode = merged.documentTranslationMode === 'literary' ? 'literary' : 'technical';
   merged.documentCodeBuddyTaskProfiles = normalizeDocumentCodeBuddyTaskProfiles(merged.documentCodeBuddyTaskProfiles);
   merged.documentReviewStrength = normalizeDocumentReviewStrength(merged.documentReviewStrength);
+  // 文档翻译默认不指定源语言：空值或缺失一律按 auto 处理，由模型自行判断原文语言。
+  // 显式选过具体语言的用户保持原值，这里只兜住空值，避免下拉框显示空白、请求里发出空字符串。
+  merged.documentSourceLang = String(merged.documentSourceLang || '').trim() || 'auto';
   return merged;
 }
 

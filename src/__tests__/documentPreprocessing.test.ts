@@ -6,6 +6,7 @@ import {
   preprocessingGateTitle,
   resolveDocumentTranslationMode,
   shouldAutoStartPreprocessing,
+  sourceLanguageMatches,
   styleGuideBadge,
 } from '../entrypoints/document/documentPreprocessing';
 
@@ -118,6 +119,33 @@ describe('literary preprocessing readiness gate', () => {
   it('marks the projection ready only when revision, analysis version and languages all match', () => {
     const result = assessContextGraphReadiness({ ...baseInput, snapshot: completedSnapshot });
     expect(result.ready).toBe(true);
+  });
+
+  it('treats auto source language as "model decides" instead of a mismatch', () => {
+    // 回归点：预处理记录里写的是分析当时使用的具体语言（en），客户端默认发 auto。
+    // 按字面比较会判定「语言不一致」，于是没改任何设置也会重跑整本分析。
+    const recordedConcrete = assessContextGraphReadiness({
+      ...baseInput, sourceLang: 'auto', snapshot: completedSnapshot,
+    });
+    expect(recordedConcrete.reason).not.toBe('language');
+    expect(recordedConcrete.ready).toBe(true);
+
+    const recordedAuto = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: { ...completedSnapshot, progress: { ...completedSnapshot.progress, sourceLang: 'auto' } },
+    });
+    expect(recordedAuto.ready).toBe(true);
+
+    expect(sourceLanguageMatches('en', 'auto')).toBe(true);
+    expect(sourceLanguageMatches('auto', 'en')).toBe(true);
+    expect(sourceLanguageMatches('en', 'ja')).toBe(false);
+    expect(sourceLanguageMatches(undefined, 'en')).toBe(true);
+
+    // 目标语言始终是显式值：换了就必须重新分析（译名与文风基准都绑定目标语言）。
+    const targetChanged = assessContextGraphReadiness({
+      ...baseInput, targetLang: 'ja', snapshot: completedSnapshot,
+    });
+    expect(targetChanged.reason).toBe('language');
   });
 
 

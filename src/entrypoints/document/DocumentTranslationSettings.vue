@@ -19,7 +19,7 @@
       <label class="setting-field">
         <span>源语言</span>
         <select v-model="config.documentSourceLang" @change="saveConfig('documentSourceLang')">
-          <option value="auto">自动检测</option>
+          <option value="auto">自动检测（默认，由模型判断）</option>
           <option value="en">英语</option>
           <option value="zh">中文</option>
           <option value="ja">日语</option>

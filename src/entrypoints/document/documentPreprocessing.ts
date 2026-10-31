@@ -95,6 +95,25 @@ export interface PreprocessingReadiness {
   message: string;
 }
 
+/**
+ * 源语言是否可复用已有预处理记录。
+ *
+ * `auto` 的语义是「不指定源语言，由模型自行判断」，它不构成约束，不能当普通语言代码比较：
+ * 服务端记录里写的是分析当时使用的语言（例如 `en`），而扩展默认发 `auto`。按字面比较两者
+ * 永远不相等，于是每次开始翻译都会被判定为「语言不一致」并重跑整本分析——用户没有改过任何
+ * 设置，却付出一轮全书分析的代价。
+ *
+ * 目标语言始终是显式值，仍然严格比较：换目标语言确实需要重新产出译名与文风基准。
+ */
+export function sourceLanguageMatches(recorded: unknown, requested: unknown): boolean {
+  const left = String(recorded ?? '').trim().toLowerCase();
+  const right = String(requested ?? '').trim().toLowerCase();
+  if (!right || right === 'auto') return true;
+  // 记录里没有语言（旧记录）或记录本身是 auto，都无法与当前设置构成冲突。
+  if (!left || left === 'auto') return true;
+  return left === right;
+}
+
 export function assessContextGraphReadiness(input: PreprocessingReadinessInput): PreprocessingReadiness {
   if (!input.required) {
     return { required: false, ready: true, reason: 'not-required', message: '' };
@@ -172,7 +191,7 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
   }
   const sourceLang = input.sourceLang || 'auto';
   const targetLang = input.targetLang || 'zh';
-  if ((progress.sourceLang || 'auto') !== sourceLang || (progress.targetLang || 'zh') !== targetLang) {
+  if (!sourceLanguageMatches(progress.sourceLang, sourceLang) || (progress.targetLang || 'zh') !== targetLang) {
     return {
       required: true, ready: false, reason: 'language',
       message: '全书预处理语言与当前设置不一致（预处理 ' + (progress.sourceLang || 'auto') + '→' +
