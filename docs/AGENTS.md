@@ -48,7 +48,7 @@ For EPUB/PDF literary translation with Local Agent enabled, the extension is a U
 
 `config.useLocalAgent` has priority over `config.useServerTranslation`. When enabled, webpage/chunk translation, document chunk translation, side-panel chat, YouTube subtitles, and EPUB/PDF literary analysis/review must use the configured local Agent endpoint. A local request failure is an error or a retained-draft warning; do not retry it through the remote Vocal Saga/DeepSeek endpoint. The optional `localAgentToken` is sent only when configured. SQLite cache read/write failures are cache misses, but clearing the SQLite cache must report a failed request instead of claiming complete success.
 
-The Express + TypeScript service lives in the sibling `devweekly/vocal-saga/local-agent-service` directory. It binds to loopback and uses SQLite for translation cache, request history, and a document recovery snapshot. IndexedDB remains the extension's primary document store; SQLite's serialized document checkpoint is limited to 5 MiB, so it is not a guaranteed backup for every file the reader can open. Do not describe this copy as unlimited or replace IndexedDB with it.
+The Express + TypeScript service lives in the sibling `devweekly/vocal-saga/local-agent-service` directory. In Local Agent document mode, its project SQLite database is the only persistent store for document business data: source files/revisions, parsed segments, translations, LiteraryMemory, Context Graph, Prompt revisions, Runs and review records. The extension may keep runtime UI projections in memory, but must not persist document content, translations or LiteraryMemory in IndexedDB, localStorage or extension storage. The server-side reader-session record stores only projectId and lightweight UI state. Never fall back to an old extension snapshot when the service is unavailable.
 
 ## Document project state authority
 
@@ -60,7 +60,7 @@ Follow [ADR-002: Local Agent 项目状态以服务端为权威](ADR-002-server-a
 - Extension project-ID maps are caches. If missing or stale, resolve the document through `POST /api/documents/projects/resolve`; do not automatically create duplicate projects after network/authentication errors.
 - On open/restore, hydrate from the service before persisting the local snapshot. Existing projects must not receive cached extension translations, Prompt, or literary memory merely because a session was restored.
 - Exact source fingerprint match allows hydration. Same-name/title but changed-source projects require explicit source-revision update or a separate project; never apply old accepted translations to changed source text.
-- IndexedDB and the local session checkpoint are offline recovery copies only. When the service is unavailable, preserve the last local copy and tell the user it may be stale. When the service returns, resolve and refresh from it.
+- In Local Agent document mode, there is no persistent extension-side document snapshot. The server-side project database is authoritative; the server reader-session record stores only a project reference and lightweight UI state. If the service is unavailable, fail clearly and do not restore old IndexedDB business data.
 - Run creation should use the project's persisted Prompt; only explicit settings actions may save a new Prompt revision. Tests should cover lost/stale maps, offline behavior and server-over-cache precedence.
 
 ## Build output
