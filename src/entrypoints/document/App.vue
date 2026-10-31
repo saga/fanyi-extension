@@ -453,6 +453,91 @@
         <p class="muted small">图谱会约束后续翻译与审校；已有译文不会自动改写。确认规范译名后，可点击“强制重译当前页”修复旧译文中的专名漂移。</p>
       </section>
 
+      <section v-if="literaryMode && literaryMemory.chineseEditorialProfile" class="panel chinese-editorial-profile">
+        <div class="dictionary-heading">
+          <div>
+            <h3>中文文学编辑档案</h3>
+            <p class="muted small">档案只从已采纳的中文译文中归纳。已确认版本持续用于后续中文编辑；新样本产生的变化先进入待审更新，不会覆盖当前版本。</p>
+          </div>
+          <span class="entity-status" :class="literaryMemory.chineseEditorialProfile.status === 'confirmed' ? 'is-confirmed' : 'is-pending'">
+            {{ literaryMemory.chineseEditorialProfile.status === 'confirmed' ? '当前版本已确认' : literaryMemory.chineseEditorialProfile.status === 'rejected' ? '已拒绝' : '待确认' }}
+          </span>
+        </div>
+        <div class="literary-status-title">
+          <span class="chip">版本 V{{ literaryMemory.chineseEditorialProfile.profileVersion || 1 }}</span>
+          <span class="chip">样本 {{ literaryMemory.chineseEditorialProfile.sampleCount }} 段</span>
+          <span class="chip">章节 {{ literaryMemory.chineseEditorialProfile.chapterCount }}</span>
+          <span class="chip">证据 {{ literaryMemory.chineseEditorialProfile.evidenceRefs.length }} 条</span>
+          <span class="chip">分析 {{ literaryMemory.chineseEditorialProfile.analysisVersion }}</span>
+        </div>
+        <div class="literary-style-grid">
+          <div v-for="field in [
+            ['叙述声音', literaryMemory.chineseEditorialProfile.profile.narrativeVoice],
+            ['语域', literaryMemory.chineseEditorialProfile.profile.register],
+            ['节奏与句法', literaryMemory.chineseEditorialProfile.profile.rhythm],
+            ['对白特征', literaryMemory.chineseEditorialProfile.profile.dialogue],
+            ['措辞与词汇', literaryMemory.chineseEditorialProfile.profile.diction]
+          ]" :key="field[0]" class="field">
+            <strong>{{ field[0] }}</strong>
+            <p>{{ field[1] || '未形成稳定结论' }}</p>
+          </div>
+        </div>
+        <div v-if="literaryMemory.chineseEditorialProfile.profile.rules?.length">
+          <strong>编辑规则</strong>
+          <ul><li v-for="rule in literaryMemory.chineseEditorialProfile.profile.rules" :key="rule">{{ rule }}</li></ul>
+        </div>
+        <div v-if="literaryMemory.chineseEditorialProfile.profile.avoid?.length">
+          <strong>避免的问题</strong>
+          <ul><li v-for="rule in literaryMemory.chineseEditorialProfile.profile.avoid" :key="rule">{{ rule }}</li></ul>
+        </div>
+        <div v-if="literaryMemory.chineseEditorialProfile.status === 'candidate'" class="settings-actions">
+          <button class="btn primary" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
+            @click="handleReviewChineseEditorialProfile('confirm')">确认并启用档案</button>
+          <button class="btn" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
+            @click="handleReviewChineseEditorialProfile('reject')">拒绝档案</button>
+        </div>
+        <section v-if="literaryMemory.chineseEditorialProfile.pendingUpdate" class="pending-editorial-update">
+          <div class="dictionary-heading">
+            <div>
+              <strong>发现新版档案，等待确认</strong>
+              <p class="muted small">基于新增已采纳译文重新分析。当前 V{{ literaryMemory.chineseEditorialProfile.profileVersion || 1 }} 仍在使用。</p>
+            </div>
+            <span class="entity-status is-pending">待审更新</span>
+          </div>
+          <div class="literary-status-title">
+            <span class="chip">新增样本 {{ literaryMemory.chineseEditorialProfile.pendingUpdate.sampleCount }} 段</span>
+            <span class="chip">证据 {{ literaryMemory.chineseEditorialProfile.pendingUpdate.evidenceRefs.length }} 条</span>
+            <span class="chip">分析 {{ literaryMemory.chineseEditorialProfile.pendingUpdate.analysisVersion }}</span>
+          </div>
+          <div class="literary-style-grid">
+            <div v-for="field in [
+              ['叙述声音', literaryMemory.chineseEditorialProfile.pendingUpdate.profile.narrativeVoice],
+              ['语域', literaryMemory.chineseEditorialProfile.pendingUpdate.profile.register],
+              ['节奏与句法', literaryMemory.chineseEditorialProfile.pendingUpdate.profile.rhythm],
+              ['对白特征', literaryMemory.chineseEditorialProfile.pendingUpdate.profile.dialogue],
+              ['措辞与词汇', literaryMemory.chineseEditorialProfile.pendingUpdate.profile.diction]
+            ]" :key="field[0]" class="field">
+              <strong>{{ field[0] }}</strong>
+              <p>{{ field[1] || '未形成稳定结论' }}</p>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn primary" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
+              @click="handleReviewChineseEditorialProfile('accept-update')">接受更新，切换到新版</button>
+            <button class="btn" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
+              @click="handleReviewChineseEditorialProfile('reject-update')">拒绝更新，保留当前版</button>
+          </div>
+        </section>
+        <details class="relationship-section">
+          <summary>档案证据（{{ literaryMemory.chineseEditorialProfile.evidenceRefs.length }}）</summary>
+          <article v-for="(evidence, index) in literaryMemory.chineseEditorialProfile.evidenceRefs" :key="evidence.segmentId + '-' + index" class="voice-profile-card">
+            <strong>{{ evidence.aspect }} · {{ evidence.segmentId }}</strong>
+            <p>“{{ evidence.targetExcerpt }}”</p>
+            <p class="muted small">{{ evidence.observation }}</p>
+          </article>
+        </details>
+      </section>
+
       <section v-if="literaryMode" class="panel literary-style-guide">
         <div class="dictionary-heading">
           <div>
@@ -1279,6 +1364,7 @@ const {
   removeRelationship,
   persistLiteraryMemoryToWorkspace,
   awaitLiteraryMemoryWrites,
+  reviewChineseEditorialProfile,
   markStyleGuideCandidate,
   setStyleGuideLines,
   importContextGraphStyleGuide,
@@ -1293,6 +1379,14 @@ const {
   persistSession: persistCurrentSession,
   contextGraphOverview,
 });
+
+async function handleReviewChineseEditorialProfile(action: 'confirm' | 'reject' | 'accept-update' | 'reject-update') {
+  try {
+    await reviewChineseEditorialProfile(action);
+  } catch (error) {
+    persistenceMessage.value = '处理中文文学编辑档案失败：' + (error instanceof Error ? error.message : String(error));
+  }
+}
 
 // 文风基准默认生效，徽章只陈述当前在用的版本，不暗示还需要确认。
 const styleGuideBadge = computed(() => computeStyleGuideBadge({
