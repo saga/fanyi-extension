@@ -471,11 +471,11 @@
           <span class="chip">分析 {{ literaryMemory.chineseEditorialProfile.analysisVersion }}</span>
         </div>
         <div class="literary-style-grid">
-          <label class="field"><strong>叙述声音</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.narrativeVoice" rows="2" @change="markChineseEditorialProfileModified" /></label>
-          <label class="field"><strong>语域</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.register" rows="2" @change="markChineseEditorialProfileModified" /></label>
-          <label class="field"><strong>节奏与句法</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.rhythm" rows="2" @change="markChineseEditorialProfileModified" /></label>
-          <label class="field"><strong>对白特征</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.dialogue" rows="2" @change="markChineseEditorialProfileModified" /></label>
-          <label class="field"><strong>措辞与词汇</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.diction" rows="2" @change="markChineseEditorialProfileModified" /></label>
+          <label class="field"><strong>叙述声音</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.narrativeVoice" rows="2" @change="markChineseEditorialProfileModified"></textarea></label>
+          <label class="field"><strong>语域</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.register" rows="2" @change="markChineseEditorialProfileModified"></textarea></label>
+          <label class="field"><strong>节奏与句法</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.rhythm" rows="2" @change="markChineseEditorialProfileModified"></textarea></label>
+          <label class="field"><strong>对白特征</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.dialogue" rows="2" @change="markChineseEditorialProfileModified"></textarea></label>
+          <label class="field"><strong>措辞与词汇</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.diction" rows="2" @change="markChineseEditorialProfileModified"></textarea></label>
         </div>
         <div v-if="literaryMemory.chineseEditorialProfile.profile.rules?.length">
           <strong>编辑规则</strong>
