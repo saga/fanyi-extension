@@ -361,9 +361,11 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const targetId = nodeIds.get(normalize(object));
     const expectedPredicate = normalize(predicate);
     // 不知道任一端点时绝不按 predicate 全局拒绝；这可能误伤其他人物的同类关系。
-    if (!sourceId || !targetId) return;
-    const pairMatches = (graph.edges || []).filter((edge) =>
-      String(edge.sourceNodeId) === sourceId && String(edge.targetNodeId) === targetId);
+    // 但 LiteraryMemory 投影仍必须保存删除；此时只跳过图谱边拒绝，走 memory-only 写入。
+    const pairMatches = sourceId && targetId
+      ? (graph.edges || []).filter((edge) =>
+          String(edge.sourceNodeId) === sourceId && String(edge.targetNodeId) === targetId)
+      : [];
     const matches = pairMatches.filter((edge) => {
       const attributes = edge.attributes && typeof edge.attributes === 'object' ? edge.attributes : {};
       const actualPredicate = normalize(String(attributes.predicate || attributes.relation || edge.kind || ''));
