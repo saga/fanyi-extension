@@ -494,7 +494,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const avoid = Array.from(new Set(styleRaw.avoid.map((value) => safeText(value, 240)).filter(Boolean))).slice(0, 16);
     if (avoid.length) styleGuide.avoid = avoid;
   }
-  const styleGuideStatus = raw.styleGuideAutoDisabled === true ? 'candidate' : Object.keys(styleGuide).length ? 'confirmed' : 'candidate';
+  const styleGuideStatus = raw.styleGuideAutoDisabled === true ? 'candidate' :
+    Object.keys(styleGuide).length && ['context-graph', 'user-edited', 'user-confirmed'].includes(String(rawStyleOrigin))
+      ? 'confirmed' : 'candidate';
   const styleGuideConfirmationSource = confirmationSource(raw.styleGuideConfirmationSource, styleGuideStatus === 'confirmed');
   const rawStyleOrigin = raw.styleGuideOrigin;
   const styleGuideOrigin: LiteraryStyleGuideOrigin =
