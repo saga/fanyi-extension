@@ -232,7 +232,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     entity = entity || ensureManagedPersonEntity(item);
     if (entity) {
       entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-      if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-confirmed';
+      if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-modified';
       else delete entity.confirmationSource;
       syncEntityMappingToVoiceProfiles(entity, field === 'source' ? oldSource : '');
     }
@@ -286,7 +286,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     syncEntityMappingToVoiceProfiles(entity, previousSource);
     // 完整映射由用户直接编辑，或由有原文证据的预处理生成时，立即生效；不要求逐条点击确认.
     entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-    if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-confirmed';
+    if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-modified';
     else delete entity.confirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存实体译名失败：' + (error instanceof Error ? error.message : String(error));
@@ -324,8 +324,9 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     });
   }
   function markRelationshipSuggested(relation: LiteraryRelationship) {
-    relation.reviewStatus = 'suggested';
-    delete relation.confirmationSource;
+    // Editing a default-adopted relation changes its working value; it remains active.
+    relation.reviewStatus = 'confirmed';
+    relation.confirmationSource = 'model-default';
     if (relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
       void persistLiteraryMemoryToWorkspace().catch((error) => {
         persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
@@ -379,19 +380,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-    if (status === 'confirmed') {
-      const grounded = profile.evidence.some((evidence) => {
-        const source = doc.value?.segments.find((segment) => segment.id === evidence.segmentId)?.text;
-        return !!source && !!evidence.sourceQuote.trim() &&
-          normalizeVoiceEvidence(source).includes(normalizeVoiceEvidence(evidence.sourceQuote));
-      });
-      if (!grounded) {
-        persistenceMessage.value = '人物声音画像没有匹配到当前文档中的原文证据，不能确认。';
-        return;
-      }
-    }
     profile.status = status;
-    if (status === 'confirmed') profile.confirmationSource = 'user-confirmed';
+    if (status === 'confirmed') profile.confirmationSource = 'user-modified';
     else delete profile.confirmationSource;
     profile.useForTranslation = status !== 'rejected';
     await persistVoiceMemoryChange(
@@ -414,12 +404,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationshipVoiceRules'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-    if (status === 'confirmed' && !rule.evidenceSegmentIds.length) {
-      persistenceMessage.value = '没有原文证据片段，不能确认人物对的说话规则。';
-      return;
-    }
     rule.status = status;
-    if (status === 'confirmed') rule.confirmationSource = 'user-confirmed';
+    if (status === 'confirmed') rule.confirmationSource = 'user-modified';
     else delete rule.confirmationSource;
     await persistVoiceMemoryChange(
       status === 'confirmed' ? '已确认有方向的人物对话规则：' + characterName(rule.speakerId) + ' → ' + characterName(rule.addresseeId) + '。'
@@ -427,22 +413,21 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     );
   }
   async function editVoiceAnchor(anchor: LiteraryBookMemory['voiceAnchors'][number]) {
-    anchor.status = 'candidate';
-    delete anchor.confirmationSource;
+    anchor.status = 'approved';
+    anchor.confirmationSource = 'user-modified';
     anchor.approvedBy = 'manual-edit';
-    await persistVoiceMemoryChange('声音锚点译文已修改，需要重新批准。');
+    await persistVoiceMemoryChange('声音锚点译文已更新，后续翻译将使用新版本。');
   }
 
   async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'candidate' | 'approved' | 'rejected') {
     const sourceSegment = doc.value?.segments.find((segment) => segment.id === anchor.segmentId);
-    if (status === 'approved' && (!anchor.attributionEvidence || (anchor.attributionConfidence ?? 0) < 0.7 ||
-      !sourceSegment || !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.attributionEvidence)))) {
-      persistenceMessage.value = '缺少与当前原文匹配的说话人归属证据（置信度至少 70%），不能批准声音锚点。';
+    if (status === 'approved' && !sourceSegment) {
+      persistenceMessage.value = '声音锚点来源片段已不存在，不能启用。';
       return;
     }
     if (status === 'approved' && (!sourceSegment ||
       !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.source)))) {
-      persistenceMessage.value = '锚点原文片段与当前文档不一致，不能批准。';
+      persistenceMessage.value = '锚点原文片段与当前文档不一致，无法继续使用。';
       return;
     }
     if (status === 'approved') {
@@ -458,7 +443,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     }
     anchor.status = status;
     if (status === 'approved') {
-      anchor.confirmationSource = 'user-confirmed';
+      anchor.confirmationSource = 'user-modified';
       anchor.approvedBy = 'user';
     } else {
       delete anchor.confirmationSource;
