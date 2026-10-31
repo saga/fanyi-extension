@@ -68,7 +68,7 @@ describe('document reader composable wiring', () => {
     );
     const runHandler = source.indexOf('async function runWorkspaceTranslation');
     expect(runHandler).toBeGreaterThan(-1);
-    const readinessCheck = source.indexOf('await prepareContextGraphForTranslation(project)', runHandler);
+    const readinessCheck = source.indexOf('await prepareContextGraphForTranslation(', runHandler);
     const runCreation = source.indexOf("'/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs'", runHandler);
     expect(readinessCheck).toBeGreaterThan(runHandler);
     expect(runCreation).toBeGreaterThan(readinessCheck);
