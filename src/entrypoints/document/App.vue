@@ -457,10 +457,10 @@
         <div class="dictionary-heading">
           <div>
             <h3>中文文学编辑档案</h3>
-            <p class="muted small">档案只从已采纳的中文译文中归纳。已确认版本持续用于后续中文编辑；新样本产生的变化先进入待审更新，不会覆盖当前版本。</p>
+            <p class="muted small">档案只从已采纳的中文译文中归纳。生成后自动启用；后续样本产生的新版本也会自动替换旧版，可随时直接编辑或拒绝。</p>
           </div>
           <span class="entity-status" :class="literaryMemory.chineseEditorialProfile.status === 'confirmed' ? 'is-confirmed' : 'is-pending'">
-            {{ literaryMemory.chineseEditorialProfile.status === 'confirmed' ? '当前版本已确认' : literaryMemory.chineseEditorialProfile.status === 'rejected' ? '已拒绝' : '待确认' }}
+            {{ literaryMemory.chineseEditorialProfile.status === 'confirmed' ? (literaryMemory.chineseEditorialProfile.confirmationSource === 'user-modified' ? '用户已调整' : '自动启用') : literaryMemory.chineseEditorialProfile.status === 'rejected' ? '已拒绝' : '自动启用' }}
           </span>
         </div>
         <div class="literary-status-title">
@@ -490,19 +490,17 @@
           <strong>避免的问题</strong>
           <ul><li v-for="rule in literaryMemory.chineseEditorialProfile.profile.avoid" :key="rule">{{ rule }}</li></ul>
         </div>
-        <div v-if="literaryMemory.chineseEditorialProfile.status === 'candidate'" class="settings-actions">
-          <button class="btn primary" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
-            @click="handleReviewChineseEditorialProfile('confirm')">确认并启用档案</button>
-          <button class="btn" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
-            @click="handleReviewChineseEditorialProfile('reject')">拒绝档案</button>
+        <div class="settings-actions">
+          <button class="btn" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true || literaryMemory.chineseEditorialProfile.status === 'rejected'"
+            @click="handleReviewChineseEditorialProfile('reject')">停用此档案</button>
         </div>
         <section v-if="literaryMemory.chineseEditorialProfile.pendingUpdate" class="pending-editorial-update">
           <div class="dictionary-heading">
             <div>
-              <strong>发现新版档案，等待确认</strong>
-              <p class="muted small">基于新增已采纳译文重新分析。当前 V{{ literaryMemory.chineseEditorialProfile.profileVersion || 1 }} 仍在使用。</p>
+              <strong>新版档案</strong>
+              <p class="muted small">基于新增已采纳译文自动更新，当前版本 V{{ literaryMemory.chineseEditorialProfile.profileVersion || 1 }}。</p>
             </div>
-            <span class="entity-status is-pending">待审更新</span>
+            <span class="entity-status is-confirmed">自动更新</span>
           </div>
           <div class="literary-status-title">
             <span class="chip">新增样本 {{ literaryMemory.chineseEditorialProfile.pendingUpdate.sampleCount }} 段</span>
@@ -521,12 +519,7 @@
               <p>{{ field[1] || '未形成稳定结论' }}</p>
             </div>
           </div>
-          <div class="settings-actions">
-            <button class="btn primary" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
-              @click="handleReviewChineseEditorialProfile('accept-update')">接受更新，切换到新版</button>
-            <button class="btn" type="button" :disabled="readerConfig?.documentUseLocalAgent !== true"
-              @click="handleReviewChineseEditorialProfile('reject-update')">拒绝更新，保留当前版</button>
-          </div>
+          <p class="muted small">该更新已自动采纳，无需操作。</p>
         </section>
         <details class="relationship-section">
           <summary>档案证据（{{ literaryMemory.chineseEditorialProfile.evidenceRefs.length }}）</summary>
@@ -794,10 +787,8 @@
                 <p v-for="(question, index) in item.profile.openQuestions" :key="item.profile.characterId + '-q-' + index" class="warn small">待确认：{{ question }}</p>
               </details>
               <div class="voice-profile-actions">
-                <button class="btn primary" :disabled="item.profile.status === 'confirmed' || !item.profile.evidence.length" @click="setCharacterVoiceStatus(item.profile, 'confirmed')">标记已核实</button>
-                <button class="btn" :disabled="!item.profile.evidence.length" @click="setCharacterVoiceUse(item.profile, !item.profile.useForTranslation)">{{ item.profile.useForTranslation ? '停用用于翻译' : '启用用于翻译' }}</button>
+                <button class="btn" @click="setCharacterVoiceUse(item.profile, !item.profile.useForTranslation)">{{ item.profile.useForTranslation ? '停用用于翻译' : '启用用于翻译' }}</button>
                 <button class="btn" :disabled="item.profile.status === 'rejected'" @click="setCharacterVoiceStatus(item.profile, 'rejected')">拒绝此画像</button>
-                <button class="btn ghost" :disabled="item.profile.status === 'candidate' && item.profile.useForTranslation" @click="setCharacterVoiceStatus(item.profile, 'candidate')">恢复为候选并启用</button>
               </div>
             </template>
             <p v-else class="muted small">该人物暂时只有译名映射。完成全书预处理、获得可核验的原文证据后，角色定位和声音观察会合并显示在这张卡片中。</p>
@@ -811,26 +802,24 @@
 
         <details class="relationship-section">
           <summary><strong>人物 / 事物关系</strong>（{{ literaryMemory.relationships.length }} 项）</summary>
-          <p class="muted small relationship-help">这里记录“谁与谁是什么关系”，用于消歧，不是译名表。只确认有明确原文依据的关系。</p>
+          <p class="muted small relationship-help">这里记录模型分析得到的关系，用于消歧。默认自动采纳；可直接编辑，或移除不需要的关系。</p>
           <div class="literary-editor-list">
             <div v-for="(relation, index) in literaryMemory.relationships" :key="'relation-' + index" class="literary-editor-row">
               <label>主体<input v-model="relation.subject" @change="markRelationshipSuggested(relation)" /></label>
               <label>关系<input v-model="relation.predicate" @change="markRelationshipSuggested(relation)" /></label>
               <label>对象<input v-model="relation.object" @change="markRelationshipSuggested(relation)" /></label>
-              <span class="chip">{{ relation.reviewStatus !== 'confirmed' ? '候选' : relation.confirmationSource === 'user-confirmed' ? '用户确认' : relation.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明' }}</span>
-              <button class="btn ghost" :disabled="!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()" @click="confirmRelationship(relation)">确认并应用</button>
+              <span class="chip">默认采纳</span>
               <button class="btn ghost danger-text" @click="removeRelationship(index)">移除</button>
             </div>
             <div class="relationship-actions">
               <button class="btn" @click="addRelationship">添加关系</button>
-              <button class="btn" :disabled="confirmableRelationshipCount === 0" @click="confirmAllRelationships">一键确认待核对项（{{ pendingRelationshipCount }}）</button>
             </div>
           </div>
         </details>
 
         <details v-if="literaryMemory.relationshipVoiceRules.length" class="relationship-section">
           <summary><strong>人物对的说话规则</strong>（{{ literaryMemory.relationshipVoiceRules.length }} 项）</summary>
-          <p class="muted small">方向不可互换：A 对 B 的称谓和语域，不代表 B 对 A 的说话方式。</p>
+          <p class="muted small">方向不可互换。模型生成后默认用于翻译，可直接修改或拒绝。</p>
           <article v-for="(rule, index) in literaryMemory.relationshipVoiceRules" :key="'voice-rule-' + index" class="voice-profile-card">
             <div class="voice-profile-heading">
               <strong>{{ characterName(rule.speakerId) }} → {{ characterName(rule.addresseeId) }}</strong>
@@ -843,15 +832,13 @@
             <p v-if="rule.sceneDependentShift"><strong>场景变化：</strong>{{ rule.sceneDependentShift }}</p>
             <p class="muted small">证据片段：{{ rule.evidenceSegmentIds.join('、') }}</p>
             <div class="voice-profile-actions">
-              <button class="btn primary" :disabled="rule.status === 'confirmed' || !rule.evidenceSegmentIds.length" @click="setRelationshipVoiceStatus(rule, 'confirmed')">确认规则</button>
-              <button class="btn" :disabled="rule.status === 'rejected'" @click="setRelationshipVoiceStatus(rule, 'rejected')">拒绝</button>
-              <button class="btn ghost" :disabled="rule.status === 'candidate'" @click="setRelationshipVoiceStatus(rule, 'candidate')">恢复候选</button>
+              <button class="btn" :disabled="rule.status === 'rejected'" @click="setRelationshipVoiceStatus(rule, 'rejected')">拒绝此规则</button>
             </div>
           </article>
         </details>
         <details v-if="literaryMemory.voiceAnchors.length" class="relationship-section">
           <summary><strong>原文—译文声音锚点</strong>（{{ literaryMemory.voiceAnchors.length }} 项）</summary>
-          <p class="muted small">仅批准的锚点会用于常规翻译。来源对不上、说话人不可靠或译文还未确定时，不应批准。</p>
+          <p class="muted small">声音锚点默认作为翻译参考；来源与当前译文发生变化时会自动失效，可直接编辑或拒绝。</p>
           <article v-for="anchor in literaryMemory.voiceAnchors" :key="anchor.anchorId" class="voice-profile-card">
             <div class="voice-profile-heading">
               <strong>{{ characterName(anchor.speakerId) }} · {{ anchor.chapter || '未标章节' }}</strong>
@@ -866,9 +853,7 @@
             <p v-if="anchor.attributionEvidence"><strong>说话人归属证据：</strong>{{ anchor.attributionEvidence }}（置信度 {{ Math.round((anchor.attributionConfidence || 0) * 100) }}%）</p>
             <p v-else class="warn small">缺少可核验的说话人归属证据；这个锚点只能保留为候选。</p>
             <div class="voice-profile-actions">
-              <button class="btn primary" :disabled="anchor.status === 'approved'" @click="setVoiceAnchorStatus(anchor, 'approved')">批准并作为声音示例</button>
-              <button class="btn" :disabled="anchor.status === 'rejected'" @click="setVoiceAnchorStatus(anchor, 'rejected')">拒绝</button>
-              <button class="btn ghost" :disabled="anchor.status === 'candidate'" @click="setVoiceAnchorStatus(anchor, 'candidate')">恢复候选</button>
+              <button class="btn" :disabled="anchor.status === 'rejected'" @click="setVoiceAnchorStatus(anchor, 'rejected')">拒绝此锚点</button>
             </div>
           </article>
         </details>
