@@ -517,6 +517,30 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     return pending;
   }
 
+  async function reviewChineseEditorialProfile(action: 'confirm' | 'reject' | 'accept-update' | 'reject-update') {
+    await awaitLiteraryMemoryWrites();
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    if (!config.documentUseLocalAgent) throw new Error('请先启用本机 Agent。');
+    let project = workspaceProject.value;
+    if (!project?.projectId) {
+      await deps.ensureWorkspace();
+      project = workspaceProject.value;
+    }
+    if (!project?.projectId) throw new Error('当前文档尚未连接到本机项目。');
+    const response = await workspaceApi<{ current?: { memory?: unknown } }>(
+      config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
+      config.documentLocalAgentToken || '',
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory/chinese-editorial-profile/review',
+      { method: 'POST', body: JSON.stringify({ action }) },
+    );
+    literaryMemory.value = sanitizeLiteraryMemory(response.current?.memory ?? literaryMemory.value);
+    await deps.persistSession();
+    persistenceMessage.value = action === 'accept-update' ? '已启用新版中文文学编辑档案。'
+      : action === 'reject-update' ? '已拒绝档案更新，继续使用原版本。'
+      : action === 'confirm' ? '已确认中文文学编辑档案。' : '已拒绝中文文学编辑档案。';
+  }
+
   function markStyleGuideCandidate() {
     literaryMemory.value.styleGuideStatus = 'candidate';
     literaryMemory.value.styleGuideOrigin = 'user-edited';
@@ -690,6 +714,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     removeRelationship,
     persistLiteraryMemoryToWorkspace,
     awaitLiteraryMemoryWrites,
+    reviewChineseEditorialProfile,
     markStyleGuideCandidate,
     setStyleGuideLines,
     importContextGraphStyleGuide,
