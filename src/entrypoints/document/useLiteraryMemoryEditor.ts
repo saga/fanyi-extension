@@ -313,7 +313,14 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       );
       literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
     }
-    await deps.persistSession();
+    try {
+      await deps.persistSession();
+    } catch (error) {
+      // The SQLite transaction has already committed; do not restore the old in-memory projection
+      // merely because the extension's local session mirror could not be refreshed.
+      persistenceMessage.value = '本机 workspace 已保存图谱与文学记忆；但浏览器会话同步失败：' +
+        (error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function rejectContextGraphRelationship(subject: string, object: string, predicate: string, memory: LiteraryBookMemory): Promise<void> {
@@ -383,7 +390,14 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       );
       literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
     }
-    await deps.persistSession();
+    try {
+      await deps.persistSession();
+    } catch (error) {
+      // The SQLite transaction has already committed; do not restore the old in-memory projection
+      // merely because the extension's local session mirror could not be refreshed.
+      persistenceMessage.value = '本机 workspace 已保存图谱与文学记忆；但浏览器会话同步失败：' +
+        (error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function removeManagedPerson(item: ManagedPersonItem) {
