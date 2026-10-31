@@ -404,9 +404,10 @@ describe('文档翻译服务端模式', () => {
     expect(state.value.translations.has('chapter1-s0')).toBe(false);
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(literaryMemory.value.entities).toHaveLength(0);
-    expect(literaryStatus.value.warnings.some((warning) => warning.includes('没有提取到实体/人物记忆'))).toBe(true);
+    // 这本书没有需要登记的专名，但有效文风基准本身就是可用的书籍级上下文。
+    expect(literaryStatus.value.bookProfileReady).toBe(true);
     expect(literaryStatus.value.diagnostics.some((event) =>
-      event.stage === 'book-analysis' && event.status === 'warning' && event.message.includes('没有提取到实体/人物记忆'),
+      event.stage === 'book-analysis' && event.status === 'completed',
     )).toBe(true);
   });
 
