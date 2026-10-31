@@ -317,33 +317,29 @@ function mergeEntityRecord(prior: LiteraryEntity, candidate: LiteraryEntity): Li
     const key = normalizedEntityName(alias);
     if (key && key !== canonicalKey && !aliasMap.has(key)) aliasMap.set(key, alias);
   }
-  const sameTarget = normalizedEntityName(prior.target) === normalizedEntityName(candidate.target);
-  const canMergeEvidenceRefs = prior.reviewStatus !== 'confirmed' ||
-    (Array.isArray(prior.evidenceRefs) && prior.evidenceRefs.length > 0);
-  const evidenceRefs = canMergeEvidenceRefs
-    ? [...(prior.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
-        .filter((item, index, all) => all.findIndex((other) =>
-          other.segmentId === item.segmentId && normalizedEntityName(other.sourceQuote) === normalizedEntityName(item.sourceQuote)) === index)
-        .slice(0, 8)
-    : [];
+  const userLockedTarget = prior.confirmationSource === 'user-modified' || prior.confirmationSource === 'user-confirmed';
+  const evidenceRefs = [...(prior.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
+    .filter((item, index, all) => all.findIndex((other) =>
+      other.segmentId === item.segmentId && normalizedEntityName(other.sourceQuote) === normalizedEntityName(item.sourceQuote)) === index)
+    .slice(0, 8);
   return {
     ...prior,
-    // Earlier canonical translation wins. A conflicting later target is never silently adopted.
+    // Only an explicit user choice locks a canonical target. Model-default mappings can be
+    // refreshed by later analysis; the newest model result remains the working default.
+    ...(userLockedTarget ? {} : {
+      target: candidate.target,
+      reviewStatus: 'confirmed' as const,
+      confirmationSource: candidate.confirmationSource || 'model-default',
+    }),
     aliases: Array.from(aliasMap.values()).slice(0, 8),
     ...(evidenceRefs.length ? { evidenceRefs } : {}),
     targetEvidenceRefs: [...(prior.targetEvidenceRefs || []), ...(candidate.targetEvidenceRefs || [])]
       .filter((item, index, all) => all.findIndex((other) => other.segmentId === item.segmentId) === index).slice(-8),
     targetConfidence: new Set([...(prior.targetEvidenceRefs || []), ...(candidate.targetEvidenceRefs || [])]
       .map((item) => item.segmentId).filter(Boolean)).size >= 2 ? 'corroborated' as const : 'candidate' as const,
-    ...(sameTarget && prior.reviewStatus !== 'confirmed' && candidate.reviewStatus === 'confirmed'
-      && candidate.confirmationSource === 'user-confirmed'
-      ? { reviewStatus: 'confirmed' as const, confirmationSource: 'user-confirmed' as const }
-      : {}),
-    ...(sameTarget && (prior.reviewStatus === 'confirmed' || candidate.reviewStatus === 'confirmed')
-      ? { confirmationSource: mergeConfirmationSource(prior.confirmationSource, candidate.confirmationSource) }
-      : {}),
+    ...(userLockedTarget ? { confirmationSource: prior.confirmationSource } : {}),
     description: prior.description || candidate.description,
-    evidence: prior.evidence || candidate.evidence,
+    evidence: candidate.evidence || prior.evidence,
   };
 }
 
