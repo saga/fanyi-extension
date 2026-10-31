@@ -85,6 +85,23 @@ describe('document reader composable wiring', () => {
     expect(contextGraph.slice(orchestration)).toContain('timeoutMs');
   });
 
+  it('starts a full-book stale Run from one literary translation action', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+      'utf8',
+    );
+    const start = source.indexOf('async function startTranslate');
+    const fullBookRun = source.indexOf(
+      "await runWorkspaceTranslation({ scope: { type: 'stale' } })",
+      start,
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(fullBookRun).toBeGreaterThan(start);
+    expect(source.slice(start, fullBookRun)).toContain(
+      "effectiveDocumentTranslationMode.value === 'literary'",
+    );
+  });
+
   it('declares the shared ref in App.vue before both composables', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
