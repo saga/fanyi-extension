@@ -1408,6 +1408,7 @@ const {
   clearContextGraphPoll,
   loadContextGraph,
   refreshContextGraphStatus,
+  ensureContextGraphPreprocessing,
   handlePreprocessingStatusRefreshRequested,
   openPreprocessingAndEnsure,
   reanalyzeContextGraph,
@@ -3475,13 +3476,43 @@ async function runWorkspaceTranslation(options: {
   // 不能只依赖 Workspace 按钮禁用：阅读页的“翻译当前页/预翻译章节”会直接调用本函数。
   if (effectiveDocumentTranslationMode.value === 'literary') {
     await refreshContextGraphStatus(project, true);
-    const readiness = translationPreprocessingReadiness.value;
+    let readiness = translationPreprocessingReadiness.value;
     if (readiness.required && !readiness.ready) {
-      state.value.running = false;
-      state.value.workStage = '';
-      state.value.activeSegmentIds = new Set();
-      state.value.error = readiness.message || '全书预处理尚未完成，文学翻译暂不能开始。';
-      return;
+      // A user's single "start translation" action also authorizes the required preprocessing.
+      // Do not make them return to the reader and click Start a second time after it finishes.
+      const documentGeneration = workspaceDocumentGeneration;
+      state.value.running = true;
+      state.value.workChapter = '全书预处理';
+      state.value.workStage = '准备全书上下文';
+      state.value.workDone = 0;
+      state.value.workTotal = doc.value?.segments.length || 0;
+
+      if (['failed', 'missing', 'version', 'language', 'incomplete'].includes(readiness.reason)) {
+        // One bounded retry per explicit translation request. A persistent failure is surfaced;
+        // there is no background retry loop that can repeatedly consume model budget.
+        await ensureContextGraphPreprocessing(project, { force: true });
+      }
+
+      const deadline = Date.now() + 60 * 60 * 1000;
+      while (!readiness.ready && Date.now() < deadline) {
+        if (workspaceDocumentGeneration !== documentGeneration ||
+            workspaceProject.value?.projectId !== project.projectId) return;
+        if (readiness.reason === 'failed') break;
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        await refreshContextGraphStatus(project, true);
+        readiness = translationPreprocessingReadiness.value;
+      }
+
+      if (!readiness.ready) {
+        state.value.running = false;
+        state.value.workStage = '';
+        state.value.workChapter = '';
+        state.value.activeSegmentIds = new Set();
+        state.value.error = readiness.message ||
+          '全书预处理未能在限定时间内完成。已保留当前进度；修复问题后可再次点击开始翻译。';
+        return;
+      }
+      state.value.workStage = '全书预处理完成，开始翻译';
     }
   }
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
@@ -3697,6 +3728,13 @@ async function startTranslate() {
       return;
     }
   }
+  // 本机文学书籍是全书级工作流：一次开始动作翻译全部待处理片段，不要求用户逐页点击。
+  // 技术文档和非本机模式仍保留当前页优先的阅读体验。
+  if (config.documentUseLocalAgent && effectiveDocumentTranslationMode.value === 'literary') {
+    await runWorkspaceTranslation({ scope: { type: 'stale' } });
+    return;
+  }
+
   // 当前页已完成但文档尚未完成时，继续按钮自动跳到后面最近的待译页；走到末尾后再回绕查找。
   if (!currentPagePending.value) {
     const pageCount = pages.value.length;
