@@ -348,38 +348,28 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     }
   }
 
-  async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-    profile.status = status;
-    if (status === 'confirmed') profile.confirmationSource = 'user-modified';
-    else delete profile.confirmationSource;
-    profile.useForTranslation = status !== 'rejected';
-    await persistVoiceMemoryChange(
-      status === 'confirmed' ? '已确认人物声音：' + profile.canonicalSourceName + '。后续相关对白会参考这份画像。'
-        : status === 'rejected' ? '已拒绝人物声音画像：' + profile.canonicalSourceName + '。'
-          : '已将人物声音画像移回候选：' + profile.canonicalSourceName + '。',
-    );
+  async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'rejected') {
+    profile.status = 'rejected';
+    profile.useForTranslation = false;
+    delete profile.confirmationSource;
+    await persistVoiceMemoryChange('已拒绝人物声音画像：' + profile.canonicalSourceName + '。');
   }
   async function setCharacterVoiceUse(profile: LiteraryBookMemory['characterVoices'][number], enabled: boolean) {
-    if (enabled && !profile.evidence.length) {
-      persistenceMessage.value = '没有原文证据的角色画像不能启用。';
-      return;
-    }
-    if (enabled && profile.status === 'rejected') profile.status = 'candidate';
     profile.useForTranslation = enabled;
+    if (enabled && profile.status === 'rejected') {
+      profile.status = 'confirmed';
+      profile.confirmationSource = 'user-modified';
+    }
     await persistVoiceMemoryChange(
-      enabled ? '已启用人物画像用于翻译：' + profile.canonicalSourceName + '。候选画像只作为弱提示。'
+      enabled ? '已启用人物画像用于翻译：' + profile.canonicalSourceName + '。'
         : '已停用人物画像：' + profile.canonicalSourceName + '。后续翻译不再注入此画像。',
     );
   }
 
-  async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationshipVoiceRules'][number], status: 'candidate' | 'confirmed' | 'rejected') {
-    rule.status = status;
-    if (status === 'confirmed') rule.confirmationSource = 'user-modified';
-    else delete rule.confirmationSource;
-    await persistVoiceMemoryChange(
-      status === 'confirmed' ? '已确认有方向的人物对话规则：' + characterName(rule.speakerId) + ' → ' + characterName(rule.addresseeId) + '。'
-        : status === 'rejected' ? '已拒绝该人物对话规则。' : '已将该人物对话规则移回候选。',
-    );
+  async function setRelationshipVoiceStatus(rule: LiteraryBookMemory['relationshipVoiceRules'][number], status: 'rejected') {
+    rule.status = 'rejected';
+    delete rule.confirmationSource;
+    await persistVoiceMemoryChange('已拒绝该人物对话规则。');
   }
   async function editVoiceAnchor(anchor: LiteraryBookMemory['voiceAnchors'][number]) {
     anchor.status = 'approved';
@@ -388,39 +378,10 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     await persistVoiceMemoryChange('声音锚点译文已更新，后续翻译将使用新版本。');
   }
 
-  async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'candidate' | 'approved' | 'rejected') {
-    const sourceSegment = doc.value?.segments.find((segment) => segment.id === anchor.segmentId);
-    if (status === 'approved' && !sourceSegment) {
-      persistenceMessage.value = '声音锚点来源片段已不存在，不能启用。';
-      return;
-    }
-    if (status === 'approved' && (!sourceSegment ||
-      !normalizeVoiceEvidence(sourceSegment.text).includes(normalizeVoiceEvidence(anchor.source)))) {
-      persistenceMessage.value = '锚点原文片段与当前文档不一致，无法继续使用。';
-      return;
-    }
-    if (status === 'approved') {
-      const acceptedTranslation = state.value.translations.get(anchor.segmentId) || '';
-      if (!acceptedTranslation.trim() || !normalizeVoiceEvidence(acceptedTranslation).includes(normalizeVoiceEvidence(anchor.target))) {
-        persistenceMessage.value = '锚点译文必须能在该段当前已采纳译文中找到。请先修改锚点译文，再批准。';
-        return;
-      }
-    }
-    if (status === 'approved' && !literaryMemory.value.characterVoices.some((profile) => profile.characterId === anchor.speakerId && profile.status === 'confirmed')) {
-      persistenceMessage.value = '请先确认该说话人的声音画像，再批准此声音锚点。';
-      return;
-    }
-    anchor.status = status;
-    if (status === 'approved') {
-      anchor.confirmationSource = 'user-modified';
-      anchor.approvedBy = 'user';
-    } else {
-      delete anchor.confirmationSource;
-    }
-    await persistVoiceMemoryChange(
-      status === 'approved' ? '已批准声音锚点；后续相关场景可复用这组原文—译文示例。'
-        : status === 'rejected' ? '已拒绝该声音锚点。' : '已将声音锚点移回候选。',
-    );
+  async function setVoiceAnchorStatus(anchor: LiteraryBookMemory['voiceAnchors'][number], status: 'rejected') {
+    anchor.status = 'rejected';
+    delete anchor.confirmationSource;
+    await persistVoiceMemoryChange('已拒绝该声音锚点。');
   }
 
   function addRelationship() {
