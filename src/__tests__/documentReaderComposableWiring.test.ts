@@ -167,6 +167,49 @@ describe('document reader composable wiring', () => {
   });
 });
 
+describe('document prompt source of truth', () => {
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+    'utf8',
+  );
+
+  it('内置提示词按当前设置重新生成，不把编辑器里的旧快照当成当前设置', () => {
+    const inputStart = source.indexOf('function workspacePromptInput()');
+    expect(inputStart).toBeGreaterThan(-1);
+    const inputBody = source.slice(inputStart, source.indexOf('async function replaceCurrentTranslations', inputStart));
+    // 回归：这里曾经直接取 documentSystemPromptEditor，hydrate 之后编辑器里是
+    // 建项目那一刻的 prompt，改源语言/文风再同步就是把这个过期快照写回项目。
+    expect(inputBody).toContain('documentSystemPromptOverride.value');
+    expect(inputBody).toContain('builtInDocumentSystemPrompt.value');
+    expect(inputBody.indexOf('builtInDocumentSystemPrompt.value'))
+      .toBeGreaterThan(inputBody.indexOf('documentSystemPromptOverride.value'));
+  });
+
+  it('hydrate 只修正过期的语言行，不重建整份提示词', () => {
+    const hydrateStart = source.indexOf('async function hydrateWorkspacePrompt(');
+    expect(hydrateStart).toBeGreaterThan(-1);
+    const hydrateBody = source.slice(hydrateStart, source.indexOf('async function refreshExistingWorkspaceFromService', hydrateStart));
+    expect(hydrateBody).not.toContain("documentSystemPromptOverride.value = typeof prompt.systemPrompt");
+    // 回归：旧项目存的提示词里写着「输入语言：英语」，但源语言可能已经改成法语。
+    expect(hydrateBody).toContain('applyDocumentLanguageLines(storedSystemPrompt)');
+    expect(hydrateBody).toContain("'/api/documents/projects/' + encodeURIComponent(projectId) + '/prompts'");
+
+    const helper = source.indexOf('function applyDocumentLanguageLines(');
+    expect(helper).toBeGreaterThan(-1);
+    const helperBody = source.slice(helper, source.indexOf('const documentStyleVars', helper));
+    expect(helperBody).toContain('/^输入语言：/m');
+    expect(helperBody).toContain('/^目标语言：/m');
+  });
+
+  it('同步 watcher 覆盖文风，切换文风会重写项目 prompt', () => {
+    const syncStart = source.indexOf('], async (next, previous) => {');
+    expect(syncStart).toBeGreaterThan(-1);
+    const watchStart = source.lastIndexOf('watch([', syncStart);
+    expect(watchStart).toBeGreaterThan(-1);
+    expect(source.slice(watchStart, syncStart)).toContain('() => readerConfig.value?.documentPromptStyle');
+  });
+});
+
 describe('reader toolbar speed knobs', () => {
   const source = readFileSync(
     resolve(process.cwd(), 'src/entrypoints/document/App.vue'),

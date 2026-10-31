@@ -338,6 +338,7 @@ import { normalizeContextWindowOption, type CodeBuddyContextWindowOption } from 
 const props = defineProps<{
   activeSourceLang?: string;
   activeTargetLang?: string;
+  activePromptStyle?: string;
 }>();
 const emit = defineEmits<{
   updated: [config: Config, changedFields: (keyof Config)[]];
@@ -426,7 +427,7 @@ onMounted(async () => {
 });
 
 watch(
-  () => [props.activeSourceLang, props.activeTargetLang],
+  () => [props.activeSourceLang, props.activeTargetLang, props.activePromptStyle],
   () => {
     if (initialized.value) applyActiveDocumentLanguages();
   },
@@ -448,6 +449,10 @@ function applyActiveDocumentLanguages() {
   // 而不是用网页翻译的全局设置覆盖当前文档会话。手动修改后会保存到文档专用配置。
   if (props.activeSourceLang) config.value.documentSourceLang = props.activeSourceLang;
   if (props.activeTargetLang) config.value.documentTargetLang = props.activeTargetLang;
+  // 文风同样跟着文档项目走：打开某本书时要显示它自己的文风，而不是别的书最后选的那个。
+  if (props.activePromptStyle) {
+    config.value.documentPromptStyle = props.activePromptStyle as Config['documentPromptStyle'];
+  }
 }
 
 const documentConfigFields: (keyof Config)[] = [

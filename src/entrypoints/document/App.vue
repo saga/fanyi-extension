@@ -50,6 +50,7 @@
       v-if="!doc && !parsing"
       :active-source-lang="doc ? sourceLang : undefined"
       :active-target-lang="doc ? targetLang : undefined"
+      :active-prompt-style="doc ? readerConfig?.documentPromptStyle : undefined"
       @updated="onTranslationSettingsUpdated"
     />
 
@@ -243,6 +244,7 @@
       <DocumentTranslationSettings
         :active-source-lang="sourceLang"
         :active-target-lang="targetLang"
+        :active-prompt-style="readerConfig?.documentPromptStyle"
         @updated="onTranslationSettingsUpdated"
       />
       <section v-if="persistenceMessage" class="panel persistence-notice">
@@ -1165,6 +1167,7 @@ import { preprocessingGateTitle, resolveDocumentTranslationMode, styleGuideBadge
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
+import { resolveLanguageName } from '@/entrypoints/service/prompt-contract';
 import {
   DOCUMENT_ACCEPT_ATTR,
   exportDocument,
@@ -1313,6 +1316,21 @@ const builtInDocumentSystemPrompt = computed(() => {
   // Include the static book workflow instructions shown to the model, not just the generic profile.
   return effectiveDocumentTranslationMode.value === 'literary' ? base + '\n\n' + buildLiteraryTranslationContextPrompt() : base;
 });
+/**
+ * 只重写提示词里的「输入语言 / 目标语言」两行。
+ *
+ * 项目里存的提示词是上一次生效的快照：源语言从英语改成法语之后，快照里的语言行不会自己更新，
+ * 模型就会照着过期语言方向翻译。这里只改这两行，保留原提示词的版本与文风，不做整份重建。
+ */
+function applyDocumentLanguageLines(prompt: string): string {
+  const sourceLine = '输入语言：' + resolveLanguageName(sourceLang.value, '自动检测（按原文实际语言判断，不要假定为英语）');
+  const targetLine = '目标语言：' + resolveLanguageName(targetLang.value, '简体中文');
+  if (!/^输入语言：/m.test(prompt) && !/^目标语言：/m.test(prompt)) return prompt;
+  return prompt
+    .replace(/^输入语言：.*$/m, () => sourceLine)
+    .replace(/^目标语言：.*$/m, () => targetLine);
+}
+
 const documentStyleVars = computed(() => ({
   '--document-font-en': englishFontFamily.value,
   '--document-font-zh': chineseFontFamily.value,
@@ -1812,11 +1830,19 @@ function onTranslationSettingsUpdated(config: Config, changedFields: (keyof Conf
       ? 'off'
       : normalizeDocumentReviewStrength(config.documentReviewStrength);
   }
-  if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
-  if (!documentUserPromptTemplate.value) documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
+  // 只有真正喂给提示词的设置才重建编辑器内容；调字体、并发之类的设置不该把编辑器里的快照换掉。
+  const promptInputsChanged = changedFields.some((field) =>
+    field === 'documentSourceLang' || field === 'documentTargetLang' ||
+    field === 'documentPromptStyle' || field === 'documentTranslationMode');
+  if (promptInputsChanged && !documentSystemPromptOverride.value) {
+    documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
+  }
+  if (promptInputsChanged && !documentUserPromptTemplate.value) {
+    documentUserPromptEditor.value = BUILT_IN_USER_PROMPT_TEMPLATE;
+  }
 }
 
-watch([sourceLang, targetLang, literaryMode], () => {
+watch([sourceLang, targetLang, literaryMode, () => JSON.stringify(glossary.value)], () => {
   if (!documentSystemPromptOverride.value) documentSystemPromptEditor.value = builtInDocumentSystemPrompt.value;
 });
 
@@ -2715,11 +2741,20 @@ function workspaceInput() {
 
 function workspacePromptInput() {
   const config = readerConfig.value;
+  // 自定义 prompt 以「已保存的自定义」为准；否则按当前设置重新生成。
+  // 不能直接读编辑器：编辑器里可能还留着上一次的快照（旧语言、旧文风），
+  // 直接 POST 会把过期提示词当成当前设置写进项目。
   return {
-    systemPrompt: documentSystemPromptEditor.value || builtInDocumentSystemPrompt.value,
-    userPromptTemplate: documentUserPromptEditor.value || BUILT_IN_USER_PROMPT_TEMPLATE,
+    systemPrompt: documentSystemPromptOverride.value
+      ? documentSystemPromptEditor.value
+      : builtInDocumentSystemPrompt.value,
+    userPromptTemplate: documentUserPromptTemplate.value
+      ? documentUserPromptEditor.value
+      : BUILT_IN_USER_PROMPT_TEMPLATE,
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
+    // 文风随项目保存：重新生成提示词时保持这本书原本的文风，不会被别的书或全局设置改掉。
+    promptStyle: config?.documentPromptStyle || 'default',
     provider: config?.documentLocalAgentProvider || 'workbuddy',
     model: config?.documentLocalAgentModel || 'auto',
     taskProfiles: config?.documentCodeBuddyTaskProfiles,
@@ -2796,6 +2831,8 @@ watch([
   () => readerConfig.value?.documentPrecedingContextSegments,
   () => readerConfig.value?.documentContextBudgetChars,
   () => readerConfig.value?.documentMaxModelAttempts,
+  // 追加在末尾：前几项的下标被 graphContextChanged 使用，不能插队。
+  () => readerConfig.value?.documentPromptStyle,
 ], async (next, previous) => {
   if (next.every((value, index) => value === previous[index])) return;
   const nextTranslationMode = next[2];
@@ -2937,6 +2974,10 @@ async function hydrateWorkspacePrompt(
     readerConfig.value = {
       ...(readerConfig.value || await getConfig()),
       documentTranslationMode: promptConfig.translationMode === 'literary' ? 'literary' : 'technical',
+      // 文风是项目 Prompt 的一部分；旧项目没有记录时保留当前设置，不要重置成通用直译。
+      documentPromptStyle: (typeof promptConfig.promptStyle === 'string' && promptConfig.promptStyle
+        ? promptConfig.promptStyle
+        : readerConfig.value?.documentPromptStyle || 'default') as Config['documentPromptStyle'],
       documentLocalAgentProvider: promptConfig.provider === 'opencode' ? 'opencode' : 'workbuddy',
       documentLocalAgentModel: typeof promptConfig.model === 'string' ? promptConfig.model : 'auto',
       documentBatchMaxSegments: Number.isFinite(strategy.maxBatchSegments) ? strategy.maxBatchSegments : readerConfig.value?.documentBatchMaxSegments,
@@ -2948,12 +2989,37 @@ async function hydrateWorkspacePrompt(
       documentContextBudgetChars: Number.isFinite(strategy.contextBudgetChars) ? strategy.contextBudgetChars : readerConfig.value?.documentContextBudgetChars,
       documentMaxModelAttempts: Number.isFinite(strategy.maxModelAttempts) ? strategy.maxModelAttempts : readerConfig.value?.documentMaxModelAttempts,
     };
-    documentSystemPromptOverride.value = typeof prompt.systemPrompt === 'string' ? prompt.systemPrompt : '';
-    documentUserPromptTemplate.value = typeof prompt.userPromptTemplate === 'string' ? prompt.userPromptTemplate : '';
+    // 服务端存的是「上一次生效过的 prompt 快照」。它可能带着过期的语言行
+    // （建项目时源语言是英语，之后改成了法语），也可能是一份自定义提示词本身。
+    // 这里只修正语言行，不重建整份提示词：重建会连文风一起改成当前设置，等于替用户改书。
+    const storedSystemPrompt = typeof prompt.systemPrompt === 'string' ? prompt.systemPrompt.trim() : '';
+    const storedUserPrompt = typeof prompt.userPromptTemplate === 'string' ? prompt.userPromptTemplate.trim() : '';
     await nextTick();
     if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return;
-    documentSystemPromptEditor.value = documentSystemPromptOverride.value || builtInDocumentSystemPrompt.value;
-    documentUserPromptEditor.value = documentUserPromptTemplate.value || BUILT_IN_USER_PROMPT_TEMPLATE;
+    documentSystemPromptEditor.value = documentSystemPromptOverride.value
+      || (storedSystemPrompt ? applyDocumentLanguageLines(storedSystemPrompt) : builtInDocumentSystemPrompt.value);
+    documentUserPromptEditor.value = documentUserPromptTemplate.value || storedUserPrompt || BUILT_IN_USER_PROMPT_TEMPLATE;
+    const normalizedSystemPrompt = documentSystemPromptEditor.value.trim();
+    const normalizedUserPrompt = documentUserPromptEditor.value.trim();
+    if (normalizedSystemPrompt !== storedSystemPrompt) {
+      try {
+        await workspaceApi(
+          baseUrl, token,
+          '/api/documents/projects/' + encodeURIComponent(projectId) + '/prompts',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              ...workspacePromptInput(),
+              systemPrompt: normalizedSystemPrompt,
+              userPromptTemplate: normalizedUserPrompt,
+            }),
+          },
+        );
+      } catch (error) {
+        persistenceMessage.value = '文档提示词与当前设置不一致，同步项目 Prompt 失败：' +
+          (error instanceof Error ? error.message : String(error));
+      }
+    }
   } finally {
     suppressWorkspacePromptSync = false;
   }
