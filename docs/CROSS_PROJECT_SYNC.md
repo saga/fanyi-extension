@@ -639,14 +639,14 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - `vocal-saga/local-agent-service/src/documents/translationAgent.ts` 是 project-based Agent 的服务端编排入口，拥有批次调度、Session scope、候选译文/审校 finding 的持久化、运行状态与事件。它是本机 Express 服务的一部分，不部署在 Cloudflare Worker 上，也不应被加入纯网页翻译模块的字节级同步清单。
 - `fanyi-extension` 的 `DocumentAgentWorkspace.vue` / `documentWorkspaceClient.ts` 通过 `/api/documents/projects/...` 使用该服务端 workflow。修改路由、JSON 字段或事件名时，客户端消费逻辑和 `local-agent-service` 的路由/测试必须一起更新。
 
-### 请求体、原始文件与恢复副本大小契约（2026-10-20）
+### 请求体、原始文件与服务端 reader-session 契约（2026-10-31）
 
 这些限制服务于不同路径，不应拿 JSON 上限来限制整本书：
 
 - 普通 Local Agent JSON API 的请求体上限由 `MAX_BODY_BYTES` 控制；`/api/documents` JSON 请求体上限由 `MAX_DOCUMENT_BODY_BYTES` 控制。这些是接口防护，不是 EPUB/PDF 整书传输机制。
 - Local Agent 模式下 EPUB/PDF 使用 `POST /api/documents/projects/import-file` 上传原始二进制；默认文件上限 **512 MiB**，由 `LOCAL_AGENT_MAX_DOCUMENT_SOURCE_MB` 调整。展开/提取文本默认上限 **1024 MiB**，由 `LOCAL_AGENT_MAX_DOCUMENT_EXPANDED_MB` 调整；PDF 文本提取默认超时 **180 秒**，由 `LOCAL_AGENT_PDF_TIMEOUT_MS` 调整。服务仍保留资源与解压炸弹防护。
 - 项目 SQLite 保存来源文件及片段。通用 `document_sessions` 仅保存 `projectId`、阅读位置、语言/视图等轻量元数据，不再复制全文、全部译文或 LiteraryMemory。恢复时从项目 API 分页加载原文、已采纳译文和文学记忆。
-- `documentWorkspaceClient.ts` 每次最多发送 200 条已采纳译文，仅用于旧阅读副本迁移等路径；新 EPUB/PDF 导入不通过该 JSON 批次传输全书内容。
+- Local Agent 模式不再从扩展阅读快照迁移译文或 LiteraryMemory；新建项目只初始化所选 Prompt。历史 `/translations/import` API 仅保留服务端兼容，不由阅读器自动调用。
 ### 当前调度与状态契约
 
 1. 默认配置上限为 4 个翻译 worker + 2 个 Reviewer worker；四槽位且启用审校时，实际预算为 2 个翻译 + 2 个 Reviewer；关闭审校时翻译可占用最多 4 个槽位。两项上限按 `LOCAL_AGENT_POOL_SIZE` 收敛。由于每批使用独立 Session，初始化开销必须纳入真实压测；CI 不测量实际耗时。
@@ -666,7 +666,7 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 ---
 ### PDF/EPUB 结构化翻译（2026-10）
 
-- 未启用 Local Agent 的轻量/离线路径仍可使用扩展 PDF.js/JSZip 解析；启用 Local Agent 后，EPUB/PDF 原始文件解析、分段、来源修订与原文件持久化由 `local-agent-service` 执行，扩展不得先解析整本书再通过 JSON 重传。Worker 只接收结构化 segments 并通过 `/api/translate/document/segments` 进行单次有界翻译；项目级跨章节记忆、Run 调度与审校归 `local-agent-service`。
+- 未启用 Local Agent 的轻量/离线路径仍可使用扩展 PDF.js/JSZip 解析，并使用其兼容翻译流程。启用 Local Agent 后，EPUB/PDF 原始文件解析、分段、来源修订与原文件持久化由 `local-agent-service` 执行，扩展不得先解析整本书再通过 JSON 重传；阅读页和 Agent Workspace 共用项目/Run API，项目级跨章节记忆、Run 调度与审校全部归 `local-agent-service`。
 - 片段的 `id`、`kind`、`level`、`marker`、`page`、`contextPath` 在客户端和服务端保持一致。章节路径、列表标记及页码作为只读元数据使用，不进入译文正文。
 - 只有所有预期 ID 都有非空译文时 `complete` 才为 true。服务端会重试一次缺失片段；仍缺失时返回 `missingSegmentIds`，扩展保留已完成结果并允许只重试缺失片段。
 - 当前 PDF parser 会告警扫描件/低文本页；本次没有接入 OCR 引擎，不能把无文本层的页面报告成已识别。
