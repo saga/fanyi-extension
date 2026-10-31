@@ -166,5 +166,8 @@ describe('literary memory deletion persistence', () => {
 
     expect(literaryMemory.value.relationships).toHaveLength(0);
     expect(calls.filter((call) => call.path.endsWith('/context-graph/review'))).toHaveLength(0);
+    const memoryWrite = calls.find((call) => call.path.endsWith('/literary-memory'));
+    expect(JSON.parse(memoryWrite.options.body).memory.relationships).toHaveLength(0,
+      'the projection must still persist when there is no unambiguous graph edge to reject');
   });
 });
