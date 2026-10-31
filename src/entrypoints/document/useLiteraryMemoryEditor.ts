@@ -547,11 +547,13 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     persistenceMessage.value = message;
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
-    if (config.documentUseLocalAgent && doc.value) {
-      try {
-        await persistLiteraryMemoryToWorkspace();
-      } catch (error) {
-        persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
+    if (config.documentUseLocalAgent) {
+      if (doc.value) {
+        try {
+          await persistLiteraryMemoryToWorkspace();
+        } catch (error) {
+          persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
+        }
       }
     } else {
       await deps.persistSession();
