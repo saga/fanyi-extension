@@ -415,7 +415,7 @@
         </div>
         <p>{{ contextGraphPhaseLabel }}<template v-if="contextGraphState.runId"> · Run {{ contextGraphState.runId.slice(0, 8) }}</template><template v-if="preprocessingElapsedLabel"> · {{ preprocessingElapsedLabel }}</template></p>
         <p v-if="readerConfig?.documentUseLocalAgent !== true" class="muted small">
-          全书实体预处理需要使用本机 Agent。启用后，已有小说也会自动检查并补做分析；不会删除已有译文。
+          全书预处理需要使用本机 Agent。新项目首次打开时会自动启动分析；失败、旧版本或语言设置变化时，请显式点击“重新分析全书”。重新分析不会删除已有译文。
         </p>
         <div v-if="contextGraphState.status === 'running' || contextGraphState.status === 'queued'" class="progress context-graph-progress">
           <div class="bar" :style="{ width: contextGraphProgressPercent + '%' }"></div>
@@ -442,7 +442,7 @@
         </p>
         <p class="warn" v-if="contextGraphState.error">{{ contextGraphState.error }}</p>
         <p class="warn" v-else-if="contextGraphState.status === 'completed' && translationPreprocessingReadiness.reason === 'version'">
-          这条记录由旧版预处理产出（{{ contextGraphState.analysisVersion || '未知版本' }}），当前服务端版本是 {{ contextGraphState.currentAnalysisVersion }}。翻译 Run 会自动按当前版本重新分析；也可以点击“重新分析全书”。已有译文不会被改写。
+          这条记录由旧版预处理产出（{{ contextGraphState.analysisVersion || '未知版本' }}），当前服务端版本是 {{ contextGraphState.currentAnalysisVersion }}。当前文学翻译不会自动使用旧结果，也不会在后台无限重跑；请点击“重新分析全书”，通过完整性检查后再开始翻译。已有译文不会被改写。
         </p>
         <p class="warn" v-else-if="contextGraphState.status === 'completed' && contextGraphState.counts.characters + contextGraphState.counts.entities === 0">
           预处理已结束，但没有保存任何有原文证据的人物或实体。请检查本轮模型响应、抽样内容与证据校验计数；可重新分析。
