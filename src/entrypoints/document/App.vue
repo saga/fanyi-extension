@@ -1357,7 +1357,7 @@ const {
   contextGraphOverview,
 });
 
-async function handleReviewChineseEditorialProfile(action: 'confirm' | 'reject' | 'accept-update' | 'reject-update') {
+async function handleReviewChineseEditorialProfile(action: 'reject') {
   try {
     await reviewChineseEditorialProfile(action);
   } catch (error) {
