@@ -106,14 +106,10 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       return searchable.some((value) => value.toLocaleLowerCase().includes(query));
     });
   });
-  const pendingRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) => relation.reviewStatus !== 'confirmed').length);
   const pendingCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'candidate').length +
     literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'candidate').length);
   const confirmedCharacterVoiceCount = computed(() => literaryMemory.value.characterVoices.filter((profile) => profile.status === 'confirmed').length +
     literaryMemory.value.relationshipVoiceRules.filter((rule) => rule.status === 'confirmed').length);
-  const confirmableRelationshipCount = computed(() => literaryMemory.value.relationships.filter((relation) =>
-    relation.reviewStatus !== 'confirmed' && !!relation.subject.trim() && !!relation.predicate.trim() && !!relation.object.trim(),
-  ).length);
   const filteredLiteraryEntities = computed(() => {
     const query = entitySearch.value.toLocaleLowerCase();
     return (showSuppressedEntities.value ? allNonPersonEntities.value : nonPersonEntities.value)
@@ -323,7 +319,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       persistenceMessage.value = '移除实体映射失败：' + (error instanceof Error ? error.message : String(error));
     });
   }
-  function markRelationshipSuggested(relation: LiteraryRelationship) {
+  function markRelationshipModified(relation: LiteraryRelationship) {
     // Editing a default-adopted relation changes its working value; it remains active.
     relation.reviewStatus = 'confirmed';
     relation.confirmationSource = 'user-modified';
@@ -332,29 +328,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
         persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
       });
     }
-  }
-  function confirmRelationship(relation: LiteraryRelationship) {
-    if (!relation.subject.trim() || !relation.predicate.trim() || !relation.object.trim()) return;
-    relation.reviewStatus = 'confirmed';
-    relation.confirmationSource = 'user-confirmed';
-    persistenceMessage.value = '已确认关系：' + relation.subject + ' — ' + relation.predicate + ' → ' + relation.object;
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
-    });
-  }
-  function confirmAllRelationships() {
-    let count = 0;
-    for (const relation of literaryMemory.value.relationships) {
-      if (relation.reviewStatus !== 'confirmed' && relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
-        relation.reviewStatus = 'confirmed';
-        relation.confirmationSource = 'user-confirmed';
-        count++;
-      }
-    }
-    persistenceMessage.value = count > 0 ? '已确认剩余关系 ' + count + ' 项' : '没有待确认的关系';
-    if (count > 0) void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
-    });
   }
   function characterName(characterId: string): string {
     const profile = literaryMemory.value.characterVoices.find((item) => item.characterId === characterId);
@@ -373,10 +346,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
         persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
       }
     }
-  }
-
-  function normalizeVoiceEvidence(value: string): string {
-    return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
   }
 
   async function setCharacterVoiceStatus(profile: LiteraryBookMemory['characterVoices'][number], status: 'candidate' | 'confirmed' | 'rejected') {
@@ -679,10 +648,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     confirmedEntityCount,
     managedPeople,
     filteredManagedPeople,
-    pendingRelationshipCount,
     pendingCharacterVoiceCount,
     confirmedCharacterVoiceCount,
-    confirmableRelationshipCount,
     filteredLiteraryEntities,
     rememberEntitySource,
     managedPersonSource,
@@ -696,9 +663,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     setEntityAliases,
     addEntity,
     removeEntity,
-    markRelationshipSuggested,
-    confirmRelationship,
-    confirmAllRelationships,
+    markRelationshipModified,
     characterName,
     setCharacterVoiceStatus,
     setCharacterVoiceUse,
