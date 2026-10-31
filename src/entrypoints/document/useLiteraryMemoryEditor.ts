@@ -58,6 +58,32 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   function normalizeManagedPersonName(value: unknown): string {
     return String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\s._'’-]+/g, ' ').trim();
   }
+  function addRejectedEntityTombstone(source: string, kind: LiteraryEntity['kind'], aliases: string[] = []) {
+    const key = normalizeManagedPersonName(source);
+    if (!key) return;
+    const existing = literaryMemory.value.rejectedItems.some((item) =>
+      item.type === 'entity' && normalizeManagedPersonName(item.source) === key);
+    if (!existing) literaryMemory.value.rejectedItems.push({ type: 'entity', source, kind, aliases: [...new Set(aliases)].slice(0, 8) });
+  }
+  function clearRejectedEntityTombstone(source: string, aliases: string[] = []) {
+    const names = new Set([source, ...aliases].map(normalizeManagedPersonName).filter(Boolean));
+    literaryMemory.value.rejectedItems = literaryMemory.value.rejectedItems.filter((item) =>
+      item.type !== 'entity' || ![item.source, ...item.aliases].some((name) => names.has(normalizeManagedPersonName(name))));
+  }
+  function addRejectedRelationshipTombstone(subject: string, predicate: string, object: string) {
+    const key = [subject, predicate, object].map(normalizeManagedPersonName).join('|');
+    if (!key.replace(/\|/g, '')) return;
+    const exists = literaryMemory.value.rejectedItems.some((item) =>
+      item.type === 'relationship' &&
+      [item.subject, item.predicate, item.object].map(normalizeManagedPersonName).join('|') === key);
+    if (!exists) literaryMemory.value.rejectedItems.push({ type: 'relationship', subject, predicate, object });
+  }
+  function clearRejectedRelationshipTombstone(subject: string, predicate: string, object: string) {
+    const key = [subject, predicate, object].map(normalizeManagedPersonName).join('|');
+    literaryMemory.value.rejectedItems = literaryMemory.value.rejectedItems.filter((item) =>
+      item.type !== 'relationship' ||
+      [item.subject, item.predicate, item.object].map(normalizeManagedPersonName).join('|') !== key);
+  }
   const managedPeople = computed<ManagedPersonItem[]>(() => {
     const items: ManagedPersonItem[] = [];
     const profiles = literaryMemory.value.characterVoices;
@@ -413,6 +439,17 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     ].map(normalizeManagedPersonName).filter(Boolean));
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const entity = findManagedPersonEntity(currentItem);
+    addRejectedEntityTombstone(
+      managedPersonSource(currentItem),
+      'person',
+      [...(currentItem.entity?.aliases || []), ...(currentItem.profile?.aliases || [])],
+    );
+    const removedRelationships = literaryMemory.value.relationships.filter((relation) =>
+      names.has(normalizeManagedPersonName(relation.subject)) ||
+      names.has(normalizeManagedPersonName(relation.object)));
+    for (const relation of removedRelationships) {
+      addRejectedRelationshipTombstone(relation.subject, relation.predicate, relation.object);
+    }
     if (entity) {
       const entityIndex = literaryMemory.value.entities.indexOf(entity);
       if (entityIndex >= 0) literaryMemory.value.entities.splice(entityIndex, 1);
@@ -440,6 +477,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   function markEntitySuggested(entity: LiteraryEntity) {
+    clearRejectedEntityTombstone(entity.source, entity.aliases || []);
     // 编辑名称即代表用户正在处理这一项；旧的服务端过滤标签不能继续隐藏它。
     delete entity.canonicalMappingDisposition;
     const previousSource = entitySourceBeforeEdit.get(entity) || '';
@@ -461,6 +499,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   function setEntityAliases(entity: LiteraryEntity, event: Event) {
+    clearRejectedEntityTombstone(entity.source, entity.aliases || []);
     delete entity.canonicalMappingDisposition;
     const value = (event.target as HTMLInputElement | null)?.value ?? '';
     entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
@@ -484,6 +523,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     if (!entity) return;
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const names = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
+    addRejectedEntityTombstone(entity.source, entity.kind, entity.aliases || []);
     literaryMemory.value.entities.splice(index, 1);
     try {
       await enqueueLiteraryMemoryOperation(() => rejectContextGraphItemsByNames(names, literaryMemory.value));
@@ -495,6 +535,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     }
   }
   function markRelationshipModified(relation: LiteraryRelationship) {
+    clearRejectedRelationshipTombstone(relation.subject, relation.predicate, relation.object);
     // Editing a default-adopted relation changes its working value; it remains active.
     relation.reviewStatus = 'confirmed';
     relation.confirmationSource = 'user-modified';
@@ -567,6 +608,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const relation = literaryMemory.value.relationships[index];
     if (!relation) return;
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
+    addRejectedRelationshipTombstone(relation.subject, relation.predicate, relation.object);
     literaryMemory.value.relationships.splice(index, 1);
     try {
       await enqueueLiteraryMemoryOperation(() =>
