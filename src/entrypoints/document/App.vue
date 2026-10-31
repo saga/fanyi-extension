@@ -135,12 +135,11 @@
             <span>审校</span>
             <input v-model="literaryReview" type="checkbox" />
           </label>
-          <label v-if="readerConfig?.documentUseLocalAgent" class="field inline" title="关闭思考能显著缩短每批耗时（实测单批 46s→20s 级）；代价是长句断句与风格判断变弱">
+          <label v-if="readerConfig?.documentUseLocalAgent" class="field inline" title="不思考：批量初译最快（实测单批 46s→20s 级），代价是长句断句与风格判断变弱；思考：模型先推理再译，更慢但长句和风格更稳">
             <span>思考</span>
             <select :value="translationThinkingMode" @change="onTranslationThinkingChange">
-              <option value="disabled">关闭</option>
-              <option value="adaptive">自适应</option>
-              <option value="enabled">指定预算</option>
+              <option value="disabled">不思考（最快）</option>
+              <option value="enabled">思考（更慢，更稳）</option>
             </select>
           </label>
           <label v-if="literaryMode && literaryReview" class="field inline" title="审校和翻译共用 4 个会话槽位：审校 2 → 翻译只剩 2；审校 1 → 翻译能拿 3">
@@ -1015,7 +1014,7 @@
                 <span v-if="workspaceProject?.projectId">project-id {{ workspaceProject.projectId }}</span>
                 <span v-if="event.runId">run-id {{ event.runId }}</span>
                 <span v-if="event.payload?.provider || event.payload?.model">model {{ event.payload?.provider || '?' }}/{{ event.payload?.model || '运行时默认' }}</span>
-                <span v-if="event.payload?.thinkingMode || event.payload?.thinking_mode">thinking {{ event.payload?.thinkingMode || event.payload?.thinking_mode }}{{ (event.payload?.thinkingBudgetTokens || event.payload?.thinking_budget_tokens) ? ' ' + (event.payload?.thinkingBudgetTokens || event.payload?.thinking_budget_tokens) : '' }}</span>
+                <span v-if="event.payload?.thinkingMode || event.payload?.thinking_mode">thinking {{ event.payload?.thinkingMode || event.payload?.thinking_mode }}</span>
                 <span v-if="event.payload?.effort">effort {{ event.payload.effort }}</span>
                 <span v-if="event.payload?.fallbackModel || event.payload?.fallback_model">fallback {{ event.payload?.fallbackModel || event.payload?.fallback_model }}</span>
                 <span>事件 #{{ event.eventId }}</span>
@@ -1211,9 +1210,10 @@ const reviewStrengthHint = computed(() =>
 const currentPageIndex = ref(0);
 const readerConfig = ref<Config | null>(null);
 /** 阅读页「思考」旋钮的当前值：直接读任务配置，避免再存一份状态。 */
-const translationThinkingMode = computed<'disabled' | 'adaptive' | 'enabled'>(() => {
+const translationThinkingMode = computed<'disabled' | 'enabled'>(() => {
   const mode = readerConfig.value?.documentCodeBuddyTaskProfiles?.translation?.thinkingMode;
-  return mode === 'adaptive' || mode === 'enabled' ? mode : 'disabled';
+  // 旧的 adaptive 配置也视作“思考”，用户看到的只有开/关两档。
+  return mode === 'adaptive' || mode === 'enabled' ? 'enabled' : 'disabled';
 });
 /** 当前文档对应的本机 workspace；阅读页与 Agent Tab 都从这里读写同一份 SQLite。 */
 const workspaceProject = ref<any>(null);
@@ -1834,7 +1834,7 @@ async function saveDocumentSpeedSetting(patch: Partial<Config>) {
 
 async function onTranslationThinkingChange(event: Event) {
   const raw = (event.target as HTMLSelectElement).value;
-  const mode = raw === 'adaptive' || raw === 'enabled' ? raw : 'disabled';
+  const mode = raw === 'enabled' ? 'enabled' : 'disabled';
   const profiles = readerConfig.value?.documentCodeBuddyTaskProfiles;
   if (!profiles?.translation) return;
   await saveDocumentSpeedSetting({
@@ -1843,15 +1843,16 @@ async function onTranslationThinkingChange(event: Event) {
       translation: {
         ...profiles.translation,
         thinkingMode: mode,
-        // 关掉思考时 effort 也要一起降下来：只关思考、留着 medium/high，省下的时间很有限。
-        // 「指定预算」保持用户已选的 effort，不替用户做决定。
-        ...(mode === 'enabled' ? {} : { effort: mode === 'disabled' ? 'low' : 'medium' }),
+        // 关掉思考时 effort 一起降到 low；开着思考则保留用户已选的推理强度。
+        ...(mode === 'enabled' ? {} : { effort: 'low' }),
+        // UI 不再暴露思考量；切到“思考”时补一个默认值，保证后端有合法预算。
+        ...(mode === 'enabled' && !(profiles.translation.thinkingBudgetTokens > 0)
+          ? { thinkingBudgetTokens: 8192 }
+          : {}),
       },
     },
   });
-  persistenceMessage.value = '翻译思考已改为' +
-    (mode === 'disabled' ? '关闭' : mode === 'adaptive' ? '自适应' : '指定预算') +
-    '，下一次运行生效。';
+  persistenceMessage.value = '翻译思考已改为' + (mode === 'disabled' ? '不思考' : '思考') + '，下一次运行生效。';
 }
 
 async function onReviewConcurrencyChange(event: Event) {

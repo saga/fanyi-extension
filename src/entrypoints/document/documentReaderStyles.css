@@ -88,12 +88,30 @@
 }
 .action-controls {
   display: flex;
-  align-items: flex-end;
-  gap: .5rem;
+  align-items: center;
+  gap: .75rem;
   flex-wrap: wrap;
 }
-.field.inline { flex-direction: row; align-items: center; }
-.field.inline select { padding: .35rem .5rem; }
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: .4rem;
+  font-size: .85rem;
+}
+.field.inline select {
+  padding: .4rem .6rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font-size: .85rem;
+  line-height: 1.2;
+}
+.field.inline input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  accent-color: #0969da;
+  cursor: pointer;
+}
 .link-btn {
   border: none;
   background: none;

@@ -102,12 +102,12 @@
       </div>
 
       <details class="strategy-settings task-profile-settings" open>
-        <summary>按任务配置 CodeBuddy 思考、推理强度与 Prompt</summary>
+        <summary>按任务配置思考方式、推理强度与 Prompt</summary>
         <p class="muted small">
           初译、准确性/术语审校、人物声音/文风审校、文学分析、全书预处理分别保存。
-          思考模式、effort 和 fallback model 使用 CodeBuddy SDK 的 query() 正式选项；预算只在“指定预算”模式生效。
+          思考方式、推理强度和备用模型直接对应 CodeBuddy SDK 的 query() 参数。
           对声明了多档 context window 的模型，额外显示本任务的上下文窗口档位；留空仍使用模型 defaultLength，不改变默认设置。
-          为确保参数生效，这些任务使用单次 query，而非复用 V2 Session；批量任务会有额外 CLI 启动开销，高 effort/大预算也会更慢。
+          为确保参数生效，这些任务使用单次 query，而非复用 V2 Session；批量任务会有额外 CLI 启动开销，推理强度越高也会越慢。
         </p>
         <article v-for="task in codeBuddyTaskOptions" :key="task.key" class="task-profile-card">
           <div class="task-profile-heading">
@@ -145,39 +145,26 @@
                 </small>
               </label>
               <label class="setting-field">
-                <span>Fallback Model（可选）</span>
+                <span>备用模型（可选）</span>
                 <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].fallbackModel"
                   placeholder="模型不可用时尝试的备用模型"
                   @change="saveConfig('documentCodeBuddyTaskProfiles')" />
               </label>
               <label class="setting-field">
-                <span>Thinking 模式</span>
-                <select v-model="config.documentCodeBuddyTaskProfiles[task.key].thinkingMode"
-                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
-                  <option value="disabled">关闭思考</option>
-                  <option value="adaptive">自适应思考</option>
-                  <option value="enabled">指定思考预算</option>
-                </select>
-              </label>
-              <label v-if="config.documentCodeBuddyTaskProfiles[task.key].thinkingMode === 'enabled'" class="setting-field">
-                <span>Thinking Budget Tokens</span>
-                <select v-model.number="config.documentCodeBuddyTaskProfiles[task.key].thinkingBudgetTokens"
-                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
-                  <option :value="2048">2,048</option>
-                  <option :value="4096">4,096</option>
-                  <option :value="8192">8,192（默认）</option>
-                  <option :value="16384">16,384</option>
-                  <option :value="32768">32,768</option>
-                  <option :value="65536">65,536</option>
+                <span>思考方式</span>
+                <select :value="config.documentCodeBuddyTaskProfiles[task.key].thinkingMode === 'disabled' ? 'disabled' : 'enabled'"
+                  @change="onThinkingModeChange(task.key, $event)">
+                  <option value="disabled">不思考（最快）</option>
+                  <option value="enabled">思考（更慢，更稳）</option>
                 </select>
               </label>
               <label class="setting-field">
-                <span>Effort（推理强度）</span>
+                <span>推理强度</span>
                 <select v-model="config.documentCodeBuddyTaskProfiles[task.key].effort"
                   @change="saveConfig('documentCodeBuddyTaskProfiles')">
-                  <option value="low">Low · 较快</option>
-                  <option value="medium">Medium · 均衡</option>
-                  <option value="high">High · 深入</option>
+                  <option value="low">低 · 较快</option>
+                  <option value="medium">中 · 均衡</option>
+                  <option value="high">高 · 深入</option>
                   <option value="xhigh">Extra High · 最深入</option>
                 </select>
               </label>
@@ -408,7 +395,7 @@ const config = ref<Config>({
   documentLiteraryReviewEnabled: true,
 });
 const codeBuddyTaskOptions: Array<{ key: DocumentCodeBuddyTaskKey; label: string; description: string }> = [
-  { key: 'translation', label: '文档初译', description: '优先忠实原文与规范输出；默认关闭思考，以低 effort 提高批量吞吐。' },
+  { key: 'translation', label: '文档初译', description: '优先忠实原文与规范输出；默认不思考，用较低推理强度提高批量吞吐。' },
   { key: 'accuracyReview', label: '准确性 / 术语审校', description: '核对意义、事实、漏译、增译、否定、指代和专名一致性。' },
   { key: 'styleReview', label: '人物声音 / 文风审校', description: '检查人物语气、叙述声音、语域、节奏与翻译腔。' },
   { key: 'literaryAnalysis', label: '章节文学分析', description: '分析当前章节的人物画像、关系语言、锚点与书籍记忆。' },
@@ -521,6 +508,17 @@ async function onContextWindowChange(task: DocumentCodeBuddyTaskKey, event: Even
   if (raw === '') delete profile.contextWindow;
   else if (Number.isSafeInteger(value) && value > 0) profile.contextWindow = value;
   else return;
+  await saveConfig('documentCodeBuddyTaskProfiles');
+}
+async function onThinkingModeChange(task: DocumentCodeBuddyTaskKey, event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLSelectElement)) return;
+  const profile = config.value.documentCodeBuddyTaskProfiles[task];
+  profile.thinkingMode = target.value === 'enabled' ? 'enabled' : 'disabled';
+  // UI 不再暴露思考量；切到“思考”时补一个默认值，保证后端拿到合法预算。
+  if (profile.thinkingMode === 'enabled' && !(profile.thinkingBudgetTokens > 0)) {
+    profile.thinkingBudgetTokens = 8192;
+  }
   await saveConfig('documentCodeBuddyTaskProfiles');
 }
 async function onLocalAgentToggle() {

@@ -135,9 +135,26 @@ describe('reader toolbar speed knobs', () => {
 
   it('writes the same config keys the settings panel uses', () => {
     // 关掉思考必须同时把 effort 降下来，否则只是少一段思考文本、耗时几乎不变。
-    expect(source).toContain("effort: mode === 'disabled' ? 'low' : 'medium'");
+    expect(source).toContain("...(mode === 'enabled' ? {} : { effort: 'low' })");
+    // 思考只有开/关两档：不再向用户暴露 adaptive 与思考量（token）概念。
+    expect(source).not.toContain('value="adaptive"');
+    expect(source).not.toContain('自动判断');
+    expect(source).not.toContain('固定思考量');
     expect(source).toContain('documentReviewConcurrency: value');
     // 两个旋钮都必须落盘，否则下次打开文档就丢了。
     expect(source).toContain('await setConfig(patch)');
+  });
+
+  it('设置页的思考选项同样只保留开/关两档，不暴露 adaptive 与 token 预算', () => {
+    const settings = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
+      'utf8',
+    );
+    expect(settings).not.toContain('value="adaptive"');
+    expect(settings).not.toContain('自动判断');
+    expect(settings).not.toContain('固定思考量');
+    expect(settings).not.toContain('思考量（tokens');
+    expect(settings).toContain('不思考（最快）');
+    expect(settings).toContain('思考（更慢，更稳）');
   });
 });

@@ -300,9 +300,7 @@ export function agentTrajectoryDetail(event: any, projectId?: unknown): string {
     identityParts.push('model ' + (modelInfo.provider || '?') + '/' + (modelInfo.model || '运行时默认'));
   }
   if (modelInfo.thinkingMode) {
-    identityParts.push('thinking ' + modelInfo.thinkingMode +
-      (modelInfo.thinkingMode === 'enabled' && modelInfo.thinkingBudgetTokens
-        ? ' ' + modelInfo.thinkingBudgetTokens : ''));
+    identityParts.push('thinking ' + modelInfo.thinkingMode);
   }
   if (modelInfo.effort) identityParts.push('effort ' + modelInfo.effort);
   if (modelInfo.fallbackModel) identityParts.push('fallback ' + modelInfo.fallbackModel);
