@@ -61,9 +61,13 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   function addRejectedEntityTombstone(source: string, kind: LiteraryEntity['kind'], aliases: string[] = []) {
     const key = normalizeManagedPersonName(source);
     if (!key) return;
-    const existing = literaryMemory.value.rejectedItems.some((item) =>
-      item.type === 'entity' && normalizeManagedPersonName(item.source) === key);
-    if (!existing) literaryMemory.value.rejectedItems.push({ type: 'entity', source, kind, aliases: [...new Set(aliases)].slice(0, 8) });
+    const existing = literaryMemory.value.rejectedItems.find((item) =>
+      item.type === 'entity' && item.kind === kind && normalizeManagedPersonName(item.source) === key);
+    if (existing?.type === 'entity') {
+      existing.aliases = Array.from(new Set([...existing.aliases, ...aliases])).slice(0, 8);
+    } else {
+      literaryMemory.value.rejectedItems.push({ type: 'entity', source, kind, aliases: [...new Set(aliases)].slice(0, 8) });
+    }
   }
   function clearRejectedEntityTombstone(source: string, aliases: string[] = []) {
     const names = new Set([source, ...aliases].map(normalizeManagedPersonName).filter(Boolean));
