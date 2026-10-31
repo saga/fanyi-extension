@@ -727,8 +727,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     entities: entityList,
     relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
     styleGuide, styleGuideStatus,
-    ...(styleGuideStatus === 'confirmed' ? { styleGuideConfirmationSource: raw.styleGuideStatus === 'confirmed'
-      ? styleGuideConfirmationSource || 'legacy-unknown' : 'model-default' } : {}),
+    ...(styleGuideStatus === 'confirmed' ? { styleGuideConfirmationSource: rawStyleOrigin === 'user-edited'
+      ? 'user-modified' : rawStyleOrigin === 'user-confirmed' ? 'user-confirmed' : raw.styleGuideStatus === 'confirmed'
+        ? styleGuideConfirmationSource || 'legacy-unknown' : 'model-default' } : {}),
     styleGuideOrigin,
     ...(styleGuideAnalysisVersion ? { styleGuideAnalysisVersion } : {}),
     ...(styleGuideSourceRevisionId ? { styleGuideSourceRevisionId } : {}),
