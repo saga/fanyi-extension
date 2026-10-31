@@ -641,7 +641,7 @@
             :key="'entity-' + index + '-' + entity.source" class="entity-card" :class="{ 'is-pending-card': entity.reviewStatus !== 'confirmed' }">
             <div class="entity-card-header">
               <span class="entity-status" :class="entity.reviewStatus === 'confirmed' ? 'is-confirmed' : 'is-pending'">
-                {{ entity.reviewStatus !== 'confirmed' ? '待补全' : entity.confirmationSource === 'user-confirmed' ? '用户确认' : entity.confirmationSource === 'evidence-verified' ? '证据验证' : '历史来源不明' }}
+                {{ entity.reviewStatus !== 'confirmed' ? '待补全' : entity.confirmationSource === 'user-confirmed' ? '用户确认' : entity.confirmationSource === 'evidence-verified' ? '证据验证' : entity.confirmationSource === 'model-default' ? '自动采纳' : entity.confirmationSource === 'user-modified' ? '用户已修改' : '来源待识别' }}
               </span>
               <span v-if="entity.kind" class="entity-kind">{{ entityKindLabel(entity.kind) }}</span>
               <span class="entity-card-spacer"></span>
@@ -758,7 +758,7 @@
 
             <template v-if="item.profile">
               <div class="voice-profile-fields">
-                <p v-if="item.profile.role"><strong>角色定位（默认弱提示；标记已核实后增强）：</strong>{{ item.profile.role }}</p>
+                <p v-if="item.profile.role"><strong>角色定位（根据当前证据自动采纳，存在不确定性时作为弱提示）：</strong>{{ item.profile.role }}</p>
                 <p v-if="item.profile.traits?.length"><strong>人物特征（默认弱提示；标记已核实后增强）：</strong>{{ item.profile.traits.join('；') }}</p>
                 <p v-if="item.profile.voiceCore.register"><strong>语域：</strong>{{ item.profile.voiceCore.register }}</p>
                 <p v-if="item.profile.voiceCore.syntaxRhythm?.length"><strong>句法 / 节奏：</strong>{{ item.profile.voiceCore.syntaxRhythm.join('；') }}</p>
@@ -779,7 +779,7 @@
                 <p v-for="(rule, index) in item.profile.contrastRules" :key="item.profile.characterId + '-contrast-' + index" class="muted small">
                   与 {{ characterName(rule.otherCharacterId) }} 的差异：{{ rule.difference }}（证据：{{ rule.evidenceSegmentIds.join('、') }}）
                 </p>
-                <p v-for="(question, index) in item.profile.openQuestions" :key="item.profile.characterId + '-q-' + index" class="warn small">待确认：{{ question }}</p>
+                <p v-for="(question, index) in item.profile.openQuestions" :key="item.profile.characterId + '-q-' + index" class="warn small">待观察：{{ question }}</p>
               </details>
               <div class="voice-profile-actions">
                 <button class="btn" @click="setCharacterVoiceUse(item.profile, !item.profile.useForTranslation)">{{ item.profile.useForTranslation ? '停用用于翻译' : '启用用于翻译' }}</button>
@@ -846,7 +846,7 @@
             </label>
             <p class="muted small">来源片段 {{ anchor.segmentId }} · {{ anchor.tags.join('、') }}</p>
             <p v-if="anchor.attributionEvidence"><strong>说话人归属证据：</strong>{{ anchor.attributionEvidence }}（置信度 {{ Math.round((anchor.attributionConfidence || 0) * 100) }}%）</p>
-            <p v-else class="warn small">缺少可核验的说话人归属证据；这个锚点只能保留为候选。</p>
+            <p v-else class="warn small">缺少可核验的说话人归属证据；该锚点仍可作为低置信度参考，不作为确定归属。</p>
             <div class="voice-profile-actions">
               <button class="btn" :disabled="anchor.status === 'rejected'" @click="setVoiceAnchorStatus(anchor, 'rejected')">拒绝此锚点</button>
             </div>
@@ -858,7 +858,7 @@
         <div class="review-workspace-heading">
           <div>
             <h3>审校工作区</h3>
-            <p class="muted small">这里只列出 Reviewer 发现的问题，不是待办通知。事实/实体译名错误会自动修正；纯文风建议保留为候选稿，需你比较后决定是否替换正文。</p>
+            <p class="muted small">这里只列出 Reviewer 发现的问题，不是待办通知。事实/实体译名错误会自动修正；纯文风建议会自动应用；你可以在译文中事后修改。</p>
           </div>
           <span class="chip">{{ literaryStatus.reviewFindings.length }} 条记录</span>
         </div>
