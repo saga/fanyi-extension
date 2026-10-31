@@ -21,6 +21,17 @@
 7. **SQLite 阅读器检查点只存轻量引用。** 服务端项目已是原文、译文、文学记忆及 Run 状态的权威存储；通用 reader session 只保存 `projectId`、阅读位置和轻量设置。不得再向通用会话表复制全书正文、全量译文和 LiteraryMemory。旧版全量快照只为恢复兼容。
 8. **文件大小和 JSON 大小分开治理。** 原始文件使用二进制请求和 `LOCAL_AGENT_MAX_DOCUMENT_SOURCE_MB` 配置（默认 512 MiB）；展开体积与 PDF 提取时间另有服务端上限。不得因为普通 JSON API 的请求体限制，改为在扩展端解析整本 EPUB/PDF。
 
+## 文学翻译的预处理状态协作
+
+文学翻译采用“扩展前置检查 + 服务端最终执行门禁”，但 Context Graph 事实始终只有服务端一份：
+
+- 扩展通过服务端轻量 status DTO 核对当前 source revision、服务端 analysis version、source/target language、有效样本、style completeness 和 B 工作流阶段。只有通过才开放创建文学 Run。
+- 从未分析的当前来源版本可由扩展自动触发一次预处理；失败、过期或语言设置变化后由用户显式重新分析。未知状态和状态读取错误一律不视为 ready。
+- Local Agent 的 executeRun 在进入 running 前再次校验。旧客户端或直接 API 可能先产生 queued Run，但服务端在 readiness 通过前不得开始翻译模型调用。
+- 技术文档模式不要求文学 Context Graph。扩展只保留状态投影，不复制节点、边、原文证据和章节摘要。
+
+服务端的完整决策见 [ADR-0005](https://github.com/saga/vocal-saga/blob/main/docs/adr/0005-literary-preprocessing-before-translation.md)。
+
 ## 实施要求
 
 - 项目发现、打开文档、IndexedDB 恢复和 Local Agent 服务检查都需复用同一个服务端解析与同步契约。
