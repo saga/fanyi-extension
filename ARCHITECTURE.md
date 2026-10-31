@@ -710,6 +710,23 @@ handleFullTranslation()
 只有本机批次规划接口的失败才允许用扩展内确定性 CPU 算法继续切分。
 ```
 
+### 8.2.1 EPUB/PDF 文学翻译的预处理顺序（Local Agent）
+
+文学模式采用质量优先的两道门禁，Context Graph 只有 local-agent-service 的 SQLite 一份事实来源：
+
+```text
+打开文学文档 / 初始化 Project
+  → 首次自动启动全书 Context Graph 预处理
+  → 扩展轮询 /context-graph/status 轻量投影
+  → 校验 source revision / analysis version / 语言方向 / 样本 / 文风完整性 / B 工作流阶段
+  → 未 ready：禁用开始、重译、重试、恢复入口；失败或过期时显式重新分析
+  → ready：开放创建文学 Run
+  → local-agent-service executeRun 再次校验
+  → 通过后才进入 running 并调用翻译模型
+```
+
+扩展不复制 Context Graph 节点、边、证据或章节摘要。旧客户端/直接 API 调用可能先创建 queued Run，但服务端必须在 readiness 通过前保持不进入翻译阶段。技术文档模式不要求文学 Context Graph。完整决策见 [Vocal Saga ADR-0005](https://github.com/saga/vocal-saga/blob/main/docs/adr/0005-literary-preprocessing-before-translation.md) 和 [本仓库 ADR-002](docs/ADR-002-server-authoritative-document-state.md)。
+
 ### 8.3 Vocal Saga 服务端翻译模式
 
 ```
