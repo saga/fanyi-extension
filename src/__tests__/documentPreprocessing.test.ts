@@ -144,6 +144,18 @@ describe('literary preprocessing readiness gate', () => {
     expect(missingStage.message).toContain('chapters');
   });
 
+  it('blocks completed records that do not identify a supported preprocessing workflow', () => {
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: {
+        ...completedSnapshot,
+        progress: { ...completedSnapshot.progress, strategy: undefined },
+      },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe('incomplete');
+  });
+
   it('reports a status refresh error even if a previous snapshot looked completed', () => {
     const result = assessContextGraphReadiness({
       ...baseInput,
