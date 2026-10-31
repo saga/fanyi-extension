@@ -288,11 +288,15 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
         if (id) items.push({ type: 'edge', id });
       }
     }
-    for (const item of items) {
+    if (items.length) {
+      // One server-side transaction prevents a node rejection succeeding while one of its edge
+      // rejections fails (for example, because a translation Run starts concurrently).
       await workspaceApi(
         base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/review',
-        { method: 'POST', body: JSON.stringify({ ...item, status: 'rejected' }) },
+        { method: 'POST', body: JSON.stringify({
+          items: items.map((item) => ({ ...item, status: 'rejected' as const })),
+        }) },
       );
     }
   }
@@ -339,13 +343,15 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       // 旧版图谱未保存 predicate 时，仅在这对节点之间只有一条关系时才可安全定位。
       return pairMatches.length === 1;
     });
-    for (const edge of matches) {
+    const items = matches.flatMap((edge) => {
       const id = String(edge.id || '');
-      if (!id) continue;
+      return id ? [{ type: 'edge' as const, id, status: 'rejected' as const }] : [];
+    });
+    if (items.length) {
       await workspaceApi(
         base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/review',
-        { method: 'POST', body: JSON.stringify({ type: 'edge', id, status: 'rejected' }) },
+        { method: 'POST', body: JSON.stringify({ items }) },
       );
     }
   }
