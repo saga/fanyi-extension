@@ -287,13 +287,13 @@ describe('文学书籍记忆', () => {
       { id: 's1', text: 'Alice said hello.' },
       { id: 's2', text: 'She is her sister.' },
     ]);
-    expect(memory.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
-    expect(memory.entities.find((entity) => entity.source === 'Bob')?.reviewStatus).toBe('suggested');
+    expect(memory.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'Bob')?.reviewStatus).toBe('confirmed');
     expect(memory.relationships.find((rel) => rel.predicate === 'sister of')?.reviewStatus).toBe('confirmed');
-    expect(memory.relationships.find((rel) => rel.predicate === 'likes')?.reviewStatus).toBe('suggested');
+    expect(memory.relationships.find((rel) => rel.predicate === 'likes')?.reviewStatus).toBe('confirmed');
   });
 
-  it('v1 文学记忆升级到 v2，角色声音候选需要有证据才能被确认', () => {
+  it('v1 文学记忆升级到 v2，人物画像默认采纳且允许部分证据', () => {
     const migrated = sanitizeLiteraryMemory({
       version: 1,
       entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person' }],
@@ -329,7 +329,8 @@ describe('文学书籍记忆', () => {
         voiceCore: { register: '正式' }, evidence: [],
       }],
     });
-    expect(withoutEvidence.characterVoices).toEqual([]);
+    expect(withoutEvidence.characterVoices[0]?.status).toBe('confirmed');
+    expect(withoutEvidence.characterVoices[0]?.useForTranslation).toBe(true);
   });
 
   it('声音上下文仅包含已启用相关画像与批准锚点，并保持合法完整 JSON', () => {
