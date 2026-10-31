@@ -2124,15 +2124,9 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
       );
       literaryMemory = sanitizeLiteraryMemory(memoryResponse.current?.memory);
     } else {
-      // Backwards compatibility for old session checkpoints created before project-backed
-      // recovery. New writes never include these fields.
-      if (!payload.document) return null;
-      document = payload.document as ParsedDocument;
-      translations = Array.isArray(snapshot.translations)
-        ? snapshot.translations.filter((entry: unknown): entry is [string, string] =>
-            Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string')
-        : [];
-      literaryMemory = sanitizeLiteraryMemory(snapshot.literaryMemory ?? createEmptyLiteraryMemory());
+      // Legacy full-document reader snapshots are not a recovery source anymore. A Local Agent
+      // session must point to a durable project; the project API owns all business data.
+      return null;
     }
 
     const literaryStatus = (snapshot.literaryStatus ?? {
