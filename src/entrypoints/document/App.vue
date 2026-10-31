@@ -2290,7 +2290,7 @@ async function restoreLastSession() {
     if (!saved) {
       savedSessionSummary.value = null;
       persistenceMessage.value = restoreConfig.documentUseLocalAgent
-        ? '本机服务中没有可恢复的阅读项目，或服务当前不可用。扩展不会使用旧 IndexedDB 快照替代服务端数据。'
+        ? '本机服务中没有可恢复的项目引用，或服务当前不可用。旧版完整阅读快照不再作为恢复来源；请重新选择原文件，扩展会重新关联服务端项目。'
         : '没有可恢复的阅读记录。';
       return;
     }
