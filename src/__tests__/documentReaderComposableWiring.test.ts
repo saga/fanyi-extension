@@ -85,6 +85,21 @@ describe('document reader composable wiring', () => {
     expect(restoreBody.slice(localAgentBranch, idbRead)).toContain('restoredFromLocalService = !!saved');
 
     expect(source).toContain('全书预处理、文学记忆和翻译结果均由本机服务统一保存');
+
+    const checkpointStart = source.indexOf('async function loadDocumentCheckpointFromLocalService()');
+    const checkpointEnd = source.indexOf('async function persistCurrentSession()', checkpointStart);
+    const checkpointBody = source.slice(checkpointStart, checkpointEnd);
+    expect(checkpointStart).toBeGreaterThan(-1);
+    expect(checkpointBody).toContain('payload.projectBacked === true');
+    expect(checkpointBody).not.toContain('payload.document');
+    expect(checkpointBody).not.toContain('snapshot.literaryMemory');
+
+    const workspace = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentAgentWorkspace.vue'),
+      'utf8',
+    );
+    expect(workspace).not.toContain('importWorkspaceTranslations');
+    expect(workspace).not.toContain('legacyMemory');
   });
 
   it('gates reader-triggered literary Run creation on current preprocessing readiness', () => {
