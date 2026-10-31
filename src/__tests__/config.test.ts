@@ -60,6 +60,7 @@ const defaultConfig: Config = {
   documentBatchMaxSourceChars: 8000,
   documentTranslationConcurrency: 4,
   documentReviewConcurrency: 2,
+  documentReviewStrength: 'medium',
   documentPrecedingContextSegments: 4,
   documentContextBudgetChars: 18000,
   documentMaxModelAttempts: 2,
