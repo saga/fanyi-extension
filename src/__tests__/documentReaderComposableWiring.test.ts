@@ -73,6 +73,10 @@ describe('document reader composable wiring', () => {
     expect(readinessCheck).toBeGreaterThan(runHandler);
     expect(runCreation).toBeGreaterThan(readinessCheck);
     expect(source.slice(readinessCheck, runCreation)).toContain('if (!readiness.ready)');
+    // 页面级动作（翻译当前页/预翻译章节）不替用户启动整本重算：只有从未分析过才顺手起一次，
+    // 语言变更、版本过期、上次失败都必须由用户在「人物与预处理」明确点重新分析。
+    expect(source.slice(readinessCheck, runCreation))
+      .toContain("allowAutoStart: contextGraphState.value.status === 'not-started'");
 
     const contextGraph = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/useContextGraph.ts'),
@@ -81,6 +85,7 @@ describe('document reader composable wiring', () => {
     const orchestration = contextGraph.indexOf('async function prepareContextGraphForTranslation');
     expect(orchestration).toBeGreaterThan(-1);
     expect(contextGraph.slice(orchestration)).toContain('await ensureContextGraphPreprocessing(project, { force: true })');
+    expect(contextGraph.slice(orchestration)).toContain('options.allowAutoStart === false');
     expect(contextGraph.slice(orchestration)).toContain('while (!readiness.ready');
     expect(contextGraph.slice(orchestration)).toContain('timeoutMs');
   });

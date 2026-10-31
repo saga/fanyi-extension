@@ -379,13 +379,18 @@ export function useContextGraph(deps: ContextGraphDeps) {
 
   /**
    * Called only after the user explicitly starts a literary translation.
-   * It starts or retries preprocessing once, waits for the service-owned readiness gate,
-   * and returns a blocking reason instead of asking the user to click Start again.
+   * It waits for the service-owned readiness gate and returns a blocking reason instead of
+   * asking the user to click Start again.
+   *
+   * `allowAutoStart=false` 用于页面级动作（翻译当前页、预翻译章节）：这些动作的语义是翻几页，
+   * 不替用户启动一次整本重算。已经在跑的分析仍会等待；语言变了、版本旧了、上次失败这类
+   * 需要重算的情况原样返回，由调用方提示用户去「人物与预处理」明确点一次重新分析。
    */
   async function prepareContextGraphForTranslation(
     project: any,
     timeoutMs = 60 * 60 * 1000,
     shouldContinue: () => boolean = () => true,
+    options: { allowAutoStart?: boolean } = {},
   ): Promise<ReturnType<typeof assessContextGraphReadiness>> {
     const projectId = String(project?.projectId || '');
     if (!projectId) return translationPreprocessingReadiness.value;
@@ -393,7 +398,9 @@ export function useContextGraph(deps: ContextGraphDeps) {
     let readiness = translationPreprocessingReadiness.value;
     if (!readiness.required || readiness.ready) return readiness;
 
-    if (['failed', 'missing', 'version', 'language', 'incomplete'].includes(readiness.reason)) {
+    const retryReasons = ['failed', 'missing', 'version', 'language', 'incomplete'];
+    if (retryReasons.includes(readiness.reason)) {
+      if (options.allowAutoStart === false) return readiness;
       // A single user-started request gets one bounded preprocessing retry, never an unbounded loop.
       await ensureContextGraphPreprocessing(project, { force: true });
     }

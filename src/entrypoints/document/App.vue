@@ -3546,6 +3546,9 @@ async function runWorkspaceTranslation(options: {
     const readiness = await prepareContextGraphForTranslation(
       project, 60 * 60 * 1000,
       () => workspaceRunGeneration.value === preparationGeneration,
+      // 只有「这本书从来没分析过」才允许这里顺手起一次分析；语言变了、版本旧了、上次失败
+      // 都要用户到「人物与预处理」明确点重新分析——翻一页不值得触发一次整本重算。
+      { allowAutoStart: contextGraphState.value.status === 'not-started' },
     );
     if (workspaceRunGeneration.value !== preparationGeneration) return;
     if (!readiness.ready) {
@@ -3553,8 +3556,9 @@ async function runWorkspaceTranslation(options: {
       state.value.workStage = '';
       state.value.workChapter = '';
       state.value.activeSegmentIds = new Set();
-      state.value.error = readiness.message ||
-        '全书预处理未能在限定时间内完成。已保留当前进度；修复问题后可再次点击开始翻译。';
+      state.value.error = readiness.message
+        ? '未开始翻译：' + readiness.message
+        : '全书预处理未能在限定时间内完成。已保留当前进度；修复问题后可再次点击开始翻译。';
       return;
     }
     state.value.workStage = '全书预处理完成，开始翻译';
