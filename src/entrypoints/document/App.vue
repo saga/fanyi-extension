@@ -101,7 +101,7 @@
       >
         <div class="preprocessing-gate-copy">
           <strong>{{ preprocessingGateTitle(translationPreprocessingReadiness.reason) }}</strong>
-          <p>全书预处理在本机服务里跑，结果只保存在本机，不会写进扩展的 LiteraryMemory。完成后翻译批次会带上规范专名和时间上有界的上下文。</p>
+          <p>全书预处理、文学记忆和翻译结果均由本机服务统一保存。扩展只负责展示与编辑，不单独持久化业务数据。完成后翻译批次会使用对应版本的全书上下文。</p>
           <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
             预处理任务 {{ contextGraphState.runId }}
             <span v-if="contextGraphPhaseLabel"> · {{ contextGraphPhaseLabel }}</span>
@@ -1931,10 +1931,15 @@ async function restoreBuiltInDocumentPrompts() {
 
 async function refreshSavedSessionSummary() {
   savedSessionSummary.value = null;
+  const config = await getConfig();
+  // Local Agent 模式只从服务端读取恢复入口；不读取扩展 IndexedDB 中的旧业务快照。
+  if (config.documentUseLocalAgent) {
+    await refreshLocalSessionSummary();
+    return;
+  }
   try {
     savedSessionSummary.value = await getActiveDocumentSessionSummary();
   } catch (error) {
-    // IndexedDB 可能在无痕模式/配额异常时不可用；仍继续探测 SQLite 备份。
     if (typeof indexedDB !== 'undefined') {
       persistenceMessage.value = '无法读取扩展恢复记录：' +
         (error instanceof Error ? error.message : String(error));
@@ -2195,22 +2200,28 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
 async function persistCurrentSession() {
   if (sessionPersistenceSuppressionCount > 0 || !activeSessionReady.value || !doc.value) return;
   const snapshot = getSnapshot();
-  const delta = snapshot.translations.filter(([id, text]) =>
-    persistedTranslations.value.get(id) !== text,
-  );
+  const delta = snapshot.translations.filter(([id, text]) => persistedTranslations.value.get(id) !== text);
   const input = {
-    sourceLang: sourceLang.value,
-    targetLang: targetLang.value,
-    viewMode: viewMode.value as SavedViewMode,
-    literaryMode: literaryMode.value,
-    currentPageIndex: currentPageIndex.value,
-    activeTab: activeTab.value,
-    snapshot,
-    translationDelta: delta,
-    translatedSegmentCount: snapshot.translations.length,
+    sourceLang: sourceLang.value, targetLang: targetLang.value,
+    viewMode: viewMode.value as SavedViewMode, literaryMode: literaryMode.value,
+    currentPageIndex: currentPageIndex.value, activeTab: activeTab.value,
+    snapshot, translationDelta: delta, translatedSegmentCount: snapshot.translations.length,
   };
-
-  // 多个 Vue watcher 和翻译批次可能同时请求保存，按顺序写入，避免旧快照覆盖新状态。
+  const config = await getConfig();
+  if (config.documentUseLocalAgent) {
+    const write = persistenceQueue.then(async () => {
+      const saved = await persistDocumentCheckpointToLocalService(input);
+      if (!saved) throw new Error('本机服务项目尚未就绪，阅读状态未保存；请检查服务连接和项目状态。');
+      localPersistedTranslations = new Map(snapshot.translations);
+      persistenceMessage.value = '阅读位置已保存到本机服务；原文、译文和文学记忆由项目数据库统一管理。';
+    });
+    persistenceQueue = write.catch(() => undefined);
+    try { await write; } catch (error) {
+      persistenceMessage.value = '本机服务未能保存阅读位置：' + (error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
+  // 非 Local Agent 兼容模式保留旧阅读器存储路径。
   const write = persistenceQueue.then(async () => {
     let indexedDbError: unknown;
     let indexedDbSaved = false;
@@ -2219,34 +2230,19 @@ async function persistCurrentSession() {
         await saveActiveDocumentProgress(input);
         indexedDbSaved = true;
         for (const [id, text] of delta) persistedTranslations.value.set(id, text);
-      } catch (error) {
-        indexedDbError = error;
-      }
+      } catch (error) { indexedDbError = error; }
     }
-
-    // 两份存储必须独立尝试。IndexedDB 配额/权限失败时，不能连带跳过 SQLite 备份。
     const sqliteSaved = await persistDocumentCheckpointToLocalService(input);
-    if (indexedDbSaved && sqliteSaved) {
-      persistenceMessage.value = '阅读位置、译文和书籍记忆已保存到扩展存储与本机 SQLite。';
-    } else if (indexedDbSaved) {
-      persistenceMessage.value = '阅读位置和译文已保存到扩展本地存储；本机 SQLite 备份当前不可用。';
-    } else if (sqliteSaved) {
-      persistenceMessage.value = '扩展 IndexedDB 当前不可用；阅读位置、译文和书籍记忆已保存到本机 SQLite。';
-    } else {
-      throw indexedDbError instanceof Error
-        ? indexedDbError
-        : new Error('扩展 IndexedDB 与本机 SQLite 均未能保存阅读检查点');
-    }
+    if (indexedDbSaved && sqliteSaved) persistenceMessage.value = '阅读位置和兼容模式数据已保存。';
+    else if (indexedDbSaved) persistenceMessage.value = '阅读位置和译文已保存到扩展本地存储。';
+    else if (sqliteSaved) persistenceMessage.value = '阅读位置已保存到本机服务。';
+    else throw indexedDbError instanceof Error ? indexedDbError : new Error('阅读会话未能保存');
   });
   persistenceQueue = write.catch(() => undefined);
-  try {
-    await write;
-  } catch (error) {
-    persistenceMessage.value = '本地自动保存失败；翻译仍会继续。请检查浏览器扩展存储空间。' +
-      (error instanceof Error ? ' ' + error.message : '');
+  try { await write; } catch (error) {
+    persistenceMessage.value = '阅读会话自动保存失败：' + (error instanceof Error ? ' ' + error.message : '');
   }
 }
-
 function currentWorkspaceDocumentKey(): string {
   return doc.value ? buildDocumentAgentSessionId(doc.value, documentFileName) : '';
 }
@@ -2289,22 +2285,18 @@ async function restoreLastSession() {
     let saved: (LoadedActiveDocumentSession & { projectId?: string; sourceFingerprint?: string }) | null = null;
     let restoredFromLocalService = false;
 
-    // When Local Agent is enabled, prefer its lightweight project pointer over an older IndexedDB
-    // copy. It rehydrates server-owned EPUB/PDF segments and accepted translations from SQLite.
+    // Local Agent 模式只允许从服务端项目恢复；服务不可用时不退回旧 IndexedDB 快照。
     if (restoreConfig.documentUseLocalAgent) {
-      try {
-        saved = await loadDocumentCheckpointFromLocalService();
-        restoredFromLocalService = !!saved;
-      } catch { /* fall back to the extension copy when the service is unavailable */ }
-    }
-    if (!saved) {
-      try { saved = await loadActiveDocumentSession(); } catch { /* local SQLite may recover the session below */ }
-    }
-    if (!saved && !restoredFromLocalService) {
-      try {
-        saved = await loadDocumentCheckpointFromLocalService();
-        restoredFromLocalService = !!saved;
-      } catch { /* report the missing snapshot below */ }
+      saved = await loadDocumentCheckpointFromLocalService();
+      restoredFromLocalService = !!saved;
+    } else {
+      try { saved = await loadActiveDocumentSession(); } catch { /* try server-side reader pointer below */ }
+      if (!saved) {
+        try {
+          saved = await loadDocumentCheckpointFromLocalService();
+          restoredFromLocalService = !!saved;
+        } catch { /* report missing snapshot below */ }
+      }
     }
     if (!saved) {
       savedSessionSummary.value = null;
@@ -2365,36 +2357,13 @@ async function restoreLastSession() {
       lastRunSegmentIds: saved.lastRunSegmentIds,
     });
 
-    // SQLite 恢复成功后，尽力重建 IndexedDB 主存储。失败仍可继续使用 SQLite 检查点。
-    if (restoredFromLocalService) {
-      try {
-        await createActiveDocumentSession({
-          fileName: documentFileName,
-          document: saved.document,
-          rawText,
-          glossary: glossary.value,
-          sourceLang: sourceLang.value,
-          targetLang: targetLang.value,
-          viewMode: viewMode.value,
-          literaryMode: literaryMode.value,
-          currentPageIndex: currentPageIndex.value,
-          activeTab: activeTab.value,
-        });
-        activeSessionIndexedDbWritable = true;
-        persistedTranslations.value.clear(); // 新记录还没有译文，需要随后写回全部已完成译文
-      } catch {
-        activeSessionIndexedDbWritable = false;
-      }
-    } else {
-      activeSessionIndexedDbWritable = true;
-    }
+    // Local Agent 项目已经包含全部业务数据；扩展不重建 IndexedDB 副本。
+    activeSessionIndexedDbWritable = !restoreConfig.documentUseLocalAgent;
 
     activeSessionReady.value = true;
     await nextTick();
 
-    // First hydrate from the service, then use IndexedDB / the SQLite session checkpoint as a
-    // local cache. If the service is offline, keep the restored local snapshot without pushing it
-    // back into a project when connectivity returns.
+    // 服务端项目是唯一业务事实来源；Local Agent 不使用扩展快照作为离线回退。
     try {
       let project = await refreshExistingWorkspaceFromService();
       if (readerConfig.value?.documentUseLocalAgent && doc.value &&
@@ -2410,7 +2379,7 @@ async function restoreLastSession() {
         void startAgentTrajectoryPolling();
       }
     } catch (error) {
-      persistenceMessage.value = '阅读会话已恢复，Local Agent 暂不可用；当前显示扩展保存的备份副本。恢复服务后会重新同步。' +
+      persistenceMessage.value = '阅读会话已从本机服务恢复，但后续服务请求失败；扩展没有本地业务副本可回退。' +
         (error instanceof Error ? ' ' + error.message : '');
     }
     await persistCurrentSession();
@@ -2569,11 +2538,11 @@ async function loadFile(file: File) {
       }
       glossary.value = extractGlossaryLocal(glossarySample);
     }
-    // Re-selecting the same file restores the active IndexedDB reading session before a new
-    // empty session replaces it. Translation cache remains a fallback for documents without a
-    // matching saved reader session.
+    // Local Agent 模式不读取扩展 IndexedDB；项目发现、译文和文学记忆全部从服务端获取。
     let previousSession: LoadedActiveDocumentSession | null = null;
-    try { previousSession = await loadActiveDocumentSession(); } catch { /* cache still supports reuse */ }
+    if (!config.documentUseLocalAgent) {
+      try { previousSession = await loadActiveDocumentSession(); } catch { /* legacy compatibility cache only */ }
+    }
     const localAgentOwnsSelectedSource = config.documentUseLocalAgent === true &&
       /\.(?:epub|pdf)$/i.test(file.name);
     const sameServerSourceSegments = !!previousSession && !!doc.value &&
@@ -2634,50 +2603,38 @@ async function loadFile(file: File) {
       return;
     }
 
-    // 保存已解析的结构化文档一次；后续翻译过程只增量写译文与小型状态。
-    // IndexedDB 配额/权限异常不会阻止正常翻译。
-    try {
-      await createActiveDocumentSession({
-        fileName: documentFileName,
-        document: doc.value,
-        rawText,
-        glossary: glossary.value,
-        sourceLang: sourceLang.value,
-        targetLang: targetLang.value,
-        viewMode: viewMode.value,
-        literaryMode: literaryMode.value,
-        currentPageIndex: currentPageIndex.value,
-        activeTab: activeTab.value,
-      });
-      activeSessionIndexedDbWritable = true;
-      activeSessionReady.value = true;
-      let synchronizedFromService = false;
-      try {
-        synchronizedFromService = !!(await refreshExistingWorkspaceFromService());
-      } catch (error) {
-        // The service is unavailable, so preserve this parsed document as an offline backup.
-        persistenceMessage.value = '文档已打开并保留扩展副本；本机服务暂不可用，恢复连接后将重新同步。' +
-          (error instanceof Error ? ' ' + error.message : '');
-      }
-      // Do not persist the initial empty snapshot before a matching service project has been
-      // checked. If no project exists or the service is offline, this becomes the backup copy.
-      if (!synchronizedFromService) await persistCurrentSession();
-      savedSessionSummary.value = await getActiveDocumentSessionSummary();
-    } catch (storageError) {
-      // 文件已在内存解析完成。即使 IndexedDB 无法创建，也尝试先建立 SQLite 恢复副本。
+    if (config.documentUseLocalAgent) {
+      // Server-only：不创建 IndexedDB 文档、译文或文学记忆副本。
       activeSessionIndexedDbWritable = false;
       activeSessionReady.value = true;
-      persistenceMessage.value = '扩展本地会话创建失败，正在尝试保存到本机 SQLite。' +
-        (storageError instanceof Error ? ' ' + storageError.message : '');
-      let synchronizedFromService = false;
       try {
-        synchronizedFromService = !!(await refreshExistingWorkspaceFromService());
+        let project = await refreshExistingWorkspaceFromService();
+        if (!project && !workspaceSourceChanged.value) project = await ensureDocumentWorkspace();
+        if (project) await persistCurrentSession();
+        else persistenceMessage.value = '文档已在当前页面打开；本机项目尚未建立，没有写入扩展本地存储。';
       } catch (error) {
-        persistenceMessage.value = '本机服务暂不可用，继续保留当前内存文档；服务恢复后重新同步。' +
+        persistenceMessage.value = '本机服务暂不可用。文档仅保留在当前页面内存中，不会写入扩展存储；请恢复服务后重新打开。' +
           (error instanceof Error ? ' ' + error.message : '');
       }
-      if (!synchronizedFromService) await persistCurrentSession();
       await refreshLocalSessionSummary();
+    } else {
+      // 非 Local Agent 兼容模式仍使用旧的浏览器阅读器会话。
+      try {
+        await createActiveDocumentSession({
+          fileName: documentFileName, document: doc.value, rawText, glossary: glossary.value,
+          sourceLang: sourceLang.value, targetLang: targetLang.value, viewMode: viewMode.value,
+          literaryMode: literaryMode.value, currentPageIndex: currentPageIndex.value, activeTab: activeTab.value,
+        });
+        activeSessionIndexedDbWritable = true;
+        activeSessionReady.value = true;
+        await persistCurrentSession();
+        savedSessionSummary.value = await getActiveDocumentSessionSummary();
+      } catch (storageError) {
+        activeSessionIndexedDbWritable = false;
+        activeSessionReady.value = true;
+        persistenceMessage.value = '扩展本地会话创建失败：' +
+          (storageError instanceof Error ? storageError.message : String(storageError));
+      }
     }
   } catch (err) {
     parseError.value = (err as Error).message;
