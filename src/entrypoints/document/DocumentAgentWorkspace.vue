@@ -415,7 +415,6 @@ import { preprocessingGateTitle } from './documentPreprocessing';
 import {
   backupWorkspaceSourceFile,
   importDocumentFileViaLocalAgent,
-  importWorkspaceTranslations,
   isServiceUnreachableError,
   loadWorkspaceAcceptedTranslations,
   lookupWorkspaceProject,
@@ -728,8 +727,6 @@ async function createProject(forceNew = false, explicitRebuild = false) {
 
   if (!isCurrent()) return;
   const input = projectInput();
-  const legacyTranslations = new Map(props.translations);
-  const legacyMemory = JSON.parse(JSON.stringify(props.literaryMemory));
   const sourceFileAtStart = props.sourceFile;
   if (props.useLocalAgent && /^(epub|pdf)$/i.test(props.format) && !sourceFileAtStart) {
     error.value = '本机服务模式下 EPUB/PDF 必须由本机解析。请重新选择原始文件后再新建项目。';
@@ -776,21 +773,14 @@ async function createProject(forceNew = false, explicitRebuild = false) {
     }
 
     await rememberWorkspaceProject(input, response.project.projectId, response.project.sourceFingerprint);
-    // Finish one-time migration from the snapshot captured for the request. If the user switches
-    // documents during these writes, complete the old project durably but never bind it to the
-    // newly opened document's reader state.
+    // The import endpoint starts with a minimal Prompt; persist the selected Prompt separately.
+    // Never migrate extension-side translation or LiteraryMemory snapshots into a new project.
     if (useRawFileImport) {
-      // The import endpoint starts with a minimal Prompt; persist the user-selected one separately.
       await api('/api/documents/projects/' + encodeURIComponent(response.project.projectId) + '/prompts', {
         method: 'POST',
         body: JSON.stringify(promptAtStart),
       });
     }
-    await importWorkspaceTranslations(props.localAgentUrl, props.localAgentToken, response.project.projectId, legacyTranslations);
-    await api('/api/documents/projects/' + encodeURIComponent(response.project.projectId) + '/literary-memory', {
-      method: 'POST',
-      body: JSON.stringify({ memory: legacyMemory }),
-    });
     if (sourceFileAtStart && !useRawFileImport) {
       try {
         await backupWorkspaceSourceFile(props.localAgentUrl, props.localAgentToken, response.project.projectId, sourceFileAtStart);
