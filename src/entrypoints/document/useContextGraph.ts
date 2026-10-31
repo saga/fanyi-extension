@@ -252,8 +252,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
     try {
       await loadContextGraph(project, schedulePoll);
       contextGraphReconnectAttempts = 0;
-      // Status is a display projection only. Graph entities/evidence never get copied into UI memory.
-      // 但「这本书从来没分析过」时要把分析真正开起来——否则用户必须自己找到按钮才能开始。
+      // The UI consumes only the compact readiness/status projection; graph entities/evidence stay service-owned.
+      // A never-analysed book starts preprocessing automatically; failed/outdated analyses require explicit retry.
       void maybeAutoStartPreprocessing(project).catch(() => {});
     } catch (error) {
       contextGraphState.value = {
