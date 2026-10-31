@@ -376,9 +376,13 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     literaryMemory.value.relationships = literaryMemory.value.relationships.filter((relation) =>
       !names.has(normalizeManagedPersonName(relation.subject)) &&
       !names.has(normalizeManagedPersonName(relation.object)));
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '移除人物资料失败：' + (error instanceof Error ? error.message : String(error));
-    });
+    try {
+      // 删除动作只有在 LiteraryMemory revision 也写入成功后才向调用方报告完成。
+      await persistLiteraryMemoryToWorkspace();
+    } catch (error) {
+      persistenceMessage.value = 'Context Graph 已拒绝该人物，但 LiteraryMemory 保存失败：' +
+        (error instanceof Error ? error.message : String(error));
+    }
   }
 
   function markEntitySuggested(entity: LiteraryEntity) {
