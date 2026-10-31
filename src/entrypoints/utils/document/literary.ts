@@ -498,12 +498,11 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
   const styleGuideStatus = raw.styleGuideAutoDisabled === true ? 'candidate' :
     Object.keys(styleGuide).length && ['context-graph', 'user-edited', 'user-confirmed'].includes(String(rawStyleOrigin))
       ? 'confirmed' : 'candidate';
-  const styleGuideConfirmationSource = styleGuideStatus !== 'confirmed' ? undefined
-    : rawStyleOrigin === 'user-edited' ? 'user-modified'
-      : rawStyleOrigin === 'user-confirmed' ? 'user-confirmed'
-        : raw.styleGuideStatus === 'confirmed'
-          ? (raw.styleGuideConfirmationSource ? confirmationSource(raw.styleGuideConfirmationSource, true) : 'legacy-unknown')
-          : 'model-default';
+  const styleGuideConfirmationSource = rawStyleOrigin === 'user-edited' ? 'user-modified'
+    : rawStyleOrigin === 'user-confirmed' ? 'user-confirmed'
+      : raw.styleGuideStatus === 'confirmed'
+        ? (raw.styleGuideConfirmationSource ? confirmationSource(raw.styleGuideConfirmationSource, true) : 'legacy-unknown')
+        : styleGuideStatus === 'confirmed' ? 'model-default' : undefined;
   const styleGuideOrigin: LiteraryStyleGuideOrigin =
     rawStyleOrigin === 'context-graph' || rawStyleOrigin === 'user-edited' ||
     rawStyleOrigin === 'user-confirmed' || rawStyleOrigin === 'legacy-unknown'
