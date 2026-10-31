@@ -326,7 +326,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   function markRelationshipSuggested(relation: LiteraryRelationship) {
     // Editing a default-adopted relation changes its working value; it remains active.
     relation.reviewStatus = 'confirmed';
-    relation.confirmationSource = 'model-default';
+    relation.confirmationSource = 'user-modified';
     if (relation.subject.trim() && relation.predicate.trim() && relation.object.trim()) {
       void persistLiteraryMemoryToWorkspace().catch((error) => {
         persistenceMessage.value = '保存人物关系失败：' + (error instanceof Error ? error.message : String(error));
@@ -526,6 +526,16 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       : action === 'confirm' ? '已确认中文文学编辑档案。' : '已拒绝中文文学编辑档案。';
   }
 
+  function markChineseEditorialProfileModified() {
+    const profile = literaryMemory.value.chineseEditorialProfile;
+    if (!profile) return;
+    profile.status = 'confirmed';
+    profile.confirmationSource = 'user-modified';
+    void persistLiteraryMemoryToWorkspace().catch((error) => {
+      persistenceMessage.value = '保存中文文学编辑档案失败：' + (error instanceof Error ? error.message : String(error));
+    });
+  }
+
   function markStyleGuideCandidate() {
     literaryMemory.value.styleGuideStatus = 'candidate';
     literaryMemory.value.styleGuideOrigin = 'user-edited';
@@ -700,6 +710,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     persistLiteraryMemoryToWorkspace,
     awaitLiteraryMemoryWrites,
     reviewChineseEditorialProfile,
+    markChineseEditorialProfileModified,
     markStyleGuideCandidate,
     setStyleGuideLines,
     importContextGraphStyleGuide,
