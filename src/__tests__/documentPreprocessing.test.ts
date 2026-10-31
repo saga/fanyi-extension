@@ -212,6 +212,7 @@ describe('literary preprocessing readiness gate', () => {
     const distinctTitles = distinctReasons.map((reason) => preprocessingGateTitle(reason));
     expect(new Set(distinctTitles).size).toBe(distinctReasons.length);
     expect(preprocessingGateTitle('version')).not.toContain('没有');
+    expect(preprocessingGateTitle('version')).toContain('重新分析');
     expect(preprocessingGateTitle('missing')).toContain('没有完成');
   });
 });
