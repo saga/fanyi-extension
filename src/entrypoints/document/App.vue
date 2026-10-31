@@ -2394,19 +2394,22 @@ async function restoreLastSession() {
 }
 
 async function clearSavedSession() {
+  const config = await getConfig();
   let indexedDbCleared = false;
-  try {
-    await clearActiveDocumentSession();
-    indexedDbCleared = true;
-    savedSessionSummary.value = null;
-  } catch (error) {
-    persistenceMessage.value = '清除扩展恢复记录失败：' +
-      (error instanceof Error ? error.message : String(error));
+  // Local Agent 项目的业务数据不在扩展 IndexedDB；只清除服务端的阅读位置引用。
+  if (!config.documentUseLocalAgent) {
+    try {
+      await clearActiveDocumentSession();
+      indexedDbCleared = true;
+      savedSessionSummary.value = null;
+    } catch (error) {
+      persistenceMessage.value = '清除扩展恢复记录失败：' +
+        (error instanceof Error ? error.message : String(error));
+    }
   }
 
-  // 即使当前已切回远程翻译模式，也不能留下用户通过“清除记录”明确要求删除的 SQLite 副本。
+  // 删除的是服务端通用阅读位置引用，不删除项目、原文、译文或文学记忆。
   try {
-    const config = await getConfig();
     const base = new URL(config.documentLocalAgentUrl || 'http://127.0.0.1:8789');
     base.pathname = '/api/documents/session/' + encodeURIComponent(LOCAL_DOCUMENT_SESSION_ID);
     base.search = '';
@@ -2422,11 +2425,13 @@ async function clearSavedSession() {
     localSessionSummary.value = null;
     localSessionDocumentSaved = false;
     localPersistedTranslations.clear();
-    if (indexedDbCleared) persistenceMessage.value = '已清除扩展与本机 SQLite 中保存的阅读记录。';
+    persistenceMessage.value = config.documentUseLocalAgent
+      ? '已清除本机服务中的阅读位置记录；项目原文、译文和文学记忆保持不变。'
+      : indexedDbCleared ? '已清除扩展与本机 SQLite 中保存的阅读记录。' : '已清除本机 SQLite 阅读记录。';
   } catch (error) {
     // SQLite 未能删除时保留摘要，用户可以重新启动服务后再次执行删除。
     if (indexedDbCleared) {
-      persistenceMessage.value = '已清除扩展恢复记录，但本机 SQLite 副本未能删除（服务未运行或连接失败）。';
+      persistenceMessage.value = '已清除扩展恢复记录，但本机 SQLite 阅读记录未能删除（服务未运行或连接失败）。';
     } else {
       persistenceMessage.value = '清除恢复记录失败：' +
         (error instanceof Error ? error.message : String(error));
