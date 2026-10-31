@@ -126,7 +126,7 @@ describe('literary memory deletion persistence', () => {
     await editor.removeEntity(0);
 
     expect(literaryMemory.value.entities).toHaveLength(1);
-    expect(persistenceMessage.value).toContain('未执行删除');
+    expect(persistenceMessage.value).toContain('已恢复本地资料');
   });
 
   it('rejects only the exact relationship edge when endpoints and predicate match', async () => {
