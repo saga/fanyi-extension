@@ -2300,8 +2300,15 @@ async function restoreLastSession() {
     }
     if (!saved) {
       savedSessionSummary.value = null;
-      persistenceMessage.value = '没有可恢复的阅读记录。';
+      persistenceMessage.value = restoreConfig.documentUseLocalAgent
+        ? '本机服务中没有可恢复的阅读项目，或服务当前不可用。扩展不会使用旧 IndexedDB 快照替代服务端数据。'
+        : '没有可恢复的阅读记录。';
       return;
+    }
+    if (restoreConfig.documentUseLocalAgent && restoredFromLocalService) {
+      // 只有服务端项目已成功恢复后，才清理旧版本遗留的扩展业务快照。
+      await clearActiveDocumentSession().catch(() => undefined);
+      savedSessionSummary.value = null;
     }
 
     resetWorkspaceBindingForDocument();
@@ -2615,8 +2622,11 @@ async function loadFile(file: File) {
       try {
         let project = await refreshExistingWorkspaceFromService();
         if (!project && !workspaceSourceChanged.value) project = await ensureDocumentWorkspace();
-        if (project) await persistCurrentSession();
-        else persistenceMessage.value = '文档已在当前页面打开；本机项目尚未建立，没有写入扩展本地存储。';
+        if (project) {
+          // 服务端项目已经接管文档后，清除旧版本遗留的 IndexedDB 全量快照。
+          await clearActiveDocumentSession().catch(() => undefined);
+          await persistCurrentSession();
+        } else persistenceMessage.value = '文档已在当前页面打开；本机项目尚未建立，没有写入扩展本地存储。';
       } catch (error) {
         persistenceMessage.value = '本机服务暂不可用。文档仅保留在当前页面内存中，不会写入扩展存储；请恢复服务后重新打开。' +
           (error instanceof Error ? ' ' + error.message : '');
