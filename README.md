@@ -335,7 +335,7 @@ flowchart TD
     N --> O[Service finalizes run and persists candidates/events]
     O --> Q{Extension UI caller?}
     Q -- Yes --> R[Extension calls accept and syncs accepted text to reader]
-    Q -- API/CLI --> S[Candidates stay pending until /accept]
+    Q -- API/CLI --> T[Server validates and auto-accepts finished candidates]
     D -. Pause/cancel blocks new batch allocation .-> P[Discard in-flight results after cancellation]
     I -. Cancellation .-> P
 ```
