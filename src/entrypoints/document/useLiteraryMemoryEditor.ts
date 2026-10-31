@@ -269,7 +269,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       await deps.persistSession();
       return;
     }
-    await awaitLiteraryMemoryWrites();
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
     const response = await workspaceApi<{ contextGraph?: { nodes?: Array<any>; edges?: Array<any> } }>(
@@ -339,7 +338,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       await deps.persistSession();
       return;
     }
-    await awaitLiteraryMemoryWrites();
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
     const response = await workspaceApi<{ contextGraph?: { nodes?: Array<any>; edges?: Array<any> } }>(
