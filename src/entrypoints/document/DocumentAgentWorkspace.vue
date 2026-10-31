@@ -80,7 +80,7 @@
           :disabled="busy || restoringProject || segments.length === 0"
           @click="startRun('stale')"
         >
-          {{ busy ? '正在准备…' : '初始化项目并开始翻译' }}
+          {{ busy ? '正在准备…' : (preprocessingState.required ? '初始化项目并开始全书预处理' : '初始化项目并开始翻译') }}
         </button>
       </section>
     </template>
@@ -129,7 +129,7 @@
           <button
             v-else-if="progressCopy.actionLabel"
             class="agent-button agent-button-primary agent-button-large"
-            :disabled="busy || sourceChanged"
+            :disabled="busy || sourceChanged || translationPreprocessingBlocked"
             @click="startRun('stale')"
           >
             {{ busy ? '正在准备…' : progressCopy.actionLabel }}
@@ -190,12 +190,12 @@
               <p>一般情况下只需使用上方的开始 / 继续翻译。以下操作用于有明确需要时。</p>
             </div>
             <div class="agent-inline-actions">
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !(activeRun?.counts?.failed)" @click="startRun('failed')">
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || translationPreprocessingBlocked || !(activeRun?.counts?.failed)" @click="startRun('failed')">
                 重试未完成片段<span v-if="activeRun?.counts?.failed">（{{ activeRun.counts.failed }}）</span>
               </button>
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
-              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="startRun('all')">重新翻译全文</button>
-              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning" @click="resumeRun">恢复中断任务</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || translationPreprocessingBlocked || !visibleSegments.length" @click="startRun('visible')">重新翻译当前阅读页</button>
+              <button class="agent-button agent-button-secondary" :disabled="busy || isRunning || translationPreprocessingBlocked" @click="startRun('all')">重新翻译全文</button>
+              <button v-if="['paused', 'failed', 'partial'].includes(activeRun?.status)" class="agent-button agent-button-secondary" :disabled="busy || isRunning || translationPreprocessingBlocked" @click="resumeRun">恢复中断任务</button>
               <button class="agent-button agent-button-tertiary" :disabled="busy || isRunning" @click="refreshProject">刷新状态</button>
             </div>
             <p class="agent-footnote">重新翻译会生成新结果。相同原文版本下已有的人工修订会优先保留。</p>
@@ -535,6 +535,9 @@ const qualityAuditError = ref('');
 const qualityAuditQuery = ref('');
 const selectedQualityFindingIds = ref<string[]>([]);
 const isRunning = computed(() => !!activeRun.value && ['queued', 'running'].includes(activeRun.value.status));
+const translationPreprocessingBlocked = computed(() =>
+  props.preprocessingState.required && !props.preprocessingState.ready,
+);
 const selectedSegment = computed(() => props.visibleSegments.find((segment) => segment.id === selectedSegmentId.value));
 const failedRunSegments = computed(() => {
   const segments = Array.isArray(activeRun.value?.segments) ? activeRun.value.segments : [];
@@ -1267,9 +1270,19 @@ async function startRun(scope: 'stale' | 'all' | 'failed' | 'visible') {
   const isCurrent = () => isCurrentWorkspaceGeneration(generation);
   busy.value = true; error.value = ''; message.value = '';
   try {
+    const initializingProject = !project.value;
     if (!project.value) await createProject();
     if (!isCurrent() || !project.value) return;
-    if (!isCurrent() || !project.value) return;
+    // A first click may create the durable project, but it must not also create a translation Run.
+    // The project watcher/status refresh starts the full-book preprocessing; the user starts
+    // translation only after the server reports the matching, complete Context Graph.
+    if (props.preprocessingState.required && !props.preprocessingState.ready) {
+      emit('preprocessingStatusRefreshRequested', project.value);
+      message.value = initializingProject
+        ? '文档项目已初始化，正在准备全书上下文。全部预处理阶段完成并通过检查后，才可以开始翻译。'
+        : '全书预处理尚未完成或未通过检查。请先完成或重新分析全书，再开始翻译。';
+      return;
+    }
     const projectId = project.value.projectId as string;
     const runScope = scope === 'visible'
       ? { type: 'ids', ids: props.visibleSegments.map((segment) => segment.id) }
@@ -1380,6 +1393,11 @@ async function refreshProjectWithoutRun() {
 
 async function resumeRun() {
   if (!activeRun.value || !project.value) return;
+  if (translationPreprocessingBlocked.value) {
+    emit('openPreprocessing');
+    message.value = '必须先完成当前原文版本的全书预处理，才能恢复文学翻译。';
+    return;
+  }
   const generation = workspaceSourceGeneration;
   const isCurrent = () => isCurrentWorkspaceGeneration(generation);
   const projectId = project.value.projectId as string;
