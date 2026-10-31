@@ -553,6 +553,8 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       } catch (error) {
         persistenceMessage.value += '；但同步到本机 workspace 失败：' + (error instanceof Error ? error.message : String(error));
       }
+    } else {
+      await deps.persistSession();
     }
   }
 
