@@ -233,7 +233,7 @@ export function preprocessingGateTitle(reason: PreprocessingBlockReason | string
     case 'language':
       return '将按当前语言设置准备全书上下文';
     case 'version':
-      return '预处理记录版本已更新，翻译时会自动重新分析';
+      return '预处理记录版本已过期，请重新分析全书';
     case 'missing':
       return '当前原文版本还没有完成全书预处理';
     case 'incomplete':
