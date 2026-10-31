@@ -1150,7 +1150,6 @@ import {
 import {
   backupWorkspaceSourceFile,
   importDocumentFileViaLocalAgent,
-  importWorkspaceTranslations,
   isServiceConnectivityMessage,
   isServiceUnreachableError,
   loadWorkspaceAcceptedTranslations,
@@ -3009,8 +3008,6 @@ async function ensureDocumentWorkspaceInternal(
   if (!isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration)) return null;
   const input = workspaceInput();
   const initialPrompt = workspacePromptInput();
-  const legacyTranslations = new Map(state.value.translations);
-  const legacyMemory = sanitizeLiteraryMemory(JSON.parse(JSON.stringify(literaryMemory.value)));
   const sourceFileAtStart = loadedSourceFile.value;
   const isCurrent = () => isWorkspaceDocumentCurrent(expectedDocumentKey, expectedGeneration);
   const config = await getConfig();
@@ -3162,24 +3159,14 @@ async function ensureDocumentWorkspaceInternal(
   sessionPersistenceSuppressionCount++;
   let refreshed: { project: any; runs?: any[] } | null = null;
   try {
-    // Migrate legacy data once, and only when the service project itself has just been created.
-    // On an existing service project, cached translations, Prompt and literary memory are never
-    // pushed back during open/restore; the next block hydrates the extension from SQLite instead.
-    if (createdNewProject) {
-      // File imports are created by the service with a minimal default Prompt. Save the reader's
-      // configured Prompt separately; LiteraryMemory always has its own compact DTO endpoint.
-      if (importBinding) {
-        await workspaceApi(base, token,
-          '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/prompts',
-          { method: 'POST', body: JSON.stringify(initialPrompt) },
-        );
-      }
-      await importWorkspaceTranslations(base, token, project.projectId, legacyTranslations);
+    // New projects created by import-file start with a minimal Prompt; initialize only the
+    // reader's selected Prompt. Never migrate extension-side translations or LiteraryMemory.
+    if (createdNewProject && importBinding) {
       await workspaceApi(base, token,
-        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
-        { method: 'POST', body: JSON.stringify({ memory: legacyMemory }) },
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/prompts',
+        { method: 'POST', body: JSON.stringify(initialPrompt) },
       );
-      if (importBinding) importBinding.createdNewProject = false;
+      importBinding.createdNewProject = false;
     }
     if (!isCurrent()) return null;
 
