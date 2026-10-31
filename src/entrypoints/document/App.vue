@@ -3471,6 +3471,19 @@ async function runWorkspaceTranslation(options: {
       return;
     }
   }
+  // 阅读页的后台翻译入口也必须遵守与 Agent Workspace 相同的文学预处理前置条件。
+  // 不能只依赖 Workspace 按钮禁用：阅读页的“翻译当前页/预翻译章节”会直接调用本函数。
+  if (effectiveDocumentTranslationMode.value === 'literary') {
+    await refreshContextGraphStatus(project, true);
+    const readiness = translationPreprocessingReadiness.value;
+    if (readiness.required && !readiness.ready) {
+      state.value.running = false;
+      state.value.workStage = '';
+      state.value.activeSegmentIds = new Set();
+      state.value.error = readiness.message || '全书预处理尚未完成，文学翻译暂不能开始。';
+      return;
+    }
+  }
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
