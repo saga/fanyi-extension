@@ -377,6 +377,39 @@ export function useContextGraph(deps: ContextGraphDeps) {
     await ensureContextGraphPreprocessing(project, { force: true });
   }
 
+  /**
+   * Called only after the user explicitly starts a literary translation.
+   * It starts or retries preprocessing once, waits for the service-owned readiness gate,
+   * and returns a blocking reason instead of asking the user to click Start again.
+   */
+  async function prepareContextGraphForTranslation(
+    project: any,
+    timeoutMs = 60 * 60 * 1000,
+  ): Promise<ReturnType<typeof assessContextGraphReadiness>> {
+    const projectId = String(project?.projectId || '');
+    if (!projectId) return translationPreprocessingReadiness.value;
+    await refreshContextGraphStatus(project, true);
+    let readiness = translationPreprocessingReadiness.value;
+    if (!readiness.required || readiness.ready) return readiness;
+
+    if (['failed', 'missing', 'version', 'language', 'incomplete'].includes(readiness.reason)) {
+      // A single user-started request gets one bounded preprocessing retry, never an unbounded loop.
+      await ensureContextGraphPreprocessing(project, { force: true });
+    }
+
+    const deadline = Date.now() + Math.max(1_000, timeoutMs);
+    while (!readiness.ready && Date.now() < deadline) {
+      if (workspaceProject.value?.projectId !== projectId || !doc.value) {
+        return translationPreprocessingReadiness.value;
+      }
+      if (readiness.reason === 'failed') break;
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      await refreshContextGraphStatus(project, true);
+      readiness = translationPreprocessingReadiness.value;
+    }
+    return readiness;
+  }
+
     /** 切换文档时清空预处理状态与轮询；服务端项目不会被删除。 */
     function resetContextGraph(): void {
       contextGraphAnalyzing.value = false;
@@ -412,6 +445,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     handlePreprocessingStatusRefreshRequested,
     openPreprocessingAndEnsure,
     reanalyzeContextGraph,
+    prepareContextGraphForTranslation,
     resetContextGraph,
   };
 }
