@@ -1,11 +1,9 @@
 /**
- * 文档阅读器的 IndexedDB 会话存储。
+ * Legacy IndexedDB reader store for the non-Local-Agent compatibility path only.
  *
- * 只保存文档翻译页：解析后的结构化文档、逐段译文、当前阅读位置与文学书籍记忆。
- * 不存储原始 PDF/EPUB 二进制，也不接入网页翻译的缓存或存储路径。
- *
- * 文档正文在导入时写入一次；翻译过程中只增量写入新增/修订的译文和小型状态记录，
- * 避免每翻译一批就把整本书再次 structured-clone 到 IndexedDB。
+ * Local Agent document workflows must not call this module for reads or writes. Their source,
+ * translations, LiteraryMemory, Context Graph and reader-session pointer are owned by the service.
+ * The remaining IndexedDB path exists only to avoid silently breaking the separate legacy mode.
  */
 
 import type { Glossary } from '../../service/_service';
