@@ -403,11 +403,18 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   }
 
   async function removeManagedPerson(item: ManagedPersonItem) {
+    // Finish earlier memory edits before taking the deletion snapshot. The deletion itself is
+    // queued below so later edits cannot race it and resurrect the removed projection.
+    await awaitLiteraryMemoryWrites();
+    const currentItem = item.profile?.characterId
+      ? managedPeople.value.find((candidate) => candidate.profile?.characterId === item.profile?.characterId) || item
+      : managedPeople.value.find((candidate) =>
+          normalizeManagedPersonName(managedPersonSource(candidate)) === normalizeManagedPersonName(managedPersonSource(item))) || item;
     const names = new Set([
-      managedPersonSource(item), ...(item.entity?.aliases || []), ...(item.profile?.aliases || []),
+      managedPersonSource(currentItem), ...(currentItem.entity?.aliases || []), ...(currentItem.profile?.aliases || []),
     ].map(normalizeManagedPersonName).filter(Boolean));
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
-    const entity = findManagedPersonEntity(item);
+    const entity = findManagedPersonEntity(currentItem);
     if (entity) {
       const entityIndex = literaryMemory.value.entities.indexOf(entity);
       if (entityIndex >= 0) literaryMemory.value.entities.splice(entityIndex, 1);
@@ -425,7 +432,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       !names.has(normalizeManagedPersonName(relation.object)));
     try {
       // Graph rejection and the resulting memory revision commit together in the service database.
-      await rejectContextGraphItemsByNames(names, literaryMemory.value);
+      await enqueueLiteraryMemoryOperation(() => rejectContextGraphItemsByNames(names, literaryMemory.value));
     } catch (error) {
       literaryMemory.value = sanitizeLiteraryMemory(snapshot);
       await deps.persistSession().catch(() => undefined);
@@ -474,13 +481,14 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     persistenceMessage.value = '已添加空白映射：填写原文名称和统一译名后会自动生效';
   }
   async function removeEntity(index: number) {
+    await awaitLiteraryMemoryWrites();
     const entity = literaryMemory.value.entities[index];
     if (!entity) return;
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const names = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
     literaryMemory.value.entities.splice(index, 1);
     try {
-      await rejectContextGraphItemsByNames(names, literaryMemory.value);
+      await enqueueLiteraryMemoryOperation(() => rejectContextGraphItemsByNames(names, literaryMemory.value));
     } catch (error) {
       literaryMemory.value = sanitizeLiteraryMemory(snapshot);
       await deps.persistSession().catch(() => undefined);
@@ -557,12 +565,14 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     literaryMemory.value.relationships.push({ subject: '', predicate: '', object: '', reviewStatus: 'suggested' });
   }
   async function removeRelationship(index: number) {
+    await awaitLiteraryMemoryWrites();
     const relation = literaryMemory.value.relationships[index];
     if (!relation) return;
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     literaryMemory.value.relationships.splice(index, 1);
     try {
-      await rejectContextGraphRelationship(relation.subject, relation.object, relation.predicate, literaryMemory.value);
+      await enqueueLiteraryMemoryOperation(() =>
+        rejectContextGraphRelationship(relation.subject, relation.object, relation.predicate, literaryMemory.value));
     } catch (error) {
       literaryMemory.value = sanitizeLiteraryMemory(snapshot);
       await deps.persistSession().catch(() => undefined);
@@ -573,6 +583,13 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
 
   let literaryMemorySaveQueue: Promise<void> = Promise.resolve();
   let literaryMemoryEditSequence = 0;
+
+  /** Serialize deletions with ordinary memory edits so a late save cannot resurrect removed data. */
+  function enqueueLiteraryMemoryOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = literaryMemorySaveQueue.catch(() => undefined).then(operation);
+    literaryMemorySaveQueue = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
 
   /**
    * Only explicit memory-edit actions call this method. Writes are serialized so rapid edit/confirm
@@ -604,9 +621,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
         await deps.persistSession();
       }
     };
-    const pending = literaryMemorySaveQueue.catch(() => undefined).then(write);
-    literaryMemorySaveQueue = pending;
-    return pending;
+    return enqueueLiteraryMemoryOperation(write);
   }
 
   async function reviewChineseEditorialProfile(action: 'reject') {
