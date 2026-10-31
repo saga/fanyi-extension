@@ -51,7 +51,7 @@ function setupEditor(graph: any) {
     persistSession,
     contextGraphOverview: ref(createEmptyContextGraphOverview()),
   });
-  return { editor, literaryMemory, persistenceMessage, calls, persistSession };
+  return { editor, literaryMemory, persistenceMessage, calls, persistSession, workspaceProject };
 }
 
 describe('literary memory deletion persistence', () => {
@@ -73,11 +73,10 @@ describe('literary memory deletion persistence', () => {
   });
 
   it('does not fall back to extension persistence when the Local Agent project is missing', async () => {
-    const { editor, persistSession } = setupEditor({ nodes: [], edges: [] });
-    const depsProject = (editor as any);
-    void depsProject;
-    // A missing project must fail rather than save the in-memory projection locally.
-    await expect(editor.persistLiteraryMemoryToWorkspace()).resolves.toBeUndefined();
+    const { editor, persistSession, workspaceProject } = setupEditor({ nodes: [], edges: [] });
+    workspaceProject.value = null;
+    // ensureWorkspace also returns null, so the operation must fail instead of saving locally.
+    await expect(editor.persistLiteraryMemoryToWorkspace()).rejects.toThrow('当前文档尚未连接到本机项目');
     expect(persistSession).not.toHaveBeenCalled();
   });
 
