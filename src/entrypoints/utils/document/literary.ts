@@ -289,7 +289,7 @@ export function createEmptyLiteraryMemory(): LiteraryBookMemory {
 
 function confirmationSource(value: unknown, active: boolean): LiteraryConfirmationSource | undefined {
   if (!active) return undefined;
-  return value === 'evidence-verified' || value === 'user-confirmed' || value === 'legacy-unknown'
+  return value === 'model-default' || value === 'user-modified' || value === 'evidence-verified' || value === 'user-confirmed' || value === 'legacy-unknown'
     ? value : 'legacy-unknown';
 }
 
@@ -448,7 +448,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
             entity.canonicalMappingDisposition === 'invalid-target' || entity.canonicalMappingDisposition === 'compound-name'
           ? { canonicalMappingDisposition: entity.canonicalMappingDisposition } : {}),
         reviewStatus: 'confirmed',
-        ...(resolvedConfirmationSource ? { confirmationSource: resolvedConfirmationSource } : {}),
+        confirmationSource: resolvedConfirmationSource || 'model-default',
       });
     }
   }
@@ -473,8 +473,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(safeText(rel.evidence, 160) ? { evidence: safeText(rel.evidence, 160) } : {}),
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
         reviewStatus: 'confirmed',
-        ...(confirmationSource(rel.confirmationSource, rel.reviewStatus === 'confirmed')
-          ? { confirmationSource: confirmationSource(rel.confirmationSource, rel.reviewStatus === 'confirmed') } : {}),
+        confirmationSource: confirmationSource(rel.confirmationSource, true) || 'model-default',
       });
     }
   }
@@ -721,7 +720,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     entities: entityList,
     relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
     styleGuide, styleGuideStatus,
-    ...(styleGuideConfirmationSource ? { styleGuideConfirmationSource } : {}),
+    ...(styleGuideStatus === 'confirmed' ? { styleGuideConfirmationSource: styleGuideConfirmationSource || 'model-default' } : {}),
     styleGuideOrigin,
     ...(styleGuideAnalysisVersion ? { styleGuideAnalysisVersion } : {}),
     ...(styleGuideSourceRevisionId ? { styleGuideSourceRevisionId } : {}),
@@ -757,7 +756,7 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
       ? mergeConfirmationSource(existing.styleGuideConfirmationSource, incoming.styleGuideConfirmationSource)
       : incoming.styleGuideConfirmationSource,
     styleGuideOrigin: existing.styleGuideOrigin === 'user-edited' ||
-      (existing.styleGuideStatus === 'confirmed' && existing.styleGuideConfirmationSource === 'user-confirmed')
+      (existing.styleGuideStatus === 'confirmed' && (existing.styleGuideConfirmationSource === 'user-confirmed' || existing.styleGuideConfirmationSource === 'user-modified'))
       ? existing.styleGuideOrigin
       : incoming.styleGuideOrigin === 'context-graph' ? 'context-graph' : existing.styleGuideOrigin || incoming.styleGuideOrigin,
     styleGuideAnalysisVersion: incoming.styleGuideOrigin === 'context-graph'
@@ -765,7 +764,9 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     styleGuideSourceRevisionId: incoming.styleGuideOrigin === 'context-graph'
       ? incoming.styleGuideSourceRevisionId : existing.styleGuideSourceRevisionId,
     styleGuideAutoDisabled: existing.styleGuideAutoDisabled,
-    chineseEditorialProfile: existing.chineseEditorialProfile || incoming.chineseEditorialProfile,
+    chineseEditorialProfile: existing.chineseEditorialProfile?.status === 'rejected' ||
+      (existing.chineseEditorialProfile?.confirmationSource === 'user-modified' || existing.chineseEditorialProfile?.confirmationSource === 'user-confirmed')
+      ? existing.chineseEditorialProfile : incoming.chineseEditorialProfile || existing.chineseEditorialProfile,
     chapterSummaries: Array.from(summaries.values()).slice(-MAX_SUMMARIES),
     recentExamples: [...existing.recentExamples, ...incoming.recentExamples].slice(-MAX_EXAMPLES),
     characterVoices: mergeCharacterVoices(existing.characterVoices, incoming.characterVoices),
@@ -833,17 +834,16 @@ function mergeVoiceRules(existing: RelationshipVoiceRule[], incoming: Relationsh
     if (prior.status === 'confirmed' || prior.status === 'rejected') {
       map.set(key, {
         ...prior,
-        ...(rule.status === 'confirmed' && rule.confirmationSource === 'user-confirmed'
-          ? { confirmationSource: 'user-confirmed' as const } : {}),
+        ...(rule.status === 'confirmed' ? { confirmationSource: mergeConfirmationSource(prior.confirmationSource, rule.confirmationSource) || 'model-default' } : {}),
         evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8),
       });
-    } else if (rule.status === 'confirmed' && rule.confirmationSource === 'user-confirmed') {
+    } else if (rule.status === 'confirmed') {
       map.set(key, { ...prior, ...rule, status: 'confirmed',
         evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     } else if (JSON.stringify({ register: prior.baselineRegister, terms: prior.addressTerms }) === JSON.stringify({ register: rule.baselineRegister, terms: rule.addressTerms })) {
-      map.set(key, { ...prior, ...rule, status: 'candidate', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
+      map.set(key, { ...prior, ...rule, status: 'confirmed', confirmationSource: rule.confirmationSource || 'model-default', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     } else {
-      map.set(key, { ...prior, status: 'candidate', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
+      map.set(key, { ...prior, status: 'confirmed', confirmationSource: prior.confirmationSource || 'model-default', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     }
   }
   return Array.from(map.values()).slice(0, MAX_VOICE_RULES);
@@ -861,7 +861,7 @@ function mergeVoiceAnchors(existing: CharacterVoiceAnchor[], incoming: Character
       }
       continue;
     }
-    map.set(candidate.anchorId, { ...prior, ...candidate, status: prior.status === 'approved' ? 'approved' : 'candidate' });
+    map.set(candidate.anchorId, { ...prior, ...candidate, status: 'approved', confirmationSource: candidate.confirmationSource || 'model-default' });
   }
   return Array.from(map.values()).slice(-MAX_VOICE_ANCHORS);
 }
