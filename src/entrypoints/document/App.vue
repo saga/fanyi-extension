@@ -2979,7 +2979,7 @@ async function hydrateWorkspacePrompt(
 
 /**
  * Refresh an existing service-backed project on document open/restore, without creating a new one.
- * A failed service request leaves the last local snapshot intact as an offline backup.
+ * Local Agent mode has no extension-side business snapshot; service failures are surfaced to the UI.
  */
 async function refreshExistingWorkspaceFromService(): Promise<any | null> {
   const documentKey = currentWorkspaceDocumentKey();
