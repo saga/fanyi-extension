@@ -180,6 +180,12 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
     };
   }
 
+  if (progress.strategy !== 'A' && progress.strategy !== 'B') {
+    return {
+      required: true, ready: false, reason: 'incomplete',
+      message: '预处理记录缺少有效的工作流策略标识，无法确认全书分析是否完整。请重新分析全书。',
+    };
+  }
   if (snapshot.styleGuideReady !== true) {
     const missing = Array.isArray(snapshot.styleMissingFields) ? snapshot.styleMissingFields : [];
     return {
