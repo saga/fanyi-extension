@@ -497,7 +497,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     if (avoid.length) styleGuide.avoid = avoid;
   }
   const rejectedItems: LiteraryMemoryRejection[] = Array.isArray(raw.rejectedItems)
-    ? raw.rejectedItems.slice(-200).flatMap((item: any) => {
+    ? raw.rejectedItems.slice(-2000).flatMap((item: any) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
         if (item.type === 'entity') {
           const source = safeText(item.source, 120);
