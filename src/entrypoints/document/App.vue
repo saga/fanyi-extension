@@ -3480,7 +3480,12 @@ async function runWorkspaceTranslation(options: {
     state.value.workStage = '准备全书上下文';
     state.value.workDone = 0;
     state.value.workTotal = doc.value?.segments.length || 0;
-    const readiness = await prepareContextGraphForTranslation(project);
+    const preparationGeneration = workspaceRunGeneration.value;
+    const readiness = await prepareContextGraphForTranslation(
+      project, 60 * 60 * 1000,
+      () => workspaceRunGeneration.value === preparationGeneration,
+    );
+    if (workspaceRunGeneration.value !== preparationGeneration) return;
     if (!readiness.ready) {
       state.value.running = false;
       state.value.workStage = '';
@@ -3587,6 +3592,15 @@ async function runWorkspaceTranslation(options: {
 }
 
 async function stopCurrentTranslation() {
+  if (!workspaceRunId.value && state.value.running && state.value.workStage === '准备全书上下文') {
+    // Cancel the user's pending one-click request while preprocessing is still running.
+    workspaceRunGeneration.value++;
+    state.value.running = false;
+    state.value.workStage = '';
+    state.value.workChapter = '';
+    state.value.activeSegmentIds = new Set();
+    return;
+  }
   if (workspaceRunId.value && workspaceProject.value && readerConfig.value?.documentUseLocalAgent) {
     const runId = workspaceRunId.value;
     const generation = workspaceRunGeneration.value;
