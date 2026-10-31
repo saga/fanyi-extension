@@ -179,6 +179,31 @@ export interface LiteraryExample {
   target: string;
   chapter?: string;
 }
+export interface ChineseEditorialProfileCandidate {
+  version: 1;
+  status: 'candidate' | 'confirmed';
+  sourceRevisionId: string;
+  analysisVersion: string;
+  sampleFingerprint: string;
+  sampleCount: number;
+  chapterCount: number;
+  generatedAt: string;
+  basedOnFingerprint?: string | null;
+  generatedFromMemoryRevisionId?: string | null;
+  profile: LiteraryStyleGuide;
+  evidenceRefs: Array<{ segmentId: string; targetExcerpt: string; observation: string; aspect: string }>;
+}
+export interface ChineseEditorialProfile extends ChineseEditorialProfileCandidate {
+  status: 'candidate' | 'confirmed' | 'rejected';
+  profileVersion?: number;
+  confirmationSource?: LiteraryConfirmationSource;
+  confirmedAt?: string;
+  pendingUpdate?: ChineseEditorialProfileCandidate;
+  previousFingerprint?: string | null;
+  acceptedUpdateAt?: string;
+  lastRejectedUpdate?: { sampleFingerprint: string; rejectedAt: string };
+}
+
 export interface LiteraryBookMemory {
   version: 2;
   entities: LiteraryEntity[];
@@ -192,6 +217,7 @@ export interface LiteraryBookMemory {
   styleGuideSourceRevisionId?: string;
   /** 用户可停用自动机器基准，而不删除候选或覆盖用户自定义文风。 */
   styleGuideAutoDisabled?: boolean;
+  chineseEditorialProfile?: ChineseEditorialProfile;
   chapterSummaries: Array<{ chapter: string; summary: string }>;
   recentExamples: LiteraryExample[];
   characterVoices: CharacterVoiceProfile[];
@@ -480,6 +506,61 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
   const styleGuideAnalysisVersion = safeText(raw.styleGuideAnalysisVersion, 120);
   const styleGuideSourceRevisionId = safeText(raw.styleGuideSourceRevisionId, 200);
   const styleGuideAutoDisabled = raw.styleGuideAutoDisabled === true;
+  const normalizeEditorialCandidate = (candidate: any): ChineseEditorialProfileCandidate | undefined => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
+    const candidateProfile = candidate.profile && typeof candidate.profile === 'object' ? candidate.profile : {};
+    const profile: LiteraryStyleGuide = {};
+    for (const key of ['narrativeVoice', 'register', 'rhythm', 'dialogue', 'diction'] as const) {
+      const value = safeText(candidateProfile[key], 1000);
+      if (value) profile[key] = value;
+    }
+    const rules = safeList(candidateProfile.rules, 16, 240);
+    const avoid = safeList(candidateProfile.avoid, 12, 240);
+    if (rules.length) profile.rules = rules;
+    if (avoid.length) profile.avoid = avoid;
+    const evidenceRefs = Array.isArray(candidate.evidenceRefs) ? candidate.evidenceRefs.slice(0, 24).flatMap((item: any) => {
+      const segmentId = safeText(item?.segmentId, 160);
+      const targetExcerpt = safeText(item?.targetExcerpt, 240);
+      const observation = safeText(item?.observation, 240);
+      const aspect = ['narrativeVoice', 'register', 'rhythm', 'dialogue', 'diction', 'consistency'].includes(String(item?.aspect))
+        ? String(item.aspect) : '';
+      return segmentId && targetExcerpt.length >= 4 && observation && aspect
+        ? [{ segmentId, targetExcerpt, observation, aspect }] : [];
+    }) : [];
+    return {
+      version: 1,
+      status: 'candidate',
+      sourceRevisionId: safeText(candidate.sourceRevisionId, 200),
+      analysisVersion: safeText(candidate.analysisVersion, 120),
+      sampleFingerprint: safeText(candidate.sampleFingerprint, 128),
+      sampleCount: Math.max(0, Math.min(1000, Number(candidate.sampleCount) || 0)),
+      chapterCount: Math.max(0, Math.min(500, Number(candidate.chapterCount) || 0)),
+      generatedAt: safeText(candidate.generatedAt, 64),
+      ...(candidate.basedOnFingerprint ? { basedOnFingerprint: safeText(candidate.basedOnFingerprint, 128) } : {}),
+      ...(candidate.generatedFromMemoryRevisionId ? { generatedFromMemoryRevisionId: safeText(candidate.generatedFromMemoryRevisionId, 200) } : {}),
+      profile,
+      evidenceRefs,
+    };
+  };
+  const rawEditorial = raw.chineseEditorialProfile && typeof raw.chineseEditorialProfile === 'object' &&
+    !Array.isArray(raw.chineseEditorialProfile) ? raw.chineseEditorialProfile as Record<string, any> : null;
+  const editorialCandidate = normalizeEditorialCandidate(rawEditorial);
+  const pendingEditorialUpdate = normalizeEditorialCandidate(rawEditorial?.pendingUpdate);
+  const chineseEditorialProfile: ChineseEditorialProfile | undefined = rawEditorial && editorialCandidate ? {
+    ...editorialCandidate,
+    status: reviewState(rawEditorial.status, ['candidate', 'confirmed', 'rejected']) as ChineseEditorialProfile['status'],
+    profileVersion: Math.max(1, Math.min(1000, Number(rawEditorial.profileVersion) || 1)),
+    ...(rawEditorial.confirmationSource === 'user-confirmed' && rawEditorial.status === 'confirmed'
+      ? { confirmationSource: 'user-confirmed', confirmedAt: safeText(rawEditorial.confirmedAt, 64) } : {}),
+    ...(pendingEditorialUpdate ? { pendingUpdate: pendingEditorialUpdate } : {}),
+    ...(rawEditorial.previousFingerprint ? { previousFingerprint: safeText(rawEditorial.previousFingerprint, 128) } : {}),
+    ...(rawEditorial.acceptedUpdateAt ? { acceptedUpdateAt: safeText(rawEditorial.acceptedUpdateAt, 64) } : {}),
+    ...(rawEditorial.lastRejectedUpdate && typeof rawEditorial.lastRejectedUpdate === 'object'
+      ? { lastRejectedUpdate: {
+          sampleFingerprint: safeText(rawEditorial.lastRejectedUpdate.sampleFingerprint, 128),
+          rejectedAt: safeText(rawEditorial.lastRejectedUpdate.rejectedAt, 64),
+        } } : {}),
+  } : undefined;
   const chapterSummaries = Array.isArray(raw.chapterSummaries)
     ? raw.chapterSummaries.slice(-MAX_SUMMARIES).flatMap((item) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
@@ -649,6 +730,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     ...(styleGuideAnalysisVersion ? { styleGuideAnalysisVersion } : {}),
     ...(styleGuideSourceRevisionId ? { styleGuideSourceRevisionId } : {}),
     styleGuideAutoDisabled,
+    ...(chineseEditorialProfile ? { chineseEditorialProfile } : {}),
     chapterSummaries, recentExamples,
     characterVoices: validVoices,
     relationshipVoiceRules: relationshipVoiceRules.filter((rule) => validCharacterIds.has(rule.speakerId) && validCharacterIds.has(rule.addresseeId)).slice(0, MAX_VOICE_RULES),
@@ -687,6 +769,7 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     styleGuideSourceRevisionId: incoming.styleGuideOrigin === 'context-graph'
       ? incoming.styleGuideSourceRevisionId : existing.styleGuideSourceRevisionId,
     styleGuideAutoDisabled: existing.styleGuideAutoDisabled,
+    chineseEditorialProfile: existing.chineseEditorialProfile || incoming.chineseEditorialProfile,
     chapterSummaries: Array.from(summaries.values()).slice(-MAX_SUMMARIES),
     recentExamples: [...existing.recentExamples, ...incoming.recentExamples].slice(-MAX_EXAMPLES),
     characterVoices: mergeCharacterVoices(existing.characterVoices, incoming.characterVoices),
