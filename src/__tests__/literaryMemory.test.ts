@@ -286,5 +286,13 @@ describe('literary memory deletion tombstones', () => {
       { type: 'entity', source: 'The King', kind: 'person', aliases: ['His Majesty'] },
       { type: 'relationship', subject: 'Alice', predicate: 'trusts', object: 'Bob' },
     ]);
+
+    const merged = mergeLiteraryMemory(memory, {
+      entities: [{ source: 'The King', target: '国王', kind: 'person', aliases: ['His Majesty'] }],
+      relationships: [{ subject: 'Alice', predicate: 'trusts', object: 'Bob' }],
+    });
+    expect(merged.entities).toEqual([]);
+    expect(merged.relationships).toEqual([]);
+    expect(merged.rejectedItems).toEqual(memory.rejectedItems);
   });
 });
