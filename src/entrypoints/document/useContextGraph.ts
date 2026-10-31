@@ -150,7 +150,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     sourceLang: sourceLang.value,
     targetLang: targetLang.value,
   }));
-  // Informational UI state only. The Local Agent owns the actual translation readiness gate.
+  // UI blocks translation until ready; local-agent-service repeats the same check as the authoritative server-side gate.
   const translationPreprocessingNeedsAttention = computed(() =>
     translationPreprocessingRequired.value && !translationPreprocessingReadiness.value.ready,
   );
