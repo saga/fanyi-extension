@@ -32,8 +32,8 @@ export interface LiteraryMemoryEditorDeps {
 /**
  * 人物、实体、关系与声音画像的编辑状态。
  *
- * 所有写操作都经 `persistLiteraryMemoryToWorkspace()` 串行落库：
- * 显式记忆编辑先写扩展会话，再同步到本机 workspace 的 memory revision。
+ * Local Agent 模式下所有写操作只提交本机 workspace 的 memory revision；
+ * 扩展中的响应式对象仅作为当前页面的编辑投影，不进行业务数据持久化。
  */
 export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const { literaryMemory, doc, state, readerConfig, workspaceProject, persistenceMessage } = deps;
@@ -295,10 +295,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       await deps.ensureWorkspace();
       project = workspaceProject.value;
     }
-    if (!project?.projectId) {
-      await deps.persistSession();
-      return;
-    }
+    if (!project?.projectId) throw new Error('当前文档尚未连接到本机项目，文学记忆没有保存。');
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
     const response = await workspaceApi<{ contextGraph?: { nodes?: Array<any>; edges?: Array<any> } }>(
@@ -342,14 +339,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       );
       literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
     }
-    try {
-      await deps.persistSession();
-    } catch (error) {
-      // The SQLite transaction has already committed; do not restore the old in-memory projection
-      // merely because the extension's local session mirror could not be refreshed.
-      persistenceMessage.value = '本机 workspace 已保存图谱与文学记忆；但浏览器会话同步失败：' +
-        (error instanceof Error ? error.message : String(error));
-    }
+    // Server commit is the persistence boundary. Do not mirror LiteraryMemory into extension storage.
   }
 
   async function rejectContextGraphRelationship(subject: string, object: string, predicate: string, memory: LiteraryBookMemory): Promise<void> {
@@ -364,10 +354,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       await deps.ensureWorkspace();
       project = workspaceProject.value;
     }
-    if (!project?.projectId) {
-      await deps.persistSession();
-      return;
-    }
+    if (!project?.projectId) throw new Error('当前文档尚未连接到本机项目，文学记忆没有保存。');
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
     const response = await workspaceApi<{ contextGraph?: { nodes?: Array<any>; edges?: Array<any> } }>(
@@ -420,14 +407,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       );
       literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
     }
-    try {
-      await deps.persistSession();
-    } catch (error) {
-      // The SQLite transaction has already committed; do not restore the old in-memory projection
-      // merely because the extension's local session mirror could not be refreshed.
-      persistenceMessage.value = '本机 workspace 已保存图谱与文学记忆；但浏览器会话同步失败：' +
-        (error instanceof Error ? error.message : String(error));
-    }
+    // Server commit is the persistence boundary. Do not mirror LiteraryMemory into extension storage.
   }
 
   async function removeManagedPerson(item: ManagedPersonItem) {
@@ -475,8 +455,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       await enqueueLiteraryMemoryOperation(() => rejectContextGraphItemsByNames(names, literaryMemory.value));
     } catch (error) {
       literaryMemory.value = sanitizeLiteraryMemory(snapshot);
-      await deps.persistSession().catch(() => undefined);
-      persistenceMessage.value = '无法原子保存人物删除与全书图谱拒绝，已恢复本地资料：' +
+      persistenceMessage.value = '无法原子保存人物删除与全书图谱拒绝，已恢复当前页面编辑状态：' +
         (error instanceof Error ? error.message : String(error));
     }
   }
@@ -543,8 +522,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       await enqueueLiteraryMemoryOperation(() => rejectContextGraphItemsByNames(names, literaryMemory.value));
     } catch (error) {
       literaryMemory.value = sanitizeLiteraryMemory(snapshot);
-      await deps.persistSession().catch(() => undefined);
-      persistenceMessage.value = '无法原子保存实体删除与全书图谱拒绝，已恢复本地资料：' +
+      persistenceMessage.value = '无法原子保存实体删除与全书图谱拒绝，已恢复当前页面编辑状态：' +
         (error instanceof Error ? error.message : String(error));
     }
   }
@@ -567,9 +545,9 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   /** 人物画像/人物对规则/锚点的状态变化是记忆数据，不是 Prompt 文本修改。 */
   async function persistVoiceMemoryChange(message: string) {
     persistenceMessage.value = message;
-    await deps.persistSession();
-    // 人物声音审核属于显式记忆编辑：直接保存文学记忆 revision，不借助 Prompt 保存的副作用。
-    if (readerConfig.value?.documentUseLocalAgent && doc.value) {
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    if (config.documentUseLocalAgent && doc.value) {
       try {
         await persistLiteraryMemoryToWorkspace();
       } catch (error) {
@@ -629,8 +607,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
         rejectContextGraphRelationship(relation.subject, relation.object, relation.predicate, literaryMemory.value));
     } catch (error) {
       literaryMemory.value = sanitizeLiteraryMemory(snapshot);
-      await deps.persistSession().catch(() => undefined);
-      persistenceMessage.value = '无法原子保存关系删除与全书图谱拒绝，已恢复本地资料：' +
+      persistenceMessage.value = '无法原子保存关系删除与全书图谱拒绝，已恢复当前页面编辑状态：' +
         (error instanceof Error ? error.message : String(error));
     }
   }
@@ -653,16 +630,18 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const snapshot = sanitizeLiteraryMemory(JSON.parse(JSON.stringify(literaryMemory.value)));
     const sequence = ++literaryMemoryEditSequence;
     const write = async () => {
-      await deps.persistSession();
       const config = readerConfig.value || await getConfig();
       readerConfig.value = config;
-      if (!config.documentUseLocalAgent) return;
+      if (!config.documentUseLocalAgent) {
+        await deps.persistSession();
+        return;
+      }
       let project = workspaceProject.value;
       if (!project?.projectId) {
         await deps.ensureWorkspace();
         project = workspaceProject.value;
       }
-      if (!project?.projectId) return;
+      if (!project?.projectId) throw new Error('当前文档尚未连接到本机项目，文学记忆没有保存。');
       const result = await workspaceApi<{ current?: { memory?: unknown } }>(
         config.documentLocalAgentUrl || 'http://127.0.0.1:8789',
         config.documentLocalAgentToken || '',
@@ -672,7 +651,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       // A newer edit may already be queued; don't replace its visible draft with this response.
       if (sequence === literaryMemoryEditSequence) {
         literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? snapshot);
-        await deps.persistSession();
       }
     };
     return enqueueLiteraryMemoryOperation(write);
@@ -696,7 +674,6 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       { method: 'POST', body: JSON.stringify({ action }) },
     );
     literaryMemory.value = sanitizeLiteraryMemory(response.current?.memory ?? literaryMemory.value);
-    await deps.persistSession();
     persistenceMessage.value = action === 'accept-update' ? '已启用新版中文文学编辑档案。'
       : action === 'reject-update' ? '已拒绝档案更新，继续使用原版本。'
       : action === 'confirm' ? '已确认中文文学编辑档案。' : '已拒绝中文文学编辑档案。';
