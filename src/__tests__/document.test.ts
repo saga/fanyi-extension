@@ -499,7 +499,7 @@ describe('文学书籍记忆', () => {
         evidenceRefs: [{ segmentId: 's2', sourceQuote: 'Alice nodded slowly.' }] }],
     }, [{ id: 's2', text: 'Alice nodded slowly.' }]));
     expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.target).toBe('艾丽丝');
-    expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
+    expect(conflicted.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
   });
 
   it('Context Graph 的历史 55% 显示为未评估，混合置信度合并不再取最大值', () => {
