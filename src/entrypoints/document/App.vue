@@ -1958,8 +1958,6 @@ const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
 const LOCAL_SESSION_REQUEST_TIMEOUT_MS = 8_000;
 let localSessionDocumentSaved = false;
 let localSessionDisabled = false;
-/** 仅用于服务端 reader-session 的轻量恢复状态，不包含译文正文。 */
-let localPersistedTranslations = new Map<string, string>();
 
 async function refreshLocalSessionSummary() {
   localSessionSummary.value = null;
@@ -2061,7 +2059,6 @@ async function persistDocumentCheckpointToLocalService(input: {
     }
 
     localSessionDocumentSaved = true;
-    localPersistedTranslations = new Map(input.snapshot.translations);
     localSessionSummary.value = {
       title: doc.value.title || documentFileName,
       format: doc.value.format,
@@ -2211,7 +2208,6 @@ async function persistCurrentSession() {
     const write = persistenceQueue.then(async () => {
       const saved = await persistDocumentCheckpointToLocalService(input);
       if (!saved) throw new Error('本机服务项目尚未就绪，阅读状态未保存；请检查服务连接和项目状态。');
-      localPersistedTranslations = new Map(snapshot.translations);
       persistenceMessage.value = '阅读位置已保存到本机服务；原文、译文和文学记忆由项目数据库统一管理。';
     });
     persistenceQueue = write.catch(() => undefined);
@@ -2317,9 +2313,6 @@ async function restoreLastSession() {
     activeSessionReady.value = false;
     activeSessionIndexedDbWritable = false;
     persistedTranslations.value = new Map(saved.translations);
-    localPersistedTranslations = restoredFromLocalService
-      ? new Map(saved.translations)
-      : new Map<string, string>();
     documentFileName = saved.fileName;
     rawText = saved.rawText;
     localSessionDocumentSaved = restoredFromLocalService;
@@ -2428,7 +2421,6 @@ async function clearSavedSession() {
     if (!response.ok) throw new Error('本机 SQLite 返回 HTTP ' + response.status);
     localSessionSummary.value = null;
     localSessionDocumentSaved = false;
-    localPersistedTranslations.clear();
     persistenceMessage.value = config.documentUseLocalAgent
       ? '已清除本机服务中的阅读位置记录；项目原文、译文和文学记忆保持不变。'
       : indexedDbCleared ? '已清除扩展与本机 SQLite 中保存的阅读记录。' : '已清除本机 SQLite 阅读记录。';
@@ -2477,7 +2469,6 @@ async function loadFile(file: File) {
   parseError.value = '';
   localSessionDocumentSaved = false;
   localSessionDisabled = false;
-  localPersistedTranslations = new Map<string, string>();
   localSessionSummary.value = null;
   doc.value = null;
   parsing.value = true;
@@ -2565,10 +2556,8 @@ async function loadFile(file: File) {
         buildDocumentAgentSessionId(previousSession.document, previousSession.fileName) ===
           buildDocumentAgentSessionId(doc.value, documentFileName) &&
         (!localAgentOwnsSelectedSource || sameServerSourceSegments)) {
-      // Local Agent owns EPUB/PDF source segments. Reuse the old reader snapshot only when the
-      // segment IDs and text are identical, and never replace service-parsed metadata with an
-      // older browser-parser document object. Legacy translations can still be migrated for a
-      // newly created project when they map to the exact same source segments.
+      // This branch is only for the non-Local-Agent compatibility reader; Local Agent never
+      // reads an extension snapshot or migrates its document/translation/memory data.
       if (!localAgentOwnsSelectedSource) {
         doc.value = previousSession.document;
         rawText = previousSession.rawText;
@@ -2583,7 +2572,6 @@ async function loadFile(file: File) {
         Math.max(0, buildDocumentPages(previousSession.document).length - 1),
       );
       persistedTranslations.value = new Map(previousSession.translations);
-      localPersistedTranslations = new Map<string, string>();
       localSessionDocumentSaved = false;
       localSessionDisabled = false;
       restoreSnapshot({
@@ -2999,7 +2987,7 @@ async function refreshExistingWorkspaceFromService(): Promise<any | null> {
   }
 }
 
-/** 保证只有一份本机项目：导入旧阅读记录、刷新 SQLite 的当前版本，并备份原件。 */
+/** 保证只有一份本机项目：解析/定位服务端来源，刷新项目状态，并备份原件。 */
 async function ensureDocumentWorkspaceInternal(
   createIfMissing = true,
   expectedDocumentKey = currentWorkspaceDocumentKey(),
@@ -3149,8 +3137,6 @@ async function ensureDocumentWorkspaceInternal(
     project = created.project;
     createdNewProject = created.reusedExisting !== true;
     await rememberWorkspaceProject(input, project.projectId, project.sourceFingerprint);
-    // A server project created just as the user switches documents still needs the one-time
-    // migration from the captured old session, but must not mutate the new document's UI.
   }
 
   if (!isCurrent() && !createdNewProject) return null;
