@@ -104,25 +104,25 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
   if (!input.expectedProjectId || !input.expectedSourceRevisionId || !snapshot) {
     return {
       required: true, ready: false, reason: 'checking',
-      message: '正在确认当前文档的全书预处理状态。开始文学翻译时，本机服务会核对当前原文版本并按需启动分析。',
+      message: '正在确认当前文档的全书预处理状态。状态未确认前不会创建文学翻译任务。',
     };
   }
   if (snapshot.projectId !== input.expectedProjectId) {
     return {
       required: true, ready: false, reason: 'project',
-      message: '正在同步当前文档的本机项目状态。来源版本校验由服务端在翻译 Run 中执行。',
+      message: '正在同步当前文档的本机项目状态。项目和原文版本匹配后才能判断预处理是否就绪。',
     };
   }
   if (!snapshot.sourceRevisionId) {
     return {
       required: true, ready: false, reason: 'checking',
-      message: '尚未读取到当前原文版本的预处理状态；翻译 Run 启动后会由服务端校验并按需准备。',
+      message: '尚未读取到当前原文版本的预处理状态。请刷新状态；确认完成前不会开始翻译。',
     };
   }
   if (snapshot.sourceRevisionId !== input.expectedSourceRevisionId) {
     return {
       required: true, ready: false, reason: 'source-revision',
-      message: '预处理记录属于另一个原文版本。文学 Run 会由服务端按当前原文版本重新准备；也可以手动刷新或重新分析全书。',
+      message: '预处理记录属于另一个原文版本。必须针对当前原文版本重新完成全书预处理。',
     };
   }
 
@@ -139,21 +139,21 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
     return {
       required: true, ready: false, reason: 'failed',
       message: snapshot.error
-        ? '上次全书预处理失败：' + snapshot.error + '。服务端会在新的文学翻译 Run 中重新检查；也可以手动重新分析。'
-        : '上次全书预处理失败。服务端会在新的文学翻译 Run 中重新检查；也可以手动重新分析。',
+        ? '上次全书预处理失败：' + snapshot.error + '。请修复问题后，在“人物与预处理”中重新分析全书。'
+        : '上次全书预处理失败。请在“人物与预处理”中重新分析全书。',
     };
   }
   if (snapshot.error || input.loading || snapshot.loading) {
     return {
       required: true, ready: false, reason: 'checking',
-      message: '无法确认本机服务中的最新预处理状态。该状态仅用于界面提示；Run 创建与上下文就绪校验由服务端处理。' +
+      message: '无法确认本机服务中的最新预处理状态。为保证翻译质量，状态读取成功前不会开始翻译。' +
         (snapshot.error ? ' 状态读取错误：' + snapshot.error : ''),
     };
   }
   if (status !== 'completed') {
     return {
       required: true, ready: false, reason: 'missing',
-      message: '当前原文版本还没有成功完成全书预处理。开始文学翻译时，服务端会自动检查并按需准备；也可以在“人物与预处理”中手动重新分析。',
+      message: '当前原文版本还没有成功完成全书预处理。请先在“人物与预处理”中启动或重新分析全书。',
     };
   }
 
@@ -167,7 +167,7 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
     return {
       required: true, ready: false, reason: 'version',
       message: '这条预处理记录由旧版分析产出（' + (progress.analysisVersion || '未知版本') + '，当前 ' +
-        currentAnalysisVersion + '）。服务端会在文学 Run 中自动重新分析；也可以手动重新分析。',
+        currentAnalysisVersion + '）。请重新分析全书后再开始翻译。',
     };
   }
   const sourceLang = input.sourceLang || 'auto';
@@ -176,7 +176,7 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
     return {
       required: true, ready: false, reason: 'language',
       message: '全书预处理语言与当前设置不一致（预处理 ' + (progress.sourceLang || 'auto') + '→' +
-        (progress.targetLang || 'zh') + '，当前 ' + sourceLang + '→' + targetLang + '）。服务端会在文学 Run 中按当前语言重新检查；也可以手动重新分析。',
+        (progress.targetLang || 'zh') + '，当前 ' + sourceLang + '→' + targetLang + '）。请按当前语言设置重新分析全书。',
     };
   }
 
