@@ -779,11 +779,10 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
   for (const candidate of incoming) {
     const prior = map.get(candidate.characterId);
     if (!prior) { map.set(candidate.characterId, candidate); continue; }
-    if (prior.status === 'confirmed') {
+    if (prior.status === 'rejected' ||
+        (prior.status === 'confirmed' && prior.confirmationSource !== 'model-default')) {
       map.set(candidate.characterId, {
         ...prior,
-        ...(candidate.confirmationSource === 'user-confirmed'
-          ? { confirmationSource: 'user-confirmed' as const } : {}),
         ...mergeCharacterVoiceConfidence(prior, candidate),
         aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
         evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>
@@ -802,10 +801,8 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
       ...(!conflicts ? { voiceCore: { ...candidate.voiceCore, ...prior.voiceCore } } : {}),
       ...(!prior.role && candidate.role ? { role: candidate.role } : {}),
       ...(!prior.traits?.length && candidate.traits?.length ? { traits: candidate.traits } : {}),
-      status: prior.status === 'rejected' ? 'rejected'
-        : candidate.status === 'confirmed' && candidate.confirmationSource === 'user-confirmed' ? 'confirmed' : 'candidate',
-      ...(candidate.status === 'confirmed' && candidate.confirmationSource === 'user-confirmed'
-        ? { confirmationSource: 'user-confirmed' as const } : { confirmationSource: undefined }),
+      status: prior.status === 'rejected' ? 'rejected' : 'confirmed',
+      ...(prior.status !== 'rejected' ? { confirmationSource: candidate.confirmationSource || 'model-default' } : { confirmationSource: undefined }),
       ...mergeCharacterVoiceConfidence(prior, candidate),
       aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
       evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>
@@ -831,19 +828,16 @@ function mergeVoiceRules(existing: RelationshipVoiceRule[], incoming: Relationsh
     const key = rule.speakerId + '>' + rule.addresseeId;
     const prior = map.get(key);
     if (!prior) { map.set(key, rule); continue; }
-    if (prior.status === 'confirmed' || prior.status === 'rejected') {
+    if (prior.status === 'rejected' ||
+        (prior.status === 'confirmed' && prior.confirmationSource !== 'model-default')) {
       map.set(key, {
         ...prior,
-        ...(rule.status === 'confirmed' ? { confirmationSource: mergeConfirmationSource(prior.confirmationSource, rule.confirmationSource) || 'model-default' } : {}),
         evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8),
       });
-    } else if (rule.status === 'confirmed') {
-      map.set(key, { ...prior, ...rule, status: 'confirmed',
-        evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
-    } else if (JSON.stringify({ register: prior.baselineRegister, terms: prior.addressTerms }) === JSON.stringify({ register: rule.baselineRegister, terms: rule.addressTerms })) {
-      map.set(key, { ...prior, ...rule, status: 'confirmed', confirmationSource: rule.confirmationSource || 'model-default', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     } else {
-      map.set(key, { ...prior, status: 'confirmed', confirmationSource: prior.confirmationSource || 'model-default', evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
+      map.set(key, { ...prior, ...rule, status: 'confirmed',
+        confirmationSource: rule.confirmationSource || 'model-default',
+        evidenceSegmentIds: Array.from(new Set([...prior.evidenceSegmentIds, ...rule.evidenceSegmentIds])).slice(0, 8) });
     }
   }
   return Array.from(map.values()).slice(0, MAX_VOICE_RULES);
