@@ -733,3 +733,22 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - Reader checkpoint 是项目引用和轻量 UI 状态。原文、译文、文学记忆、Prompt、Run 和审校结果均由项目 SQLite 管理；旧全量快照只维持迁移兼容。
 - LiteraryMemory 是有界编辑 DTO；Context Graph、全书证据与章节摘要保留在项目 SQLite，大小限制不能反过来限制全书分析数据。
 - `extractGlossaryLocal`、PDF.js 和 JSZip 仍作为非 Local Agent 模式的客户端能力；Local Agent 文学 EPUB/PDF 路径依赖服务端项目记忆，不重复运行扩展端 heuristic glossary。
+
+## Local Agent 文档数据唯一持久化规则（2026-10-31）
+
+Local Agent 模式下，两个仓库统一遵循 **Server-only persistence**：
+
+- `local-agent-service` 的项目 SQLite 是原始文件/来源版本、解析片段、译文、人工修订、Prompt revisions、Context Graph、LiteraryMemory revisions、Runs、审校结果和事件的唯一持久化位置。
+- `fanyi-extension` 只保留当前页面运行时 UI 投影。Vue 响应式对象可以暂存文学记忆和译文以便展示/编辑，但不得写入 IndexedDB、localStorage 或扩展 storage。
+- 文学记忆编辑必须直接调用项目 API；服务端成功提交后才更新为已保存状态。不得先执行 `persistSession()` 再同步 Server。
+- Reader session 位于服务端，只保存 `projectId`、阅读位置、语言、视图和 Tab 等轻量元数据；不能复制正文、译文、LiteraryMemory 或 Context Graph。
+- 服务不可用时明确失败，不得退回扩展旧快照，也不得将未提交的内存编辑伪装成已保存。服务恢复后重新读取项目。
+- 旧版本 IndexedDB 全量快照只作为待清理遗留数据；服务端项目成功恢复/创建后可清理，不得自动回灌已有项目。
+- 扩展的 project ID 映射属于定位缓存，不包含业务内容，可以继续保留。
+
+对应决策：
+- [fanyi-extension ADR-002](ADR-002-server-authoritative-document-state.md)
+- [vocal-saga ADR-0003](https://github.com/saga/vocal-saga/blob/main/docs/adr/0003-server-authoritative-project-state.md)
+
+回归测试必须验证：Local Agent 模式不读写扩展 IndexedDB；文学记忆编辑只提交 Server；Server 失败不会产生本地持久化副本；清空浏览器 IndexedDB 后仍能恢复完整项目。
+
