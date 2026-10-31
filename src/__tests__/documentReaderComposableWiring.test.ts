@@ -61,6 +61,32 @@ describe('document reader composable wiring', () => {
     expect(graph.contextGraphOverview).toBe(contextGraphOverview);
   });
 
+  it('keeps Local Agent document persistence on the server and never falls back to IndexedDB', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+      'utf8',
+    );
+    const persistStart = source.indexOf('async function persistCurrentSession()');
+    const persistEnd = source.indexOf('function currentWorkspaceDocumentKey()', persistStart);
+    const persistBody = source.slice(persistStart, persistEnd);
+    const serverBranch = persistBody.indexOf('if (config.documentUseLocalAgent)');
+    const idbWrite = persistBody.indexOf('saveActiveDocumentProgress(input)');
+    expect(serverBranch).toBeGreaterThan(-1);
+    expect(idbWrite).toBeGreaterThan(serverBranch);
+    expect(persistBody.slice(serverBranch, idbWrite)).toContain('return;');
+
+    const restoreStart = source.indexOf('async function restoreLastSession()');
+    const restoreEnd = source.indexOf('async function clearSavedSession()', restoreStart);
+    const restoreBody = source.slice(restoreStart, restoreEnd);
+    const localAgentBranch = restoreBody.indexOf('if (restoreConfig.documentUseLocalAgent)');
+    const idbRead = restoreBody.indexOf('loadActiveDocumentSession()');
+    expect(localAgentBranch).toBeGreaterThan(-1);
+    expect(idbRead).toBeGreaterThan(localAgentBranch);
+    expect(restoreBody.slice(localAgentBranch, idbRead)).toContain('restoredFromLocalService = !!saved');
+
+    expect(source).toContain('全书预处理、文学记忆和翻译结果均由本机服务统一保存');
+  });
+
   it('gates reader-triggered literary Run creation on current preprocessing readiness', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
