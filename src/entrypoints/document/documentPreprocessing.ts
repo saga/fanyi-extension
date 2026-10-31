@@ -39,8 +39,8 @@ export function shouldAutoStartPreprocessing(input: {
 
 /**
  * Resolve the translation mode shared by the reader, Agent workspace and persisted Prompt.
- * Preprocessing status is informational in the extension; the Local Agent Run worker owns the
- * actual source/version/language readiness gate. Per-document literary mode takes precedence.
+ * Literary translation is blocked in the extension until the service confirms a complete,
+ * source/version/language-matched Context Graph. The Local Agent repeats this check server-side.
  */
 export function resolveDocumentTranslationMode(
   perDocumentLiteraryMode: boolean,
@@ -61,6 +61,8 @@ export interface ContextGraphPreprocessingSnapshot {
   progress?: Record<string, any> | null;
   error?: string;
   loading?: boolean;
+  styleGuideReady?: boolean;
+  styleMissingFields?: string[];
 }
 
 export type PreprocessingBlockReason =
@@ -73,7 +75,8 @@ export type PreprocessingBlockReason =
   | 'failed'
   | 'missing'
   | 'version'
-  | 'language';
+  | 'language'
+  | 'incomplete';
 
 export interface PreprocessingReadinessInput {
   required: boolean;
@@ -128,8 +131,8 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
     return {
       required: true, ready: false, reason: status,
       message: status === 'queued'
-        ? '全书预处理已排队。可以提交文学翻译 Run，服务端会等待分析完成后再开始翻译。'
-        : '全书预处理正在运行。可以提交文学翻译 Run，服务端会等待分析完成后再开始翻译。',
+        ? '全书预处理已排队。必须等待全书分析和完整性检查通过后，才能开始正式翻译。'
+        : '全书预处理正在运行。正式翻译暂不可开始；所有分析阶段完成并通过检查后才会开放。',
     };
   }
   if (status === 'failed') {
@@ -155,11 +158,12 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
   }
 
   const progress = snapshot.progress || {};
-  // 版本比较必须用服务端下发的 currentAnalysisVersion，不能和扩展内的常量比。
-  // 服务端没下发版本时不做判断：这里只是显示投影，真正的门禁由服务端 Run 负责，
-  // 宁可不提示，也不要凭空断言「版本过旧」把用户骗去重跑一次 8 分钟的全书分析。
+  // 严格模式下不能在服务端未提供当前版本时推断预处理有效。
   const currentAnalysisVersion = String(snapshot.currentAnalysisVersion || '');
-  if (currentAnalysisVersion && String(progress.analysisVersion || '') !== currentAnalysisVersion) {
+  if (!currentAnalysisVersion) {
+    return { required: true, ready: false, reason: 'checking', message: '服务端没有返回当前预处理版本，暂时无法确认全书上下文是否可用于翻译。请刷新状态。' };
+  }
+  if (String(progress.analysisVersion || '') !== currentAnalysisVersion) {
     return {
       required: true, ready: false, reason: 'version',
       message: '这条预处理记录由旧版分析产出（' + (progress.analysisVersion || '未知版本') + '，当前 ' +
@@ -176,11 +180,32 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
     };
   }
 
+  if (snapshot.styleGuideReady !== true) {
+    const missing = Array.isArray(snapshot.styleMissingFields) ? snapshot.styleMissingFields : [];
+    return {
+      required: true, ready: false, reason: 'incomplete',
+      message: '预处理任务虽然结束，但全书文风基准未通过完整性检查' +
+        (missing.length ? '（缺少：' + missing.join('、') + '）' : '') +
+        '。请重新分析全书；在完整性检查通过前不会开始翻译。',
+    };
+  }
+  if (progress.strategy === 'B') {
+    const requiredStages = ['style', 'characters', 'entities', 'relationships', 'chapters'];
+    const completedStages = Array.isArray(progress.completedStages) ? progress.completedStages : [];
+    const missingStages = requiredStages.filter((stage) => !completedStages.includes(stage));
+    if (missingStages.length) {
+      return {
+        required: true, ready: false, reason: 'incomplete',
+        message: '全书预处理尚未完成全部分析阶段（' + missingStages.join('、') + '）。请重新分析全书。',
+      };
+    }
+  }
+
   return { required: true, ready: true, reason: 'not-required', message: '' };
 }
 
 /**
- * 阅读页预处理提示卡的标题。
+ * 阅读页预处理提示卡的标题.
  *
  * 每个 reason 必须有独立文案：`version`（记录由旧版产出）、`missing`（确实没有记录）和
  * `checking`（还没读到状态）是三种完全不同的情况，统一显示成「尚无可用的全书预处理记录」
@@ -199,6 +224,8 @@ export function preprocessingGateTitle(reason: PreprocessingBlockReason | string
       return '预处理记录版本已更新，翻译时会自动重新分析';
     case 'missing':
       return '当前原文版本还没有完成全书预处理';
+    case 'incomplete':
+      return '全书预处理未通过完整性检查';
     case 'source-revision':
       return '正在同步当前文档的原文版本';
     case 'project':
@@ -236,6 +263,8 @@ export function contextGraphSnapshotFromResponse(
     projectId,
     sourceRevisionId: typeof graph?.sourceRevisionId === 'string' ? graph.sourceRevisionId : '',
     currentAnalysisVersion: typeof graph?.currentAnalysisVersion === 'string' ? graph.currentAnalysisVersion : '',
+    styleGuideReady: graph?.styleGuideReady === true,
+    styleMissingFields: Array.isArray(graph?.styleMissingFields) ? graph.styleMissingFields.filter((item: unknown): item is string => typeof item === 'string') : [],
     status: typeof run?.status === 'string' ? run.status : 'not-started',
     phase: typeof run?.phase === 'string' ? run.phase : 'not-started',
     runId: typeof run?.runId === 'string' ? run.runId : '',
