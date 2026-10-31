@@ -471,16 +471,11 @@
           <span class="chip">分析 {{ literaryMemory.chineseEditorialProfile.analysisVersion }}</span>
         </div>
         <div class="literary-style-grid">
-          <div v-for="field in [
-            ['叙述声音', literaryMemory.chineseEditorialProfile.profile.narrativeVoice],
-            ['语域', literaryMemory.chineseEditorialProfile.profile.register],
-            ['节奏与句法', literaryMemory.chineseEditorialProfile.profile.rhythm],
-            ['对白特征', literaryMemory.chineseEditorialProfile.profile.dialogue],
-            ['措辞与词汇', literaryMemory.chineseEditorialProfile.profile.diction]
-          ]" :key="field[0]" class="field">
-            <strong>{{ field[0] }}</strong>
-            <p>{{ field[1] || '未形成稳定结论' }}</p>
-          </div>
+          <label class="field"><strong>叙述声音</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.narrativeVoice" rows="2" @change="markChineseEditorialProfileModified" /></label>
+          <label class="field"><strong>语域</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.register" rows="2" @change="markChineseEditorialProfileModified" /></label>
+          <label class="field"><strong>节奏与句法</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.rhythm" rows="2" @change="markChineseEditorialProfileModified" /></label>
+          <label class="field"><strong>对白特征</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.dialogue" rows="2" @change="markChineseEditorialProfileModified" /></label>
+          <label class="field"><strong>措辞与词汇</strong><textarea v-model="literaryMemory.chineseEditorialProfile.profile.diction" rows="2" @change="markChineseEditorialProfileModified" /></label>
         </div>
         <div v-if="literaryMemory.chineseEditorialProfile.profile.rules?.length">
           <strong>编辑规则</strong>
@@ -1346,6 +1341,7 @@ const {
   persistLiteraryMemoryToWorkspace,
   awaitLiteraryMemoryWrites,
   reviewChineseEditorialProfile,
+  markChineseEditorialProfileModified,
   markStyleGuideCandidate,
   setStyleGuideLines,
   importContextGraphStyleGuide,
