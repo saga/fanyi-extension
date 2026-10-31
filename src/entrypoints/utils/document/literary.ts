@@ -204,10 +204,16 @@ export interface ChineseEditorialProfile extends ChineseEditorialProfileCandidat
   lastRejectedUpdate?: { sampleFingerprint: string; rejectedAt: string };
 }
 
+export type LiteraryMemoryRejection =
+  | { type: 'entity'; source: string; kind: LiteraryEntityKind; aliases: string[] }
+  | { type: 'relationship'; subject: string; predicate: string; object: string };
+
 export interface LiteraryBookMemory {
   version: 2;
   entities: LiteraryEntity[];
   relationships: LiteraryRelationship[];
+  /** Hidden durable user-deletion tombstones; never displayed as active memory. */
+  rejectedItems: LiteraryMemoryRejection[];
   styleGuide: LiteraryStyleGuide;
   styleGuideStatus: 'candidate' | 'confirmed';
   styleGuideConfirmationSource?: LiteraryConfirmationSource;
@@ -284,7 +290,7 @@ function entityKind(value: unknown): LiteraryEntityKind {
     : 'other';
 }
 export function createEmptyLiteraryMemory(): LiteraryBookMemory {
-  return { version: 2, entities: [], relationships: [], styleGuide: {}, styleGuideStatus: 'candidate', styleGuideAutoDisabled: false, chapterSummaries: [], recentExamples: [], characterVoices: [], relationshipVoiceRules: [], voiceAnchors: [] };
+  return { version: 2, entities: [], relationships: [], rejectedItems: [], styleGuide: {}, styleGuideStatus: 'candidate', styleGuideAutoDisabled: false, chapterSummaries: [], recentExamples: [], characterVoices: [], relationshipVoiceRules: [], voiceAnchors: [] };
 }
 
 function confirmationSource(value: unknown, active: boolean): LiteraryConfirmationSource | undefined {
@@ -490,6 +496,26 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const avoid = Array.from(new Set(styleRaw.avoid.map((value) => safeText(value, 240)).filter(Boolean))).slice(0, 16);
     if (avoid.length) styleGuide.avoid = avoid;
   }
+  const rejectedItems: LiteraryMemoryRejection[] = Array.isArray(raw.rejectedItems)
+    ? raw.rejectedItems.slice(-200).flatMap((item: any) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        if (item.type === 'entity') {
+          const source = safeText(item.source, 120);
+          if (!source) return [];
+          return [{
+            type: 'entity' as const, source, kind: entityKind(item.kind),
+            aliases: Array.isArray(item.aliases) ? Array.from(new Set(item.aliases.map((value: unknown) => safeText(value, 80)).filter(Boolean))).slice(0, 8) : [],
+          }];
+        }
+        if (item.type === 'relationship') {
+          const subject = safeText(item.subject, 120);
+          const predicate = safeText(item.predicate, 100);
+          const object = safeText(item.object, 120);
+          return subject && predicate && object ? [{ type: 'relationship' as const, subject, predicate, object }] : [];
+        }
+        return [];
+      })
+    : [];
   const rawStyleOrigin = raw.styleGuideOrigin;
   const styleGuideStatus = raw.styleGuideAutoDisabled === true ? 'candidate' :
     Object.keys(styleGuide).length && ['context-graph', 'user-edited', 'user-confirmed'].includes(String(rawStyleOrigin))
@@ -726,6 +752,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     version: 2,
     entities: entityList,
     relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
+    rejectedItems,
     styleGuide, styleGuideStatus,
     ...(styleGuideConfirmationSource ? { styleGuideConfirmationSource } : {}),
     styleGuideOrigin,
