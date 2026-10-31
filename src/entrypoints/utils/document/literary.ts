@@ -743,6 +743,15 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     });
   }
   const entityList = dedupeEntities(entities).slice(0, MAX_ENTITIES);
+  const rejectedEntityNames = rejectedItems.filter((item) => item.type === 'entity')
+    .map((item) => ({ kind: item.kind, names: new Set([item.source, ...item.aliases].map(normalizedEntityName)) }));
+  const activeEntities = entityList.filter((entity) => !rejectedEntityNames.some((rejected) =>
+    (rejected.kind === entity.kind || rejected.kind === 'other' || entity.kind === 'other') &&
+    [entity.source, ...(entity.aliases || [])].some((name) => rejected.names.has(normalizedEntityName(name)))));
+  const rejectedRelationshipKeys = new Set(rejectedItems.filter((item) => item.type === 'relationship')
+    .map((item) => [item.subject, item.predicate, item.object].map(normalizedEntityName).join('|')));
+  const activeRelationships = dedupeRelationships(relationships).filter((relation) =>
+    !rejectedRelationshipKeys.has([relation.subject, relation.predicate, relation.object].map(normalizedEntityName).join('|')));
   const validCharacterIds = new Set(characterVoices.map((profile) => profile.characterId));
   const validVoices = characterVoices.map((profile) => ({
     ...profile,
@@ -750,8 +759,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
   }));
   return {
     version: 2,
-    entities: entityList,
-    relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
+    entities: activeEntities,
+    relationships: activeRelationships.slice(0, MAX_RELATIONSHIPS),
     rejectedItems,
     styleGuide, styleGuideStatus,
     ...(styleGuideConfirmationSource ? { styleGuideConfirmationSource } : {}),
@@ -784,6 +793,14 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
     version: 2,
     entities,
     relationships: [...existing.relationships, ...incoming.relationships],
+    rejectedItems: [...existing.rejectedItems, ...incoming.rejectedItems]
+      .filter((item, index, all) => all.findIndex((other) =>
+        item.type === other.type && (item.type === 'entity' && other.type === 'entity'
+          ? normalizedEntityName(item.source) === normalizedEntityName(other.source)
+          : item.type === 'relationship' && other.type === 'relationship' &&
+            [item.subject, item.predicate, item.object].map(normalizedEntityName).join('|') ===
+            [other.subject, other.predicate, other.object].map(normalizedEntityName).join('|'))) === index)
+      .slice(-200),
     styleGuide,
     styleGuideStatus: existing.styleGuideStatus === 'confirmed' ? 'confirmed' : incoming.styleGuideStatus,
     styleGuideConfirmationSource: existing.styleGuideStatus === 'confirmed'
