@@ -68,11 +68,21 @@ describe('document reader composable wiring', () => {
     );
     const runHandler = source.indexOf('async function runWorkspaceTranslation');
     expect(runHandler).toBeGreaterThan(-1);
-    const readinessCheck = source.indexOf('await refreshContextGraphStatus(project, true)', runHandler);
+    const readinessCheck = source.indexOf('await prepareContextGraphForTranslation(project)', runHandler);
     const runCreation = source.indexOf("'/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs'", runHandler);
     expect(readinessCheck).toBeGreaterThan(runHandler);
     expect(runCreation).toBeGreaterThan(readinessCheck);
-    expect(source.slice(readinessCheck, runCreation)).toContain('if (readiness.required && !readiness.ready)');
+    expect(source.slice(readinessCheck, runCreation)).toContain('if (!readiness.ready)');
+
+    const contextGraph = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/useContextGraph.ts'),
+      'utf8',
+    );
+    const orchestration = contextGraph.indexOf('async function prepareContextGraphForTranslation');
+    expect(orchestration).toBeGreaterThan(-1);
+    expect(contextGraph.slice(orchestration)).toContain('await ensureContextGraphPreprocessing(project, { force: true })');
+    expect(contextGraph.slice(orchestration)).toContain('while (!readiness.ready');
+    expect(contextGraph.slice(orchestration)).toContain('timeoutMs');
   });
 
   it('declares the shared ref in App.vue before both composables', () => {
