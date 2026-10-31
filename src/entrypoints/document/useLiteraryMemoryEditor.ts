@@ -502,7 +502,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     return pending;
   }
 
-  async function reviewChineseEditorialProfile(action: 'confirm' | 'reject' | 'accept-update' | 'reject-update') {
+  async function reviewChineseEditorialProfile(action: 'reject') {
     await awaitLiteraryMemoryWrites();
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
