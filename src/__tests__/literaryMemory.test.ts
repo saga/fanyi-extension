@@ -25,7 +25,7 @@ describe('literary style guide dimensions', () => {
       rules: ['-san 按场合译为先生/女士', 'Sire 统一译为大人'],
       avoid: ['避免现代网络流行语', '避免无依据增加心理描写'],
     });
-    expect(memory.styleGuideStatus).toBe('confirmed');
+    expect(memory.styleGuideStatus).toBe('candidate');
   });
 });
 
@@ -120,7 +120,7 @@ describe('literary style provenance and long fields', () => {
     });
     expect(memory.styleGuideOrigin).toBe('user-edited');
     expect(memory.styleGuideStatus).toBe('confirmed');
-    expect(memory.styleGuideConfirmationSource).toBe('model-default');
+    expect(memory.styleGuideConfirmationSource).toBe('user-modified');
   });
 });
 
