@@ -28,6 +28,7 @@ const completedSnapshot = {
   runId: 'preprocess-run',
   progress: {
     analysisVersion: 'context-graph-v9-current',
+    sampleCount: 24,
     sourceLang: 'en',
     targetLang: 'zh',
     strategy: 'B',
