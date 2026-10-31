@@ -7,7 +7,7 @@
       </div>
     </header>
 
-    <!-- 上次阅读快照仅包含最近一本书；正文与译文保存在扩展本地 IndexedDB。 -->
+    <!-- Local Agent 模式的恢复入口来自本机服务；扩展不保存项目业务快照。 -->
     <section v-if="!doc && !parsing && (savedSessionSummary || localSessionSummary)" class="panel saved-session">
       <div class="saved-session-copy">
         <strong>继续上次阅读</strong>
@@ -1245,11 +1245,11 @@ const documentSystemPromptEditor = ref('');
 const documentUserPromptTemplate = ref('');
 const documentUserPromptEditor = ref('');
 const savedSessionSummary = ref<ActiveDocumentSessionSummary | null>(null);
-/** 当 IndexedDB 不可用时，仅凭 SQLite 的轻量摘要也要显示恢复入口。 */
+/** 服务端 reader-session 只保存轻量项目引用和 UI 状态。 */
 const localSessionSummary = ref<{ title: string; format: string; updatedAt: string } | null>(null);
 const persistenceMessage = ref('');
 const activeSessionReady = ref(false);
-/** 该阅读会话是否已成功落入 IndexedDB；失败时仍允许写入独立的 SQLite 恢复副本。 */
+/** 非 Local Agent 兼容模式的历史阅读器存储开关；Local Agent 模式始终为 false。 */
 let activeSessionIndexedDbWritable = false;
 const persistedTranslations = ref(new Map<string, string>());
 let persistenceQueue: Promise<void> = Promise.resolve();
@@ -1959,7 +1959,7 @@ const LOCAL_DOCUMENT_SESSION_ID = 'active-document-session-v1';
 const LOCAL_SESSION_REQUEST_TIMEOUT_MS = 8_000;
 let localSessionDocumentSaved = false;
 let localSessionDisabled = false;
-/** 只跟踪真正成功写入 SQLite 的译文，不能复用 IndexedDB 的持久化游标。 */
+/** 仅用于服务端 reader-session 的轻量恢复状态，不包含译文正文。 */
 let localPersistedTranslations = new Map<string, string>();
 
 async function refreshLocalSessionSummary() {
@@ -2355,7 +2355,7 @@ async function restoreLastSession() {
       total: saved.total,
       done: saved.done,
       failedBatches: saved.failedBatches,
-      // 唯一的状态入口：不论来自 SQLite 还是 IndexedDB，连接类错误都不恢复。
+      // 连接类错误不恢复；Local Agent 模式的业务状态只来自服务端项目。
       // 这类文案描述的是"当时连不上"，被恢复出来就等于每次打开文档都伪造一次当前故障。
       error: isServiceConnectivityMessage(saved.error) ? '' : saved.error,
       literaryMemory: saved.literaryMemory,
@@ -2403,16 +2403,14 @@ async function restoreLastSession() {
 async function clearSavedSession() {
   const config = await getConfig();
   let indexedDbCleared = false;
-  // Local Agent 项目的业务数据不在扩展 IndexedDB；只清除服务端的阅读位置引用。
-  if (!config.documentUseLocalAgent) {
-    try {
-      await clearActiveDocumentSession();
-      indexedDbCleared = true;
-      savedSessionSummary.value = null;
-    } catch (error) {
-      persistenceMessage.value = '清除扩展恢复记录失败：' +
-        (error instanceof Error ? error.message : String(error));
-    }
+  // 清理旧版本遗留的扩展快照；Local Agent 当前路径不会再读取或写入这些数据。
+  try {
+    await clearActiveDocumentSession();
+    indexedDbCleared = true;
+    savedSessionSummary.value = null;
+  } catch (error) {
+    persistenceMessage.value = '清理旧版扩展恢复记录失败：' +
+      (error instanceof Error ? error.message : String(error));
   }
 
   // 删除的是服务端通用阅读位置引用，不删除项目、原文、译文或文学记忆。
