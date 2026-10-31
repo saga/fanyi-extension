@@ -156,6 +156,18 @@ describe('literary preprocessing readiness gate', () => {
     expect(result.reason).toBe('incomplete');
   });
 
+  it('blocks completed records without valid full-book analysis samples', () => {
+    const result = assessContextGraphReadiness({
+      ...baseInput,
+      snapshot: {
+        ...completedSnapshot,
+        progress: { ...completedSnapshot.progress, sampleCount: 0 },
+      },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toBe('incomplete');
+  });
+
   it('reports a status refresh error even if a previous snapshot looked completed', () => {
     const result = assessContextGraphReadiness({
       ...baseInput,
