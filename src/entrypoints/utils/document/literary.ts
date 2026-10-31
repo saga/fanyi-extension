@@ -317,7 +317,6 @@ function mergeEntityRecord(prior: LiteraryEntity, candidate: LiteraryEntity): Li
     const key = normalizedEntityName(alias);
     if (key && key !== canonicalKey && !aliasMap.has(key)) aliasMap.set(key, alias);
   }
-  const sameTarget = normalizedEntityName(prior.target) === normalizedEntityName(candidate.target);
   const priorUserChoice = prior.confirmationSource === 'user-modified' || prior.confirmationSource === 'user-confirmed';
   const candidateUserChoice = candidate.confirmationSource === 'user-modified' || candidate.confirmationSource === 'user-confirmed';
   const target = priorUserChoice ? prior.target : candidateUserChoice ? candidate.target : prior.target;
