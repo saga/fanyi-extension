@@ -1385,28 +1385,31 @@ export function useDocumentTranslation() {
           isCurrentRun,
         );
         if (!profile || !isCurrentRun(runId)) return state.value;
-        literaryMemory.value = profile.memory;
-        literaryStatus.value.bookProfileReady = profile.analyzed;
+        const styleGuideUsable = Object.values(profile.memory.styleGuide || {}).some((value) =>
+          typeof value === 'string' ? !!value.trim() : Array.isArray(value) && value.length > 0,
+        );
         const hasUsableBookMemory = profile.memory.entities.length > 0 ||
           profile.memory.relationships.length > 0 ||
           profile.memory.characterVoices.length > 0 ||
           profile.memory.relationshipVoiceRules.length > 0 ||
-          profile.memory.voiceAnchors.length > 0;
-        const emptyBookMemoryWarning = !profile.warning && profile.analyzed && !hasUsableBookMemory
-          ? '全书预分析返回成功，但没有提取到实体/人物记忆；本次翻译将缺少书籍级专名和人物一致性参考'
-          : '';
-        const bookAnalysisWarning = profile.warning || emptyBookMemoryWarning;
-        recordDiagnostic('book-analysis', bookAnalysisWarning ? 'warning' : 'completed',
-          bookAnalysisWarning || (profile.analyzed ? '全书预分析完成' : '分析接口返回，但未标记 analyzed'),
-          {
-            analyzed: profile.analyzed, memoryUsable: hasUsableBookMemory,
-            entities: profile.memory.entities.length, relationships: profile.memory.relationships.length,
-            characterVoices: profile.memory.characterVoices.length,
-            confirmedVoices: profile.memory.characterVoices.filter((item) => item.status === 'confirmed').length,
-            relationshipVoiceRules: profile.memory.relationshipVoiceRules.length,
-            voiceAnchors: profile.memory.voiceAnchors.length,
-          });
-        if (bookAnalysisWarning) literaryStatus.value.warnings.push(bookAnalysisWarning);
+          profile.memory.voiceAnchors.length > 0 ||
+          profile.memory.chapterSummaries.length > 0 ||
+          styleGuideUsable;
+        if (!profile.analyzed) throw new Error(profile.warning || '分析接口没有确认全书预分析完成');
+        if (profile.warning) throw new Error(profile.warning);
+        if (!hasUsableBookMemory) throw new Error('全书预分析没有生成可用于翻译的书籍上下文');
+        literaryMemory.value = profile.memory;
+        literaryStatus.value.bookProfileReady = true;
+        recordDiagnostic('book-analysis', 'completed', '全书预分析完成并通过可用性检查', {
+          analyzed: profile.analyzed, memoryUsable: hasUsableBookMemory,
+          entities: profile.memory.entities.length, relationships: profile.memory.relationships.length,
+          characterVoices: profile.memory.characterVoices.length,
+          confirmedVoices: profile.memory.characterVoices.filter((item) => item.status === 'confirmed').length,
+          relationshipVoiceRules: profile.memory.relationshipVoiceRules.length,
+          voiceAnchors: profile.memory.voiceAnchors.length,
+          chapterSummaries: profile.memory.chapterSummaries.length,
+          styleGuideUsable,
+        });
         if (profile.analyzed) {
           // 单章文件的全书抽样已经覆盖了本章，无须为同一章再付一次分析请求。
           const chapterKeys = new Set(
@@ -1423,11 +1426,17 @@ export function useDocumentTranslation() {
         await checkpoint(effectiveOptions);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        recordDiagnostic('book-analysis', 'failed', '全书预分析失败；后续尝试逐章补充实体记忆', {
+        recordDiagnostic('book-analysis', 'failed', '全书预处理未通过；正式翻译已阻止', {
           error: message.slice(0, 240),
         });
-        literaryStatus.value.warnings.push('全书预分析失败，将逐章补充实体记忆：' + message);
+        literaryStatus.value.bookProfileReady = false;
+        literaryStatus.value.warnings.push('全书预处理失败，尚未开始翻译：' + message);
+        state.value.error = '全书预处理失败，正式翻译已停止：' + message;
+        state.value.running = false;
+        state.value.workStage = '';
+        state.value.activeSegmentIds = new Set();
         await checkpoint(effectiveOptions);
+        return state.value;
       }
     }
 
