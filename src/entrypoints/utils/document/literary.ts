@@ -133,7 +133,7 @@ export interface CharacterVoiceAnchor {
 }
 export interface LiteraryVoiceContext {
   version: 1;
-  policyVersion: 'character-voice-v3';
+  policyVersion: 'character-voice-v4-default-adoption';
   styleGuide: LiteraryStyleGuide;
   styleGuideStatus: 'candidate' | 'confirmed';
   styleGuideConfirmationSource?: LiteraryConfirmationSource;
@@ -904,8 +904,8 @@ export function refreshLiteraryExampleTargets(
 /**
  * 新分析入库时自动激活可核验的规范项，免去逐条点击。
  * 必须用稳定 segment ID 将 evidenceRefs 与实际 sourceSegments 对齐，并验证连续引文；
- * 只有自由文本 evidence 或模型自报 ID/quote 的记录继续作为候选。
- * confirmed 表示运行时作为强规范使用，confirmationSource 独立记录依据，不代表用户一定审过。
+ * evidence 用于描述可追溯性，不作为是否默认采纳的审批门槛。
+ * confirmed 表示默认采纳并参与运行时工作，不代表用户已经审核或事实已被证明。
  */
 export function autoConfirmLiteraryMemory(
   input: unknown,
@@ -1058,8 +1058,8 @@ export function buildLiteraryTranslationContextPrompt(chapterTitle = ''): string
   return [
     '任务模式：书籍/文学作品的章节翻译，不要套用网页翻译的简短、信息压缩式表达。',
     '忠实保留原意、叙述视角、人物动机、事实细节和关系，在此基础上使用自然的文学表达，保留文字的节奏、味道和人物声音。',
-    '各片段的 voiceContext 是独立的只读书籍记忆 JSON；用它维持实体译名、经确认的角色声音、关系语言规则和批准锚点。contextPath 只表示章节/页面结构，绝不能混入角色记忆。',
-    'reviewStatus=confirmed 表示当前运行将其作为强规范；confirmationSource 单独说明其来源（evidence-verified、user-confirmed 或 legacy-unknown）。不得把机器证据验证冒称为用户确认；suggested 是弱候选，原文有反证时应报告冲突。',
+    '各片段的 voiceContext 是独立的只读书籍记忆 JSON；用它维持默认采纳的人物、关系、声音和锚点信息。contextPath 只表示章节/页面结构，绝不能混入角色记忆。',
+    'reviewStatus=confirmed 表示默认采纳并参与当前运行，不代表事实已被证明或经过用户审核；confirmationSource 单独说明来源（model-default、user-modified、evidence-verified、user-confirmed 或 legacy-unknown）。证据质量不构成人工审批门槛，原文明确反证时以当前原文为准。',
     '书籍记忆中 source 与 aliases 指向同一实体时，所有形式必须统一使用该实体的 target；target 只代表名称本身，不要因原文改用简称或全名而重新音译。',
     '区分姓名与头衔：英文 Lady 按人物关系和语境译作“夫人/女士/小姐”或自然省略，不得默认译成“大人”；日语 -san 也不能一律译成“大人”。Lord 是否译作“大人/主公”等须按身份判断，不能把称谓并入人名。',
     '关系记忆只用于消歧，不要把角色关系说明写进正文。不要擅自解释悬念、含混、反讽和信息差。',
