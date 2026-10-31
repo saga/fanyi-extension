@@ -186,6 +186,12 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
       message: '预处理记录缺少有效的工作流策略标识，无法确认全书分析是否完整。请重新分析全书。',
     };
   }
+  if (Number(progress.sampleCount || 0) <= 0) {
+    return {
+      required: true, ready: false, reason: 'incomplete',
+      message: '预处理记录没有有效的全书分析样本，不能用于正式翻译。请重新分析全书。',
+    };
+  }
   if (snapshot.styleGuideReady !== true) {
     const missing = Array.isArray(snapshot.styleMissingFields) ? snapshot.styleMissingFields : [];
     return {
