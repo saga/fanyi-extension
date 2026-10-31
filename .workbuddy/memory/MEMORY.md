@@ -40,6 +40,12 @@ dominance）此前因长文 contentCoverage≈0.04 从不触发，修复后长�
   - *模式 A（已确认，来自生产报错日志）*：请求**确实到达**服务端（`POST /fanyi/page` → `translateChunks`），但 LLM 返回了坏 JSON。报错栈 `cleanResponse→repairJson→jsonrepair` 抛 `Colon expected at position ~6333`，是 **gemini provider 未强制 JSON 输出**导致某个 `translated_text` 结构损坏；当时 `cleanResponse` 无兜底 catch、下游也无故障隔离，单个坏 chunk 直接把整页翻译成 500。默认 provider 是 `deepseek`（`response_format: json_object` 强约束，极少坏 JSON）；用户把扩展 `config.provider` 设成 `gemini` 才触发。日志里 `client=Firefox/153.0 (Android...)` 只是 `clientInfo` 元数据，**不是根因**。修复（vocal-saga，2026-08-15）：gemini 加 `responseMimeType:'application/json'` 从源头杜绝；新增 `extractJsonContainer` 提升 jsonrepair 成功率；`processTranslationWithCheck`/`translateChunk` 改为容错降级（解析失败返回空 Map → 缺失重试/原样渲染，而非整请求 500）；空结果不写缓存。
   - *模式 B（仅假设，未在生产日志证实）*：Firefox content script 的 `fetch` 可能受页面 CSP `connect-src` 约束（Chrome 不受），表现为客户端 "网络请求失败 statusCode=0"、从未到达服务端。本地翻译已正确走 background（`runtime.sendMessage({action:'translateChunk'})`）；服务端翻译路径 `translateViaServer` 仍是 content script 直接 fetch。这条**尚未在真实 Firefox 上验证**，且用户贴的日志证明本次失败是模式 A（请求到了服务端），所以模式 B 是否为真需另行实测，**不要据此盲目改成 background 架构**。
 
+## 文档翻译提示词的唯一真源（2026-10-31）
+自定义 Prompt（`config.documentSystemPromptOverride`）> 项目里存的快照（仅修正语言行）> 按当前设置生成的内置提示词。
+- 项目快照不是「当前设置」：`hydrateWorkspacePrompt` 不能把服务端 systemPrompt 写进 `documentSystemPromptOverride`（曾导致编辑器长期持有旧快照，再被同步 watcher 原样写回项目）。
+- 语言行（`输入语言：/目标语言：`）以**本次 Run** 为准：服务端 `translationAgent` 组装系统提示词时走 `applyRunLanguageDirection` 重写，`auto` 渲染成「自动检测（按原文实际语言判断，不要假定为英语）」。不要在 hydrate 时整份重建提示词——那会把文风一起换成当前全局设置。
+- 文风随项目走：项目 Prompt config 存 `promptStyle`，打开项目回填；设置页靠 `activePromptStyle` prop 显示当前文档实际文风。
+
 ## 约定
 - 浏览器扩展改动需**重新加载扩展**生效（本地改动，非线上部署）。
 - vocal-saga 改动需 `build:lib` + `deploy:cf` 才上线（wrangler OAuth 曾过期，需 `CLOUDFLARE_API_TOKEN` 或 `wrangler login`）。
