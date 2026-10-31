@@ -61,6 +61,20 @@ describe('document reader composable wiring', () => {
     expect(graph.contextGraphOverview).toBe(contextGraphOverview);
   });
 
+  it('gates reader-triggered literary Run creation on current preprocessing readiness', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+      'utf8',
+    );
+    const runHandler = source.indexOf('async function startLocalAgentWorkspaceRun');
+    expect(runHandler).toBeGreaterThan(-1);
+    const readinessCheck = source.indexOf('await refreshContextGraphStatus(project, true)', runHandler);
+    const runCreation = source.indexOf("'/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs'", runHandler);
+    expect(readinessCheck).toBeGreaterThan(runHandler);
+    expect(runCreation).toBeGreaterThan(readinessCheck);
+    expect(source.slice(readinessCheck, runCreation)).toContain('if (readiness.required && !readiness.ready)');
+  });
+
   it('declares the shared ref in App.vue before both composables', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
