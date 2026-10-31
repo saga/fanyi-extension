@@ -328,12 +328,16 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const sourceId = nodeIds.get(normalize(subject));
     const targetId = nodeIds.get(normalize(object));
     const expectedPredicate = normalize(predicate);
-    const matches = (graph.edges || []).filter((edge) => {
-      if (sourceId && targetId && (String(edge.sourceNodeId) !== sourceId || String(edge.targetNodeId) !== targetId)) return false;
+    // 不知道任一端点时绝不按 predicate 全局拒绝；这可能误伤其他人物的同类关系。
+    if (!sourceId || !targetId) return;
+    const pairMatches = (graph.edges || []).filter((edge) =>
+      String(edge.sourceNodeId) === sourceId && String(edge.targetNodeId) === targetId);
+    const matches = pairMatches.filter((edge) => {
       const attributes = edge.attributes && typeof edge.attributes === 'object' ? edge.attributes : {};
       const actualPredicate = normalize(String(attributes.predicate || attributes.relation || edge.kind || ''));
-      return (!sourceId || !targetId || (String(edge.sourceNodeId) === sourceId && String(edge.targetNodeId) === targetId)) &&
-        (!expectedPredicate || !actualPredicate || expectedPredicate === actualPredicate);
+      if (actualPredicate) return !expectedPredicate || actualPredicate === expectedPredicate;
+      // 旧版图谱未保存 predicate 时，仅在这对节点之间只有一条关系时才可安全定位。
+      return pairMatches.length === 1;
     });
     for (const edge of matches) {
       const id = String(edge.id || '');
