@@ -1,39 +1,48 @@
-# ADR-002: Local Agent 项目状态以服务端为权威
+# ADR-002: Local Agent 文档业务数据由服务端唯一持久化
 
 - 状态：Accepted
-- 日期：2026-10-18
-- 关联仓库：[devweekly/vocal-saga](https://github.com/devweekly/vocal-saga)
-- 服务端对应决策：[ADR-0003：服务端项目权威与扩展离线副本](https://github.com/devweekly/vocal-saga/blob/main/docs/adr/0003-server-authoritative-project-state.md)
+- 日期：2026-10-31
+- 关联仓库：[saga/vocal-saga](https://github.com/saga/vocal-saga)
+- 服务端对应决策：[ADR-0003：Local Agent 项目数据唯一服务端持久化](https://github.com/saga/vocal-saga/blob/main/docs/adr/0003-server-authoritative-project-state.md)
 
 ## 背景
 
-文档阅读器会把当前阅读位置、译文和文学记忆保存到扩展 IndexedDB，并可能另存一份 Local Agent SQLite 会话检查点。这些记录用于快速恢复和离线连续性，但它们不是 Local Agent 文档项目的第二个事实来源。浏览器记录可能缺失、落后或来自旧版本；如果打开文档时用它覆盖服务端 Prompt、译文或记忆，就会抹掉更新过的人工修订与运行结果。若扩展映射清失或过期后直接新建项目，也会形成重复项目。
+历史文档阅读器曾把解析后的文档、原文、译文、阅读状态和 LiteraryMemory 写入扩展 IndexedDB，同时又把项目数据保存到 Local Agent SQLite。后续虽然将 Server 定义为权威来源，但仍保留扩展快照恢复、双写和服务不可用时回退路径，造成两份可恢复的业务状态以及额外的一致性问题。
+
+这不是目标架构。Local Agent 模式下，扩展是 UI 和浏览器适配层；所有文档业务数据必须由 `local-agent-service` 管理和持久化。扩展可以在当前页面内存中持有响应式数据用于渲染和编辑，但不能把它写入 IndexedDB、扩展 storage 或其他浏览器持久化介质作为业务副本。
 
 ## 决策
 
-1. **服务端优先，扩展副本从属。** Local Agent 可用并找到匹配项目时，扩展必须从服务端刷新项目、来源版本、已采纳译文、文学记忆、运行状态和轨迹。刷新页面、重新打开文档以及进入 Agent Workspace 都不得仅凭扩展缓存认定服务端状态。
-2. **映射是缓存，不是目录。** 扩展的 project ID 映射只能用作快速查找。映射缺失或指向已删除项目时，扩展调用 `POST /api/documents/projects/resolve`，先按标准化原文指纹寻找精确项目；不能把文件名/标题相似误当作原文相同。
-3. **来源不同不自动合并。** 精确指纹匹配才允许同步译文；文件身份/标题相近但来源指纹不同，只显示来源变化并要求用户显式更新来源版本或另建项目。不得将旧译文映射到新原文。
-4. **读取现有项目时不回灌扩展快照。** 普通打开、恢复、项目发现和 Run 创建，不得把本地缓存译文、Prompt 或文学记忆再提交至已存在的服务端项目。只有明确的新建项目迁移或显式用户更改才能执行对应写操作。Run 创建只提交范围等执行参数，使用项目在服务端保存的当前 Prompt；用户点击“保存 Prompt”或显式调整项目语言/模式时，才同步相应 Prompt 修订。
-5. **离线副本只用于服务不可用时恢复。** 服务不可达、鉴权失败或超时不能被解释为“项目不存在”，也不能触发重复新建。扩展可以继续显示最后一次同步的本地副本，并提示其可能过期；服务恢复后必须重新解析并以服务端状态刷新本地副本。
+1. **Server 是唯一业务持久化边界。** Local Agent 项目的原始文件、来源版本、解析片段、已采纳译文、人工修订、候选译文、审校结果、Prompt revisions、Context Graph、LiteraryMemory revisions、Runs、事件和质量审计全部由本机服务持久化。
+2. **扩展只保留运行时 UI 投影。** LiteraryMemory、Context Graph 状态、译文和文档片段可以在 Vue 响应式状态中短暂存在；用户编辑必须提交 Server API，只有服务端成功提交后才视为保存成功。扩展不得将这些业务对象写入 IndexedDB、`chrome.storage`、localStorage 或其他浏览器持久化存储。
+3. **阅读恢复记录也由 Server 保存。** 阅读位置、当前 Tab、视图模式、语言方向等轻量恢复元数据写入本机服务的 reader-session 记录，并关联 `projectId`。reader session 只能保存轻量引用和 UI 元数据，不得复制原文、完整译文、LiteraryMemory 或 Context Graph。
+4. **项目内容只能从项目 API 恢复。** 恢复时先读取服务端 reader-session pointer，再通过项目 API 读取来源、分页片段、已采纳译文、文学记忆和 Run 状态。项目数据库是业务事实来源；reader session 不是第二份项目数据。
+5. **服务不可用时 fail closed。** 不得回退到扩展 IndexedDB 中的旧 LiteraryMemory、译文或全文快照，不得把未提交的 UI 草稿显示为已保存。应明确提示服务不可用，当前页面内存数据不具备持久化保证；服务恢复后重新从 Server 加载。
+6. **旧 IndexedDB 数据只允许清理，不允许作为新权威来源。** 当服务端项目已成功恢复或创建后，可以清理旧版本遗留的扩展文档快照。不得自动把旧快照回灌到已有项目。确需迁移的旧数据必须通过单独、可审计的显式迁移流程，并校验来源指纹及人工修订保护。
+7. **项目映射仅是定位缓存。** 扩展可以保存 project ID 与来源身份映射，以便快速定位项目；映射不包含业务数据，不得用于替代 Server 查询。映射缺失或过期时调用 `POST /api/documents/projects/resolve`；服务不可达、鉴权失败或超时不能被解释为项目不存在。
+8. **Local Agent 与非 Local Agent 模式必须分开。** 本 ADR 约束启用 Local Agent 的文档项目工作流。非 Local Agent 的轻量兼容路径不得把其浏览器缓存冒充为 Local Agent 项目状态，也不得向 Local Agent 项目回灌旧快照。
 
-6. **本机 EPUB/PDF 原始文件由 Local Agent 解析。** 当 Local Agent 开启时，扩展上传原始二进制到 `POST /api/documents/projects/import-file`，不把浏览器解析后的全书片段通过 JSON 发送到项目创建/resolve 接口。扩展仅将分页读回的片段用于 UI 展示。更新来源版本也上传原始文件，由服务端解析并建立新 revision。
-7. **SQLite 阅读器检查点只存轻量引用。** 服务端项目已是原文、译文、文学记忆及 Run 状态的权威存储；通用 reader session 只保存 `projectId`、阅读位置和轻量设置。不得再向通用会话表复制全书正文、全量译文和 LiteraryMemory。旧版全量快照只为恢复兼容。
-8. **文件大小和 JSON 大小分开治理。** 原始文件使用二进制请求和 `LOCAL_AGENT_MAX_DOCUMENT_SOURCE_MB` 配置（默认 512 MiB）；展开体积与 PDF 提取时间另有服务端上限。不得因为普通 JSON API 的请求体限制，改为在扩展端解析整本 EPUB/PDF。
+## LiteraryMemory 与 Context Graph 的边界
 
-## 文学翻译的预处理状态协作
+- Context Graph 是服务端全书分析事实，包括节点、边、原文证据、章节摘要、分析版本和运行状态。
+- LiteraryMemory 是服务端维护的可编辑翻译投影，包括规范译名、人物声音、关系规则、文风基准、声音锚点及拒绝 tombstone。
+- 两者是不同的业务模型，但都只在服务端持久化。扩展可以读取 LiteraryMemory DTO 并在页面内编辑；所有变更通过服务端版本化 API 保存。
+- 人物、实体、关系的删除/拒绝必须通过服务端原子操作同时更新 Context Graph review 状态与 LiteraryMemory revision。失败时恢复当前页面的编辑投影，不写入本地副本。
+- Run 必须固定引用创建时的 source revision、Prompt revision 和 LiteraryMemory revision；后续编辑不能改变既有 Run 的输入快照。
 
-文学翻译采用“扩展前置检查 + 服务端最终执行门禁”，但 Context Graph 事实始终只有服务端一份：
+## EPUB/PDF 原始文件与解析
 
-- 扩展通过服务端轻量 status DTO 核对当前 source revision、服务端 analysis version、source/target language、有效样本、style completeness 和 B 工作流阶段。只有通过才开放创建文学 Run。
-- 从未分析的当前来源版本可由扩展自动触发一次预处理；失败、过期或语言设置变化后由用户显式重新分析。未知状态和状态读取错误一律不视为 ready。
-- Local Agent 的 executeRun 在进入 running 前再次校验。旧客户端或直接 API 可能先产生 queued Run，但服务端在 readiness 通过前不得开始翻译模型调用。
-- 技术文档模式不要求文学 Context Graph。扩展只保留状态投影，不复制节点、边、原文证据和章节摘要。
-
-服务端的完整决策见 [ADR-0005](https://github.com/saga/vocal-saga/blob/main/docs/adr/0005-literary-preprocessing-before-translation.md)。
+- Local Agent 模式下，EPUB/PDF 原始文件通过 `POST /api/documents/projects/import-file` 发送给本机服务，由服务端负责解析、分段、来源版本管理和持久化。
+- 扩展只读取分页结构化片段用于 UI 展示，不保存全书解析副本。
+- 来源更新必须通过原始文件上传和服务端 revision 流程完成；不能仅凭文件名或标题复用旧译文。
+- 原始文件大小、展开体积和解析超时由服务端配置控制，不通过在扩展 IndexedDB 中保存整本书来绕过请求限制。
 
 ## 实施要求
 
-- 项目发现、打开文档、IndexedDB 恢复和 Local Agent 服务检查都需复用同一个服务端解析与同步契约。
-- 新增或修改同步逻辑时，为精确指纹匹配、缺失映射、过期映射、来源变化、服务离线、鉴权失败和服务端译文优先级增加回归测试。
-- 扩展端不得复制服务端的项目指纹或维护一套独立的合并决策。源版本、译文优先级和运行生命周期仍由 Local Agent 管理。
+- Local Agent 模式的文档打开、恢复、进度保存、文学记忆编辑和清除阅读位置均不得调用扩展 IndexedDB 文档会话存储。
+- `persistCurrentSession` 只提交 Server reader-session pointer；不得把 `snapshot.literaryMemory`、全文、译文 delta 或 Context Graph 放入 reader-session payload。
+- 文学记忆编辑器不得先调用扩展 `persistSession()` 再调用 Server API；Server API 成功响应是唯一保存确认。
+- Server API 失败时保留页面内存中的未提交编辑并显示错误；不得把它写入本地持久化层或自动重试到另一事实来源。
+- 项目打开/恢复时，Server 不可用必须明确失败，不能使用旧 IndexedDB 快照静默恢复。
+- 增加回归测试：Local Agent 模式不读写 IndexedDB；LiteraryMemory 编辑只调用 Server API；服务端失败不会写本地副本；清空浏览器 IndexedDB 后仍能从 Server 恢复完整项目；清理旧快照不会删除 Server 项目数据。
+- 修改本 ADR 时同步检查 Vocal Saga ADR-0003、两个仓库的 AGENTS 文档、CROSS_PROJECT_SYNC 和 Local Agent README。
