@@ -5,6 +5,7 @@ import {
   isContextGraphBusy,
   preprocessingGateTitle,
   resolveDocumentTranslationMode,
+  shouldAutoStartPreprocessing,
   styleGuideBadge,
 } from '../entrypoints/document/documentPreprocessing';
 
@@ -216,5 +217,37 @@ describe('style guide badge', () => {
   it('does not claim an active baseline before preprocessing is ready', () => {
     const badge = styleGuideBadge({ autoDisabled: false, origin: 'legacy-unknown', graphReady: false });
     expect(badge).toEqual({ label: '预处理未就绪', tone: 'inactive' });
+  });
+});
+
+describe('automatic preprocessing on document open', () => {
+  const open = {
+    required: true,
+    status: 'not-started',
+    segmentCount: 1200,
+    analyzing: false,
+    alreadyAttempted: false,
+  };
+
+  it('starts preprocessing when the document was never analysed', () => {
+    expect(shouldAutoStartPreprocessing(open)).toBe(true);
+  });
+
+  it('does not spend a full-book analysis on failed or outdated records', () => {
+    // failed 可能是模型/配置问题，版本过旧是成本决策，两者都必须由用户点「重新分析全书」。
+    expect(shouldAutoStartPreprocessing({ ...open, status: 'failed' })).toBe(false);
+    expect(shouldAutoStartPreprocessing({ ...open, status: 'completed' })).toBe(false);
+    expect(shouldAutoStartPreprocessing({ ...open, status: 'queued' })).toBe(false);
+    expect(shouldAutoStartPreprocessing({ ...open, status: 'running' })).toBe(false);
+  });
+
+  it('stays out of the way for technical mode and empty projects', () => {
+    expect(shouldAutoStartPreprocessing({ ...open, required: false })).toBe(false);
+    expect(shouldAutoStartPreprocessing({ ...open, segmentCount: 0 })).toBe(false);
+  });
+
+  it('fires once per project revision so a rejected start cannot loop', () => {
+    expect(shouldAutoStartPreprocessing({ ...open, alreadyAttempted: true })).toBe(false);
+    expect(shouldAutoStartPreprocessing({ ...open, analyzing: true })).toBe(false);
   });
 });

@@ -14,6 +14,30 @@ export function isContextGraphBusy(status: unknown, analyzing = false): boolean 
 }
 
 /**
+ * 打开文档后是否该自动开始预处理。
+ *
+ * 只处理「这本书从来没分析过」（status === 'not-started'）。failed 和版本过旧都不自动重跑：
+ * 前者可能是模型/配置问题，自动重试只会连续烧掉几轮全书分析；后者要用户确认是否接受重算成本。
+ * 这两种情况保留「重新分析全书」按钮，由用户决定。
+ *
+ * `alreadyAttempted` 由调用方按 projectId + 原文版本记忆：自动启动失败（例如该书正在翻译、
+ * 模型未配置）时不能随每次状态轮询重试，否则 1.2 秒一次 POST 会刷爆服务端。
+ */
+export function shouldAutoStartPreprocessing(input: {
+  required: boolean;
+  status: unknown;
+  segmentCount: number;
+  analyzing: boolean;
+  alreadyAttempted: boolean;
+}): boolean {
+  if (!input.required) return false;
+  if (input.analyzing || input.alreadyAttempted) return false;
+  // 没有片段就没有可分析的内容，此时提交只会拿到 409。
+  if (!Number.isFinite(input.segmentCount) || input.segmentCount <= 0) return false;
+  return String(input.status || 'not-started') === 'not-started';
+}
+
+/**
  * Resolve the translation mode shared by the reader, Agent workspace and persisted Prompt.
  * Preprocessing status is informational in the extension; the Local Agent Run worker owns the
  * actual source/version/language readiness gate. Per-document literary mode takes precedence.

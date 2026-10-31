@@ -15,10 +15,14 @@ describe('server-authoritative document project state', () => {
     expect(app).not.toMatch(/:disabled="[^"]*translationPreprocessingNeedsAttention/);
   });
 
-  it('does not start full-book preprocessing while opening, restoring or synchronizing a project', () => {
+  it('starts preprocessing on open only through the composable, and only for a never-analysed revision', () => {
+    // App.vue 的打开/恢复/同步路径只读状态，不直接发起分析。
     expect(app).not.toMatch(/(?:await|void)\s+ensureContextGraphPreprocessing\s*\(/);
     expect(app).toContain('void refreshContextGraphStatus(refreshed.project, true)');
     expect(app).toContain('await refreshContextGraphStatus(refreshed.project, true)');
+    // 自动启动的判定集中在 composable + 纯函数里，由状态刷新统一触发。
+    expect(contextGraph).toContain('shouldAutoStartPreprocessing({');
+    expect(contextGraph).toContain('await ensureContextGraphPreprocessing(project, { auto: true })');
   });
 
   it('keeps manual re-analysis as an explicit user command', () => {

@@ -101,7 +101,7 @@
       >
         <div class="preprocessing-gate-copy">
           <strong>{{ preprocessingGateTitle(translationPreprocessingReadiness.reason) }}</strong>
-          <p>点击开始文学翻译后，local-agent-service 会核对原文版本、分析版本和语言，并在服务端自动启动或等待预处理。全书分析、原文证据和章节摘要不会复制进扩展的 LiteraryMemory。</p>
+          <p>全书预处理在本机服务里跑，结果只保存在本机，不会写进扩展的 LiteraryMemory。完成后翻译批次会带上规范专名和时间上有界的上下文。</p>
           <p v-if="contextGraphState.runId" class="preprocessing-gate-meta">
             预处理任务 {{ contextGraphState.runId }}
             <span v-if="contextGraphPhaseLabel"> · {{ contextGraphPhaseLabel }}</span>
@@ -208,8 +208,8 @@
 
       <!-- 阅读时常驻的小型翻译控制器，避免用户滚回页面顶部操作。 -->
       <div v-if="activeTab === 'reading'" class="reader-quick-actions" role="group" aria-label="快速翻译控制">
-        <button class="quick-action" :disabled="state.running || !hasPendingPageAhead" @click="translatePages(1)">翻译下一页</button>
         <button class="quick-action" :disabled="state.running || !hasPendingPageAhead" @click="translatePages(3)">翻译下三页</button>
+        <button class="quick-action" :disabled="state.running || !hasPendingPageAhead" @click="translatePages(10)">翻译下十页</button>
         <button class="quick-action quick-action-stop" :disabled="!state.running" @click="stopCurrentTranslation">停止翻译</button>
       </div>
 
@@ -2861,7 +2861,7 @@ async function handleAgentWorkspaceProjectUpdated(project: any, sourceChanged = 
     await replaceCurrentTranslations(accepted);
     stateHydrated = true;
 
-    // Refresh the status projection only. Never start full-book analysis during hydration.
+    // 打开项目时读状态；「从未分析过」由 useContextGraph 自动发起预处理，其余情况只刷新展示。
     await refreshContextGraphStatus(refreshed.project, true);
   } catch (error) {
     if (isCurrent()) {
@@ -3192,7 +3192,7 @@ async function ensureDocumentWorkspaceInternal(
   await persistCurrentSession();
 
   // Project details, translations and memory are now hydrated from the service; only session UI
-  // state is persisted locally. Opening/restoring a project reads status but never starts analysis.
+  // state is persisted locally. 读状态的同时，若这本书从未做过预处理就自动开跑（见 useContextGraph）。
   if (config.documentUseLocalAgent) {
     void refreshContextGraphStatus(refreshed.project, true);
   }
