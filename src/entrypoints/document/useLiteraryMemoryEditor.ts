@@ -253,16 +253,22 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
    * 删除人物/实体/关系时同步写入 Context Graph 的持久拒绝状态。
    * LiteraryMemory 是编辑投影；仅从投影数组删除会导致下一次图谱刷新后项目重新出现。
    */
-  async function rejectContextGraphItemsByNames(names: Set<string>): Promise<void> {
+  async function rejectContextGraphItemsByNames(names: Set<string>, memory: LiteraryBookMemory): Promise<void> {
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
-    if (!config.documentUseLocalAgent) return;
+    if (!config.documentUseLocalAgent) {
+      await deps.persistSession();
+      return;
+    }
     let project = workspaceProject.value;
     if (!project?.projectId) {
       await deps.ensureWorkspace();
       project = workspaceProject.value;
     }
-    if (!project?.projectId) return;
+    if (!project?.projectId) {
+      await deps.persistSession();
+      return;
+    }
     await awaitLiteraryMemoryWrites();
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
@@ -289,28 +295,43 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       }
     }
     if (items.length) {
-      // One server-side transaction prevents a node rejection succeeding while one of its edge
-      // rejections fails (for example, because a translation Run starts concurrently).
-      await workspaceApi(
+      // Graph rejections and the LiteraryMemory revision share one server-side SQLite transaction.
+      const result = await workspaceApi<{ current?: { memory?: unknown } }>(
         base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/review',
         { method: 'POST', body: JSON.stringify({
           items: items.map((item) => ({ ...item, status: 'rejected' as const })),
+          memory,
         }) },
       );
+      literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
+    } else {
+      const result = await workspaceApi<{ current?: { memory?: unknown } }>(
+        base, token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+        { method: 'POST', body: JSON.stringify({ memory }) },
+      );
+      literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
     }
+    await deps.persistSession();
   }
 
-  async function rejectContextGraphRelationship(subject: string, object: string, predicate: string): Promise<void> {
+  async function rejectContextGraphRelationship(subject: string, object: string, predicate: string, memory: LiteraryBookMemory): Promise<void> {
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
-    if (!config.documentUseLocalAgent) return;
+    if (!config.documentUseLocalAgent) {
+      await deps.persistSession();
+      return;
+    }
     let project = workspaceProject.value;
     if (!project?.projectId) {
       await deps.ensureWorkspace();
       project = workspaceProject.value;
     }
-    if (!project?.projectId) return;
+    if (!project?.projectId) {
+      await deps.persistSession();
+      return;
+    }
     await awaitLiteraryMemoryWrites();
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
@@ -348,12 +369,21 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       return id ? [{ type: 'edge' as const, id, status: 'rejected' as const }] : [];
     });
     if (items.length) {
-      await workspaceApi(
+      const result = await workspaceApi<{ current?: { memory?: unknown } }>(
         base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/review',
-        { method: 'POST', body: JSON.stringify({ items }) },
+        { method: 'POST', body: JSON.stringify({ items, memory }) },
       );
+      literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
+    } else {
+      const result = await workspaceApi<{ current?: { memory?: unknown } }>(
+        base, token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/literary-memory',
+        { method: 'POST', body: JSON.stringify({ memory }) },
+      );
+      literaryMemory.value = sanitizeLiteraryMemory(result.current?.memory ?? memory);
     }
+    await deps.persistSession();
   }
 
   async function removeManagedPerson(item: ManagedPersonItem) {
