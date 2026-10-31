@@ -25,7 +25,7 @@ describe('literary style guide dimensions', () => {
       rules: ['-san 按场合译为先生/女士', 'Sire 统一译为大人'],
       avoid: ['避免现代网络流行语', '避免无依据增加心理描写'],
     });
-    expect(memory.styleGuideStatus).toBe('candidate');
+    expect(memory.styleGuideStatus).toBe('confirmed');
   });
 });
 
@@ -119,8 +119,8 @@ describe('literary style provenance and long fields', () => {
       styleGuideOrigin: 'user-edited',
     });
     expect(memory.styleGuideOrigin).toBe('user-edited');
-    expect(memory.styleGuideStatus).toBe('candidate');
-    expect(memory.styleGuideConfirmationSource).toBeUndefined();
+    expect(memory.styleGuideStatus).toBe('confirmed');
+    expect(memory.styleGuideConfirmationSource).toBe('model-default');
   });
 });
 
@@ -149,10 +149,10 @@ describe('automatic canonical entity activation', () => {
       ],
     }, [{ id: 's1', text: 'But Timsen was much too clever to allow the King to see through him.' }]);
 
-    expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('suggested');
+    expect(memory.entities.find((entity) => entity.source === 'the King')?.reviewStatus).toBe('confirmed');
     expect(memory.entities.find((entity) => entity.source === 'the King')?.confirmationSource).toBe('evidence-verified');
-    expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.reviewStatus).toBe('suggested');
-    expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.confirmationSource).toBeUndefined();
+    expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.reviewStatus).toBe('confirmed');
+    expect(memory.entities.find((entity) => entity.source === 'Unknown title')?.confirmationSource).toBe('model-default');
   });
 
   it('labels legacy confirmed records as source-unknown instead of inferring user approval', () => {
@@ -242,16 +242,16 @@ describe('Chinese editorial profile versioning', () => {
     },
   };
 
-  it('preserves the confirmed base profile and pending update through extension sanitization', () => {
+  it('automatically promotes a legacy pending editorial update during extension sanitization', () => {
     const memory = sanitizeLiteraryMemory({ chineseEditorialProfile: profile });
     expect(memory.chineseEditorialProfile?.status).toBe('confirmed');
-    expect(memory.chineseEditorialProfile?.profileVersion).toBe(3);
-    expect(memory.chineseEditorialProfile?.profile.narrativeVoice).toBe('克制、疏离。');
-    expect(memory.chineseEditorialProfile?.pendingUpdate?.sampleFingerprint).toBe('pending-fingerprint');
-    expect(memory.chineseEditorialProfile?.pendingUpdate?.profile.narrativeVoice).toBe('新版叙述声音。');
+    expect(memory.chineseEditorialProfile?.profileVersion).toBe(4);
+    expect(memory.chineseEditorialProfile?.sampleFingerprint).toBe('pending-fingerprint');
+    expect(memory.chineseEditorialProfile?.profile.narrativeVoice).toBe('新版叙述声音。');
+    expect(memory.chineseEditorialProfile?.pendingUpdate).toBeUndefined();
   });
 
-  it('does not replace a confirmed profile with an incoming candidate during memory merge', () => {
+  it('keeps explicit user edits while auto-adopting a newer machine profile version', () => {
     const existing = sanitizeLiteraryMemory({ chineseEditorialProfile: profile });
     const merged = mergeLiteraryMemory(existing, {
       chineseEditorialProfile: {
@@ -263,8 +263,8 @@ describe('Chinese editorial profile versioning', () => {
         pendingUpdate: undefined,
       },
     });
-    expect(merged.chineseEditorialProfile?.sampleFingerprint).toBe('active-fingerprint');
-    expect(merged.chineseEditorialProfile?.profile.narrativeVoice).toBe('克制、疏离。');
-    expect(merged.chineseEditorialProfile?.pendingUpdate?.sampleFingerprint).toBe('pending-fingerprint');
+    expect(merged.chineseEditorialProfile?.sampleFingerprint).toBe('pending-fingerprint');
+    expect(merged.chineseEditorialProfile?.profile.narrativeVoice).toBe('新版叙述声音。');
+    expect(merged.chineseEditorialProfile?.pendingUpdate).toBeUndefined();
   });
 });
