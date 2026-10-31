@@ -473,7 +473,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(safeText(rel.evidence, 160) ? { evidence: safeText(rel.evidence, 160) } : {}),
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
         reviewStatus: 'confirmed',
-        confirmationSource: rel.confirmationSource ? confirmationSource(rel.confirmationSource, true) : 'model-default',
+        confirmationSource: rel.reviewStatus === 'confirmed'
+          ? (rel.confirmationSource ? confirmationSource(rel.confirmationSource, true) : 'legacy-unknown') : 'model-default',
       });
     }
   }
@@ -551,7 +552,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     profileVersion: Math.max(1, Math.min(1000, Number(rawEditorial.profileVersion) || 1)) +
       (pendingEditorialUpdate && rawEditorial.status !== 'rejected' ? 1 : 0),
     ...(rawEditorial.status !== 'rejected'
-      ? { confirmationSource: rawEditorial.status === 'confirmed' && rawEditorial.confirmationSource ? confirmationSource(rawEditorial.confirmationSource, true) : 'model-default' } : {}),
+      ? { confirmationSource: rawEditorial.status === 'confirmed'
+        ? (rawEditorial.confirmationSource ? confirmationSource(rawEditorial.confirmationSource, true) : 'legacy-unknown') : 'model-default' } : {}),
     ...(pendingEditorialUpdate ? { previousFingerprint: safeText(rawEditorial.sampleFingerprint, 128), acceptedUpdateAt: new Date().toISOString() } :
       rawEditorial.previousFingerprint ? { previousFingerprint: safeText(rawEditorial.previousFingerprint, 128) } : {}),
     ...(rawEditorial.lastRejectedUpdate && typeof rawEditorial.lastRejectedUpdate === 'object'
@@ -637,7 +639,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       ...(safeList(value.traits, 10, 160).length ? { traits: safeList(value.traits, 10, 160) } : {}),
       aliases: safeList(value.aliases, 12, 80),
       status,
-      ...(status === 'confirmed' ? { confirmationSource: value.status === 'confirmed' && value.confirmationSource ? confirmationSource(value.confirmationSource, true) : 'model-default' } : {}),
+      ...(status === 'confirmed' ? { confirmationSource: value.status === 'confirmed'
+        ? (value.confirmationSource ? confirmationSource(value.confirmationSource, true) : 'legacy-unknown') : 'model-default' } : {}),
       useForTranslation: value.useForTranslation !== false && status !== 'rejected',
       confidence: confidenceSource ? profileConfidence : null,
       ...(confidenceSource ? { confidenceSource } : {}),
@@ -669,7 +672,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     relationshipVoiceRules.push({
       speakerId, addresseeId,
       status: value.status === 'rejected' ? 'rejected' : 'confirmed',
-      ...(value.status !== 'rejected' ? { confirmationSource: value.status === 'confirmed' && value.confirmationSource ? confirmationSource(value.confirmationSource, true) : 'model-default' } : {}),
+      ...(value.status !== 'rejected' ? { confirmationSource: value.status === 'confirmed'
+        ? (value.confirmationSource ? confirmationSource(value.confirmationSource, true) : 'legacy-unknown') : 'model-default' } : {}),
       ...(safeText(value.baselineRegister, 180) ? { baselineRegister: safeText(value.baselineRegister, 180) } : {}),
       addressTerms: safeList(value.addressTerms, 8, 100),
       ...(safeText(value.directness, 180) ? { directness: safeText(value.directness, 180) } : {}),
@@ -700,7 +704,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       ...(safeText(value.chapter, 120) ? { chapter: safeText(value.chapter, 120) } : {}),
       segmentId,
       status,
-      ...(status === 'approved' ? { confirmationSource: value.status === 'approved' && value.confirmationSource ? confirmationSource(value.confirmationSource, true) : 'model-default' } : {}),
+      ...(status === 'approved' ? { confirmationSource: value.status === 'approved'
+        ? (value.confirmationSource ? confirmationSource(value.confirmationSource, true) : 'legacy-unknown') : 'model-default' } : {}),
       approvedBy: value.approvedBy === 'user' || value.approvedBy === 'reviewer' || value.approvedBy === 'manual-edit' || value.approvedBy === 'model-default'
         ? value.approvedBy : 'model-default',
       ...(attributionEvidence ? { attributionEvidence } : {}),
@@ -720,7 +725,8 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     entities: entityList,
     relationships: dedupeRelationships(relationships).slice(0, MAX_RELATIONSHIPS),
     styleGuide, styleGuideStatus,
-    ...(styleGuideStatus === 'confirmed' ? { styleGuideConfirmationSource: raw.styleGuideConfirmationSource ? styleGuideConfirmationSource || 'model-default' : 'model-default' } : {}),
+    ...(styleGuideStatus === 'confirmed' ? { styleGuideConfirmationSource: raw.styleGuideStatus === 'confirmed'
+      ? styleGuideConfirmationSource || 'legacy-unknown' : 'model-default' } : {}),
     styleGuideOrigin,
     ...(styleGuideAnalysisVersion ? { styleGuideAnalysisVersion } : {}),
     ...(styleGuideSourceRevisionId ? { styleGuideSourceRevisionId } : {}),
