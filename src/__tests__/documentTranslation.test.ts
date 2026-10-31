@@ -303,6 +303,38 @@ describe('文档翻译服务端模式', () => {
     expect(literaryStatus.value.reviewFindings[0]?.priority).toBe('optional');
   });
 
+  it('全书预分析失败时阻止文学翻译，不再降级为逐章补充', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: 'context service unavailable' }),
+    });
+    const { run, state, literaryStatus } = useDocumentTranslation();
+    const segments = [
+      {
+        id: 'book-s0', index: 0, text: 'A representative opening paragraph.',
+        kind: 'paragraph' as const, contextPath: 'Chapter One',
+      },
+      {
+        id: 'book-s1', index: 1, text: 'A later paragraph with a recurring character.',
+        kind: 'paragraph' as const, contextPath: 'Chapter Two',
+      },
+    ];
+    await run(segments, {
+      sourceLang: 'en', targetLang: 'zh', literaryMode: true, useLocalAgent: true,
+      localAgentUrl: 'http://127.0.0.1:8789', documentFormat: 'epub',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(state.value.running).toBe(false);
+    expect(state.value.error).toContain('全书预处理失败');
+    expect(literaryStatus.value.bookProfileReady).toBe(false);
+    expect(literaryStatus.value.diagnostics.some((event) =>
+      event.stage === 'book-analysis' && event.status === 'failed',
+    )).toBe(true);
+  });
+
   it('文学模式优先翻译当前页所在章节，而不是从头开始', async () => {
     sendMessage.mockImplementation(async (message: { jsonContent: string }) => {
       const blocks = JSON.parse(message.jsonContent) as Array<{ id: string }>;
