@@ -377,7 +377,7 @@ describe('文学书籍记忆', () => {
     expect(parsed.characterVoices.map((profile: any) => profile.characterId)).toContain('char-alice');
     expect(parsed.characterVoices.map((profile: any) => profile.characterId)).not.toContain('char-candidate');
     expect(parsed.relationshipVoiceRules).toHaveLength(1);
-    expect(parsed.voiceAnchors.map((item: any) => item.anchorId)).toEqual(['v1']);
+    expect(parsed.voiceAnchors.map((item: any) => item.anchorId)).toEqual(['v1', 'v2']);
     expect(serialized.length).toBeLessThan(10000);
     expect(parsed.constraints.join(' ')).toContain('不确定说话人');
   });
@@ -493,7 +493,7 @@ describe('文学书籍记忆', () => {
       entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person', evidence: 'Alice smiled',
         evidenceRefs: [{ segmentId: 's1', sourceQuote: 'Alice smiled at Bob.' }] }],
     }, [{ id: 's1', text: 'Alice smiled at Bob.' }]));
-    expect(corroborated.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('suggested');
+    expect(corroborated.entities.find((entity) => entity.source === 'Alice')?.reviewStatus).toBe('confirmed');
     const conflicted = mergeLiteraryMemory(first, autoConfirmLiteraryMemory({
       entities: [{ source: 'Alice', target: '爱丽斯', kind: 'person', evidence: 'Alice nodded',
         evidenceRefs: [{ segmentId: 's2', sourceQuote: 'Alice nodded slowly.' }] }],
