@@ -81,6 +81,8 @@ Local Agent 模式下，服务端 SQLite 是项目人物与上下文记忆的事
 - `model-default` 是机器默认采纳，不是用户确认。用户修改、确认和拒绝必须分别记录；`user-modified` 与 `user-confirmed` 均优先于机器默认结果。
 - 用户拒绝/删除必须持久化，重新分析、记忆刷新、TranslationBrief 合并不得自动恢复。不得仅删除 UI 或 LiteraryMemory 投影而让 Context Graph 原记录继续注入。
 - Local Agent 模式下，删除人物/实体/关系时必须通过 `/context-graph/review` 批量请求同时提交被拒绝的图谱节点/边和更新后的 LiteraryMemory；服务端在同一 SQLite 事务中提交图谱状态、记忆 revision 与事件。不得拆成“先拒绝图谱、再单独保存记忆”的两个写操作；事务失败时恢复本地快照。
+- 删除人物/实体/关系时，还必须在 `LiteraryBookMemory.rejectedItems` 写入隐藏 tombstone；人物删除包含 entity/profile canonical name、aliases 及被连带删除的关系。sanitize/merge 必须保留 tombstone 并过滤重新出现的同一项。只有用户明确重新编辑该实体/关系时，才清除对应 tombstone。不得只依赖图谱 node/edge ID，因为重新分析可能产生新 ID。
+- 普通 LiteraryMemory 写入与删除必须使用同一串行队列；删除先等待之前的写入完成，再基于最新内存状态创建快照，避免旧异步写入复活删除内容。
 - 证据不完整只影响置信度、可用范围和约束强度，不得仅因文风字段、画像维度、关系证据覆盖不完整而阻断翻译。
 - 保留原文版本、语言方向、来源绑定、未来章节隔离、译文写回位置和数据完整性等硬约束。只有缺少不可替代输入、数据损坏或执行无法继续等技术异常才暂停。
 - 自动应用必须保留来源与版本记录，且不得覆盖用户修改；用户可以事后修改或拒绝。
