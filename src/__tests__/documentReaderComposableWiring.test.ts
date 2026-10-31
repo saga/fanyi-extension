@@ -66,7 +66,7 @@ describe('document reader composable wiring', () => {
       resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
       'utf8',
     );
-    const runHandler = source.indexOf('async function startLocalAgentWorkspaceRun');
+    const runHandler = source.indexOf('async function runWorkspaceTranslation');
     expect(runHandler).toBeGreaterThan(-1);
     const readinessCheck = source.indexOf('await refreshContextGraphStatus(project, true)', runHandler);
     const runCreation = source.indexOf("'/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs'", runHandler);
