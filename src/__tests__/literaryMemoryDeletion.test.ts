@@ -67,10 +67,17 @@ describe('literary memory deletion persistence', () => {
     literaryMemory.value.entities.push({
       source: 'John Doe', target: '约翰', kind: 'person', aliases: ['Johnny'], reviewStatus: 'confirmed',
     } as any);
+    literaryMemory.value.relationships.push({
+      subject: 'Jane', predicate: 'knows', object: 'John Doe', reviewStatus: 'confirmed',
+    } as any);
 
     await editor.removeEntity(0);
 
     expect(literaryMemory.value.entities).toHaveLength(0);
+    expect(literaryMemory.value.relationships).toHaveLength(0);
+    expect(literaryMemory.value.rejectedItems).toContainEqual({
+      type: 'relationship', subject: 'Jane', predicate: 'knows', object: 'John Doe',
+    });
     const review = calls.filter((call) => call.path.endsWith('/context-graph/review'));
     const request = JSON.parse(review[0].options.body);
     expect(request.items).toEqual([
@@ -78,6 +85,7 @@ describe('literary memory deletion persistence', () => {
       { type: 'edge', id: 'edge-jane-john', status: 'rejected' },
     ]);
     expect(request.memory.entities).toHaveLength(0);
+    expect(request.memory.relationships).toHaveLength(0);
     expect(calls.some((call) => call.path.endsWith('/literary-memory'))).toBe(false,
       'graph rejection and memory revision must use one atomic API request');
   });
