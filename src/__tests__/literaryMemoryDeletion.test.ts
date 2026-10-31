@@ -153,6 +153,46 @@ describe('literary memory deletion persistence', () => {
     expect(request.memory.relationships).toHaveLength(0);
   });
 
+  it('serializes deletion after an already queued memory edit', async () => {
+    const { editor, literaryMemory, calls } = setupEditor({ nodes: [], edges: [] });
+    literaryMemory.value.entities.push({
+      source: 'Alice', target: '艾丽丝', kind: 'person', aliases: [], reviewStatus: 'confirmed',
+    } as any);
+
+    let releaseFirstWrite!: () => void;
+    let markFirstWriteStarted!: () => void;
+    const firstWriteGate = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+    const firstWriteStarted = new Promise<void>((resolve) => { markFirstWriteStarted = resolve; });
+    let memoryWrites = 0;
+    workspaceApiMock.mockImplementation(async (_base: string, _token: string, path: string, options?: any) => {
+      calls.push({ path, options });
+      if (path.endsWith('/context-graph')) return { contextGraph: { nodes: [], edges: [] } };
+      if (path.endsWith('/literary-memory')) {
+        memoryWrites++;
+        const memory = JSON.parse(options?.body || '{}').memory;
+        if (memoryWrites === 1) {
+          markFirstWriteStarted();
+          await firstWriteGate;
+        }
+        return { current: { memory } };
+      }
+      throw new Error('Unexpected workspace API path: ' + path);
+    });
+
+    const earlierEdit = editor.persistLiteraryMemoryToWorkspace();
+    await firstWriteStarted;
+    const deletion = editor.removeEntity(0);
+    releaseFirstWrite();
+    await Promise.all([earlierEdit, deletion]);
+
+    const writes = calls.filter((call) => call.path.endsWith('/literary-memory'));
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(writes[0].options.body).memory.entities).toHaveLength(1);
+    expect(JSON.parse(writes[1].options.body).memory.entities).toHaveLength(0,
+      'the queued deletion must be the final write and must not be overwritten by the earlier edit');
+    expect(literaryMemory.value.entities).toHaveLength(0);
+  });
+
   it('never rejects a relationship by predicate alone when an endpoint is unknown', async () => {
     const { editor, literaryMemory, calls } = setupEditor({
       nodes: [{ id: 'alice', name: 'Alice', attributes: {} }],
