@@ -198,3 +198,73 @@ describe('automatic canonical entity activation', () => {
     expect(merged.characterVoices[0]?.confirmationSource).toBe('user-confirmed');
   });
 });
+
+
+describe('Chinese editorial profile versioning', () => {
+  const profile = {
+    version: 1,
+    profileVersion: 3,
+    status: 'confirmed',
+    confirmationSource: 'user-confirmed',
+    sourceRevisionId: 'source-revision-1',
+    analysisVersion: 'chinese-editorial-profile-v1',
+    sampleFingerprint: 'active-fingerprint',
+    sampleCount: 24,
+    chapterCount: 5,
+    generatedAt: '2026-10-30T00:00:00.000Z',
+    confirmedAt: '2026-10-30T01:00:00.000Z',
+    profile: {
+      narrativeVoice: '克制、疏离。',
+      register: '现代书面语。',
+      rhythm: '保留长句。',
+      dialogue: '对白简洁。',
+      diction: '准确节制。',
+      rules: ['不擅自拆句。'],
+      avoid: ['不增加心理描写。'],
+    },
+    evidenceRefs: [
+      { segmentId: 's1', targetExcerpt: '她没有回答', observation: '对白克制', aspect: 'dialogue' },
+    ],
+    pendingUpdate: {
+      version: 1,
+      status: 'candidate',
+      sourceRevisionId: 'source-revision-1',
+      analysisVersion: 'chinese-editorial-profile-v1',
+      sampleFingerprint: 'pending-fingerprint',
+      basedOnFingerprint: 'active-fingerprint',
+      sampleCount: 32,
+      chapterCount: 7,
+      generatedAt: '2026-10-31T00:00:00.000Z',
+      profile: { narrativeVoice: '新版叙述声音。', rules: ['新版规则。'] },
+      evidenceRefs: [
+        { segmentId: 's2', targetExcerpt: '他仍然沉默', observation: '新版证据', aspect: 'narrativeVoice' },
+      ],
+    },
+  };
+
+  it('preserves the confirmed base profile and pending update through extension sanitization', () => {
+    const memory = sanitizeLiteraryMemory({ chineseEditorialProfile: profile });
+    expect(memory.chineseEditorialProfile?.status).toBe('confirmed');
+    expect(memory.chineseEditorialProfile?.profileVersion).toBe(3);
+    expect(memory.chineseEditorialProfile?.profile.narrativeVoice).toBe('克制、疏离。');
+    expect(memory.chineseEditorialProfile?.pendingUpdate?.sampleFingerprint).toBe('pending-fingerprint');
+    expect(memory.chineseEditorialProfile?.pendingUpdate?.profile.narrativeVoice).toBe('新版叙述声音。');
+  });
+
+  it('does not replace a confirmed profile with an incoming candidate during memory merge', () => {
+    const existing = sanitizeLiteraryMemory({ chineseEditorialProfile: profile });
+    const merged = mergeLiteraryMemory(existing, {
+      chineseEditorialProfile: {
+        ...profile,
+        status: 'candidate',
+        confirmationSource: undefined,
+        sampleFingerprint: 'unreviewed-incoming-candidate',
+        profile: { narrativeVoice: '不应覆盖已确认版本。' },
+        pendingUpdate: undefined,
+      },
+    });
+    expect(merged.chineseEditorialProfile?.sampleFingerprint).toBe('active-fingerprint');
+    expect(merged.chineseEditorialProfile?.profile.narrativeVoice).toBe('克制、疏离。');
+    expect(merged.chineseEditorialProfile?.pendingUpdate?.sampleFingerprint).toBe('pending-fingerprint');
+  });
+});
