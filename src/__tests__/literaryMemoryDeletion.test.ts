@@ -79,6 +79,30 @@ describe('literary memory deletion persistence', () => {
     expect(calls.some((call) => call.path.endsWith('/literary-memory'))).toBe(true);
   });
 
+  it('deletes a managed person only after rejecting its node and connected edges', async () => {
+    const { editor, literaryMemory, calls } = setupEditor({
+      nodes: [{ id: 'alice', name: 'Alice', attributes: { aliases: ['Ally'] } }],
+      edges: [{ id: 'alice-bob', sourceNodeId: 'alice', targetNodeId: 'bob' }],
+    });
+    literaryMemory.value.entities.push({
+      source: 'Alice', target: '艾丽丝', kind: 'person', aliases: ['Ally'], reviewStatus: 'confirmed',
+    } as any);
+    literaryMemory.value.relationships.push({
+      subject: 'Alice', predicate: 'knows', object: 'Bob', reviewStatus: 'confirmed',
+    } as any);
+
+    await editor.removeManagedPerson(editor.managedPeople.value[0]);
+
+    expect(literaryMemory.value.entities).toHaveLength(0);
+    expect(literaryMemory.value.relationships).toHaveLength(0);
+    const review = calls.filter((call) => call.path.endsWith('/context-graph/review'));
+    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([
+      { type: 'node', id: 'alice', status: 'rejected' },
+      { type: 'edge', id: 'alice-bob', status: 'rejected' },
+    ]);
+    expect(calls.some((call) => call.path.endsWith('/literary-memory'))).toBe(true);
+  });
+
   it('does not delete the local entity when persistent Context Graph rejection fails', async () => {
     const { editor, literaryMemory, persistenceMessage } = setupEditor({
       nodes: [{ id: 'node-john', name: 'John Doe', attributes: {} }],
