@@ -301,7 +301,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     entity.aliases = Array.from(new Set(value.split(',').map((alias) => alias.trim()).filter(Boolean))).slice(0, 8);
     syncEntityMappingToVoiceProfiles(entity);
     entity.reviewStatus = entity.source.trim() && entity.target.trim() ? 'confirmed' : 'suggested';
-    if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-confirmed';
+    if (entity.reviewStatus === 'confirmed') entity.confirmationSource = 'user-modified';
     else delete entity.confirmationSource;
     void persistLiteraryMemoryToWorkspace().catch((error) => {
       persistenceMessage.value = '保存实体别名失败：' + (error instanceof Error ? error.message : String(error));
