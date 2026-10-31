@@ -417,7 +417,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       const entityIndex = literaryMemory.value.entities.indexOf(entity);
       if (entityIndex >= 0) literaryMemory.value.entities.splice(entityIndex, 1);
     }
-    const characterId = item.profile?.characterId;
+    const characterId = currentItem.profile?.characterId;
     if (characterId) {
       literaryMemory.value.characterVoices = literaryMemory.value.characterVoices.filter((profile) => profile.characterId !== characterId)
         .map((profile) => ({ ...profile, contrastRules: profile.contrastRules.filter((rule) => rule.otherCharacterId !== characterId) }));
