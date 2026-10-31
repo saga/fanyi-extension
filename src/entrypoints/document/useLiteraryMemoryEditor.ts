@@ -435,14 +435,15 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       : managedPeople.value.find((candidate) =>
           normalizeManagedPersonName(managedPersonSource(candidate)) === normalizeManagedPersonName(managedPersonSource(item))) || item;
     const names = new Set([
-      managedPersonSource(currentItem), ...(currentItem.entity?.aliases || []), ...(currentItem.profile?.aliases || []),
+      managedPersonSource(currentItem), currentItem.profile?.canonicalSourceName,
+      ...(currentItem.entity?.aliases || []), ...(currentItem.profile?.aliases || []),
     ].map(normalizeManagedPersonName).filter(Boolean));
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const entity = findManagedPersonEntity(currentItem);
     addRejectedEntityTombstone(
       managedPersonSource(currentItem),
       'person',
-      [...(currentItem.entity?.aliases || []), ...(currentItem.profile?.aliases || [])],
+      [currentItem.profile?.canonicalSourceName || '', ...(currentItem.entity?.aliases || []), ...(currentItem.profile?.aliases || [])],
     );
     const removedRelationships = literaryMemory.value.relationships.filter((relation) =>
       names.has(normalizeManagedPersonName(relation.subject)) ||
