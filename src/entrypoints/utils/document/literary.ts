@@ -800,7 +800,7 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
           : item.type === 'relationship' && other.type === 'relationship' &&
             [item.subject, item.predicate, item.object].map(normalizedEntityName).join('|') ===
             [other.subject, other.predicate, other.object].map(normalizedEntityName).join('|'))) === index)
-      .slice(-200),
+      .slice(-2000),
     styleGuide,
     styleGuideStatus: existing.styleGuideStatus === 'confirmed' ? 'confirmed' : incoming.styleGuideStatus,
     styleGuideConfirmationSource: existing.styleGuideStatus === 'confirmed'
