@@ -8,7 +8,7 @@ export type LiteraryEntityKind = 'person' | 'place' | 'object' | 'organization' 
 export type CanonicalMappingDisposition = 'eligible' | 'low-value' | 'invalid-target' | 'compound-name';
 
 /** 记录启用依据，而不是把机器证据误称为用户确认。 */
-export type LiteraryConfirmationSource = 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
+export type LiteraryConfirmationSource = 'model-default' | 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
 export type LiteraryStyleGuideOrigin = 'context-graph' | 'user-edited' | 'user-confirmed' | 'legacy-unknown';
 export type LiteraryTargetConfidence = 'candidate' | 'corroborated';
 export interface LiteraryTargetEvidenceRef { segmentId: string; sourceQuote: string; targetSurface: string }
@@ -125,7 +125,7 @@ export interface CharacterVoiceAnchor {
   status: 'candidate' | 'approved' | 'rejected';
   /** 旧锚点可能没有可证明的审批来源。 */
   confirmationSource?: LiteraryConfirmationSource;
-  approvedBy: 'user' | 'reviewer' | 'manual-edit';
+  approvedBy: 'user' | 'reviewer' | 'manual-edit' | 'model-default';
   /** 原文中用于判断说话人归属的可核对证据；没有它不能批准声音锚点。 */
   attributionEvidence?: string;
   attributionConfidence?: number;
@@ -298,7 +298,7 @@ function mergeConfirmationSource(
   incoming: LiteraryConfirmationSource | undefined,
 ): LiteraryConfirmationSource | undefined {
   const rank = (value: LiteraryConfirmationSource | undefined) =>
-    value === 'user-confirmed' ? 3 : value === 'evidence-verified' ? 2 : value === 'legacy-unknown' ? 1 : 0;
+    value === 'user-confirmed' ? 4 : value === 'model-default' ? 3 : value === 'evidence-verified' ? 2 : value === 'legacy-unknown' ? 1 : 0;
   return rank(incoming) > rank(prior) ? incoming : prior;
 }
 function normalizedEntityName(value: string): string {
@@ -447,7 +447,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         ...(entity.canonicalMappingDisposition === 'eligible' || entity.canonicalMappingDisposition === 'low-value' ||
             entity.canonicalMappingDisposition === 'invalid-target' || entity.canonicalMappingDisposition === 'compound-name'
           ? { canonicalMappingDisposition: entity.canonicalMappingDisposition } : {}),
-        reviewStatus: isUserConfirmed ? 'confirmed' : 'suggested',
+        reviewStatus: 'confirmed',
         ...(resolvedConfirmationSource ? { confirmationSource: resolvedConfirmationSource } : {}),
       });
     }
@@ -472,7 +472,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
         subject, predicate, object,
         ...(safeText(rel.evidence, 160) ? { evidence: safeText(rel.evidence, 160) } : {}),
         ...(evidenceRefs.length ? { evidenceRefs } : {}),
-        reviewStatus: rel.reviewStatus === 'confirmed' ? 'confirmed' : 'suggested',
+        reviewStatus: 'confirmed',
         ...(confirmationSource(rel.confirmationSource, rel.reviewStatus === 'confirmed')
           ? { confirmationSource: confirmationSource(rel.confirmationSource, rel.reviewStatus === 'confirmed') } : {}),
       });
@@ -494,7 +494,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const avoid = Array.from(new Set(styleRaw.avoid.map((value) => safeText(value, 240)).filter(Boolean))).slice(0, 16);
     if (avoid.length) styleGuide.avoid = avoid;
   }
-  const styleGuideStatus = raw.styleGuideStatus === 'confirmed' ? 'confirmed' : 'candidate';
+  const styleGuideStatus = raw.styleGuideAutoDisabled === true ? 'candidate' : Object.keys(styleGuide).length ? 'confirmed' : 'candidate';
   const styleGuideConfirmationSource = confirmationSource(raw.styleGuideConfirmationSource, styleGuideStatus === 'confirmed');
   const rawStyleOrigin = raw.styleGuideOrigin;
   const styleGuideOrigin: LiteraryStyleGuideOrigin =
@@ -548,10 +548,10 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
   const pendingEditorialUpdate = normalizeEditorialCandidate(rawEditorial?.pendingUpdate);
   const chineseEditorialProfile: ChineseEditorialProfile | undefined = rawEditorial && editorialCandidate ? {
     ...editorialCandidate,
-    status: reviewState(rawEditorial.status, ['candidate', 'confirmed', 'rejected']) as ChineseEditorialProfile['status'],
+    status: rawEditorial.status === 'rejected' ? 'rejected' : 'confirmed',
     profileVersion: Math.max(1, Math.min(1000, Number(rawEditorial.profileVersion) || 1)),
-    ...(rawEditorial.confirmationSource === 'user-confirmed' && rawEditorial.status === 'confirmed'
-      ? { confirmationSource: 'user-confirmed', confirmedAt: safeText(rawEditorial.confirmedAt, 64) } : {}),
+    ...(rawEditorial.status !== 'rejected'
+      ? { confirmationSource: confirmationSource(rawEditorial.confirmationSource, true) || 'model-default', ...(rawEditorial.confirmedAt ? { confirmedAt: safeText(rawEditorial.confirmedAt, 64) } : {}) } : {}),
     ...(pendingEditorialUpdate ? { pendingUpdate: pendingEditorialUpdate } : {}),
     ...(rawEditorial.previousFingerprint ? { previousFingerprint: safeText(rawEditorial.previousFingerprint, 128) } : {}),
     ...(rawEditorial.acceptedUpdateAt ? { acceptedUpdateAt: safeText(rawEditorial.acceptedUpdateAt, 64) } : {}),
@@ -626,7 +626,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     }) : [];
     const profileStatus = reviewState(value.status, ['candidate', 'confirmed', 'rejected']) as CharacterVoiceProfile['status'];
     // 即便输入声称 confirmed，没有可定位的原文证据也只能降级为 candidate。
-    const status = profileStatus === 'confirmed' && evidence.length ? 'confirmed' : profileStatus === 'rejected' ? 'rejected' : 'candidate';
+    const status = profileStatus === 'rejected' ? 'rejected' : 'confirmed';
     const profileConfidence = safeConfidence(value.confidence);
     const confidenceSource = profileConfidence !== null && value.confidenceSource === 'model_self_report'
       ? 'model_self_report' as const
@@ -638,8 +638,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       ...(safeList(value.traits, 10, 160).length ? { traits: safeList(value.traits, 10, 160) } : {}),
       aliases: safeList(value.aliases, 12, 80),
       status,
-      ...(confirmationSource(value.confirmationSource, status === 'confirmed')
-        ? { confirmationSource: confirmationSource(value.confirmationSource, status === 'confirmed') } : {}),
+      ...(status === 'confirmed' ? { confirmationSource: confirmationSource(value.confirmationSource, true) || 'model-default' } : {}),
       useForTranslation: value.useForTranslation !== false && status !== 'rejected',
       confidence: confidenceSource ? profileConfidence : null,
       ...(confidenceSource ? { confidenceSource } : {}),
@@ -657,7 +656,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       openQuestions: safeList(value.openQuestions, 8, 180),
     };
     // 空画像没有可执行信息时跳过，避免人物数量膨胀且持续注入噪音。
-    if ((Object.keys(profile.voiceCore).length || profile.role || profile.traits?.length) && evidence.length) characterVoices.push(profile);
+    if (Object.keys(profile.voiceCore).length || profile.role || profile.traits?.length) characterVoices.push(profile);
   }
   const voiceRuleInput = Array.isArray(raw.relationshipVoiceRules) ? raw.relationshipVoiceRules : [];
   const relationshipVoiceRules: RelationshipVoiceRule[] = [];
@@ -667,12 +666,11 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const speakerId = safeText(value.speakerId, 100);
     const addresseeId = safeText(value.addresseeId, 100);
     const evidenceSegmentIds = safeList(value.evidenceSegmentIds, 8, 160);
-    if (!speakerId || !addresseeId || !evidenceSegmentIds.length) continue;
+    if (!speakerId || !addresseeId) continue;
     relationshipVoiceRules.push({
       speakerId, addresseeId,
-      status: reviewState(value.status, ['candidate', 'confirmed', 'rejected']) as RelationshipVoiceRule['status'],
-      ...(confirmationSource(value.confirmationSource, value.status === 'confirmed')
-        ? { confirmationSource: confirmationSource(value.confirmationSource, value.status === 'confirmed') } : {}),
+      status: value.status === 'rejected' ? 'rejected' : 'confirmed',
+      ...(value.status !== 'rejected' ? { confirmationSource: confirmationSource(value.confirmationSource, true) || 'model-default' } : {}),
       ...(safeText(value.baselineRegister, 180) ? { baselineRegister: safeText(value.baselineRegister, 180) } : {}),
       addressTerms: safeList(value.addressTerms, 8, 100),
       ...(safeText(value.directness, 180) ? { directness: safeText(value.directness, 180) } : {}),
@@ -694,8 +692,7 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     const attributionEvidence = safeText(value.attributionEvidence, 240);
     const attributionConfidence = safeConfidence(value.attributionConfidence) ?? 0;
     const claimedStatus = reviewState(value.status, ['candidate', 'approved', 'rejected']) as CharacterVoiceAnchor['status'];
-    const status = claimedStatus === 'approved' && (!attributionEvidence || attributionConfidence < 0.7)
-      ? 'candidate' : claimedStatus;
+    const status = claimedStatus === 'rejected' ? 'rejected' : 'approved';
     voiceAnchors.push({
       anchorId: safeText(value.anchorId, 120) || 'anchor_' + stableCharacterId(segmentId + source).slice(5),
       speakerId,
@@ -704,10 +701,9 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
       ...(safeText(value.chapter, 120) ? { chapter: safeText(value.chapter, 120) } : {}),
       segmentId,
       status,
-      ...(confirmationSource(value.confirmationSource, status === 'approved')
-        ? { confirmationSource: confirmationSource(value.confirmationSource, status === 'approved') } : {}),
-      approvedBy: value.approvedBy === 'user' || value.approvedBy === 'reviewer' || value.approvedBy === 'manual-edit'
-        ? value.approvedBy : 'reviewer',
+      ...(status === 'approved' ? { confirmationSource: confirmationSource(value.confirmationSource, true) || 'model-default' } : {}),
+      approvedBy: value.approvedBy === 'user' || value.approvedBy === 'reviewer' || value.approvedBy === 'manual-edit' || value.approvedBy === 'model-default'
+        ? value.approvedBy : 'model-default',
       ...(attributionEvidence ? { attributionEvidence } : {}),
       ...(typeof value.attributionConfidence === 'number' && Number.isFinite(value.attributionConfidence)
         ? { attributionConfidence } : {}),
