@@ -28,7 +28,7 @@
 
 **启用 Local Agent 时，阅读页和 Agent Workspace 必须共用同一个 Project/Run pipeline。** 阅读页的“翻译当前页/继续翻译下一待译页/翻译下一页/翻译下三页/强制重译当前页/重试失败项”，以及 Agent Workspace、CLI 和项目 API，都必须通过 `/api/documents/projects/:projectId/runs` 与 Local Agent Service 的同一 Run executor 执行。入口只选择 segment IDs / Run scope；不得在 `useDocumentTranslation.ts` 中为 Local Agent 再跑一套浏览器侧批次循环。该旧执行路径只供非 Local Agent/轻量服务模式使用。
 
-Local Agent 模式下，服务端 SQLite 是项目人物与上下文记忆的事实来源。扩展仅在新建项目时迁移旧阅读会话记忆；后续用户明确编辑/确认人物、实体、关系、角色声音或文风时，才通过 `/literary-memory` 显式保存。普通 Prompt 更新和 Run 创建不得把旧 IndexedDB 记忆快照隐式重写成当前记忆 revision。每个本地 Run 结束后，阅读页刷新服务端记忆，再保存本地阅读恢复快照。
+Local Agent 模式下，服务端 SQLite 是文档项目全部业务数据的唯一持久化位置，包括来源文件/片段、译文、Prompt、LiteraryMemory、Context Graph、Runs 和审校记录。扩展只保留当前页面内存中的 UI 投影；不得把文档、译文或 LiteraryMemory 写入 IndexedDB、localStorage 或扩展 storage。用户编辑通过服务端 API 保存，服务端成功响应才代表保存成功。阅读位置等轻量恢复元数据也写入服务端 reader-session，并只保存 projectId 和 UI 状态。服务不可用时不得回退到扩展旧快照。
 
 文学初译的 `context_delta` 验证、来源顺序合并、冻结 wave 边界、冲突审计和自动候选记忆持久化全部属于 `vocal-saga/local-agent-service`。扩展可以展示默认采纳结果及其证据/置信度，也可以直接修改或明确拒绝；不要求逐项确认。扩展不得复制服务端的提取/合并算法，也不得把机器默认采纳伪装成用户确认。统一管线不要求所有任务使用同一个 Prompt；小说/技术文档的策略可不同，但执行生命周期和可信数据边界必须统一。
 
