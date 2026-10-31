@@ -249,10 +249,113 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     });
     persistenceMessage.value = '已添加人物：填写规范原文名和统一译名后会保存；角色与声音信息可随后合并进来。';
   }
-  function removeManagedPerson(item: ManagedPersonItem) {
+  /**
+   * 删除人物/实体/关系时同步写入 Context Graph 的持久拒绝状态。
+   * LiteraryMemory 是编辑投影；仅从投影数组删除会导致下一次图谱刷新后项目重新出现。
+   */
+  async function rejectContextGraphItemsByNames(names: Set<string>): Promise<void> {
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    if (!config.documentUseLocalAgent) return;
+    let project = workspaceProject.value;
+    if (!project?.projectId) {
+      await deps.ensureWorkspace();
+      project = workspaceProject.value;
+    }
+    if (!project?.projectId) return;
+    await awaitLiteraryMemoryWrites();
+    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+    const token = config.documentLocalAgentToken || '';
+    const response = await workspaceApi<{ contextGraph?: { nodes?: Array<any>; edges?: Array<any> } }>(
+      base, token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph',
+    );
+    const graph = response.contextGraph || {};
+    const matchedNodeIds = new Set<string>();
+    for (const node of graph.nodes || []) {
+      const attributes = node.attributes && typeof node.attributes === 'object' ? node.attributes : {};
+      const candidates = [node.name, attributes.canonicalName, attributes.sourceName, attributes.name,
+        ...(Array.isArray(attributes.aliases) ? attributes.aliases : [])];
+      if (candidates.some((value) => names.has(normalizeManagedPersonName(String(value || ''))))) {
+        matchedNodeIds.add(String(node.id || ''));
+      }
+    }
+    const items: Array<{ type: 'node' | 'edge'; id: string }> = [];
+    for (const id of matchedNodeIds) if (id) items.push({ type: 'node', id });
+    for (const edge of graph.edges || []) {
+      if (matchedNodeIds.has(String(edge.sourceNodeId || '')) || matchedNodeIds.has(String(edge.targetNodeId || ''))) {
+        const id = String(edge.id || '');
+        if (id) items.push({ type: 'edge', id });
+      }
+    }
+    for (const item of items) {
+      await workspaceApi(
+        base, token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/review',
+        { method: 'POST', body: JSON.stringify({ ...item, status: 'rejected' }) },
+      );
+    }
+  }
+
+  async function rejectContextGraphRelationship(subject: string, object: string, predicate: string): Promise<void> {
+    const config = readerConfig.value || await getConfig();
+    readerConfig.value = config;
+    if (!config.documentUseLocalAgent) return;
+    let project = workspaceProject.value;
+    if (!project?.projectId) {
+      await deps.ensureWorkspace();
+      project = workspaceProject.value;
+    }
+    if (!project?.projectId) return;
+    await awaitLiteraryMemoryWrites();
+    const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
+    const token = config.documentLocalAgentToken || '';
+    const response = await workspaceApi<{ contextGraph?: { nodes?: Array<any>; edges?: Array<any> } }>(
+      base, token,
+      '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph',
+    );
+    const graph = response.contextGraph || {};
+    const normalize = normalizeManagedPersonName;
+    const nodeIds = new Map<string, string>();
+    for (const node of graph.nodes || []) {
+      const attributes = node.attributes && typeof node.attributes === 'object' ? node.attributes : {};
+      for (const value of [node.name, attributes.canonicalName, attributes.sourceName, attributes.name,
+        ...(Array.isArray(attributes.aliases) ? attributes.aliases : [])]) {
+        const key = normalize(String(value || ''));
+        if (key) nodeIds.set(key, String(node.id || ''));
+      }
+    }
+    const sourceId = nodeIds.get(normalize(subject));
+    const targetId = nodeIds.get(normalize(object));
+    const expectedPredicate = normalize(predicate);
+    const matches = (graph.edges || []).filter((edge) => {
+      if (sourceId && targetId && (String(edge.sourceNodeId) !== sourceId || String(edge.targetNodeId) !== targetId)) return false;
+      const attributes = edge.attributes && typeof edge.attributes === 'object' ? edge.attributes : {};
+      const actualPredicate = normalize(String(attributes.predicate || attributes.relation || edge.kind || ''));
+      return (!sourceId || !targetId || (String(edge.sourceNodeId) === sourceId && String(edge.targetNodeId) === targetId)) &&
+        (!expectedPredicate || !actualPredicate || expectedPredicate === actualPredicate);
+    });
+    for (const edge of matches) {
+      const id = String(edge.id || '');
+      if (!id) continue;
+      await workspaceApi(
+        base, token,
+        '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/context-graph/review',
+        { method: 'POST', body: JSON.stringify({ type: 'edge', id, status: 'rejected' }) },
+      );
+    }
+  }
+
+  async function removeManagedPerson(item: ManagedPersonItem) {
     const names = new Set([
       managedPersonSource(item), ...(item.entity?.aliases || []), ...(item.profile?.aliases || []),
     ].map(normalizeManagedPersonName).filter(Boolean));
+    try {
+      await rejectContextGraphItemsByNames(names);
+    } catch (error) {
+      persistenceMessage.value = '无法持久拒绝对应的全书人物/关系记录，未执行删除：' + (error instanceof Error ? error.message : String(error));
+      return;
+    }
     const entity = findManagedPersonEntity(item);
     if (entity) {
       const entityIndex = literaryMemory.value.entities.indexOf(entity);
@@ -313,11 +416,17 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     literaryMemory.value.entities.push({ source: '', target: '', kind: 'other', aliases: [], reviewStatus: 'suggested' });
     persistenceMessage.value = '已添加空白映射：填写原文名称和统一译名后会自动生效';
   }
-  function removeEntity(index: number) {
-    literaryMemory.value.entities.splice(index, 1);
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '移除实体映射失败：' + (error instanceof Error ? error.message : String(error));
-    });
+  async function removeEntity(index: number) {
+    const entity = literaryMemory.value.entities[index];
+    if (!entity) return;
+    const names = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
+    try {
+      await rejectContextGraphItemsByNames(names);
+      literaryMemory.value.entities.splice(index, 1);
+      await persistLiteraryMemoryToWorkspace();
+    } catch (error) {
+      persistenceMessage.value = '无法持久拒绝对应的全书实体记录，未执行删除：' + (error instanceof Error ? error.message : String(error));
+    }
   }
   function markRelationshipModified(relation: LiteraryRelationship) {
     // Editing a default-adopted relation changes its working value; it remains active.
@@ -387,11 +496,16 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
   function addRelationship() {
     literaryMemory.value.relationships.push({ subject: '', predicate: '', object: '', reviewStatus: 'suggested' });
   }
-  function removeRelationship(index: number) {
-    literaryMemory.value.relationships.splice(index, 1);
-    void persistLiteraryMemoryToWorkspace().catch((error) => {
-      persistenceMessage.value = '移除人物关系失败：' + (error instanceof Error ? error.message : String(error));
-    });
+  async function removeRelationship(index: number) {
+    const relation = literaryMemory.value.relationships[index];
+    if (!relation) return;
+    try {
+      await rejectContextGraphRelationship(relation.subject, relation.object, relation.predicate);
+      literaryMemory.value.relationships.splice(index, 1);
+      await persistLiteraryMemoryToWorkspace();
+    } catch (error) {
+      persistenceMessage.value = '无法持久拒绝对应的全书关系记录，未执行删除：' + (error instanceof Error ? error.message : String(error));
+    }
   }
 
   let literaryMemorySaveQueue: Promise<void> = Promise.resolve();
