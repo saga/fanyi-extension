@@ -529,7 +529,16 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
     const snapshot = JSON.parse(JSON.stringify(literaryMemory.value)) as LiteraryBookMemory;
     const names = new Set([entity.source, ...(entity.aliases || [])].map(normalizeManagedPersonName).filter(Boolean));
     addRejectedEntityTombstone(entity.source, entity.kind, entity.aliases || []);
+    const relatedRelationships = literaryMemory.value.relationships.filter((relation) =>
+      names.has(normalizeManagedPersonName(relation.subject)) ||
+      names.has(normalizeManagedPersonName(relation.object)));
+    for (const relation of relatedRelationships) {
+      addRejectedRelationshipTombstone(relation.subject, relation.predicate, relation.object);
+    }
     literaryMemory.value.entities.splice(index, 1);
+    literaryMemory.value.relationships = literaryMemory.value.relationships.filter((relation) =>
+      !names.has(normalizeManagedPersonName(relation.subject)) &&
+      !names.has(normalizeManagedPersonName(relation.object)));
     try {
       await enqueueLiteraryMemoryOperation(() => rejectContextGraphItemsByNames(names, literaryMemory.value));
     } catch (error) {
