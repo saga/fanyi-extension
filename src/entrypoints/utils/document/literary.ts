@@ -546,14 +546,14 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
   const editorialCandidate = normalizeEditorialCandidate(rawEditorial);
   const pendingEditorialUpdate = normalizeEditorialCandidate(rawEditorial?.pendingUpdate);
   const chineseEditorialProfile: ChineseEditorialProfile | undefined = rawEditorial && editorialCandidate ? {
-    ...editorialCandidate,
+    ...(pendingEditorialUpdate && rawEditorial.status !== 'rejected' ? pendingEditorialUpdate : editorialCandidate),
     status: rawEditorial.status === 'rejected' ? 'rejected' : 'confirmed',
-    profileVersion: Math.max(1, Math.min(1000, Number(rawEditorial.profileVersion) || 1)),
+    profileVersion: Math.max(1, Math.min(1000, Number(rawEditorial.profileVersion) || 1)) +
+      (pendingEditorialUpdate && rawEditorial.status !== 'rejected' ? 1 : 0),
     ...(rawEditorial.status !== 'rejected'
-      ? { confirmationSource: confirmationSource(rawEditorial.confirmationSource, true) || 'model-default', ...(rawEditorial.confirmedAt ? { confirmedAt: safeText(rawEditorial.confirmedAt, 64) } : {}) } : {}),
-    ...(pendingEditorialUpdate ? { pendingUpdate: pendingEditorialUpdate } : {}),
-    ...(rawEditorial.previousFingerprint ? { previousFingerprint: safeText(rawEditorial.previousFingerprint, 128) } : {}),
-    ...(rawEditorial.acceptedUpdateAt ? { acceptedUpdateAt: safeText(rawEditorial.acceptedUpdateAt, 64) } : {}),
+      ? { confirmationSource: confirmationSource(rawEditorial.confirmationSource, true) || 'model-default' } : {}),
+    ...(pendingEditorialUpdate ? { previousFingerprint: safeText(rawEditorial.sampleFingerprint, 128), acceptedUpdateAt: new Date().toISOString() } :
+      rawEditorial.previousFingerprint ? { previousFingerprint: safeText(rawEditorial.previousFingerprint, 128) } : {}),
     ...(rawEditorial.lastRejectedUpdate && typeof rawEditorial.lastRejectedUpdate === 'object'
       ? { lastRejectedUpdate: {
           sampleFingerprint: safeText(rawEditorial.lastRejectedUpdate.sampleFingerprint, 128),
