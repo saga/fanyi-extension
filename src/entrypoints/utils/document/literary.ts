@@ -789,18 +789,27 @@ export function mergeLiteraryMemory(existingInput: unknown, incomingInput: unkno
   for (const item of [...existing.chapterSummaries, ...incoming.chapterSummaries]) {
     summaries.set(item.chapter.toLocaleLowerCase(), item);
   }
+  const rejectionMap = new Map<string, LiteraryMemoryRejection>();
+  for (const item of [...existing.rejectedItems, ...incoming.rejectedItems]) {
+    const key = item.type === 'entity'
+      ? 'entity|' + item.kind + '|' + normalizedEntityName(item.source)
+      : 'relationship|' + [item.subject, item.predicate, item.object].map(normalizedEntityName).join('|');
+    const prior = rejectionMap.get(key);
+    if (item.type === 'entity' && prior?.type === 'entity') {
+      rejectionMap.set(key, {
+        ...prior,
+        aliases: Array.from(new Set([...prior.aliases, ...item.aliases])).slice(0, 8),
+      });
+    } else if (!prior) {
+      rejectionMap.set(key, item);
+    }
+  }
+  const rejectedItems = Array.from(rejectionMap.values()).slice(-2000);
   return sanitizeLiteraryMemory({
     version: 2,
     entities,
     relationships: [...existing.relationships, ...incoming.relationships],
-    rejectedItems: [...existing.rejectedItems, ...incoming.rejectedItems]
-      .filter((item, index, all) => all.findIndex((other) =>
-        item.type === other.type && (item.type === 'entity' && other.type === 'entity'
-          ? normalizedEntityName(item.source) === normalizedEntityName(other.source)
-          : item.type === 'relationship' && other.type === 'relationship' &&
-            [item.subject, item.predicate, item.object].map(normalizedEntityName).join('|') ===
-            [other.subject, other.predicate, other.object].map(normalizedEntityName).join('|'))) === index)
-      .slice(-2000),
+    rejectedItems,
     styleGuide,
     styleGuideStatus: existing.styleGuideStatus === 'confirmed' ? 'confirmed' : incoming.styleGuideStatus,
     styleGuideConfirmationSource: existing.styleGuideStatus === 'confirmed'
