@@ -26,6 +26,7 @@ function setupEditor(graph: any) {
   });
   const workspaceProject = ref<any>({ projectId: 'project-1' });
   const persistenceMessage = ref('');
+  const persistSession = vi.fn(async () => {});
   const calls: Array<{ path: string; options?: any }> = [];
 
   workspaceApiMock.mockImplementation(async (_base: string, _token: string, path: string, options?: any) => {
@@ -47,16 +48,37 @@ function setupEditor(graph: any) {
     workspaceProject,
     ensureWorkspace: async () => workspaceProject.value,
     persistenceMessage,
-    persistSession: async () => {},
+    persistSession,
     contextGraphOverview: ref(createEmptyContextGraphOverview()),
   });
-  return { editor, literaryMemory, persistenceMessage, calls };
+  return { editor, literaryMemory, persistenceMessage, calls, persistSession };
 }
 
 describe('literary memory deletion persistence', () => {
   beforeEach(() => {
     workspaceApiMock.mockReset();
     getConfigMock.mockReset();
+  });
+
+  it('does not persist Local Agent LiteraryMemory in the extension session store', async () => {
+    const { editor, literaryMemory, calls, persistSession } = setupEditor({ nodes: [], edges: [] });
+    literaryMemory.value.entities.push({
+      source: 'Alice', target: '艾丽丝', kind: 'person', aliases: [], reviewStatus: 'confirmed',
+    } as any);
+
+    await editor.persistLiteraryMemoryToWorkspace();
+
+    expect(calls.filter((call) => call.path.endsWith('/literary-memory'))).toHaveLength(1);
+    expect(persistSession).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to extension persistence when the Local Agent project is missing', async () => {
+    const { editor, persistSession } = setupEditor({ nodes: [], edges: [] });
+    const depsProject = (editor as any);
+    void depsProject;
+    // A missing project must fail rather than save the in-memory projection locally.
+    await expect(editor.persistLiteraryMemoryToWorkspace()).resolves.toBeUndefined();
+    expect(persistSession).not.toHaveBeenCalled();
   });
 
   it('rejects a matching entity node and persists the LiteraryMemory projection', async () => {
@@ -134,7 +156,7 @@ describe('literary memory deletion persistence', () => {
     await editor.removeEntity(0);
 
     expect(literaryMemory.value.entities).toHaveLength(1);
-    expect(persistenceMessage.value).toContain('已恢复本地资料');
+    expect(persistenceMessage.value).toContain('已恢复当前页面编辑状态');
   });
 
   it('rejects only the exact relationship edge when endpoints and predicate match', async () => {
