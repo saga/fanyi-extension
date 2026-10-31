@@ -317,27 +317,28 @@ function mergeEntityRecord(prior: LiteraryEntity, candidate: LiteraryEntity): Li
     const key = normalizedEntityName(alias);
     if (key && key !== canonicalKey && !aliasMap.has(key)) aliasMap.set(key, alias);
   }
-  const userLockedTarget = prior.confirmationSource === 'user-modified' || prior.confirmationSource === 'user-confirmed';
+  const sameTarget = normalizedEntityName(prior.target) === normalizedEntityName(candidate.target);
+  const priorUserChoice = prior.confirmationSource === 'user-modified' || prior.confirmationSource === 'user-confirmed';
+  const candidateUserChoice = candidate.confirmationSource === 'user-modified' || candidate.confirmationSource === 'user-confirmed';
+  const target = priorUserChoice ? prior.target : candidateUserChoice ? candidate.target : prior.target;
+  const confirmation = priorUserChoice ? prior.confirmationSource
+    : candidateUserChoice ? candidate.confirmationSource
+      : mergeConfirmationSource(prior.confirmationSource, candidate.confirmationSource) || 'model-default';
   const evidenceRefs = [...(prior.evidenceRefs || []), ...(candidate.evidenceRefs || [])]
     .filter((item, index, all) => all.findIndex((other) =>
       other.segmentId === item.segmentId && normalizedEntityName(other.sourceQuote) === normalizedEntityName(item.sourceQuote)) === index)
     .slice(0, 8);
   return {
     ...prior,
-    // Only an explicit user choice locks a canonical target. Model-default mappings can be
-    // refreshed by later analysis; the newest model result remains the working default.
-    ...(userLockedTarget ? {} : {
-      target: candidate.target,
-      reviewStatus: 'confirmed' as const,
-      confirmationSource: candidate.confirmationSource || 'model-default',
-    }),
+    target,
+    reviewStatus: 'confirmed',
+    confirmationSource: confirmation,
     aliases: Array.from(aliasMap.values()).slice(0, 8),
     ...(evidenceRefs.length ? { evidenceRefs } : {}),
     targetEvidenceRefs: [...(prior.targetEvidenceRefs || []), ...(candidate.targetEvidenceRefs || [])]
       .filter((item, index, all) => all.findIndex((other) => other.segmentId === item.segmentId) === index).slice(-8),
     targetConfidence: new Set([...(prior.targetEvidenceRefs || []), ...(candidate.targetEvidenceRefs || [])]
       .map((item) => item.segmentId).filter(Boolean)).size >= 2 ? 'corroborated' as const : 'candidate' as const,
-    ...(userLockedTarget ? { confirmationSource: prior.confirmationSource } : {}),
     description: prior.description || candidate.description,
     evidence: candidate.evidence || prior.evidence,
   };
