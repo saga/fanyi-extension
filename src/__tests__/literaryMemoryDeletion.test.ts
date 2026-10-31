@@ -72,10 +72,12 @@ describe('literary memory deletion persistence', () => {
 
     expect(literaryMemory.value.entities).toHaveLength(0);
     const review = calls.filter((call) => call.path.endsWith('/context-graph/review'));
-    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([
-      { type: 'node', id: 'node-john', status: 'rejected' },
-      { type: 'edge', id: 'edge-jane-john', status: 'rejected' },
-    ]);
+    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([{
+      items: [
+        { type: 'node', id: 'node-john', status: 'rejected' },
+        { type: 'edge', id: 'edge-jane-john', status: 'rejected' },
+      ],
+    }]);
     expect(calls.some((call) => call.path.endsWith('/literary-memory'))).toBe(true);
   });
 
@@ -96,10 +98,12 @@ describe('literary memory deletion persistence', () => {
     expect(literaryMemory.value.entities).toHaveLength(0);
     expect(literaryMemory.value.relationships).toHaveLength(0);
     const review = calls.filter((call) => call.path.endsWith('/context-graph/review'));
-    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([
-      { type: 'node', id: 'alice', status: 'rejected' },
-      { type: 'edge', id: 'alice-bob', status: 'rejected' },
-    ]);
+    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([{
+      items: [
+        { type: 'node', id: 'alice', status: 'rejected' },
+        { type: 'edge', id: 'alice-bob', status: 'rejected' },
+      ],
+    }]);
     expect(calls.some((call) => call.path.endsWith('/literary-memory'))).toBe(true);
   });
 
@@ -142,9 +146,9 @@ describe('literary memory deletion persistence', () => {
 
     expect(literaryMemory.value.relationships).toHaveLength(0);
     const review = calls.filter((call) => call.path.endsWith('/context-graph/review'));
-    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([
-      { type: 'edge', id: 'alice-knows-bob', status: 'rejected' },
-    ]);
+    expect(review.map((call) => JSON.parse(call.options.body))).toEqual([{
+      items: [{ type: 'edge', id: 'alice-knows-bob', status: 'rejected' }],
+    }]);
   });
 
   it('never rejects a relationship by predicate alone when an endpoint is unknown', async () => {
