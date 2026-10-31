@@ -385,6 +385,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
   async function prepareContextGraphForTranslation(
     project: any,
     timeoutMs = 60 * 60 * 1000,
+    shouldContinue: () => boolean = () => true,
   ): Promise<ReturnType<typeof assessContextGraphReadiness>> {
     const projectId = String(project?.projectId || '');
     if (!projectId) return translationPreprocessingReadiness.value;
@@ -398,7 +399,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     }
 
     const deadline = Date.now() + Math.max(1_000, timeoutMs);
-    while (!readiness.ready && Date.now() < deadline) {
+    while (!readiness.ready && Date.now() < deadline && shouldContinue()) {
       if (workspaceProject.value?.projectId !== projectId || !doc.value) {
         return translationPreprocessingReadiness.value;
       }
