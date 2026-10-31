@@ -800,9 +800,9 @@
           <p class="muted small relationship-help">这里记录模型分析得到的关系，用于消歧。默认自动采纳；可直接编辑，或移除不需要的关系。</p>
           <div class="literary-editor-list">
             <div v-for="(relation, index) in literaryMemory.relationships" :key="'relation-' + index" class="literary-editor-row">
-              <label>主体<input v-model="relation.subject" @change="markRelationshipSuggested(relation)" /></label>
-              <label>关系<input v-model="relation.predicate" @change="markRelationshipSuggested(relation)" /></label>
-              <label>对象<input v-model="relation.object" @change="markRelationshipSuggested(relation)" /></label>
+              <label>主体<input v-model="relation.subject" @change="markRelationshipModified(relation)" /></label>
+              <label>关系<input v-model="relation.predicate" @change="markRelationshipModified(relation)" /></label>
+              <label>对象<input v-model="relation.object" @change="markRelationshipModified(relation)" /></label>
               <span class="chip">默认采纳</span>
               <button class="btn ghost danger-text" @click="removeRelationship(index)">移除</button>
             </div>
@@ -1329,7 +1329,7 @@ const {
   setEntityAliases,
   addEntity,
   removeEntity,
-  markRelationshipSuggested,
+  markRelationshipModified,
   characterName,
   setCharacterVoiceStatus,
   setCharacterVoiceUse,
