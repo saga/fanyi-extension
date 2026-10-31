@@ -369,24 +369,6 @@ export async function workspaceApi<T = any>(
   return payload as T;
 }
 
-export async function importWorkspaceTranslations(
-  baseUrl: string,
-  token: string,
-  projectId: string,
-  translations: Map<string, string> | Array<{ id: string; text: string }>,
-): Promise<void> {
-  const rows = translations instanceof Map
-    ? Array.from(translations, ([id, text]) => ({ id, text }))
-    : translations;
-  // 分批导入已采纳译文，避免一次请求复制整本书的译文数组；/api/documents/* 的 JSON 上限为 100 MiB。
-  for (let offset = 0; offset < rows.length; offset += 200) {
-    await workspaceApi(baseUrl, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/translations/import', {
-      method: 'POST',
-      body: JSON.stringify({ items: rows.slice(offset, offset + 200) }),
-    });
-  }
-}
-
 export async function loadWorkspaceAcceptedTranslations(
   baseUrl: string,
   token: string,
