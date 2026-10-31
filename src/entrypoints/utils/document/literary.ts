@@ -8,7 +8,7 @@ export type LiteraryEntityKind = 'person' | 'place' | 'object' | 'organization' 
 export type CanonicalMappingDisposition = 'eligible' | 'low-value' | 'invalid-target' | 'compound-name';
 
 /** 记录启用依据，而不是把机器证据误称为用户确认。 */
-export type LiteraryConfirmationSource = 'model-default' | 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
+export type LiteraryConfirmationSource = 'model-default' | 'user-modified' | 'evidence-verified' | 'user-confirmed' | 'legacy-unknown';
 export type LiteraryStyleGuideOrigin = 'context-graph' | 'user-edited' | 'user-confirmed' | 'legacy-unknown';
 export type LiteraryTargetConfidence = 'candidate' | 'corroborated';
 export interface LiteraryTargetEvidenceRef { segmentId: string; sourceQuote: string; targetSurface: string }
