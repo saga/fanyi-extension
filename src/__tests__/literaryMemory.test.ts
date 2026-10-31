@@ -268,3 +268,23 @@ describe('Chinese editorial profile versioning', () => {
     expect(merged.chineseEditorialProfile?.pendingUpdate).toBeUndefined();
   });
 });
+
+describe('literary memory deletion tombstones', () => {
+  it('preserves hidden entity and relationship rejections across sanitization', () => {
+    const memory = sanitizeLiteraryMemory({
+      entities: [],
+      relationships: [],
+      rejectedItems: [
+        { type: 'entity', source: 'The King', kind: 'person', aliases: ['His Majesty'] },
+        { type: 'relationship', subject: 'Alice', predicate: 'trusts', object: 'Bob' },
+        { type: 'unknown', source: 'ignored' },
+      ],
+    });
+    expect(memory.entities).toEqual([]);
+    expect(memory.relationships).toEqual([]);
+    expect(memory.rejectedItems).toEqual([
+      { type: 'entity', source: 'The King', kind: 'person', aliases: ['His Majesty'] },
+      { type: 'relationship', subject: 'Alice', predicate: 'trusts', object: 'Bob' },
+    ]);
+  });
+});
