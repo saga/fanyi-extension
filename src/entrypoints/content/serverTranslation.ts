@@ -253,7 +253,9 @@ export async function checkServerCache(
   checkUrl.searchParams.set('target', config.targetLang || 'zh');
   checkUrl.searchParams.set('provider', config.provider || 'deepseek');
   checkUrl.searchParams.set('promptStyle', config.promptStyle || 'default');
-  checkUrl.searchParams.set('translationMode', config.translationMode || 'technical');
+  // The remote webpage service always uses its lightweight technical pipeline.
+  checkUrl.searchParams.set('translationMode', 'technical');
+  checkUrl.searchParams.set('qualityMode', config.webEnhancedQuality ? 'enhanced' : 'fast');
   if (blocks.length > 0) {
     checkUrl.searchParams.set('contentHash', computeBlocksFingerprint(blocks));
   }
@@ -405,7 +407,9 @@ export async function translateViaServer(
     provider,
     // 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描, wangxiaobo=王小波大白话
     promptStyle: config.promptStyle,
-    translationMode: config.translationMode || 'technical',
+    // Keep the remote webpage path separate from local literary/document translation.
+    translationMode: 'technical',
+    qualityMode: config.webEnhancedQuality ? 'enhanced' : 'fast',
     // 本次抽取的结构指纹。服务端原样存进 content_hash，下次 check 时用它判断
     // 缓存里的 block id 映射是否仍与当前页面一致（不一致就 410 重译，避免译文错位）。
     contentHash: computeBlocksFingerprint(blocks),
