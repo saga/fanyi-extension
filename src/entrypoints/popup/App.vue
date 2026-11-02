@@ -121,6 +121,15 @@
         <input type="checkbox" v-model="config.useServerTranslation" :disabled="config.useLocalAgent" @change="saveConfig" />
         <span>通过远程服务翻译当前页面</span>
       </label>
+      <label class="switch-item quality-mode-item">
+        <input
+          type="checkbox"
+          v-model="config.webEnhancedQuality"
+          :disabled="config.useLocalAgent || !config.useServerTranslation"
+          @change="saveConfig"
+        />
+        <span>增强质量（增加少量网页上下文，不做额外审校）</span>
+      </label>
       <span v-if="config.useLocalAgent" class="hint-text">本机 Provider 已启用，用于网页与选中文本翻译；EPUB/PDF 文档翻译在文档页单独配置。</span>
 
       <div v-if="config.useServerTranslation" class="server-section">
@@ -187,6 +196,7 @@ const config = ref<Config>({
   provider: 'deepseek',
   promptStyle: 'default',
   translationMode: 'technical',
+  webEnhancedQuality: false,
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -444,6 +454,14 @@ h2 {
   width: 18px;
   height: 18px;
   cursor: pointer;
+}
+.quality-mode-item {
+  margin-left: 26px;
+  font-size: 12px;
+  color: #666;
+}
+.quality-mode-item input[type="checkbox"]:disabled {
+  cursor: not-allowed;
 }
 
 .input-item,
