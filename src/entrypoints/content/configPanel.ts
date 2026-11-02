@@ -127,12 +127,12 @@ function buildPanelHtml(isMobile: boolean): string {
             <option value="opencode">OpenCode</option>
           </select>
         </div>
-        <div class="fanyi-config-row fanyi-config-switch">
-          <label>
-            <input type="checkbox" class="fanyi-web-enhanced-quality" />
-            增强质量（增加少量网页上下文，不做额外审校）
-          </label>
-        </div>
+      </div>
+      <div class="fanyi-config-row fanyi-config-switch">
+        <label>
+          <input type="checkbox" class="fanyi-web-enhanced-quality" />
+          增强质量（远程网页翻译；增加少量网页上下文，不做额外审校）
+        </label>
       </div>
       <div class="fanyi-config-actions">
         <button class="fanyi-btn-save">保存</button>
