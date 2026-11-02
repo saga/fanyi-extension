@@ -127,6 +127,12 @@ function buildPanelHtml(isMobile: boolean): string {
             <option value="opencode">OpenCode</option>
           </select>
         </div>
+        <div class="fanyi-config-row fanyi-config-switch">
+          <label>
+            <input type="checkbox" class="fanyi-web-enhanced-quality" />
+            增强质量（增加少量网页上下文，不做额外审校）
+          </label>
+        </div>
       </div>
       <div class="fanyi-config-actions">
         <button class="fanyi-btn-save">保存</button>
@@ -159,6 +165,10 @@ async function loadConfigIntoPanel(panel: HTMLElement, isMobile: boolean): Promi
   const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
   if (serverUrlInput) {
     serverUrlInput.value = config.serverUrl || 'https://s.sunxiunan.com/fanyi/page';
+  }
+  const enhancedQualityCheckbox = panel.querySelector('.fanyi-web-enhanced-quality') as HTMLInputElement | null;
+  if (enhancedQualityCheckbox) {
+    enhancedQualityCheckbox.checked = config.webEnhancedQuality === true;
   }
 }
 
@@ -252,6 +262,7 @@ async function saveConfigFromPanel(panel: HTMLElement, isMobile: boolean): Promi
   config.targetLang = (panel.querySelector('.fanyi-target-lang') as HTMLSelectElement).value;
   config.promptStyle = (panel.querySelector('.fanyi-prompt-style') as HTMLSelectElement).value as Config['promptStyle'];
   config.translationMode = (panel.querySelector('.fanyi-translation-mode') as HTMLSelectElement).value as Config['translationMode'];
+  config.webEnhancedQuality = (panel.querySelector('.fanyi-web-enhanced-quality') as HTMLInputElement | null)?.checked === true;
 
   config.useServerTranslation = useServer;
   const serverUrlInput = panel.querySelector('.fanyi-server-url') as HTMLInputElement | null;
