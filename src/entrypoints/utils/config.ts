@@ -81,6 +81,8 @@ export interface Config {
   promptStyle: PromptStyle;
   /** 独立翻译目标：technical 精确技术翻译；literary 文学表达与实体一致性。 */
   translationMode: TranslationMode;
+  /** Optional lightweight webpage context on the remote service; off by default. */
+  webEnhancedQuality: boolean;
   floatingBallPosition?: { x: number; y: number };
   shortcuts: ShortcutConfig;
   /** 是否使用服务端翻译（发送到 /fanyi/page） */
@@ -211,6 +213,7 @@ const defaultConfig: Config = {
   provider: 'deepseek',
   promptStyle: 'default',
   translationMode: 'technical',
+  webEnhancedQuality: false,
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
