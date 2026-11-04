@@ -99,6 +99,14 @@ export interface Config {
   /** 可选共享令牌；本机服务未配置 LOCAL_AGENT_TOKEN 时留空即可。 */
   localAgentToken: string;
 
+  /** 对话执行后端独立于翻译路由：remote 使用 Vocal Saga Cloud API；本地使用 local-agent-service。 */
+  chatBackend: 'remote' | 'workbuddy' | 'opencode';
+  chatModel: string;
+  chatThinkingMode: 'disabled' | 'adaptive' | 'enabled';
+  chatEffort: 'low' | 'medium' | 'high' | 'xhigh';
+  chatSkillIds: string[];
+  remoteServiceToken: string;
+
   /**
    * 文档翻译专用配置，与网页页面/选区翻译隔离。
    * 未显式设置过的字段会临时继承旧的全局值；首次修改文档设置时会保存独立配置。
@@ -227,6 +235,13 @@ const defaultConfig: Config = {
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
+
+  chatBackend: 'remote',
+  chatModel: '',
+  chatThinkingMode: 'adaptive',
+  chatEffort: 'medium',
+  chatSkillIds: [],
+  remoteServiceToken: '',
 
   // getConfig() inherits legacy values until these document-specific fields are persisted.
   documentSourceLang: 'auto',
