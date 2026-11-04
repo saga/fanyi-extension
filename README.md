@@ -40,9 +40,9 @@ Chrome：需要自己build
 3. 设置源语言和目标语言
 4. 选择翻译模式（双语对照 / 仅译文）
 
-## 本机 Workbuddy / OpenCode Provider（可选）
+## 对话执行后端（独立配置）\n\n侧栏顶部可以独立选择 Vocal Saga 远端服务、Workbuddy 或 OpenCode，并配置模型、思考模式、思考强度。Workbuddy/OpenCode 的 Agent Skills 从 `vocal-saga/local-agent-service/skills` 服务端目录加载；扩展只保存 Skill ID。对话路由不受网页翻译/文档翻译 Provider 开关影响。\n\n## 本机 Workbuddy / OpenCode Provider（可选）
 
-扩展可把翻译、侧栏对话和 EPUB/PDF 的书籍实体分析与 Reviewer 请求交给本机服务，不需要配置 DeepSeek API Key。这个 Provider 与远程 Vocal Saga 服务相互独立；启用“使用本机 Workbuddy/OpenCode 翻译”后，本机模型调用失败会明确报错或保留已有初译，不会偷偷回退到远程服务。关闭本机 Provider 后，原有远程/DeepSeek 路径继续可用。
+网页/文档翻译的本机 Provider 与网页侧栏对话是两套独立路由。翻译是否使用本机 Workbuddy/OpenCode 仍由原有翻译设置决定；侧栏对话可单独选择 Vocal Saga 远端服务、Workbuddy 或 OpenCode。远端对话调用 Vocal Saga Cloud 的 `/api/v1/chat/completions`；本地对话调用 `local-agent-service` 的独立 `/api/agent/chat`，并从服务端 `/api/agent/skills` 读取可选 Agent Skills。普通网页对话不进入文档翻译 Pipeline。
 
 本机模式返回 HTTP 502 时，扩展日志会显示本机错误类型、request ID 和模型输出长度；本机终端使用同一 request ID 输出请求阶段、provider/model、耗时和堆栈。若出现“返回内容不是有效 JSON”，请查看终端中 `invalid-json` 的响应预览，或检查 `GET /api/history?limit=30`。默认只在解析失败时记录最多 600 字符预览；设置 `LOCAL_AGENT_LOG_RESPONSE_PREVIEW=false` 可关闭。
 
