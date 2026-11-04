@@ -46,7 +46,7 @@ For EPUB/PDF literary translation with Local Agent enabled, the extension is a U
 
 ## Local Agent Provider
 
-`config.useLocalAgent` has priority over `config.useServerTranslation`. When enabled, webpage/chunk translation, document chunk translation, side-panel chat, YouTube subtitles, and EPUB/PDF literary analysis/review must use the configured local Agent endpoint. A local request failure is an error or a retained-draft warning; do not retry it through the remote Vocal Saga/DeepSeek endpoint. The optional `localAgentToken` is sent only when configured. SQLite cache read/write failures are cache misses, but clearing the SQLite cache must report a failed request instead of claiming complete success.
+`config.useLocalAgent` has priority over `config.useServerTranslation`. When enabled, webpage/chunk translation, document chunk translation, YouTube subtitles, and EPUB/PDF literary analysis/review must use the configured local Agent endpoint. A local request failure is an error or a retained-draft warning; do not retry it through the remote Vocal Saga/DeepSeek endpoint. The optional `localAgentToken` is sent only when configured. SQLite cache read/write failures are cache misses, but clearing the SQLite cache must report a failed request instead of claiming complete success.
 
 The Express + TypeScript service lives in the sibling `devweekly/vocal-saga/local-agent-service` directory. In Local Agent document mode, its project SQLite database is the only persistent store for document business data: source files/revisions, parsed segments, translations, LiteraryMemory, Context Graph, Prompt revisions, Runs and review records. The extension may keep runtime UI projections in memory, but must not persist document content, translations or LiteraryMemory in IndexedDB, localStorage or extension storage. The server-side reader-session record stores only projectId and lightweight UI state. Never fall back to an old extension snapshot when the service is unavailable.
 
@@ -85,3 +85,8 @@ A build hook (`wxt.config.ts:63`) rewrites absolute asset paths in HTML to relat
 - Translation cache uses simple string hash (not cryptographic) with 7-day TTL.
 - Config writing uses `JSON.parse(JSON.stringify(...))` to strip Proxy wrappers from Vue refs.
 - The content script schedules two warm-up chunks, then allows up to 4 (desktop) / 2 (mobile) chunk tasks in flight. However, `background.ts` sends model requests through `globalQueue`, whose current concurrency is 1. This means scheduling is concurrent but actual model calls are globally serialized. Keep these two layers distinct when changing concurrency or reasoning about provider prompt-cache behavior; chunk retry, missing-ID validation, and DOM application (`applyTranslationsWithRAF`) are separate concerns.
+
+
+## Side-panel Agent Chat
+
+Side-panel chat has its own `chatBackend` setting and must not inherit `useLocalAgent` or `useServerTranslation`. Remote mode calls Vocal Saga Cloud `/api/v1/chat/completions`; local Workbuddy/OpenCode modes call the standalone `local-agent-service/api/agent/chat` endpoint. The extension discovers and selects server-managed Skills by ID through `/api/agent/skills`. Never route ordinary chat through Document Project / Translation Run or the literary translation pipeline.
