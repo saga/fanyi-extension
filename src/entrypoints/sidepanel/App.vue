@@ -43,7 +43,7 @@
         </select>
       </label>
       <label v-if="chatBackend === 'remote'">远端服务 Token
-        <input v-model="remoteServiceToken" type="password" autocomplete="off" placeholder="Vocal Saga AUTH_KEY" @change="saveChatSettings" />
+        <input v-model="remoteServiceToken" type="password" autocomplete="off" placeholder="Vocal Saga AUTH_KEY" @change="onRemoteTokenChange" />
       </label>
       <label v-if="chatBackend !== 'remote' && availableSkills.length">Agent Skills（服务端）
         <select v-model="chatSkillIds" multiple :disabled="streaming" @change="saveChatSettings">
@@ -237,6 +237,11 @@ async function refreshChatOptions() {
   } catch (error) {
     chatOptionsError.value = error instanceof Error ? error.message : String(error);
   }
+}
+
+async function onRemoteTokenChange() {
+  await saveChatSettings();
+  await refreshChatOptions();
 }
 
 async function onBackendChange() {
