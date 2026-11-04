@@ -59,7 +59,7 @@
     <!-- 提示条 -->
     <div v-if="status === 'error'" class="banner error">
       {{ errorMsg }}
-      <div class="banner-hint">提示：在普通网页（http/https）上打开本页，或在插件设置中填写 DeepSeek API Key。</div>
+      <div class="banner-hint">请检查所选执行服务、模型配置及远端 Token / 本机 local-agent-service 是否可用。</div>
     </div>
     <div v-else-if="status === 'loading'" class="banner">正在读取当前页面内容…</div>
     <div v-else-if="pageContext" class="banner ok">
@@ -241,7 +241,6 @@ async function refreshChatOptions() {
 
 async function onBackendChange() {
   chatModel.value = '';
-  chatSkillIds.value = [];
   await saveChatSettings();
   await refreshChatOptions();
 }
