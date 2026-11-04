@@ -23,6 +23,7 @@ const defaultConfig: Config = {
   provider: 'deepseek',
   promptStyle: 'default',
   translationMode: 'technical',
+  webEnhancedQuality: false,
   documentEnglishFontFamily: 'Georgia',
   documentChineseFontFamily: 'Noto Serif CJK SC',
   documentEnglishFontSize: 17,
