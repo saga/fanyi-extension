@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { MAX_CSS_SHEET_BYTES } from '../entrypoints/utils/cssSnapshotLimits';
 
 vi.mock('webextension-polyfill', () => ({
   default: { runtime: { sendMessage: vi.fn() } },
@@ -267,5 +270,86 @@ describe('inlineStylesheetsInClone', () => {
     expect(inlined).toBe(0);
     expect(fetchFn).not.toHaveBeenCalled();
     root.remove();
+  });
+
+  it('站点主样式表超过 512 KiB 仍可内联', async () => {
+    const bigCss = '.x{color:red}' + ' '.repeat(600 * 1024);
+    const root = makeRoot('<link rel="stylesheet" href="/big.css">');
+    const fetchFn = vi.fn().mockResolvedValue(cssResponse(bigCss));
+    const onError = vi.fn();
+    const result = await inlineStylesheetsInClone(root, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      baseUri: BASE,
+      onError,
+    });
+    expect(result.inlined).toBe(1);
+    expect(result.complete).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+    expect(root.getAttribute('data-fanyi-css-snapshot')).toBe('v2-complete');
+    root.remove();
+  });
+
+  it('@import layer(name) 展开成 @layer 块，快照保持完整', async () => {
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.endsWith('main.css')) {
+        return cssResponse(
+          '@import "/a.css" layer(theme);\n@import "/b.css" layer(base) screen;\nbody{margin:0}',
+        );
+      }
+      if (url.endsWith('a.css')) return cssResponse('h1{color:red}');
+      if (url.endsWith('b.css')) return cssResponse('p{color:blue}');
+      return cssResponse('');
+    });
+    const root = makeRoot('<link rel="stylesheet" href="/main.css">');
+    const onError = vi.fn();
+    const result = await inlineStylesheetsInClone(root, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      baseUri: BASE,
+      onError,
+    });
+    expect(result.complete).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+    const css = root.querySelector('style')?.textContent ?? '';
+    expect(css).toContain('@layer theme');
+    expect(css).toContain('h1{color:red}');
+    expect(css).toContain('@layer base');
+    expect(css).toContain('@media screen');
+    expect(css).toContain('p{color:blue}');
+    expect(css).toContain('body{margin:0}');
+    expect(css).not.toContain('@import');
+    root.remove();
+  });
+
+  it('supports() 条件仍标记为不完整，不猜测其级联语义', async () => {
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.endsWith('main.css')) return cssResponse('@import "/a.css" supports(display:grid);');
+      return cssResponse('h1{color:red}');
+    });
+    const root = makeRoot('<link rel="stylesheet" href="/main.css">');
+    const onError = vi.fn();
+    const result = await inlineStylesheetsInClone(root, {
+      fetchFn: fetchFn as unknown as typeof fetch,
+      baseUri: BASE,
+      onError,
+    });
+    expect(result.complete).toBe(false);
+    expect(onError).toHaveBeenCalledWith(
+      expect.stringContaining('main.css'),
+      expect.stringContaining('unsupported @import condition'),
+    );
+    expect(root.querySelector('link[rel=stylesheet]')).not.toBeNull();
+    root.remove();
+  });
+});
+
+describe('CSS 快照字节上限', () => {
+  it('background 使用共享上限，不再硬编码 512 KiB', () => {
+    const background = readFileSync(resolve(process.cwd(), 'src/entrypoints/background.ts'), 'utf8');
+    expect(background).toContain('MAX_CSS_SHEET_BYTES');
+    expect(background).not.toContain('512 * 1024');
+  });
+
+  it('共享上限覆盖站点常见的大样式表', () => {
+    expect(MAX_CSS_SHEET_BYTES).toBeGreaterThanOrEqual(1024 * 1024);
   });
 });

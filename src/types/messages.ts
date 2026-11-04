@@ -163,6 +163,23 @@ export type FetchRemoteCssResponse =
   | { success: true; url: string; status: number; css: string }
   | { success: false; error: string };
 
+/**
+ * content script 直连翻译服务端失败时，转由 background 发起的同构请求。
+ * 页面 CSP 的 connect-src 会拦掉 content script 的跨源 fetch（Chrome 85+ 起），
+ * background 不受该限制。
+ */
+export interface ProxyServerFetchMessage {
+  action: 'proxyServerFetch';
+  url: string;
+  method: 'GET' | 'POST';
+  headers: Record<string, string>;
+  body?: string;
+}
+
+export type ProxyServerFetchResponse =
+  | { success: true; status: number; statusText: string; body: string }
+  | { success: false; error: string };
+
 /** 发往 background 的所有消息类型。 */
 export type BackgroundMessage =
   | TranslateChunkMessage
@@ -172,7 +189,8 @@ export type BackgroundMessage =
   | CheckConfigMessage
   | GetPageContextMessage
   | RelayToContentMessage
-  | FetchRemoteCssMessage;
+  | FetchRemoteCssMessage
+  | ProxyServerFetchMessage;
 
 // ============================================================
 // Content-script-bound messages (background → content script)
@@ -343,7 +361,8 @@ export type BackgroundResponse =
   | CheckConfigResponse
   | GetPageContextResponse
   | RelayToContentResponse
-  | FetchRemoteCssResponse;
+  | FetchRemoteCssResponse
+  | ProxyServerFetchResponse;
 
 // ============================================================
 // Listener 签名（替换 onMessage.addListener 的 `any` 入参）

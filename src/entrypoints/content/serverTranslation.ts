@@ -1,3 +1,5 @@
+import browser from 'webextension-polyfill';
+import type { ProxyServerFetchResponse } from '../../types/messages';
 import { applyBlockTranslation } from '../utils/translationDisplay';
 import type { TextBlock } from '../utils/blockExtractor';
 import type { Config } from '../utils/config';
@@ -141,6 +143,62 @@ function getDefaultServerUrl(config: Config): string {
   return config.serverUrl?.trim() || 'https://s.sunxiunan.com/fanyi/page';
 }
 
+/** 翻译服务端响应只需这几个字段；background 回退路径用普通对象满足同一契约。 */
+interface ServerHttpResponse {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  text(): Promise<string>;
+}
+
+/**
+ * 向翻译服务端发请求。
+ *
+ * content script 的跨源 fetch 遵循所在页面的 CORS/CSP（Chrome 85+ 起）。带
+ * `connect-src 'self'` 的页面（Cloudflare 挑战页、部分新闻站）会在请求发出前就抛
+ * `TypeError: Failed to fetch`，服务端完全收不到请求。直连失败时转由 background
+ * 重试一次：扩展上下文有自身 host 权限，不受页面 CSP 约束。重试仍失败则保留原错误，
+ * 由调用方按既有语义展示。
+ */
+async function requestTranslationServer(
+  url: string,
+  init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string },
+): Promise<ServerHttpResponse> {
+  try {
+    return await fetch(url, init);
+  } catch (directError) {
+    const detail = directError instanceof Error ? directError.message : String(directError);
+    logger.warn(
+      '[ServerTranslation] direct fetch failed, retrying through background: ' +
+        `url=${url} method=${init.method} bodyBytes=${utf8ByteLength(init.body ?? '')} error=${detail}`,
+    );
+    let proxied: ProxyServerFetchResponse;
+    try {
+      proxied = (await browser.runtime.sendMessage({
+        action: 'proxyServerFetch',
+        url,
+        method: init.method,
+        headers: init.headers,
+        body: init.body,
+      })) as ProxyServerFetchResponse;
+    } catch (proxyError) {
+      logger.error('[ServerTranslation] background proxy unavailable:', proxyError);
+      throw directError;
+    }
+    if (!proxied?.success) {
+      logger.error('[ServerTranslation] background proxy failed:', proxied?.error ?? 'no response');
+      throw directError;
+    }
+    logger.info('[ServerTranslation] background proxy succeeded:', proxied.status);
+    return {
+      ok: proxied.status >= 200 && proxied.status < 300,
+      status: proxied.status,
+      statusText: proxied.statusText,
+      text: async () => proxied.body,
+    };
+  }
+}
+
 /**
  * 采集当前浏览器/设备的精确信息，随请求发给服务端。
  * 服务端据此在错误日志里标注「哪个浏览器、是否移动端、屏幕多大」，
@@ -260,7 +318,7 @@ export async function checkServerCache(
     checkUrl.searchParams.set('contentHash', computeBlocksFingerprint(blocks));
   }
 
-  const response = await fetch(checkUrl.toString(), {
+  const response = await requestTranslationServer(checkUrl.toString(), {
     method: 'GET',
     headers: { 'X-Session-Id': getSessionId() },
   });
@@ -424,20 +482,25 @@ export async function translateViaServer(
     body.apiKey = apiKey;
   }
 
-  // 网络错误（DNS 失败、连接超时、CORS 拦截等）拿不到 HTTP 响应，
-  // 直接抛错由调用方展示给用户。
-  let response: Response;
+  // 网络错误（DNS 失败、连接超时、页面 CSP 拦截等）拿不到 HTTP 响应，
+  // 直接抛错由调用方展示给用户。直连失败时 requestTranslationServer 会先走一次
+  // background 通道重试，能救回被页面 CSP 拦截的请求。
+  const requestBody = JSON.stringify(body);
+  let response: ServerHttpResponse;
   try {
-    response = await fetch(serverUrl, {
+    response = await requestTranslationServer(serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Session-Id': getSessionId() },
-      body: JSON.stringify(body),
+      body: requestBody,
     });
   } catch (networkErr) {
     const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
-    logger.error('[ServerTranslation] network error:', msg);
+    logger.error(
+      '[ServerTranslation] network error:', msg,
+      `url=${serverUrl} sentHtmlBytes=${utf8ByteLength(html)} requestBytes=${utf8ByteLength(requestBody)}`,
+    );
     throw new ServerTranslationError(
-      `服务端翻译网络请求失败: ${msg}`,
+      `服务端翻译网络请求失败（${msg}）。已尝试后台通道重试；若仍失败请检查网络或该页面的 CSP 设置。`,
       0, // 0 表示未拿到 HTTP 响应
     );
   }

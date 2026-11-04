@@ -32,8 +32,11 @@ import type {
   RelayToContentResponse,
   FetchRemoteCssMessage,
   FetchRemoteCssResponse,
+  ProxyServerFetchMessage,
+  ProxyServerFetchResponse,
   PageContext,
 } from '../types/messages';
+import { MAX_CSS_SHEET_BYTES } from './utils/cssSnapshotLimits';
 import { buildChatSystem, type ChatMessage } from './service/chat';
 import { openSidePanel } from './utils/sidePanel';
 import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
@@ -373,6 +376,8 @@ export default defineBackground({
             await handleRelayToContent(message, sendResponse as (r: RelayToContentResponse) => void);
           } else if (message.action === 'fetchRemoteCss') {
             await handleFetchRemoteCss(message, sendResponse as (r: FetchRemoteCssResponse) => void);
+          } else if (message.action === 'proxyServerFetch') {
+            await handleProxyServerFetch(message, sendResponse as (r: ProxyServerFetchResponse) => void);
           } else {
             // Unknown action, don't keep port open
             sendResponse({ success: false, error: 'Unknown action' });
@@ -417,14 +422,13 @@ export default defineBackground({
           redirect: 'follow',
         });
         const contentLength = Number(response.headers.get('content-length') || 0);
-        const maxCssBytes = 512 * 1024;
-        if (contentLength > maxCssBytes) {
-          sendResponse({ success: false, error: 'Stylesheet exceeds 512 KiB limit' });
+        if (contentLength > MAX_CSS_SHEET_BYTES) {
+          sendResponse({ success: false, error: `Stylesheet exceeds ${MAX_CSS_SHEET_BYTES} byte limit` });
           return;
         }
         const css = response.ok ? await response.text() : '';
-        if (new TextEncoder().encode(css).byteLength > maxCssBytes) {
-          sendResponse({ success: false, error: 'Stylesheet exceeds 512 KiB limit' });
+        if (new TextEncoder().encode(css).byteLength > MAX_CSS_SHEET_BYTES) {
+          sendResponse({ success: false, error: `Stylesheet exceeds ${MAX_CSS_SHEET_BYTES} byte limit` });
           return;
         }
         sendResponse({
@@ -442,6 +446,52 @@ export default defineBackground({
         });
       } finally {
         clearTimeout(timer);
+      }
+    }
+
+    /**
+     * 在扩展上下文转发翻译服务端请求。
+     *
+     * content script 的跨源 fetch 遵循所在页面的 CORS/CSP（Chrome 85+ 起），
+     * 带 `connect-src 'self'` 的页面会直接抛 `Failed to fetch`，请求根本到不了服务端。
+     * 这里由 background 发起，不受页面 CSP 约束。
+     * 整页翻译耗时较长，MV3 service worker 靠未决 message 通道保活；该通道只用于
+     * 直连失败后的重试，正常路径仍由 content script 直连。
+     */
+    async function handleProxyServerFetch(
+      message: ProxyServerFetchMessage,
+      sendResponse: (response: ProxyServerFetchResponse) => void,
+    ): Promise<void> {
+      let parsed: URL;
+      try {
+        parsed = new URL(message.url);
+      } catch {
+        sendResponse({ success: false, error: 'Invalid server URL' });
+        return;
+      }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        sendResponse({ success: false, error: 'Only HTTP(S) server URLs are allowed' });
+        return;
+      }
+      try {
+        const response = await fetch(message.url, {
+          method: message.method,
+          headers: message.headers,
+          body: message.body,
+          credentials: 'omit',
+          redirect: 'follow',
+        });
+        sendResponse({
+          success: true,
+          status: response.status,
+          statusText: response.statusText,
+          body: await response.text(),
+        });
+      } catch (error) {
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 

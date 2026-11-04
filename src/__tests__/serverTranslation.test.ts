@@ -8,6 +8,12 @@ import {
 import type { Config } from '../entrypoints/utils/config';
 import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 
+vi.mock('webextension-polyfill', () => ({
+  default: { runtime: { sendMessage: vi.fn() } },
+}));
+
+import browser from 'webextension-polyfill';
+
 // Mock translationDisplay to avoid actual DOM manipulation side effects
 vi.mock('../entrypoints/utils/translationDisplay', () => ({
   applyBlockTranslation: vi.fn(),
@@ -329,6 +335,51 @@ describe('translateViaServer', () => {
       'Refusing to translate/cache a likely domain-parking page',
     );
   });
+
+  it('页面 CSP 拦掉直连 fetch 时改走 background 通道重试', async () => {
+    const sendMessage = vi.mocked(browser.runtime.sendMessage);
+    sendMessage.mockReset();
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const translatedHtml = `
+      <html><body><article>
+        <h1 data-fanyi-block-id="b1" class="fanyi-translated">
+          <span class="fanyi-original">Hello World</span>
+          <span class="fanyi-translation">你好世界</span>
+        </h1>
+      </article></body></html>`;
+    sendMessage.mockResolvedValueOnce({
+      success: true, status: 200, statusText: 'OK', body: translatedHtml,
+    } as never);
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    const result = await translateViaServer(baseConfig, blocks, nodeMap);
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'proxyServerFetch', method: 'POST' }),
+    );
+    expect(result.translatedIds.has('b1')).toBe(true);
+  });
+
+  it('background 通道也失败时保留网络错误语义', async () => {
+    const sendMessage = vi.mocked(browser.runtime.sendMessage);
+    sendMessage.mockReset();
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    sendMessage.mockResolvedValueOnce({ success: false, error: 'network down' } as never);
+
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '/html/body/article/h1', tag: 'h1', text: 'Hello World' },
+    ];
+    const nodeMap = new Map<string, Node>([['b1', document.querySelector('h1')!]]);
+
+    await expect(translateViaServer(baseConfig, blocks, nodeMap)).rejects.toMatchObject({
+      name: 'ServerTranslationError',
+      statusCode: 0,
+    });
+  });
 });
 
 describe('checkServerCache', () => {
@@ -380,6 +431,24 @@ describe('checkServerCache', () => {
     ];
     await expect(checkServerCache(baseConfig, blocks)).rejects.toThrow(
       '服务端缓存检查失败: 500 Internal Server Error',
+    );
+  });
+
+  it('直连被页面 CSP 拦掉时通过 background 拿到缓存', async () => {
+    const sendMessage = vi.mocked(browser.runtime.sendMessage);
+    sendMessage.mockReset();
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    sendMessage.mockResolvedValueOnce({
+      success: true, status: 200, statusText: 'OK', body: '<html>cached</html>',
+    } as never);
+
+    const result = await checkServerCache(baseConfig, [
+      { id: 'b1', xpath: '/html/body/h1', tag: 'h1', text: 'Hello World' },
+    ]);
+
+    expect(result).toBe('<html>cached</html>');
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'proxyServerFetch', method: 'GET' }),
     );
   });
 });

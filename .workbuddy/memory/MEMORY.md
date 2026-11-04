@@ -38,7 +38,8 @@ dominance）此前因长文 contentCoverage≈0.04 从不触发，修复后长�
   （单列、td 内含 p/div 块级内容，降级 FILTER_SKIP 下钻）。
 - **服务端翻译在 Firefox 失败，根因要分清两种模式（2026-08-15 生产日志实测更正）：**
   - *模式 A（已确认，来自生产报错日志）*：请求**确实到达**服务端（`POST /fanyi/page` → `translateChunks`），但 LLM 返回了坏 JSON。报错栈 `cleanResponse→repairJson→jsonrepair` 抛 `Colon expected at position ~6333`，是 **gemini provider 未强制 JSON 输出**导致某个 `translated_text` 结构损坏；当时 `cleanResponse` 无兜底 catch、下游也无故障隔离，单个坏 chunk 直接把整页翻译成 500。默认 provider 是 `deepseek`（`response_format: json_object` 强约束，极少坏 JSON）；用户把扩展 `config.provider` 设成 `gemini` 才触发。日志里 `client=Firefox/153.0 (Android...)` 只是 `clientInfo` 元数据，**不是根因**。修复（vocal-saga，2026-08-15）：gemini 加 `responseMimeType:'application/json'` 从源头杜绝；新增 `extractJsonContainer` 提升 jsonrepair 成功率；`processTranslationWithCheck`/`translateChunk` 改为容错降级（解析失败返回空 Map → 缺失重试/原样渲染，而非整请求 500）；空结果不写缓存。
-  - *模式 B（仅假设，未在生产日志证实）*：Firefox content script 的 `fetch` 可能受页面 CSP `connect-src` 约束（Chrome 不受），表现为客户端 "网络请求失败 statusCode=0"、从未到达服务端。本地翻译已正确走 background（`runtime.sendMessage({action:'translateChunk'})`）；服务端翻译路径 `translateViaServer` 仍是 content script 直接 fetch。这条**尚未在真实 Firefox 上验证**，且用户贴的日志证明本次失败是模式 A（请求到了服务端），所以模式 B 是否为真需另行实测，**不要据此盲目改成 background 架构**。
+  - *模式 B（2026-11-05 已实测确认并修复，此前「Chrome 不受」的判断是错的）*：**Chrome 85+ 起 content script 的跨源 fetch 遵循所在页面的 CORS/CSP**（Chromium 官方文档 `extension-content-script-fetches`），Playwright 实测页面带 `connect-src 'self'` 时 `fetch` 抛 `TypeError: Failed to fetch`，请求从未到达服务端，因此 Worker/服务端日志里查不到。表现是客户端 "网络请求失败 statusCode=0"。smithsonianmag 的 CF 挑战页就是这种 CSP。修复（fanyi-extension）：新增 `proxyServerFetch` 消息，直连失败时由 background 重试一次；正常路径仍直连，避免整页翻译长请求触发 MV3 service worker 保活问题。`checkServerCache` 与 `translateViaServer` 共用 `requestTranslationServer`。CSS 快照同样早有 `fetchCssThroughBackground` 代理。
+  - **排查口诀**：客户端 `Failed to fetch` + 服务端无日志 = 请求没出门（页面 CSP / 网络），不是服务端 bug；不要往服务端 LLM/JSON 方向查。
 
 ## 文档翻译提示词的唯一真源（2026-10-31）
 自定义 Prompt（`config.documentSystemPromptOverride`）> 项目里存的快照（仅修正语言行）> 按当前设置生成的内置提示词。

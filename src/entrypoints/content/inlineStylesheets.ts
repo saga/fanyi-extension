@@ -1,5 +1,6 @@
 import browser from 'webextension-polyfill';
 import type { FetchRemoteCssResponse } from '../../types/messages';
+import { MAX_CSS_SHEET_BYTES } from '../utils/cssSnapshotLimits';
 import { logger } from '../../utils/logger';
 
 /**
@@ -16,7 +17,7 @@ import { logger } from '../../utils/logger';
  */
 
 export interface InlineStylesheetsOptions {
-  /** 单张样式表及其展开结果的字节上限。默认 512 KiB。 */
+  /** 单张样式表及其展开结果的字节上限。默认 MAX_CSS_SHEET_BYTES。 */
   maxBytesPerSheet?: number;
   /** 所有最终内联 CSS 的字节预算。默认 1.5 MiB。 */
   maxBytesTotal?: number;
@@ -36,7 +37,7 @@ export interface InlineStylesheetsOptions {
   onError?: (url: string, reason: string) => void;
 }
 
-const DEFAULT_MAX_BYTES_PER_SHEET = 512 * 1024;
+const DEFAULT_MAX_BYTES_PER_SHEET = MAX_CSS_SHEET_BYTES;
 const DEFAULT_MAX_BYTES_TOTAL = 1.5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_SHEETS = 24;
@@ -299,9 +300,54 @@ async function fetchCssBundle(
   }
 }
 
+interface ImportCondition {
+  /** undefined = 没有 layer；null = 匿名 layer；字符串 = 具名 layer。 */
+  layerName: string | null | undefined;
+  media: string;
+  unsupported: boolean;
+}
+
 /**
- * 展开普通 @import 并保留 media 条件。对于 layer()/supports() 等复杂 import 条件，
- * 不猜测其级联语义；标记为不完整并保留原始 link，由服务端统一降级。
+ * 解析 @import 的条件部分。
+ *
+ * `layer(name)` 决定导入内容归属哪个级联层，展开成 `@layer name { ... }` 即可保留
+ * 层的先后顺序 —— arxiv 的 HTML 论文页把整份样式表拆成两个 layer() import，
+ * 不展开会让快照只剩 188 字节的空壳。
+ * `supports()` 依赖运行时特性检测，静态展开会改变命中语义，仍标记为不支持并
+ * 保留原始 link 交给服务端兜底。
+ */
+function parseImportCondition(condition: string): ImportCondition {
+  const rest = condition.trim();
+  if (/\bsupports\s*\(/i.test(rest)) {
+    return { layerName: undefined, media: '', unsupported: true };
+  }
+  let remainder = rest;
+  let layerName: string | null | undefined;
+  const layerMatch = /^layer(?:\s*\(\s*([^)]*?)\s*\))?(?=\s|$)/i.exec(remainder);
+  if (layerMatch) {
+    const named = layerMatch[1]?.trim();
+    layerName = named || null;
+    remainder = remainder.slice(layerMatch[0].length).trim();
+  }
+  return { layerName, media: remainder, unsupported: false };
+}
+
+/** 按 layer / media 条件包裹导入的 CSS，保持与 @import 相近的级联语义。 */
+function wrapImportedCss(css: string, condition: ImportCondition): string {
+  let wrapped = css;
+  if (condition.layerName !== undefined) {
+    const name = condition.layerName ? ' ' + condition.layerName : '';
+    wrapped = '@layer' + name + '{\n' + wrapped + '\n}\n';
+  }
+  if (condition.media && condition.media.toLowerCase() !== 'all') {
+    wrapped = '@media ' + condition.media + '{\n' + wrapped + '\n}\n';
+  }
+  return wrapped.endsWith('\n') ? wrapped : wrapped + '\n';
+}
+
+/**
+ * 展开普通 @import、layer() import 与 media 条件；supports() 等复杂条件
+ * 不猜测其级联语义，标记为不完整并保留原始 link，由服务端统一降级。
  */
 async function expandCssImports(
   sourceCss: string,
@@ -323,7 +369,8 @@ async function expandCssImports(
 
     const href = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '').trim();
     const condition = (match[6] || '').trim();
-    if (/\b(?:layer|supports)\s*\(/i.test(condition)) {
+    const parsed = parseImportCondition(condition);
+    if (parsed.unsupported) {
       state.onError(sourceUrl, 'unsupported @import condition: ' + condition);
       complete = false;
       continue;
@@ -343,11 +390,7 @@ async function expandCssImports(
     }
     if (!imported.css) continue;
 
-    if (condition && condition.toLowerCase() !== 'all') {
-      output += '@media ' + condition + '{\n' + imported.css + '\n}\n';
-    } else {
-      output += imported.css + '\n';
-    }
+    output += wrapImportedCss(imported.css, parsed);
   }
 
   output += sourceCss.slice(cursor);

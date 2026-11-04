@@ -8,6 +8,10 @@ import { extractBlocks, buildNodeMap } from '../entrypoints/utils/blockExtractor
 import type { Config } from '../entrypoints/utils/config';
 import type { TextBlock } from '../entrypoints/utils/blockExtractor';
 
+vi.mock('webextension-polyfill', () => ({
+  default: { runtime: { sendMessage: vi.fn() } },
+}));
+
 vi.mock('../entrypoints/utils/translationDisplay', () => ({
   applyBlockTranslation: vi.fn(),
 }));
