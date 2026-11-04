@@ -12,13 +12,54 @@
       </button>
     </header>
 
+    <!-- 对话执行配置独立于网页/文档翻译配置；远端调用 Vocal Saga Cloud，本地调用 local-agent-service。 -->
+    <section class="chat-controls">
+      <label>执行服务
+        <select v-model="chatBackend" :disabled="streaming" @change="onBackendChange">
+          <option value="remote">Vocal Saga 远端服务</option>
+          <option value="workbuddy">本地 Workbuddy</option>
+          <option value="opencode">本地 OpenCode</option>
+        </select>
+      </label>
+      <label>模型
+        <input v-model="chatModel" list="chat-model-options" :disabled="streaming" placeholder="自动 / 输入模型 ID" @change="saveChatSettings" />
+        <datalist id="chat-model-options">
+          <option v-for="model in availableModels" :key="model.id" :value="model.id" />
+        </datalist>
+      </label>
+      <label>思考模式
+        <select v-model="chatThinkingMode" :disabled="streaming" @change="saveChatSettings">
+          <option value="disabled">关闭</option>
+          <option value="adaptive">自适应</option>
+          <option value="enabled">开启</option>
+        </select>
+      </label>
+      <label>思考强度
+        <select v-model="chatEffort" :disabled="streaming" @change="saveChatSettings">
+          <option value="low">低</option>
+          <option value="medium">中</option>
+          <option value="high">高</option>
+          <option value="xhigh">极高</option>
+        </select>
+      </label>
+      <label v-if="chatBackend === 'remote'">远端服务 Token
+        <input v-model="remoteServiceToken" type="password" autocomplete="off" placeholder="Vocal Saga AUTH_KEY" @change="onRemoteTokenChange" />
+      </label>
+      <label v-if="chatBackend !== 'remote' && availableSkills.length">Agent Skills（服务端）
+        <select v-model="chatSkillIds" multiple :disabled="streaming" @change="saveChatSettings">
+          <option v-for="skill in availableSkills" :key="skill.id" :value="skill.id">{{ skill.name }}</option>
+        </select>
+      </label>
+      <div v-if="chatOptionsError" class="chat-options-error">{{ chatOptionsError }}</div>
+    </section>
+
     <!-- KV Cache 命中率指示（多轮时 system 前缀命中缓存，输入 token 大幅下降） -->
     <div v-if="usageText" class="usage-hint">{{ usageText }}</div>
 
     <!-- 提示条 -->
     <div v-if="status === 'error'" class="banner error">
       {{ errorMsg }}
-      <div class="banner-hint">提示：在普通网页（http/https）上打开本页，或在插件设置中填写 DeepSeek API Key。</div>
+      <div class="banner-hint">请检查所选执行服务、模型配置及远端 Token / 本机 local-agent-service 是否可用。</div>
     </div>
     <div v-else-if="status === 'loading'" class="banner">正在读取当前页面内容…</div>
     <div v-else-if="pageContext" class="banner ok">
@@ -91,6 +132,7 @@ import browser from 'webextension-polyfill';
 import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse } from '@/types/messages';
 import type { ChatUsage } from '@/entrypoints/service/chat';
+import { getConfig, setConfig } from '@/entrypoints/utils/config';
 
 interface ChatTurn {
   role: 'user' | 'assistant';
@@ -110,6 +152,16 @@ const currentPort = ref<browser.Runtime.Port | null>(null);
 // 手动输入上下文模式：自动读取失败时启用，让用户粘贴正文继续对话
 const manualMode = ref(false);
 const manualText = ref('');
+const chatBackend = ref<'remote' | 'workbuddy' | 'opencode'>('remote');
+const chatModel = ref('');
+const chatThinkingMode = ref<'disabled' | 'adaptive' | 'enabled'>('adaptive');
+const chatEffort = ref<'low' | 'medium' | 'high' | 'xhigh'>('medium');
+const chatSkillIds = ref<string[]>([]);
+const remoteServiceToken = ref('');
+const availableModels = ref<Array<{ id: string }>>([]);
+const availableSkills = ref<Array<{ id: string; name: string; description: string }>>([]);
+const chatOptionsError = ref('');
+
 
 const canSend = computed(() => input.value.trim().length > 0 && !!pageContext.value && !streaming.value);
 
@@ -120,6 +172,83 @@ const usageText = computed(() => {
   const hitRate = Math.round((u.cacheHitTokens / u.promptTokens) * 100);
   return `KV 缓存命中 ${hitRate}% · 输入 ${u.promptTokens} / 命中 ${u.cacheHitTokens}`;
 });
+
+
+async function saveChatSettings() {
+  try {
+    await setConfig({
+      chatBackend: chatBackend.value,
+      chatModel: chatModel.value.trim(),
+      chatThinkingMode: chatThinkingMode.value,
+      chatEffort: chatEffort.value,
+      chatSkillIds: [...chatSkillIds.value],
+      remoteServiceToken: remoteServiceToken.value.trim(),
+    });
+  } catch (error) {
+    chatOptionsError.value = error instanceof Error ? error.message : '保存对话设置失败';
+  }
+}
+
+async function loadChatOptions() {
+  const config = await getConfig();
+  chatBackend.value = config.chatBackend || 'remote';
+  chatModel.value = config.chatModel || '';
+  chatThinkingMode.value = config.chatThinkingMode || 'adaptive';
+  chatEffort.value = config.chatEffort || 'medium';
+  chatSkillIds.value = config.chatSkillIds || [];
+  remoteServiceToken.value = config.remoteServiceToken || '';
+  await refreshChatOptions();
+}
+
+async function refreshChatOptions() {
+  availableModels.value = [];
+  availableSkills.value = [];
+  chatOptionsError.value = '';
+  try {
+    if (chatBackend.value === 'remote') {
+      const config = await getConfig();
+      const token = remoteServiceToken.value.trim() || config.remoteServiceToken;
+      const base = new URL(config.serverUrl || 'https://s.sunxiunan.com/fanyi/page');
+      const response = await fetch(new URL('/api/v1/models', base), {
+        headers: token ? { Authorization: 'Bearer ' + token } : {},
+      });
+      if (!response.ok) throw new Error('Vocal Saga 模型目录请求失败：HTTP ' + response.status);
+      const data = await response.json() as { data?: Array<{ id?: string }> };
+      availableModels.value = (data.data || []).filter((item): item is { id: string } => typeof item.id === 'string');
+    } else {
+      const config = await getConfig();
+      const base = (config.localAgentUrl || 'http://127.0.0.1:8789').replace(/\/+$/, '');
+      const headers = config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {};
+      const [capabilityResponse, skillResponse] = await Promise.all([
+        fetch(base + '/api/agent/capabilities', { headers }),
+        fetch(base + '/api/agent/skills', { headers }),
+      ]);
+      if (!capabilityResponse.ok) throw new Error('本机 Agent 能力目录请求失败：HTTP ' + capabilityResponse.status);
+      if (!skillResponse.ok) throw new Error('本机 Agent Skill 目录请求失败：HTTP ' + skillResponse.status);
+      const capabilities = await capabilityResponse.json() as { providers?: Array<{ id: string; models?: Array<{ id: string }> }> };
+      const skills = await skillResponse.json() as { skills?: Array<{ id: string; name: string; description: string }> };
+      const provider = capabilities.providers?.find((item) => item.id === chatBackend.value);
+      availableModels.value = provider?.models || [];
+      availableSkills.value = skills.skills || [];
+      if (chatSkillIds.value.some((id) => !availableSkills.value.some((skill) => skill.id === id))) {
+        chatSkillIds.value = chatSkillIds.value.filter((id) => availableSkills.value.some((skill) => skill.id === id));
+      }
+    }
+  } catch (error) {
+    chatOptionsError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function onRemoteTokenChange() {
+  await saveChatSettings();
+  await refreshChatOptions();
+}
+
+async function onBackendChange() {
+  chatModel.value = '';
+  await saveChatSettings();
+  await refreshChatOptions();
+}
 
 function shortUrl(url: string): string {
   try {
@@ -342,10 +471,21 @@ async function send() {
       scrollToBottom();
     }
   });
-  port.postMessage({ type: 'chat', context: pageContext.value, history, jsonMode: jsonMode.value });
+  port.postMessage({
+    type: 'chat',
+    context: pageContext.value,
+    history,
+    jsonMode: jsonMode.value,
+    backend: chatBackend.value,
+    model: chatModel.value.trim(),
+    thinkingMode: chatThinkingMode.value,
+    effort: chatEffort.value,
+    skillIds: chatSkillIds.value,
+    remoteServiceToken: remoteServiceToken.value.trim(),
+  });
 }
 
-onMounted(initChat);
+onMounted(async () => { await loadChatOptions(); await initChat(); });
 onUnmounted(disconnectPort);
 </script>
 
@@ -470,6 +610,46 @@ onUnmounted(disconnectPort);
     padding: 9px 10px;
     font-size: 15px;
   }
+}
+
+
+.chat-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #ececec;
+  flex-shrink: 0;
+}
+.chat-controls label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: #666;
+  font-size: 11px;
+}
+.chat-controls select,
+.chat-controls input {
+  min-width: 92px;
+  max-width: 190px;
+  height: 30px;
+  padding: 3px 6px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font: inherit;
+}
+.chat-controls select[multiple] {
+  height: 58px;
+  min-width: 150px;
+}
+.chat-options-error {
+  flex-basis: 100%;
+  color: #c4564f;
+  font-size: 11px;
 }
 
 .banner {

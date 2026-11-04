@@ -6,7 +6,7 @@
 
 ### 1.1 定位
 
-浏览器扩展，将网页正文逐块翻译为中文（或其他目标语言），以双语对照方式显示。当前有三种翻译路由：直连 DeepSeek API、远程 Vocal Saga 服务、以及本机 Workbuddy/OpenCode Agent 服务。启用本机 Provider 后，网页分块、YouTube 字幕、文档翻译及文学分析/审校都严格走本机；本机模型或服务失败时直接报错，不切换到远程 API。
+浏览器扩展，将网页正文逐块翻译为中文（或其他目标语言），以双语对照方式显示。翻译路由仍包括直连 Provider、远程 Vocal Saga 服务和本机 Workbuddy/OpenCode Agent。侧栏对话另有独立执行后端选择：Vocal Saga Cloud `/api/v1/chat/completions`，或本机 `local-agent-service` `/api/agent/chat`。本机对话可选择服务端 Agent Skills，不创建 Document Project / Translation Run，也不触发文档翻译 Pipeline。
 
 ### 1.2 技术栈
 
@@ -841,3 +841,12 @@ fanyi-extension 与 vocal-saga（服务端项目）共享以下模块，修改�
 4. **多语言页面**: 含 `data-t` 等隐藏多语言文本的页面，textContent 会混合所有语言版本
 5. **SPA 数据岛**: 某些 Next.js 站点首屏未 hydrate 时需要从 `__NEXT_DATA__` 提取
 6. **流式翻译**: 当前未启用，接口已预留
+
+
+## Side-panel Agent Chat
+
+- Conversation routing is independent of webpage/document translation provider settings.
+- Remote: Vocal Saga Cloud `POST /api/v1/chat/completions`, model catalog `GET /api/v1/models`.
+- Local: `local-agent-service` `GET /api/agent/capabilities`, `GET /api/agent/skills`, `POST /api/agent/chat`.
+- The extension sends Skill IDs only. Skill files and their content remain in `vocal-saga/local-agent-service/skills`.
+- Local chat is a standalone Agent request, not a document translation run or literary workflow.
