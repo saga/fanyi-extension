@@ -34,7 +34,7 @@ import type {
   FetchRemoteCssResponse,
   PageContext,
 } from '../types/messages';
-import { chatStream, buildChatSystem, type ChatMessage, type ChatUsage } from './service/chat';
+import { buildChatSystem, type ChatMessage } from './service/chat';
 import { openSidePanel } from './utils/sidePanel';
 import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
 
@@ -1131,72 +1131,81 @@ export default defineBackground({
     browser.runtime.onConnect.addListener((port) => {
       if (port.name !== 'chat') return;
 
-      // 用户关闭侧栏 / 导航时端口断开 -> 中断在途请求，避免浪费带宽与配额
       const controller = new AbortController();
       port.onDisconnect.addListener(() => controller.abort());
 
       port.onMessage.addListener(async (msg: unknown) => {
-        const m = msg as { type?: string; context?: PageContext; history?: ChatMessage[]; jsonMode?: boolean };
+        const m = msg as {
+          type?: string; context?: PageContext; history?: ChatMessage[]; jsonMode?: boolean;
+          backend?: 'remote' | 'workbuddy' | 'opencode'; model?: string;
+          thinkingMode?: 'disabled' | 'adaptive' | 'enabled';
+          effort?: 'low' | 'medium' | 'high' | 'xhigh'; skillIds?: string[];
+          remoteServiceToken?: string;
+        };
         if (m.type !== 'chat') return;
 
-        const config = await getConfig();
-        if (!config.useLocalAgent && !config.deepseekApiKey) {
-          port.postMessage({ type: 'error', message: '未配置 DeepSeek API Key，请在插件设置中填写，或启用本机 Workbuddy/OpenCode Provider' });
-          return;
-        }
-
         try {
+          const config = await getConfig();
+          const backend = m.backend || config.chatBackend || 'remote';
           const system = buildChatSystem(m.context ?? null, m.jsonMode);
-          const llmMessages: ChatMessage[] = [{ role: 'system', content: system }, ...(m.history ?? [])];
-          let full = '';
-          let usage: ChatUsage | null = null;
-          if (config.useLocalAgent) {
-            const response = await fetch(new URL('/v1/chat/completions', getLocalAgentBaseUrl(config)).toString(), {
+          const llmMessages: ChatMessage[] = [
+            { role: 'system', content: system },
+            ...(m.history ?? []),
+          ];
+          let response: Response;
+          if (backend === 'remote') {
+            const token = (m.remoteServiceToken || config.remoteServiceToken || '').trim();
+            if (!token) throw new Error('请先配置 Vocal Saga 远端服务 Token');
+            const base = new URL(config.serverUrl || 'https://s.sunxiunan.com/fanyi/page');
+            const endpoint = new URL('/api/v1/chat/completions', base).toString();
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+              signal: controller.signal,
+              body: JSON.stringify({
+                model: m.model || config.chatModel || 'deepseek-v4-flash',
+                messages: llmMessages,
+                stream: false,
+                ...(m.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+                thinking: { type: m.thinkingMode || config.chatThinkingMode || 'adaptive' },
+                reasoning_effort: m.effort || config.chatEffort || 'medium',
+              }),
+            });
+          } else {
+            const endpoint = new URL('/api/agent/chat', getLocalAgentBaseUrl(config)).toString();
+            response = await fetch(endpoint, {
               method: 'POST',
               headers: getLocalAgentHeaders(config),
               signal: controller.signal,
               body: JSON.stringify({
-                model: getLocalAgentModelId(config),
+                provider: backend,
+                model: m.model || config.chatModel || '',
                 messages: llmMessages,
-                ...(m.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+                thinkingMode: m.thinkingMode || config.chatThinkingMode || 'adaptive',
+                effort: m.effort || config.chatEffort || 'medium',
+                skillIds: m.skillIds || config.chatSkillIds || [],
+                jsonMode: m.jsonMode === true,
               }),
             });
-            const data = await response.json().catch(() => ({})) as {
-              choices?: Array<{ message?: { content?: unknown } }>;
-              error?: { message?: string } | string;
-            };
-            if (!response.ok) {
-              const detail = typeof data.error === 'string' ? data.error : data.error?.message;
-              throw new Error(detail || '本机 Agent 服务返回 HTTP ' + response.status);
-            }
-            const content = data.choices?.[0]?.message?.content;
-            if (typeof content !== 'string' || !content.trim()) throw new Error('本机 Agent 未返回对话内容');
-            full = content;
-            port.postMessage({ type: 'partial', text: full });
-            port.postMessage({ type: 'done', text: full, usage: null });
-            return;
           }
-          for await (const partial of chatStream(config.deepseekApiKey, llmMessages, {
-            jsonMode: m.jsonMode,
-            signal: controller.signal,
-            onUsage: (u) => {
-              usage = u;
-              // 实时回传，供 UI 即时展示缓存命中率（无需等整段生成完）
-              port.postMessage({ type: 'usage', usage: u });
-            },
-          })) {
-            full = partial;
-            port.postMessage({ type: 'partial', text: full });
+
+          const data = await response.json().catch(() => ({})) as {
+            choices?: Array<{ message?: { content?: unknown } }>;
+            error?: { message?: string } | string;
+            message?: string;
+          };
+          if (!response.ok) {
+            const detail = typeof data.error === 'string' ? data.error : data.error?.message || data.message;
+            throw new Error(detail || 'Agent 服务返回 HTTP ' + response.status);
           }
-          port.postMessage({ type: 'done', text: full, usage });
+          const content = data.choices?.[0]?.message?.content;
+          if (typeof content !== 'string' || !content.trim()) throw new Error('Agent 服务未返回对话内容');
+          port.postMessage({ type: 'partial', text: content });
+          port.postMessage({ type: 'done', text: content, usage: data.usage ?? null, provider: backend, model: data.model });
         } catch (error) {
-          // 端口已断开（用户主动关闭）导致的 abort 属正常流程，静默处理
           if (controller.signal.aborted) return;
-          logger.error('[Background] chat stream error:', error);
-          port.postMessage({
-            type: 'error',
-            message: error instanceof Error ? error.message : '对话失败',
-          });
+          logger.error('[Background] chat request failed:', error);
+          port.postMessage({ type: 'error', message: error instanceof Error ? error.message : '对话失败' });
         }
       });
     });
