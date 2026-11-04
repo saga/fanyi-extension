@@ -1167,7 +1167,7 @@ export default defineBackground({
                 messages: llmMessages,
                 stream: false,
                 ...(m.jsonMode ? { response_format: { type: 'json_object' } } : {}),
-                thinking: { type: m.thinkingMode || config.chatThinkingMode || 'adaptive' },
+                thinking: { type: (m.thinkingMode || config.chatThinkingMode || 'adaptive') === 'disabled' ? 'disabled' : 'enabled' },
                 reasoning_effort: m.effort || config.chatEffort || 'medium',
               }),
             });
