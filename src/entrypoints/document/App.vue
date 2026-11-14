@@ -3540,8 +3540,9 @@ async function runWorkspaceTranslation(options: {
   const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
     options.scope || { type: 'ids', ids: options.ids || [] };
   // 小范围显式选段与服务端使用相同阈值；全书/失败项/过期项任务仍必须先准备全书上下文。
+  const selectedIds = scope.type === 'ids' ? new Set(scope.ids) : new Set<string>();
   const selectedSegments = scope.type === 'ids'
-    ? doc.value.segments.filter((segment) => new Set(scope.ids).has(segment.id))
+    ? doc.value.segments.filter((segment) => selectedIds.has(segment.id))
     : [];
   const lightweightSelection = scope.type === 'ids' && shouldUseLightweightLiterarySelection(selectedSegments);
   // 阅读页的后台翻译入口与 Agent Workspace 共用服务端门禁；小范围选段由服务端最终复核阈值。
