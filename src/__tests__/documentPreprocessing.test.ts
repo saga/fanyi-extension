@@ -6,6 +6,7 @@ import {
   preprocessingGateTitle,
   resolveDocumentTranslationMode,
   shouldAutoStartPreprocessing,
+  shouldUseLightweightLiterarySelection,
   sourceLanguageMatches,
   styleGuideBadge,
 } from '../entrypoints/document/documentPreprocessing';
@@ -149,15 +150,15 @@ describe('literary preprocessing readiness gate', () => {
   });
 
 
-  it('blocks a completed run whose style baseline or workflow stages are incomplete', () => {
+  it('does not block a completed run when optional style dimensions are unavailable', () => {
     const missingStyle = assessContextGraphReadiness({
       ...baseInput,
       snapshot: { ...completedSnapshot, styleGuideReady: false, styleMissingFields: ['styleRhythm'] },
     });
-    expect(missingStyle.ready).toBe(false);
-    expect(missingStyle.reason).toBe('incomplete');
-    expect(missingStyle.message).toContain('styleRhythm');
+    expect(missingStyle.ready).toBe(true);
+  });
 
+  it('still blocks a completed run whose required workflow stages are incomplete', () => {
     const missingStage = assessContextGraphReadiness({
       ...baseInput,
       snapshot: {
@@ -246,6 +247,16 @@ describe('literary preprocessing readiness gate', () => {
   });
 });
 
+
+describe('lightweight literary selection', () => {
+  it('allows only small, non-empty explicit selections', () => {
+    expect(shouldUseLightweightLiterarySelection([{ text: 'A line.' }, { text: 'A reply.' }])).toBe(true);
+    expect(shouldUseLightweightLiterarySelection(Array.from({ length: 13 }, () => ({ text: 'x' })))).toBe(false);
+    expect(shouldUseLightweightLiterarySelection([{ text: 'x'.repeat(6001) }])).toBe(false);
+    expect(shouldUseLightweightLiterarySelection([{ text: '   ' }])).toBe(false);
+    expect(shouldUseLightweightLiterarySelection([])).toBe(false);
+  });
+});
 
 describe('context graph busy state (button disable guard)', () => {
   it('treats queued and running preprocessing as busy', () => {
