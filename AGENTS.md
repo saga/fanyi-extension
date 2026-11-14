@@ -34,9 +34,9 @@ Local Agent 模式下，服务端 SQLite 是文档项目全部业务数据的唯
 
 ### 文学翻译的预处理前置条件
 
-- 文学翻译以质量优先：当前原文版本的全书 Context Graph 必须完整通过 readiness 检查后，才允许扩展创建开始/重译/重试/恢复 Run。
-- 新项目首次分析自动触发；扩展通过服务端轻量状态投影判断 readiness。预处理失败、旧版本、语言方向不符、分析不完整或状态未知时 fail closed；失败/过期由用户在“人物与预处理”显式重新分析。
-- 扩展只维护 UI readiness，不复制 Context Graph 数据或分析算法。Local Agent 的 executeRun 仍负责直接 API/旧客户端的最终门禁：queued Run 可以等待预处理，但 readiness 通过前不得调用翻译模型。
+- 长篇/全书文学翻译优先复用当前原文版本的 Context Graph；小范围显式选段（最多 12 个有效片段、源文合计不超过 6,000 字符）允许服务端走轻量上下文路径，不因全书分析失败或文风字段不齐而阻塞。
+- 新项目首次分析可以自动触发；扩展通过服务端轻量状态投影展示 readiness。长范围任务遇到预处理失败、旧版本、语言方向不符或阶段不完整时 fail closed；失败/过期由用户在“人物与预处理”显式重新分析。小范围选段阈值由扩展与服务端同步，服务端最终复核。
+- 扩展只维护 UI 状态，不复制 Context Graph 数据或分析算法。Local Agent 的 executeRun 仍负责最终门禁：长范围 Run 等待全书上下文；小范围选段只在 Run 仍绑定当前原文版本、且没有全书分析正在运行时才可轻量继续。
 - 技术文档翻译不要求文学 Context Graph。完整性通过不等于用户确认风格；机器应用、用户编辑和用户确认必须区分来源。
 - 详细决策见 [vocal-saga ADR-0005](https://github.com/saga/vocal-saga/blob/main/docs/adr/0005-literary-preprocessing-before-translation.md)。
 
