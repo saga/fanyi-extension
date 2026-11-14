@@ -131,6 +131,30 @@ describe('document reader composable wiring', () => {
     expect(contextGraph.slice(orchestration)).toContain('timeoutMs');
   });
 
+  it('returns before full-book preprocessing when an explicit selection is empty', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+      'utf8',
+    );
+    const runHandler = source.indexOf('async function runWorkspaceTranslation');
+    expect(runHandler).toBeGreaterThan(-1);
+    const emptyScopeGuard = source.indexOf(
+      "if (scope.type === 'ids' && (!scope.ids || scope.ids.length === 0)) return;",
+      runHandler,
+    );
+    const memoryWait = source.indexOf('await awaitLiteraryMemoryWrites()', runHandler);
+    const fullBookPreprocessing = source.indexOf('await prepareContextGraphForTranslation(', runHandler);
+    const runCreation = source.indexOf(
+      "'/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs'",
+      runHandler,
+    );
+    expect(emptyScopeGuard).toBeGreaterThan(runHandler);
+    expect(memoryWait).toBeGreaterThan(emptyScopeGuard);
+    expect(fullBookPreprocessing).toBeGreaterThan(emptyScopeGuard);
+    expect(runCreation).toBeGreaterThan(emptyScopeGuard);
+    expect(emptyScopeGuard).toBeLessThan(fullBookPreprocessing);
+  });
+
   it('keeps one literary translation action scoped to the current page, not the whole book', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/App.vue'),

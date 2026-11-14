@@ -3500,6 +3500,10 @@ async function runWorkspaceTranslation(options: {
   chapterTitle?: string;
 }) {
   if (!doc.value || state.value.running) return;
+  const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
+    options.scope || { type: 'ids', ids: options.ids || [] };
+  // 空的显式选段不是全书任务；必须在任何全书预处理/记忆等待之前直接结束。
+  if (scope.type === 'ids' && (!scope.ids || scope.ids.length === 0)) return;
   // 显式修改 Voice Bible 后立即翻译时，先等待排队中的 SQLite 记忆写入完成。
   await awaitLiteraryMemoryWrites();
   const config = readerConfig.value || await getConfig();
@@ -3537,8 +3541,6 @@ async function runWorkspaceTranslation(options: {
       return;
     }
   }
-  const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
-    options.scope || { type: 'ids', ids: options.ids || [] };
   // 小范围显式选段与服务端使用相同阈值；全书/失败项/过期项任务仍必须先准备全书上下文。
   const selectedIds = scope.type === 'ids' ? new Set(scope.ids) : new Set<string>();
   const selectedSegments = scope.type === 'ids'
@@ -3575,7 +3577,6 @@ async function runWorkspaceTranslation(options: {
   } else if (lightweightSelection) {
     state.value.workStage = '使用当前选段上下文，开始翻译';
   }
-  if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
   const response = await workspaceApi<{ run: any; started: boolean }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs',
     { method: 'POST', body: JSON.stringify({ scope }) },
