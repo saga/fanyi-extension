@@ -165,9 +165,15 @@ export function validateBlockMapping(
     if (sentenceRatio > maxSentenceRatio) {
       reasons.push(`句子数激增：比 ${sentenceRatio.toFixed(2)} > ${maxSentenceRatio}`);
     }
-    // 中文把几个英文短句并成一句是常态，只有原文句数足够多时「骤减」才有区分度：
-    // 3 句→1 句（比 0.33）刚好压在阈值下，属于正常合并，不告警。
-    if (sentenceRatio < minSentenceRatio && origSentences >= minOrigForCollapse) {
+    // 中文把几个英文短句并成一句是常态，单看比值无法区分「正常合并」与「拿到别的 block 的译文」。
+    // 用「绝对句数差 + 译文句数」做二次门控：译文只有 1 句且原文 ≥ 4 句时才算骤减；
+    // 译文 ≥ 2 句的多对多合并一律不告警（此时 charRatio 已能覆盖真正的截断/错配）。
+    // 5→1（比 0.20）、10→3（比 0.30）这类真实页面已验证仍会被捕获。
+    if (
+      sentenceRatio < minSentenceRatio &&
+      transSentences === 1 &&
+      origSentences - transSentences >= minOrigForCollapse
+    ) {
       reasons.push(`句子数骤减：比 ${sentenceRatio.toFixed(2)} < ${minSentenceRatio}`);
     }
   }
