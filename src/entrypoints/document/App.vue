@@ -3537,9 +3537,15 @@ async function runWorkspaceTranslation(options: {
       return;
     }
   }
-  // 阅读页的后台翻译入口也必须遵守与 Agent Workspace 相同的文学预处理前置条件。
-  // 不能只依赖 Workspace 按钮禁用：阅读页的“翻译当前页/预翻译章节”会直接调用本函数。
-  if (effectiveDocumentTranslationMode.value === 'literary') {
+  const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
+    options.scope || { type: 'ids', ids: options.ids || [] };
+  // 小范围显式选段与服务端使用相同阈值；全书/失败项/过期项任务仍必须先准备全书上下文。
+  const selectedSegments = scope.type === 'ids'
+    ? doc.value.segments.filter((segment) => new Set(scope.ids).has(segment.id))
+    : [];
+  const lightweightSelection = scope.type === 'ids' && shouldUseLightweightLiterarySelection(selectedSegments);
+  // 阅读页的后台翻译入口与 Agent Workspace 共用服务端门禁；小范围选段由服务端最终复核阈值。
+  if (effectiveDocumentTranslationMode.value === 'literary' && !lightweightSelection) {
     state.value.running = true;
     state.value.workChapter = '全书预处理';
     state.value.workStage = '准备全书上下文';
@@ -3565,9 +3571,9 @@ async function runWorkspaceTranslation(options: {
       return;
     }
     state.value.workStage = '全书预处理完成，开始翻译';
+  } else if (lightweightSelection) {
+    state.value.workStage = '使用当前选段上下文，开始翻译';
   }
-  const scope: { type: 'ids'; ids: string[] } | { type: 'failed' } | { type: 'stale' } | { type: 'all' } =
-    options.scope || { type: 'ids', ids: options.ids || [] };
   if (scope.type === 'ids' && (!scope.ids || !scope.ids.length)) return;
   const response = await workspaceApi<{ run: any; started: boolean }>(
     base, token, '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs',
