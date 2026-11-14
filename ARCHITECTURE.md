@@ -716,16 +716,16 @@ handleFullTranslation()
 
 ```text
 打开文学文档 / 初始化 Project
-  → 首次自动启动全书 Context Graph 预处理
+  → 首次可自动启动全书 Context Graph 预处理
   → 扩展轮询 /context-graph/status 轻量投影
-  → 校验 source revision / analysis version / 语言方向 / 样本 / 文风完整性 / B 工作流阶段
-  → 未 ready：禁用开始、重译、重试、恢复入口；失败或过期时显式重新分析
-  → ready：开放创建文学 Run
+  → 长篇/全书 Run：校验 source revision / analysis version / 语言方向 / 样本 / B 工作流阶段
+  → 小范围显式选段（≤12 段且 ≤6,000 源文字符）：可跳过等待全书分析
+  → 服务端最终校验；文风字段不完整不阻断翻译
   → local-agent-service executeRun 再次校验
   → 通过后才进入 running 并调用翻译模型
 ```
 
-扩展不复制 Context Graph 节点、边、证据或章节摘要。旧客户端/直接 API 调用可能先创建 queued Run，但服务端必须在 readiness 通过前保持不进入翻译阶段。技术文档模式不要求文学 Context Graph。完整决策见 [Vocal Saga ADR-0005](https://github.com/saga/vocal-saga/blob/main/docs/adr/0005-literary-preprocessing-before-translation.md) 和 [本仓库 ADR-002](docs/ADR-002-server-authoritative-document-state.md)。
+扩展不复制 Context Graph 节点、边、证据或章节摘要。旧客户端/直接 API 调用可能先创建 queued Run；服务端对长篇/全书任务执行完整上下文门禁，小范围选段按服务端阈值走轻量路径。技术文档模式不要求文学 Context Graph。完整决策见 [Vocal Saga ADR-0005](https://github.com/saga/vocal-saga/blob/main/docs/adr/0005-literary-preprocessing-before-translation.md) 和 [本仓库 ADR-002](docs/ADR-002-server-authoritative-document-state.md)。
 
 ### 8.3 Vocal Saga 服务端翻译模式
 

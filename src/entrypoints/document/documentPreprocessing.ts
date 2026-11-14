@@ -38,9 +38,22 @@ export function shouldAutoStartPreprocessing(input: {
 }
 
 /**
+ * 小范围选段的阈值与 local-agent-service 保持一致。
+ * 只允许显式 ids 选段使用；全书、失败项和过期项重试仍走完整全书上下文。
+ */
+export function shouldUseLightweightLiterarySelection(
+  segments: Array<{ text?: unknown }> | null | undefined,
+): boolean {
+  const valid = (Array.isArray(segments) ? segments : [])
+    .filter((segment) => typeof segment?.text === 'string' && segment.text.trim().length > 0);
+  if (!valid.length || valid.length > 12) return false;
+  return valid.reduce((total, segment) => total + String(segment.text).length, 0) <= 6_000;
+}
+
+/**
  * Resolve the translation mode shared by the reader, Agent workspace and persisted Prompt.
- * Literary translation is blocked in the extension until the service confirms a complete,
- * source/version/language-matched Context Graph. The Local Agent repeats this check server-side.
+ * Long literary translations wait for a complete, source/version/language-matched Context Graph.
+ * Small explicit selections use the service's bounded lightweight-context path.
  */
 export function resolveDocumentTranslationMode(
   perDocumentLiteraryMode: boolean,
@@ -211,15 +224,7 @@ export function assessContextGraphReadiness(input: PreprocessingReadinessInput):
       message: '预处理记录没有有效的全书分析样本，不能用于正式翻译。请重新分析全书。',
     };
   }
-  if (snapshot.styleGuideReady !== true) {
-    const missing = Array.isArray(snapshot.styleMissingFields) ? snapshot.styleMissingFields : [];
-    return {
-      required: true, ready: false, reason: 'incomplete',
-      message: '预处理任务虽然结束，但全书文风基准未通过完整性检查' +
-        (missing.length ? '（缺少：' + missing.join('、') + '）' : '') +
-        '。请重新分析全书；在完整性检查通过前不会开始翻译。',
-    };
-  }
+  // styleGuideReady 只描述文风字段是否齐全，不是翻译准入条件；缺失维度按已有证据使用。
   if (progress.strategy === 'B') {
     const requiredStages = ['style', 'characters', 'entities', 'relationships', 'chapters'];
     const completedStages = Array.isArray(progress.completedStages) ? progress.completedStages : [];
