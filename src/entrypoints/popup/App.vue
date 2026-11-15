@@ -366,7 +366,7 @@ async function triggerTranslate() {
     let isArxivPdf = false;
     try {
       const url = new URL(currentUrl);
-      isArxivPdf = /(^|\\.)arxiv\\.org$/i.test(url.hostname) && /^\\/pdf\\//.test(url.pathname);
+      isArxivPdf = /(^|\.)arxiv\.org$/i.test(url.hostname) && /^\/pdf\//.test(url.pathname);
     } catch {
       isArxivPdf = false;
     }
