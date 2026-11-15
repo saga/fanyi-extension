@@ -169,8 +169,8 @@ function renderPaper(): void {
     const translation = document.createElement('p');
     translation.className = 'translation';
     translation.textContent = paragraph.translated || '';
-    translation.classList.toggle('hidden', !paragraph.translated || showOriginal);
-    original.classList.toggle('hidden', !showOriginal);
+    translation.classList.toggle('hidden', !paragraph.translated);
+    original.classList.toggle('hidden', translationOnly);
     block.append(original, translation);
     currentSection.append(block);
   }
