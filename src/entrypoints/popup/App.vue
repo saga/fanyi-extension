@@ -359,7 +359,27 @@ async function checkApiKey() {
 async function triggerTranslate() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
-    // 经 background 消息中枢转发到 content script（失败由 background 统一处理）
+    const currentUrl = tab.url || '';
+    // Firefox's built-in PDF viewer is a privileged page: content scripts cannot run there.
+    // For arXiv PDFs, replace this tab with our own responsive reader (no new tab and no
+    // document-translation project). The reader keeps the source URL so Back restores the PDF.
+    let isArxivPdf = false;
+    try {
+      const url = new URL(currentUrl);
+      isArxivPdf = /(^|\.)arxiv\.org$/i.test(url.hostname) && /^\/pdf\//.test(url.pathname);
+    } catch {
+      isArxivPdf = false;
+    }
+    if (isArxivPdf) {
+      const readerUrl = browser.runtime.getURL(
+        'pdf-reader.html?url=' + encodeURIComponent(currentUrl),
+      );
+      await browser.tabs.update(tab.id, { url: readerUrl });
+      window.close();
+      return;
+    }
+
+    // 普通网页仍走原有网页翻译消息通道。
     browser.runtime.sendMessage({ action: 'relayToContent', tabId: tab.id, message: { action: 'translatePage' } })
       .catch(() => {});
     window.close();
