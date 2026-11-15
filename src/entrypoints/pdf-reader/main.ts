@@ -18,7 +18,7 @@ const paperNode = document.querySelector<HTMLElement>('#paper')!;
 const translateButton = document.querySelector<HTMLButtonElement>('#translate')!;
 const modeButton = document.querySelector<HTMLButtonElement>('#mode-toggle')!;
 let paragraphs: Paragraph[] = [];
-let showOriginal = false;
+let translationOnly = false;
 let translated = false;
 
 function status(message: string, error = false): void {
@@ -129,7 +129,8 @@ async function extractPdf(url: string): Promise<void> {
     paragraphs = all.filter(item => item.text.length >= 4);
     if (!paragraphs.length) throw new Error('PDF 没有可提取的文本；扫描版/OCR PDF 暂不支持。');
     renderPaper();
-    status('已提取 '+paragraphs.length+' 个文本段落，共 '+pdf.numPages+' 页。');
+    status('已提取 '+paragraphs.length+' 个文本段落，共 '+pdf.numPages+' 页，开始翻译…');
+    void translateAll();
   } finally {
     await loadingTask.destroy();
   }
@@ -216,12 +217,12 @@ async function translateAll(): Promise<void> {
 }
 
 modeButton.addEventListener('click', () => {
-  showOriginal = !showOriginal;
-  modeButton.textContent = showOriginal ? '显示译文' : '显示原文';
+  translationOnly = !translationOnly;
+  modeButton.textContent = translationOnly ? '显示原文' : '仅显示译文';
   for (const block of paperNode.querySelectorAll<HTMLElement>('.block')) {
-    block.querySelector('.original')?.classList.toggle('hidden', !showOriginal);
+    block.querySelector('.original')?.classList.toggle('hidden', translationOnly);
     const translation = block.querySelector('.translation');
-    translation?.classList.toggle('hidden', showOriginal || !translation.textContent);
+    translation?.classList.toggle('hidden', !translation.textContent);
   }
 });
 
