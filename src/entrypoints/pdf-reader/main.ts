@@ -181,8 +181,9 @@ async function translateAll(): Promise<void> {
   translateButton.disabled = true;
   try {
     const config = await getConfig();
+    const detected = detectLanguage(paragraphs.slice(0,12).map(p=>p.text).join('\\n'));
     const sourceLang = config.sourceLang === 'auto'
-      ? detectLanguage(paragraphs.slice(0,12).map(p=>p.text).join('\n'))
+      ? (detected.language === 'unknown' ? 'en' : detected.language)
       : config.sourceLang;
     const targetLang = config.targetLang || 'zh';
     const eligible = paragraphs.filter(p => !p.heading && !isLikelyMath(p.text) && p.text.length >= 18);
