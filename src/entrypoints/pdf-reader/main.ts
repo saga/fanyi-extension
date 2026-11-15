@@ -192,7 +192,7 @@ async function translateAll(): Promise<void> {
       ? (detected.language === 'unknown' ? 'en' : detected.language)
       : config.sourceLang;
     const targetLang = config.targetLang || 'zh';
-    const eligible = paragraphs.filter(p => !isLikelyMath(p.text) && p.text.length >= (p.heading ? 4 : 18));
+    const eligible = paragraphs.filter(p => !p.translated && !isLikelyMath(p.text) && p.text.length >= (p.heading ? 4 : 18));
     const batchSize = 8;
     let done = 0;
     for (let offset=0; offset<eligible.length; offset+=batchSize) {
@@ -214,9 +214,10 @@ async function translateAll(): Promise<void> {
       renderPaper();
       status('正在翻译：'+done+' / '+eligible.length+' 段');
     }
-    translated = true;
-    status('翻译完成。共翻译 '+done+' 段。');
-    translateButton.textContent = '翻译完成';
+    translated = paragraphs.every(p => p.heading || isLikelyMath(p.text) || p.text.length < 18 || !!p.translated);
+    status(translated ? '翻译完成。共翻译 '+paragraphs.filter(p=>p.translated).length+' 段。' : '部分段落未返回译文，可再次点击重试。');
+    translateButton.textContent = translated ? '翻译完成' : '重试未完成段落';
+    translateButton.disabled = translated;
   } catch (error) {
     status(error instanceof Error ? error.message : String(error), true);
     translateButton.disabled = false;
@@ -226,10 +227,11 @@ async function translateAll(): Promise<void> {
 modeButton.addEventListener('click', () => {
   translationOnly = !translationOnly;
   modeButton.textContent = translationOnly ? '显示原文' : '仅显示译文';
-  for (const block of paperNode.querySelectorAll<HTMLElement>('.block')) {
-    block.querySelector('.original')?.classList.toggle('hidden', translationOnly);
-    const translation = block.querySelector('.translation');
-    translation?.classList.toggle('hidden', !translation.textContent);
+  for (const original of paperNode.querySelectorAll<HTMLElement>('.original')) {
+    original.classList.toggle('hidden', translationOnly);
+  }
+  for (const translation of paperNode.querySelectorAll<HTMLElement>('.translation')) {
+    translation.classList.toggle('hidden', !translation.textContent);
   }
 });
 
