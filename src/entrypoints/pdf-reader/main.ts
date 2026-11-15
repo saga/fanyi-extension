@@ -185,6 +185,7 @@ function renderPaper(): void {
 async function translateAll(): Promise<void> {
   if (!paragraphs.length || translated) return;
   translateButton.disabled = true;
+  translateButton.textContent = '正在翻译…';
   try {
     const config = await getConfig();
     const detected = detectLanguage(paragraphs.slice(0,12).map(p=>p.text).join('\\n'));
@@ -214,12 +215,13 @@ async function translateAll(): Promise<void> {
       renderPaper();
       status('正在翻译：'+done+' / '+eligible.length+' 段');
     }
-    translated = paragraphs.every(p => p.heading || isLikelyMath(p.text) || p.text.length < 18 || !!p.translated);
+    translated = paragraphs.every(p => isLikelyMath(p.text) || p.text.length < (p.heading ? 4 : 18) || !!p.translated);
     status(translated ? '翻译完成。共翻译 '+paragraphs.filter(p=>p.translated).length+' 段。' : '部分段落未返回译文，可再次点击重试。');
     translateButton.textContent = translated ? '翻译完成' : '重试未完成段落';
     translateButton.disabled = translated;
   } catch (error) {
     status(error instanceof Error ? error.message : String(error), true);
+    translateButton.textContent = '重试未完成段落';
     translateButton.disabled = false;
   }
 }
