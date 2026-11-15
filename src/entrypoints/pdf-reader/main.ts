@@ -115,9 +115,9 @@ async function extractPdf(url: string): Promise<void> {
       const page = await pdf.getPage(pageNo);
       const viewport = page.getViewport({scale:1});
       const content = await page.getTextContent();
-      const items = content.items.filter((item): item is PdfTextItem =>
+      const items = content.items.filter(item =>
         typeof (item as PdfTextItem).str === 'string' && !!(item as PdfTextItem).str.trim()
-      );
+      ) as unknown as PdfTextItem[];
       const columns = splitColumns(items, viewport.width);
       const pageParagraphs = columns.flatMap(column =>
         linesToParagraphs(itemsToLines(column), pageNo)
@@ -151,8 +151,14 @@ function renderPaper(): void {
     if (paragraph.heading) {
       currentSection = document.createElement('section');
       const h = document.createElement('h2');
+      h.className = 'original';
       h.textContent = paragraph.text;
-      currentSection.append(h);
+      h.classList.toggle('hidden', translationOnly);
+      const translatedHeading = document.createElement('div');
+      translatedHeading.className = 'translation';
+      translatedHeading.textContent = paragraph.translated || '';
+      translatedHeading.classList.toggle('hidden', !paragraph.translated);
+      currentSection.append(h, translatedHeading);
       paperNode.append(currentSection);
       continue;
     }
@@ -186,7 +192,7 @@ async function translateAll(): Promise<void> {
       ? (detected.language === 'unknown' ? 'en' : detected.language)
       : config.sourceLang;
     const targetLang = config.targetLang || 'zh';
-    const eligible = paragraphs.filter(p => !p.heading && !isLikelyMath(p.text) && p.text.length >= 18);
+    const eligible = paragraphs.filter(p => !isLikelyMath(p.text) && p.text.length >= (p.heading ? 4 : 18));
     const batchSize = 8;
     let done = 0;
     for (let offset=0; offset<eligible.length; offset+=batchSize) {
