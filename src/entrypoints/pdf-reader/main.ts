@@ -1,9 +1,9 @@
 import browser from 'webextension-polyfill';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
-import { getConfig } from '../../utils/config';
-import { detectLanguage } from '../../utils/languageDetector';
-import type { TranslateChunkMessage, TranslateChunkResponse } from '../../../types/messages';
+import { getConfig } from '../utils/config';
+import { detectLanguage } from '../utils/languageDetector';
+import type { TranslateChunkMessage, TranslateChunkResponse } from '../../types/messages';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
