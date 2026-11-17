@@ -270,4 +270,27 @@ describe('reader toolbar speed knobs', () => {
     expect(settings).toContain('不思考（最快）');
     expect(settings).toContain('思考（更慢，更稳）');
   });
+
+  it('设置页的备用模型使用下拉，且保留不在模型列表里的已存值', () => {
+    const settings = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
+      'utf8',
+    );
+    const fieldStart = settings.indexOf('<span>备用模型（可选）</span>');
+    expect(fieldStart).toBeGreaterThan(-1);
+    const field = settings.slice(fieldStart, fieldStart + 700);
+    const labelEnd = field.indexOf('</label>');
+    const body = labelEnd > -1 ? field.slice(0, labelEnd) : field;
+    // 回归：这里曾经是自由文本 input，无法下拉选择模型。
+    expect(body).toContain('<select v-model="config.documentCodeBuddyTaskProfiles[task.key].fallbackModel"');
+    expect(body).toContain('v-for="model in fallbackModelOptions(task.key)"');
+    expect(body).not.toContain('<input');
+    expect(body).toContain('<option value="">留空（不启用备用）</option>');
+    // 已存的自定义/旧默认值不能因下拉而丢失。
+    expect(settings).toContain('function fallbackModelOptions(');
+    const helper = settings.indexOf('function fallbackModelOptions(');
+    const helperBody = settings.slice(helper, settings.indexOf('async function onTaskModelChange', helper));
+    expect(helperBody).toContain('if (current && !options.some(');
+    expect(helperBody).toContain('options.unshift({ id: current');
+  });
 });

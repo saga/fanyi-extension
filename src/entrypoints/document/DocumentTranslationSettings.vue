@@ -146,9 +146,14 @@
               </label>
               <label class="setting-field">
                 <span>备用模型（可选）</span>
-                <input v-model.trim="config.documentCodeBuddyTaskProfiles[task.key].fallbackModel"
-                  placeholder="模型不可用时尝试的备用模型"
-                  @change="saveConfig('documentCodeBuddyTaskProfiles')" />
+                <select v-model="config.documentCodeBuddyTaskProfiles[task.key].fallbackModel"
+                  @change="saveConfig('documentCodeBuddyTaskProfiles')">
+                  <option value="">留空（不启用备用）</option>
+                  <option v-for="model in fallbackModelOptions(task.key)" :key="model.id" :value="model.id">
+                    {{ model.id }}{{ model.credits != null ? '（' + model.credits + ' credits）' : '' }}
+                  </option>
+                </select>
+                <small class="muted">主模型不可用时尝试；列表来自本机服务 /api/codebuddy/models。</small>
               </label>
               <label class="setting-field">
                 <span>思考方式</span>
@@ -478,6 +483,20 @@ async function saveConfig(...fields: (keyof Config)[]) {
   } finally {
     saving.value = false;
   }
+}
+
+/**
+ * 备用模型下拉选项。
+ * 模型列表来自本机服务；若用户已保存一个不在列表里的值（如旧默认值 hy3），
+ * 必须把它保留为选项，否则 <select> 会静默复位成空值。
+ */
+function fallbackModelOptions(task: DocumentCodeBuddyTaskKey): Array<{ id: string; credits?: number | null }> {
+  const current = config.value.documentCodeBuddyTaskProfiles[task].fallbackModel?.trim();
+  const options = codeBuddyModels.value.map((model) => ({ id: model.id, credits: model.credits }));
+  if (current && !options.some((option) => option.id === current)) {
+    options.unshift({ id: current, credits: null });
+  }
+  return options;
 }
 
 async function onTaskModelChange(task: DocumentCodeBuddyTaskKey) {
