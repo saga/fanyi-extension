@@ -140,6 +140,7 @@ async function loadHistory() {
       selectedId.value = history.value[0]!.comparisonId;
       activeComparison.value = history.value[0]!;
     }
+    syncPolling();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
