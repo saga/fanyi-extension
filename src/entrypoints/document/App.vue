@@ -84,7 +84,7 @@
         <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'agent' }" @click="activeTab = 'agent'">
           翻译 Agent
         </button>
-        <button v-if="readerConfig?.documentUseLocalAgent && (doc.format === 'epub' || doc.format === 'pdf')" class="tab" :class="{ active: activeTab === 'model-comparison' }" @click="activeTab = 'model-comparison'">
+        <button v-if="readerConfig?.documentUseLocalAgent && (doc.format === 'epub' || doc.format === 'pdf')" class="tab" :class="{ active: activeTab === 'model-comparison' }" @click="openModelComparison">
           双模型对比
         </button>
         <button v-if="doc.format === 'epub' || doc.format === 'pdf'" class="tab" :class="{ active: activeTab === 'trajectory' }" @click="activeTab = 'trajectory'">
@@ -1361,6 +1361,15 @@ const effectiveDocumentTranslationMode = computed(() =>
 
 /** 阅读、配置、人物/预处理、Agent 工作区和轨迹分区相互独立。 */
 const activeTab = ref<SavedDocumentTab>('reading');
+
+async function openModelComparison(): Promise<void> {
+  const project = workspaceProject.value?.projectId ? workspaceProject.value : await ensureDocumentWorkspace();
+  if (!project?.projectId) {
+    persistenceMessage.value = '无法初始化本机文档项目，暂时不能进行模型对比。';
+    return;
+  }
+  activeTab.value = 'model-comparison';
+}
 
 // 预处理文风基准由两个 composable 共享，必须在这里先创建：
 // `useLiteraryMemoryEditor` 的 watcher 会在 setup 阶段立即读取一次。
