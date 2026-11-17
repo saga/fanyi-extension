@@ -18,7 +18,7 @@ const SESSIONS_STORE = 'sessions';
 const TRANSLATIONS_STORE = 'translations';
 
 export type SavedViewMode = 'bilingual' | 'translation' | 'original';
-export type SavedDocumentTab = 'reading' | 'settings' | 'characters' | 'agent' | 'trajectory' | 'prompt';
+export type SavedDocumentTab = 'reading' | 'settings' | 'characters' | 'agent' | 'trajectory' | 'prompt' | 'model-comparison';
 
 export interface DocumentTranslationSnapshot {
   translations: Array<[string, string]>;
