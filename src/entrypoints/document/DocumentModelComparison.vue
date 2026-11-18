@@ -66,7 +66,9 @@
             <header><strong>模型 A</strong><span>{{ activeComparison.modelA?.provider }} / {{ activeComparison.modelA?.requestedModel }}</span><em :class="'status-' + activeComparison.modelA?.status">{{ statusLabel(activeComparison.modelA?.status) }}</em></header>
             <p v-if="activeComparison.modelA?.error" class="comparison-error">{{ activeComparison.modelA.error }}</p>
             <article v-for="source in activeComparison.source" :key="'a-' + source.id" class="comparison-segment">
-              <small>{{ source.id }}</small>
+              <small>{{ source.id }} · 原文</small>
+              <p class="comparison-source-text">{{ source.text }}</p>
+              <small>模型 A 译文</small>
               <p>{{ activeComparison.modelA?.translations?.[source.id] || missingLabel(activeComparison.modelA, source.id) }}</p>
             </article>
           </section>
@@ -74,7 +76,9 @@
             <header><strong>模型 B</strong><span>{{ activeComparison.modelB?.provider }} / {{ activeComparison.modelB?.requestedModel }}</span><em :class="'status-' + activeComparison.modelB?.status">{{ statusLabel(activeComparison.modelB?.status) }}</em></header>
             <p v-if="activeComparison.modelB?.error" class="comparison-error">{{ activeComparison.modelB.error }}</p>
             <article v-for="source in activeComparison.source" :key="'b-' + source.id" class="comparison-segment">
-              <small>{{ source.id }}</small>
+              <small>{{ source.id }} · 原文</small>
+              <p class="comparison-source-text">{{ source.text }}</p>
+              <small>模型 B 译文</small>
               <p>{{ activeComparison.modelB?.translations?.[source.id] || missingLabel(activeComparison.modelB, source.id) }}</p>
             </article>
           </section>
@@ -148,7 +152,7 @@ async function loadHistory() {
   }
 }
 async function selectHistory() {
-  if (!selectedId.value) { activeComparison.value = null; return; }
+  if (!selectedId.value) { activeComparison.value = null; syncPolling(); return; }
   try {
     const response = await workspaceApi<{ comparison: ComparisonRecord }>(
       props.serviceUrl, props.token, endpoint.value + '/' + encodeURIComponent(selectedId.value),
@@ -169,11 +173,17 @@ async function refreshActive() {
   if (index >= 0) history.value[index] = response.comparison;
   syncPolling();
 }
+function stopPolling() {
+  if (pollHandle) {
+    clearInterval(pollHandle);
+    pollHandle = null;
+  }
+}
 function syncPolling() {
   if (running.value && !pollHandle) {
     pollHandle = setInterval(() => { void refreshActive().catch((cause) => { error.value = cause instanceof Error ? cause.message : String(cause); }); }, 2200);
-  } else if (!running.value && pollHandle) {
-    clearInterval(pollHandle); pollHandle = null;
+  } else if (!running.value) {
+    stopPolling();
   }
 }
 async function startComparison() {
@@ -201,9 +211,15 @@ async function startComparison() {
     loading.value = false;
   }
 }
-watch(() => props.projectId, () => { selectedId.value = ''; activeComparison.value = null; void loadHistory(); });
+watch(() => props.projectId, () => {
+  stopPolling();
+  selectedId.value = '';
+  activeComparison.value = null;
+  history.value = [];
+  void loadHistory();
+});
 onMounted(() => { void loadHistory(); });
-onBeforeUnmount(() => { if (pollHandle) clearInterval(pollHandle); });
+onBeforeUnmount(stopPolling);
 </script>
 
 <style scoped>
@@ -218,6 +234,7 @@ onBeforeUnmount(() => { if (pollHandle) clearInterval(pollHandle); });
 .comparison-column > header em { margin-left: auto; font-size: 12px; font-style: normal; }
 .comparison-segment { border-top: 1px solid var(--border-color, #ddd); padding-top: 8px; }
 .comparison-segment p { white-space: pre-wrap; line-height: 1.65; margin: 6px 0 0; }
+.comparison-segment .comparison-source-text { color: var(--muted-color, #777); padding-bottom: 8px; border-bottom: 1px dashed var(--border-color, #ddd); }
 .comparison-empty { color: var(--muted-color, #777); padding: 18px 0; }
 .comparison-error { color: #b42318; white-space: pre-wrap; }
 .status-completed { color: #16803c; }
