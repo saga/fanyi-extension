@@ -80,6 +80,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
   const contextGraphBusy = computed(() =>
     isContextGraphBusy(contextGraphState.value.status, contextGraphAnalyzing.value));
   let contextGraphPollTimer: number | null = null;
+  // 作废切换文档前尚未完成的状态读取，避免旧项目响应覆盖新项目的 UI 快照。
+  let contextGraphRequestGeneration = 0;
+  function isCurrentContextGraphRequest(generation: number, projectId: string): boolean {
+    return generation === contextGraphRequestGeneration &&
+      (!workspaceProject.value?.projectId || workspaceProject.value.projectId === projectId);
+  }
   /** 服务不可达时的连续重连上限，避免本机服务长期离线时无限轮询。 */
   const CONTEXT_GRAPH_RECONNECT_MAX_ATTEMPTS = 20;
   let contextGraphReconnectAttempts = 0;
@@ -177,6 +183,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
   }
 
   async function loadContextGraph(project: any, schedulePoll = true): Promise<any> {
+    const requestGeneration = contextGraphRequestGeneration;
     const config = readerConfig.value || await getConfig();
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
@@ -186,6 +193,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
       base, token, '/api/documents/projects/' + encodeURIComponent(projectId) + '/context-graph/status',
     );
     const graph = result.contextGraph || {};
+    if (!isCurrentContextGraphRequest(requestGeneration, projectId)) return graph;
     contextGraphOverview.value = {
       narrativeStyle: typeof graph.overview?.narrativeStyle === 'string' ? graph.overview.narrativeStyle : '',
       styleRegister: typeof graph.overview?.styleRegister === 'string' ? graph.overview.styleRegister : '',
@@ -235,18 +243,21 @@ export function useContextGraph(deps: ContextGraphDeps) {
   }
 
   async function refreshContextGraphStatus(projectOverride?: any, schedulePoll = true) {
+    const requestGeneration = contextGraphRequestGeneration;
     const config = readerConfig.value || await getConfig();
     readerConfig.value = config;
     if (!config.documentUseLocalAgent) return;
     let project = projectOverride || workspaceProject.value;
     if (!project?.projectId && doc.value) project = await deps.ensureWorkspace();
-    if (!project?.projectId) return;
+    if (!project?.projectId || !isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
     contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
     try {
       await loadContextGraph(project, schedulePoll);
+      if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
       contextGraphReconnectAttempts = 0;
       // 状态刷新只读取服务端状态，不产生任务副作用；分析只能来自明确的用户动作。
     } catch (error) {
+      if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
       contextGraphState.value = {
         ...contextGraphState.value,
         projectId: project.projectId,
@@ -275,7 +286,9 @@ export function useContextGraph(deps: ContextGraphDeps) {
         readerConfig.value?.documentUseLocalAgent !== true) return;
     // 已有启动请求在途时直接忽略，避免重复 POST analyze。
     if (contextGraphAnalyzing.value) return;
+    const requestGeneration = contextGraphRequestGeneration;
     const config = readerConfig.value || await getConfig();
+    if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
     readerConfig.value = config;
     const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
     const token = config.documentLocalAgentToken || '';
@@ -283,6 +296,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     contextGraphState.value = { ...contextGraphState.value, loading: true, error: '' };
     try {
       const graph = await loadContextGraph(project, false);
+      if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
       const currentStatus = String(graph.status || contextGraphState.value.status || 'not-started');
       if (!options.force && ['queued', 'running'].includes(currentStatus)) {
         scheduleContextGraphPoll(project.projectId);
@@ -296,6 +310,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
         { method: 'POST', body: JSON.stringify({}) },
       );
       // 服务端已接受请求就先进入 queued/running；即使随后状态刷新失败，按钮也不会重新可点。
+      if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
       const acceptedRunId = String(response?.preprocessing?.runId || '');
       if (acceptedRunId) {
         contextGraphState.value = {
@@ -307,8 +322,11 @@ export function useContextGraph(deps: ContextGraphDeps) {
         };
       }
       await loadContextGraph(project, true);
-      contextGraphState.value = { ...contextGraphState.value, error: '' };
+      if (isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) {
+        contextGraphState.value = { ...contextGraphState.value, error: '' };
+      }
     } catch (error) {
+      if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return;
       const message = error instanceof Error ? error.message : String(error);
       contextGraphState.value = {
         ...contextGraphState.value,
@@ -317,7 +335,9 @@ export function useContextGraph(deps: ContextGraphDeps) {
         error: message,
       };
     } finally {
-      contextGraphAnalyzing.value = false;
+      if (isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) {
+        contextGraphAnalyzing.value = false;
+      }
     }
   }
 
@@ -361,6 +381,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     const projectId = String(project?.projectId || '');
     if (!projectId) return translationPreprocessingReadiness.value;
     await refreshContextGraphStatus(project, true);
+    if (workspaceProject.value?.projectId !== projectId) return translationPreprocessingReadiness.value;
     let readiness = translationPreprocessingReadiness.value;
     if (!readiness.required || readiness.ready) return readiness;
 
@@ -386,6 +407,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
 
     /** 切换文档时清空预处理状态与轮询；服务端项目不会被删除。 */
     function resetContextGraph(): void {
+      contextGraphRequestGeneration++;
+      contextGraphReconnectAttempts = 0;
       contextGraphAnalyzing.value = false;
       if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
       contextGraphPollTimer = null;
