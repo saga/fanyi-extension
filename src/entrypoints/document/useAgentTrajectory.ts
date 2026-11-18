@@ -177,14 +177,15 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
       if (!config.documentUseLocalAgent) throw new Error('请先启用本机 Local Agent，才能读取失败片段详情。');
       const project = deps.workspaceProject.value || await deps.ensureWorkspace();
       if (requestGeneration !== agentTrajectoryRequestGeneration) return;
-      if (!project?.projectId || deps.workspaceProject.value?.projectId !== project.projectId) return;
+      if (!project?.projectId || (deps.workspaceProject.value?.projectId && deps.workspaceProject.value.projectId !== project.projectId)) return;
       const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
       const token = config.documentLocalAgentToken || '';
       const response = await workspaceApi<{ run: any }>(
         base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
       );
-      if (requestGeneration !== agentTrajectoryRequestGeneration || deps.workspaceProject.value?.projectId !== project.projectId) return;
+      if (requestGeneration !== agentTrajectoryRequestGeneration ||
+          (deps.workspaceProject.value?.projectId && deps.workspaceProject.value.projectId !== project.projectId)) return;
       const run = response.run || {};
       const runSegments = Array.isArray(run.segments) ? run.segments : [];
       const failedRows = runSegments.filter((item: any) => item.status === 'failed');
