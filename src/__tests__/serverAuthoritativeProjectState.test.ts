@@ -29,6 +29,11 @@ describe('server-authoritative document project state', () => {
     expect(contextGraph.slice(refreshStart, refreshEnd)).not.toContain('ensureContextGraphPreprocessing(');
   });
 
+  it('keeps Context Graph state server-projected instead of fabricating failures in App.vue', () => {
+    expect(app).not.toContain('contextGraphState.value =');
+    expect(app).toContain('persistenceMessage.value = \'无法准备全书预处理：\'');
+  });
+
   it('discards stale Context Graph responses after the document changes', () => {
     expect(contextGraph).toContain('let contextGraphRequestGeneration = 0');
     expect(contextGraph).toContain('function isCurrentContextGraphRequest');
