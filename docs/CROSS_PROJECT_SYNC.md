@@ -724,6 +724,7 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 - 扩展的状态展示只调用 GET /api/documents/projects/:projectId/context-graph/status，读取来源版本、运行阶段、计数和必要的文风摘要；不得在常规轮询中下载完整 nodes、edges、evidence 或章节摘要。
 - Context Graph 状态读取必须是只读操作；打开/恢复文档和轮询不得隐式启动全书分析。扩展可在用户明确发起的一次文学翻译动作中，为从未分析的原文版本启动首次预处理，也提供明确的手动重新分析操作。扩展 readiness 只用于基于最新服务端快照保守禁用 UI 操作；local-agent-service 仍是最终准入权威，必须校验 project/source revision/分析版本/语言方向，拒绝过期或不匹配的 Run。扩展不得复制 Context Graph 证据、实体合并或记忆写入逻辑。
 - 打开人物/预处理 Tab、恢复会话或同步项目时，只读取 `/context-graph/status` 投影，不启动全书分析。正常翻译按钮与快捷操作不得根据客户端 readiness 禁用；扩展只提交 Run，由服务端负责预处理、来源/分析版本/语言校验以及失败事件。只有用户明确选择“重新分析全书”时，扩展才调用分析 API。服务不可用时明确报告 API 失败；远程 fallback 不得伪装成已写入 Local Agent 项目的规范分析结果。
+- 扩展内的 Context Graph 状态快照由 `useContextGraph` 独占维护；切换文档时递增请求代次，迟到的旧项目响应不得覆盖新项目状态。workspace 初始化失败属于页面连接错误，不得伪造成服务端 `failed` Run。Agent 轨迹与失败详情由 `useAgentTrajectory` 管理，切换文档时统一清空项目级事件、Context Graph Run 和失败详情缓存，并忽略已失效的详情请求。
 - 测试验收应关注实际译文与 reviewer findings、漏译率、专名/关系/角色声音一致性和定点返工闭环。API 状态 DTO 大小只是界面传输设计，不是整本书分析的数据质量指标。
 
 ## Local Agent 原始文件导入与恢复边界（2026-10-20）
