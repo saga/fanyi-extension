@@ -15,14 +15,17 @@ describe('server-authoritative document project state', () => {
     expect(app).not.toMatch(/:disabled="[^"]*translationPreprocessingNeedsAttention/);
   });
 
-  it('starts preprocessing on open only through the composable, and only for a never-analysed revision', () => {
-    // App.vue 的打开/恢复/同步路径只读状态，不直接发起分析。
+  it('keeps passive project open/restore/status refresh read-only', () => {
+    // 打开、恢复和轮询只读取服务端状态；不能因页面挂载而启动昂贵的全书分析。
     expect(app).not.toMatch(/(?:await|void)\s+ensureContextGraphPreprocessing\s*\(/);
     expect(app).toContain('void refreshContextGraphStatus(refreshed.project, true)');
     expect(app).toContain('await refreshContextGraphStatus(refreshed.project, true)');
-    // 自动启动的判定集中在 composable + 纯函数里，由状态刷新统一触发。
-    expect(contextGraph).toContain('shouldAutoStartPreprocessing({');
-    expect(contextGraph).toContain('await ensureContextGraphPreprocessing(project, { auto: true })');
+    expect(contextGraph).not.toContain('maybeAutoStartPreprocessing');
+    expect(contextGraph).not.toContain('shouldAutoStartPreprocessing');
+    const refreshStart = contextGraph.indexOf('async function refreshContextGraphStatus');
+    const refreshEnd = contextGraph.indexOf('async function ensureContextGraphPreprocessing', refreshStart);
+    expect(refreshStart).toBeGreaterThan(-1);
+    expect(contextGraph.slice(refreshStart, refreshEnd)).not.toContain('ensureContextGraphPreprocessing(');
   });
 
   it('keeps manual re-analysis as an explicit user command', () => {
