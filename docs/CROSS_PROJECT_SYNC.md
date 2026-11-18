@@ -722,7 +722,7 @@ Local Agent 模式下，阅读页与 Agent Workspace 不是两个翻译执行方
 
 - Local Agent 的 SQLite 是全书 Context Graph、人物/关系候选、章节摘要、原文证据与分析 Run 的唯一事实来源。不要将这些数据批量复制到扩展 LiteraryMemory，也不因 120 KiB 的客户端记忆 DTO 守卫而压缩或截断服务端分析数据。
 - 扩展的状态展示只调用 GET /api/documents/projects/:projectId/context-graph/status，读取来源版本、运行阶段、计数和必要的文风摘要；不得在常规轮询中下载完整 nodes、edges、evidence 或章节摘要。
-- 文学 Run 的 Context Graph 自动启动、等待、分析版本/source revision/语言方向验证，必须在 local-agent-service 的 executeRun 内完成，并在校验通过前不进入正常翻译批次。扩展只提交 Run、显示持久化事件，并提供明确的手动重新分析操作。
+- Context Graph 状态读取必须是只读操作；打开/恢复文档和轮询不得隐式启动全书分析。扩展可在用户明确发起的一次文学翻译动作中，为从未分析的原文版本启动首次预处理，也提供明确的手动重新分析操作。扩展 readiness 只用于基于最新服务端快照保守禁用 UI 操作；local-agent-service 仍是最终准入权威，必须校验 project/source revision/分析版本/语言方向，拒绝过期或不匹配的 Run。扩展不得复制 Context Graph 证据、实体合并或记忆写入逻辑。
 - 打开人物/预处理 Tab、恢复会话或同步项目时，只读取 `/context-graph/status` 投影，不启动全书分析。正常翻译按钮与快捷操作不得根据客户端 readiness 禁用；扩展只提交 Run，由服务端负责预处理、来源/分析版本/语言校验以及失败事件。只有用户明确选择“重新分析全书”时，扩展才调用分析 API。服务不可用时明确报告 API 失败；远程 fallback 不得伪装成已写入 Local Agent 项目的规范分析结果。
 - 测试验收应关注实际译文与 reviewer findings、漏译率、专名/关系/角色声音一致性和定点返工闭环。API 状态 DTO 大小只是界面传输设计，不是整本书分析的数据质量指标。
 
