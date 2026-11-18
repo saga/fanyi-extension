@@ -46,6 +46,20 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
     agentTrajectoryRequestGeneration++;
   }
 
+  /** 切换文档时清除所有项目级轨迹与失败详情缓存。 */
+  function resetAgentTrajectory() {
+    stopAgentTrajectoryPolling();
+    agentTrajectoryEvents.value = [];
+    agentTrajectoryContextGraphRuns.value = null;
+    agentTrajectoryCursor.value = 0;
+    agentTrajectoryLoading.value = false;
+    agentTrajectoryError.value = '';
+    expandedAgentFailureEventId.value = null;
+    agentTrajectoryFailureDetails.value = {};
+    agentTrajectoryFailureLoading.value = {};
+    agentTrajectoryFailureErrors.value = {};
+  }
+
   async function refreshAgentTrajectory(reset = false): Promise<void> {
     if (reset) agentTrajectoryRequestGeneration++;
     const config = deps.readerConfig.value || await getConfig();
@@ -152,21 +166,25 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
     if (!runId) return;
     expandedAgentFailureEventId.value = event.eventId;
     if (Object.prototype.hasOwnProperty.call(agentTrajectoryFailureDetails.value, runId)) return;
+    const requestGeneration = agentTrajectoryRequestGeneration;
 
     agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: true };
     agentTrajectoryFailureErrors.value = { ...agentTrajectoryFailureErrors.value, [runId]: '' };
     try {
       const config = deps.readerConfig.value || await getConfig();
       deps.readerConfig.value = config;
+      if (requestGeneration !== agentTrajectoryRequestGeneration) return;
       if (!config.documentUseLocalAgent) throw new Error('请先启用本机 Local Agent，才能读取失败片段详情。');
       const project = deps.workspaceProject.value || await deps.ensureWorkspace();
-      if (!project?.projectId) throw new Error('尚未建立当前文档的本机项目。');
+      if (requestGeneration !== agentTrajectoryRequestGeneration) return;
+      if (!project?.projectId || deps.workspaceProject.value?.projectId !== project.projectId) return;
       const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
       const token = config.documentLocalAgentToken || '';
       const response = await workspaceApi<{ run: any }>(
         base, token,
         '/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs/' + encodeURIComponent(runId),
       );
+      if (requestGeneration !== agentTrajectoryRequestGeneration || deps.workspaceProject.value?.projectId !== project.projectId) return;
       const run = response.run || {};
       const runSegments = Array.isArray(run.segments) ? run.segments : [];
       const failedRows = runSegments.filter((item: any) => item.status === 'failed');
@@ -194,12 +212,16 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
       });
       agentTrajectoryFailureDetails.value = { ...agentTrajectoryFailureDetails.value, [runId]: details };
     } catch (error) {
-      agentTrajectoryFailureErrors.value = {
-        ...agentTrajectoryFailureErrors.value,
-        [runId]: error instanceof Error ? error.message : String(error),
-      };
+      if (requestGeneration === agentTrajectoryRequestGeneration) {
+        agentTrajectoryFailureErrors.value = {
+          ...agentTrajectoryFailureErrors.value,
+          [runId]: error instanceof Error ? error.message : String(error),
+        };
+      }
     } finally {
-      agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: false };
+      if (requestGeneration === agentTrajectoryRequestGeneration) {
+        agentTrajectoryFailureLoading.value = { ...agentTrajectoryFailureLoading.value, [runId]: false };
+      }
     }
   }
 
@@ -223,6 +245,7 @@ export function useAgentTrajectory(deps: AgentTrajectoryDeps) {
     agentTrajectoryVisibleEvents,
     agentTrajectoryActiveTasks,
     stopAgentTrajectoryPolling,
+    resetAgentTrajectory,
     refreshAgentTrajectory,
     startAgentTrajectoryPolling,
     toggleAgentTrajectoryFailureDetails,
