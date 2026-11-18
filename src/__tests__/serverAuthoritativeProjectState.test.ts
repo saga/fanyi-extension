@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 const app = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/App.vue'), 'utf8');
 const workspace = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/DocumentAgentWorkspace.vue'), 'utf8');
 const contextGraph = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/useContextGraph.ts'), 'utf8');
+const trajectory = readFileSync(resolve(process.cwd(), 'src/entrypoints/document/useAgentTrajectory.ts'), 'utf8');
 
 describe('server-authoritative document project state', () => {
   it('does not disable normal translation controls based on client preprocessing readiness', () => {
@@ -34,6 +35,15 @@ describe('server-authoritative document project state', () => {
     expect(contextGraph).toContain('if (!isCurrentContextGraphRequest(requestGeneration, projectId)) return graph');
     expect(contextGraph).toContain('contextGraphRequestGeneration++');
     expect(contextGraph).toContain('if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return');
+  });
+
+  it('clears project-scoped trajectory caches and ignores stale failure-detail responses', () => {
+    expect(app).toContain('resetAgentTrajectory();');
+    expect(trajectory).toContain('function resetAgentTrajectory()');
+    expect(trajectory).toContain('agentTrajectoryContextGraphRuns.value = null');
+    expect(trajectory).toContain('agentTrajectoryFailureDetails.value = {}');
+    expect(trajectory).toContain('agentTrajectoryFailureErrors.value = {}');
+    expect(trajectory).toContain('requestGeneration !== agentTrajectoryRequestGeneration');
   });
 
   it('keeps manual re-analysis as an explicit user command', () => {
