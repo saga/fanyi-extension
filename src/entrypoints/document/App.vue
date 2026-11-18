@@ -1658,11 +1658,9 @@ watch(
     // Existing documents must receive preprocessing too; opening an old reading snapshot must not
     // be mistaken for a completed whole-book analysis.
     void ensureDocumentWorkspace().catch((error) => {
-      contextGraphState.value = {
-        ...contextGraphState.value,
-        status: 'failed',
-        error: '无法准备全书预处理：' + (error instanceof Error ? error.message : String(error)),
-      };
+      // Context Graph 状态只反映服务端运行记录；workspace 初始化失败属于页面连接错误。
+      persistenceMessage.value = '无法准备全书预处理：' +
+        (error instanceof Error ? error.message : String(error));
     });
   },
   { flush: 'post' },
