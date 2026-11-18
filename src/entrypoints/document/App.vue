@@ -1588,6 +1588,7 @@ const {
   agentTrajectoryVisibleEvents,
   agentTrajectoryActiveTasks,
   stopAgentTrajectoryPolling,
+  resetAgentTrajectory,
   refreshAgentTrajectory,
   startAgentTrajectoryPolling,
   toggleAgentTrajectoryFailureDetails,
@@ -2306,11 +2307,7 @@ function resetWorkspaceBindingForDocument(): void {
   workspaceRunGeneration.value++;
   workspaceCandidateTranslations.value = new Map();
   resetContextGraph();
-  stopAgentTrajectoryPolling();
-  agentTrajectoryEvents.value = [];
-  agentTrajectoryCursor.value = 0;
-  agentTrajectoryLoading.value = false;
-  agentTrajectoryError.value = '';
+  resetAgentTrajectory();
 }
 
 async function restoreLastSession() {
