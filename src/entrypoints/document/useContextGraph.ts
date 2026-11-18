@@ -1,7 +1,7 @@
 import { computed, ref, type Ref } from 'vue';
 import { getConfig, type Config } from '@/entrypoints/utils/config';
 import type { ParsedDocument } from '@/entrypoints/utils/document/types';
-import { assessContextGraphReadiness, isContextGraphBusy, shouldAutoStartPreprocessing } from './documentPreprocessing';
+import { assessContextGraphReadiness, isContextGraphBusy } from './documentPreprocessing';
 import { isServiceUnreachableError, workspaceApi } from './documentWorkspaceClient';
 
 /** 预处理产出的文风基准（阅读页「全书文风基准」编辑区读取）。 */
@@ -50,10 +50,10 @@ export interface ContextGraphDeps {
 }
 
 /**
- * 全书预处理（Context Graph）状态机。
+ * 全书预处理（Context Graph）状态投影与用户命令。
  *
- * 只负责调用服务端 API、展示状态和响应用户明确的重新分析动作。
- * Context Graph、证据和运行前就绪门禁全部归 local-agent-service 所有。
+ * 状态刷新只读服务端；只有用户明确重新分析，或在一次明确的翻译动作中
+ * 按 readiness 门禁启动首次预处理。Context Graph、证据和最终准入判断归 local-agent-service。
  */
 export function useContextGraph(deps: ContextGraphDeps) {
     const {
@@ -76,13 +76,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
     startedAt: null, finishedAt: null, error: '', loading: false, checkedAt: '',
   });
   const contextGraphAnalyzing = ref(false);
-  /**
-   * 自动启动的尝试记录，键是 `projectId:sourceRevisionId`。
-   *
-   * 自动启动失败（该书正在翻译、模型未配置、服务 409…）时状态会停在 not-started，
-   * 若没有这条记录，每次状态轮询都会再 POST 一次 analyze。
-   */
-  const autoStartAttempted = new Set<string>();
   // 排队、运行和“正在提交启动请求”都算 busy；按钮与文案统一使用这个状态。
   const contextGraphBusy = computed(() =>
     isContextGraphBusy(contextGraphState.value.status, contextGraphAnalyzing.value));
@@ -252,9 +245,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
     try {
       await loadContextGraph(project, schedulePoll);
       contextGraphReconnectAttempts = 0;
-      // The UI consumes only the compact readiness/status projection; graph entities/evidence stay service-owned.
-      // A never-analysed book starts preprocessing automatically; failed/outdated analyses require explicit retry.
-      void maybeAutoStartPreprocessing(project).catch(() => {});
+      // 状态刷新只读取服务端状态，不产生任务副作用；分析只能来自明确的用户动作。
     } catch (error) {
       contextGraphState.value = {
         ...contextGraphState.value,
@@ -273,36 +264,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
   }
 
   /**
-   * 打开文档（或切到文学模式）时自动开始预处理。
-   *
-   * 判定逻辑在 `shouldAutoStartPreprocessing`，只对「从未分析过」的原文版本生效；
-   * failed / 版本过旧仍然要用户点「重新分析全书」。
-   */
-  async function maybeAutoStartPreprocessing(project: any): Promise<void> {
-    const projectId = String(project?.projectId || '');
-    if (!projectId) return;
-    const revisionId = String(contextGraphState.value.sourceRevisionId || '');
-    const key = projectId + ':' + revisionId;
-    const shouldStart = shouldAutoStartPreprocessing({
-      required: translationPreprocessingRequired.value,
-      status: contextGraphState.value.status,
-      segmentCount: Number(contextGraphState.value.segmentCount || 0),
-      analyzing: contextGraphAnalyzing.value,
-      alreadyAttempted: autoStartAttempted.has(key),
-    });
-    if (!shouldStart) return;
-    // 先登记再发请求：ensureContextGraphPreprocessing 内部还会再读一次状态，中间有 await 窗口。
-    autoStartAttempted.add(key);
-    await ensureContextGraphPreprocessing(project, { auto: true });
-  }
-
-  /**
    * 启动服务端预处理任务。
    *
    * 自动调用（打开文档时）和用户点「重新分析全书」共用同一条路径，区别只在于失败文案：
    * 自动启动失败不该像用户主动操作那样弹一条红色报错，但也不能静默——它要能解释「为什么没开始」。
    */
-  async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean; auto?: boolean } = {}) {
+  async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
     if (!project?.projectId ||
         effectiveDocumentTranslationMode.value !== 'literary' ||
         readerConfig.value?.documentUseLocalAgent !== true) return;
@@ -347,8 +314,7 @@ export function useContextGraph(deps: ContextGraphDeps) {
         ...contextGraphState.value,
         loading: false,
         checkedAt: new Date().toISOString(),
-        // 自动启动是被动的：文案要说明是「没开始」而不是「用户的操作失败了」。
-        error: options.auto ? '全书预处理未能自动开始：' + message : message,
+        error: message,
       };
     } finally {
       contextGraphAnalyzing.value = false;
@@ -421,8 +387,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
     /** 切换文档时清空预处理状态与轮询；服务端项目不会被删除。 */
     function resetContextGraph(): void {
       contextGraphAnalyzing.value = false;
-      // 换文档后允许对新文档重新尝试自动启动。
-      autoStartAttempted.clear();
       if (contextGraphPollTimer !== null) window.clearTimeout(contextGraphPollTimer);
       contextGraphPollTimer = null;
       contextGraphState.value = {
