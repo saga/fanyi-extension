@@ -266,8 +266,8 @@ export function useContextGraph(deps: ContextGraphDeps) {
   /**
    * 启动服务端预处理任务。
    *
-   * 自动调用（打开文档时）和用户点「重新分析全书」共用同一条路径，区别只在于失败文案：
-   * 自动启动失败不该像用户主动操作那样弹一条红色报错，但也不能静默——它要能解释「为什么没开始」。
+   * 仅由明确的用户动作调用：用户点「重新分析全书」，或在一次明确的翻译动作中
+   * 为从未分析的原文版本启动首次预处理。普通状态读取和页面打开不得触发任务。
    */
   async function ensureContextGraphPreprocessing(project: any, options: { force?: boolean } = {}) {
     if (!project?.projectId ||
