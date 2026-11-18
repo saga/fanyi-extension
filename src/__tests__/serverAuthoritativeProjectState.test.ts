@@ -28,6 +28,14 @@ describe('server-authoritative document project state', () => {
     expect(contextGraph.slice(refreshStart, refreshEnd)).not.toContain('ensureContextGraphPreprocessing(');
   });
 
+  it('discards stale Context Graph responses after the document changes', () => {
+    expect(contextGraph).toContain('let contextGraphRequestGeneration = 0');
+    expect(contextGraph).toContain('function isCurrentContextGraphRequest');
+    expect(contextGraph).toContain('if (!isCurrentContextGraphRequest(requestGeneration, projectId)) return graph');
+    expect(contextGraph).toContain('contextGraphRequestGeneration++');
+    expect(contextGraph).toContain('if (!isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) return');
+  });
+
   it('keeps manual re-analysis as an explicit user command', () => {
     expect(app).toContain('@click="reanalyzeContextGraph"');
     expect(contextGraph).toContain('async function reanalyzeContextGraph()');
