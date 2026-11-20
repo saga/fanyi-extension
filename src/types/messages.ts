@@ -177,7 +177,7 @@ export interface ProxyServerFetchMessage {
 }
 
 export type ProxyServerFetchResponse =
-  | { success: true; status: number; statusText: string; body: string }
+  | { success: true; status: number; statusText: string; body: string; headers?: Record<string, string> }
   | { success: false; error: string };
 
 /** 发往 background 的所有消息类型。 */

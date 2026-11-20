@@ -481,10 +481,14 @@ export default defineBackground({
           credentials: 'omit',
           redirect: 'follow',
         });
+        const responseHeaders: Record<string, string> = {};
+        const cacheWarning = response.headers.get('X-Translate-Warning');
+        if (cacheWarning) responseHeaders['x-translate-warning'] = cacheWarning;
         sendResponse({
           success: true,
           status: response.status,
           statusText: response.statusText,
+          headers: responseHeaders,
           body: await response.text(),
         });
       } catch (error) {

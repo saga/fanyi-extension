@@ -148,6 +148,7 @@ interface ServerHttpResponse {
   ok: boolean;
   status: number;
   statusText: string;
+  headers?: { get(name: string): string | null };
   text(): Promise<string>;
 }
 
@@ -194,6 +195,7 @@ async function requestTranslationServer(
       ok: proxied.status >= 200 && proxied.status < 300,
       status: proxied.status,
       statusText: proxied.statusText,
+      headers: { get: (name) => proxied.headers?.[name.toLowerCase()] ?? null },
       text: async () => proxied.body,
     };
   }

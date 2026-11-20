@@ -531,6 +531,35 @@ describe('translateBlocksViaServer — PDF D1 cache path', () => {
     expect(onWarning).toHaveBeenCalledWith(expect.stringContaining('D1 write failed'));
   });
 
+  it('preserves D1 warning headers when the content-script request falls back to background', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Blocked by page CSP'));
+    const sendMessage = vi.mocked(browser.runtime.sendMessage);
+    sendMessage.mockReset();
+    sendMessage.mockResolvedValueOnce({
+      success: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'x-translate-warning': 'D1 write failed' },
+      body: (
+        '<html><body><p data-fanyi-block-id="pdfjs-p0">' +
+        '<span class="fanyi-original">Hello PDF world.</span>' +
+        '<span class="fanyi-translation">你好，PDF 世界。</span>' +
+        '</p></body></html>'
+      ),
+    } as never);
+    const onWarning = vi.fn();
+    const result = await translateBlocksViaServer(
+      baseConfig, blocks, 'https://arxiv.org/pdf/2601.12345.pdf', 'Paper',
+      { sourceLang: 'en', targetLang: 'zh' }, onWarning,
+    );
+    expect(result.get('pdfjs-p0')).toBe('你好，PDF 世界。');
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'proxyServerFetch',
+      method: 'POST',
+    }));
+    expect(onWarning).toHaveBeenCalledWith(expect.stringContaining('D1 write failed'));
+  });
+
   it('rejects local file URLs instead of writing ambiguous cache entries', async () => {
     await expect(
       translateBlocksViaServer(baseConfig, blocks, 'file:///Users/me/paper.pdf', 'Paper'),
