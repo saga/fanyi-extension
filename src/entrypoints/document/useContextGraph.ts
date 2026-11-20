@@ -261,7 +261,6 @@ export function useContextGraph(deps: ContextGraphDeps) {
       contextGraphState.value = {
         ...contextGraphState.value,
         projectId: project.projectId,
-        loading: false,
         checkedAt: new Date().toISOString(),
         error: error instanceof Error ? error.message : String(error),
       };
@@ -271,6 +270,10 @@ export function useContextGraph(deps: ContextGraphDeps) {
         contextGraphReconnectAttempts++;
         scheduleContextGraphPoll(project.projectId);
       }
+    } finally {
+      // loading 一旦置起就必须在所有路径清掉；否则 translationPreprocessingReadiness 会永远
+      // 停在 checking，点击翻译时只闪一下、从不创建 Run。
+      contextGraphState.value = { ...contextGraphState.value, loading: false };
     }
   }
 
@@ -335,9 +338,9 @@ export function useContextGraph(deps: ContextGraphDeps) {
         error: message,
       };
     } finally {
-      if (isCurrentContextGraphRequest(requestGeneration, String(project.projectId))) {
-        contextGraphAnalyzing.value = false;
-      }
+      // 文档切换会让 generation 失效，但 analyzing 是组件级标志：不在这里无条件清掉，
+      // 之后每次翻译就绪判断都会被它钉在 checking。
+      contextGraphAnalyzing.value = false;
     }
   }
 
@@ -393,6 +396,12 @@ export function useContextGraph(deps: ContextGraphDeps) {
     }
 
     const deadline = Date.now() + Math.max(1_000, timeoutMs);
+    // `checking` 是本地 UI 标志（loading / analyzing）造成的暂态，不是服务端任务状态。
+    // 旧实现会为它轮询整整一小时：点击翻译后按钮闪一下、没有任何任务被创建，用户只能点停止。
+    // 服务端状态已经成功读取却仍停留在 checking，说明本地标志卡住；最多再确认几轮就明确返回，
+    // 由调用方给出可操作的提示，绝不静默等待。
+    let checkingStreak = 0;
+    const maxCheckingStreak = 3;
     while (!readiness.ready && Date.now() < deadline && shouldContinue()) {
       if (workspaceProject.value?.projectId !== projectId || !doc.value) {
         return translationPreprocessingReadiness.value;
@@ -401,6 +410,16 @@ export function useContextGraph(deps: ContextGraphDeps) {
       await new Promise((resolve) => window.setTimeout(resolve, 1200));
       await refreshContextGraphStatus(project, true);
       readiness = translationPreprocessingReadiness.value;
+      if (readiness.reason === 'checking') checkingStreak++;
+      if (checkingStreak >= maxCheckingStreak) break;
+    }
+    if (readiness.reason === 'checking') {
+      return {
+        required: true,
+        ready: false,
+        reason: 'checking',
+        message: '全书预处理状态一直显示为“正在确认”，未创建翻译任务。请到「人物与预处理」点刷新状态，确认“已完成”后再点翻译。',
+      };
     }
     return readiness;
   }

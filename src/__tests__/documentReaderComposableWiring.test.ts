@@ -271,6 +271,36 @@ describe('reader toolbar speed knobs', () => {
     expect(settings).toContain('思考（更慢，更稳）');
   });
 
+  it('预处理状态卡在 checking 时给出可操作提示，不静默吞掉点击', () => {
+    const graph = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/useContextGraph.ts'),
+      'utf8',
+    );
+    const prepare = graph.indexOf('async function prepareContextGraphForTranslation');
+    expect(prepare).toBeGreaterThan(-1);
+    const gate = graph.slice(prepare, graph.indexOf('/** 切换文档时清空预处理状态', prepare));
+    expect(gate).toContain('maxCheckingStreak');
+    expect(gate).toContain("readiness.reason === 'checking'");
+    expect(gate).toContain('请到「人物与预处理」点刷新状态');
+
+    // loading 一旦置起必须在所有路径清掉，否则就绪判断永远停在 checking。
+    const refresh = graph.indexOf('async function refreshContextGraphStatus');
+    const refreshBody = graph.slice(refresh, graph.indexOf('/**\n   * 启动服务端预处理任务', refresh));
+    expect(refreshBody).toContain('loading: true');
+    expect(refreshBody).toMatch(/finally\s*\{[\s\S]*loading: false/);
+
+    const start = graph.indexOf('async function ensureContextGraphPreprocessing');
+    const startBody = graph.slice(start, graph.indexOf('async function handlePreprocessingStatusRefreshRequested', start));
+    expect(startBody).toMatch(/finally\s*\{\s*\/\/[\s\S]*contextGraphAnalyzing\.value = false;/);
+
+    const app = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+      'utf8',
+    );
+    expect(app).toContain("state.value.error = '未开始翻译：本机项目中的原文版本与当前文档不同。");
+    expect(app).toContain("state.value.error = '未开始翻译：无法确认本机服务项目。");
+  });
+
   it('设置页的备用模型使用下拉，且保留不在模型列表里的已存值', () => {
     const settings = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),

@@ -3530,7 +3530,12 @@ async function runWorkspaceTranslation(options: {
   readerConfig.value = config;
   if (!config.documentUseLocalAgent) return;
   const project = await ensureDocumentWorkspace();
-  if (!project) return;
+  if (!project) {
+    if (!state.value.error) {
+      state.value.error = '未开始翻译：无法确认本机服务项目。请检查服务连接后重试。';
+    }
+    return;
+  }
   const base = config.documentLocalAgentUrl || 'http://127.0.0.1:8789';
   const token = config.documentLocalAgentToken || '';
   const activeRun = workspaceActiveRun.value;
@@ -3775,7 +3780,11 @@ async function startTranslate() {
   if (config.documentUseLocalAgent) {
     try {
       const project = await ensureDocumentWorkspace();
-      if (workspaceSourceChanged.value) return;
+      if (workspaceSourceChanged.value) {
+        // 这里过去是静默 return：点击只闪一下，用户完全不知道为什么没有开始翻译。
+        state.value.error = '未开始翻译：本机项目中的原文版本与当前文档不同。请在 Agent 面板确认来源版本或另建项目。';
+        return;
+      }
       if (project && workspaceActiveRun.value && ['queued', 'running'].includes(workspaceActiveRun.value.status)) {
         await followWorkspaceRun(project, workspaceActiveRun.value);
         return;
