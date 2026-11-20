@@ -72,12 +72,7 @@ export interface Config {
   deepseekApiKey: string;
   /** 远程服务翻译使用的 LLM Provider；本机 Agent 模式改用 localAgentProvider。 */
   provider: Provider;
-  /**
-   * 翻译文风：default=通用直译, jinyong=金庸武侠, acheng=阿城白描,
-   * wangxiaobo=王小波大白话, ja-source-natural=日语原文汉译（源语言感知，仅日译中）。
-   * 选 default 时，若页级检测判定源语言为日语且目标语言非日语，
-   * 会自动升级为 ja-source-natural（见 utils/languageDetector）。
-   */
+  /** 翻译文风：default=通用自然翻译, jinyong=雅正从容, acheng=白描克制, wangxiaobo=理性口语。 */
   promptStyle: PromptStyle;
   /** 独立翻译目标：technical 精确技术翻译；literary 文学表达与实体一致性。 */
   translationMode: TranslationMode;
@@ -214,6 +209,14 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
   return result;
 }
 
+const VALID_PROMPT_STYLES = new Set<PromptStyle>(['default', 'jinyong', 'acheng', 'wangxiaobo']);
+
+function normalizePromptStyle(value: unknown): PromptStyle {
+  return typeof value === 'string' && VALID_PROMPT_STYLES.has(value as PromptStyle)
+    ? value as PromptStyle
+    : 'default';
+}
+
 const defaultConfig: Config = {
   sourceLang: 'auto',
   targetLang: 'zh',
@@ -313,6 +316,8 @@ export async function getConfig(): Promise<Config> {
     // Write directly to storage; do not call setConfig() here and recurse back into getConfig().
     await storage.setItem('local:config', JSON.parse(JSON.stringify({ ...stored, ...migrated })));
   }
+  merged.promptStyle = normalizePromptStyle(merged.promptStyle);
+  merged.documentPromptStyle = normalizePromptStyle(merged.documentPromptStyle);
   merged.translationMode = merged.translationMode === 'literary' ? 'literary' : 'technical';
   merged.documentTranslationMode = merged.documentTranslationMode === 'literary' ? 'literary' : 'technical';
   merged.documentCodeBuddyTaskProfiles = normalizeDocumentCodeBuddyTaskProfiles(merged.documentCodeBuddyTaskProfiles);

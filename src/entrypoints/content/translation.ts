@@ -3,7 +3,6 @@ import { getDomainParkingPageMessage } from '../utils/domainParkingGuard';
 import { buildNodeMap } from '../utils/blockExtractor';
 import { buildChunks } from '../utils/chunkBuilder';
 import { getConfig } from '../utils/config';
-import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
 import { DOMObserverManager } from '../utils/domObserver';
 import { extractGlossaryLocal } from '../utils/glossaryExtractor';
 import { matchSiteRule } from '../../rules';
@@ -16,7 +15,6 @@ import {
   type ServerApplyResult,
 } from './serverTranslation';
 import { rotateSessionId } from '../utils/session';
-import type { PromptStyle } from '../service/deepseek';
 import {
   isPdfJsViewer,
   translatePdfJsViewer,
@@ -350,35 +348,8 @@ async function handleFullTranslation(
   // noun phrases can accidentally force names, nationalities and ordinary words to remain English.
   const glossary = config.translationMode === 'literary' || skipGlossary ? {} : await extractGlossary(fullText);
 
-  // ── 页级语言检测（整页只做一次）──
-  // 目的：日语原文 → 非日语目标语言时，把 default 文风自动升级为 ja-source-natural
-  // （保留原文的克制、论述顺序与限定语气，见 service/japanese-natural-zh-prompt）。
-  //
-  // 位置说明：只作用于「本地直连 DeepSeek」这条路径。走服务端翻译时，
-  // 服务端会基于同一份正文自行检测（lib/translate/pipeline.ts），
-  // 这里不重复判断，避免两边结论不一致时难以定位。
-  //
-  // 只检测一次而不是每 chunk 一次：既避免重复统计，也保证同一页面所有
-  // chunk 用同一文风（否则同页会出现文风割裂）。
-  // 用户手工选择的文风永远优先 —— 策略集中在 shouldUseJapaneseSource。
-  const detected = detectLanguage(fullText, {
-    htmlLang: document.documentElement.lang || undefined,
-  });
-  const effectiveStyle: PromptStyle = shouldUseJapaneseSource(
-    config.promptStyle,
-    detected.language,
-    config.targetLang,
-  )
-    ? 'ja-source-natural'
-    : config.promptStyle;
-  if (effectiveStyle !== config.promptStyle) {
-    logger.debug(
-      `[ContentScript] Source detected as ${detected.language} ` +
-        `(kanaRatio=${detected.kanaRatio.toFixed(3)}, confidence=${detected.confidence.toFixed(2)}) ` +
-        `→ promptStyle ${config.promptStyle} auto-upgraded to ${effectiveStyle}`,
-    );
-  }
-
+  // 网页翻译只使用用户显式选择的文风；源语言不会隐式改变文风。
+  const effectiveStyle = config.promptStyle;
   showStatus(`翻译进度: 0/${chunks.length}`, 'loading');
   const { translatedIds, voiceContext } = await translateChunksViaBackground(
     chunks,

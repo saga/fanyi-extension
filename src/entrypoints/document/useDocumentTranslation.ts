@@ -5,7 +5,6 @@ import type { Glossary } from '../service/_service';
 import type { DocumentCodeBuddyTaskProfiles } from '../utils/config';
 import { MODEL_FETCH_TIMEOUT_MS } from '../service/_service';
 import type { PromptStyle, TranslationMode } from '../service/deepseek';
-import { detectLanguage, shouldUseJapaneseSource } from '../utils/languageDetector';
 import { buildSegmentBatches, type BatchBudget } from '../utils/document/batcher';
 import type { DocumentSegment } from '../utils/document/types';
 import { getMissingDocumentBatchIds, normalizeDocumentBatchResult } from '../utils/document/translationResult';
@@ -105,34 +104,6 @@ function resolveDocumentSessionLane(
     hash = (Math.imul(hash, 31) + id.charCodeAt(index)) | 0;
   }
   return 'lane-' + ((hash >>> 0) % 4);
-}
-
-/**
- * 解析本次文档翻译应使用的文风。
- *
- * 与网页翻译、PDF 翻译同一策略：日语原文 → 非日语目标语言时，把 default
- * 自动升级为 ja-source-natural（保留原文的克制、论述顺序与限定语气）。
- * 用户手工选择的文风永远优先 —— 策略集中在 shouldUseJapaneseSource。
- *
- * 检测基于**全部** segment 而不是单批：单批文本可能过短，会触发
- * languageDetector 的短文本保护而判不出语言，导致同一文档内各批文风不一致。
- */
-function resolveDocumentStyle(
-  segments: DocumentSegment[],
-  options: TranslateOptions,
-): PromptStyle | undefined {
-  // 语言识别只需要有代表性的样本。不要把整本 EPUB 拼成超大字符串，
-  // 否则正式发送第一个翻译请求之前，还要额外复制并扫描整本书。
-  const SAMPLE_LIMIT = 20_000;
-  let sample = '';
-  for (const segment of segments) {
-    if (sample.length >= SAMPLE_LIMIT) break;
-    sample += segment.text.slice(0, SAMPLE_LIMIT - sample.length) + '\n';
-  }
-  const detected = detectLanguage(sample);
-  return shouldUseJapaneseSource(options.promptStyle, detected.language, options.targetLang)
-    ? 'ja-source-natural'
-    : options.promptStyle;
 }
 
 interface ServerDocumentTranslationResponse {
@@ -1345,7 +1316,6 @@ export function useDocumentTranslation() {
       ...options,
       literaryMode: literaryEnabled,
       translationMode: literaryProfileEnabled ? 'literary' : (options.translationMode || 'technical'),
-      promptStyle: resolveDocumentStyle(segments, options),
     };
     if (literaryProfileEnabled) {
       recordDiagnostic('run', 'started', '开始文学翻译运行', {
@@ -1670,7 +1640,6 @@ export function useDocumentTranslation() {
     // 且同一文档会出现文风割裂。
     const effectiveOptions: TranslateOptions = {
       ...options,
-      promptStyle: resolveDocumentStyle(segments, options),
     };
 
 
