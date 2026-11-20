@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   translateViaServer,
+  translateBlocksViaServer,
   checkServerCache,
   applyServerTranslatedHtml,
   computeBlocksFingerprint,
@@ -450,6 +451,91 @@ describe('checkServerCache', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'proxyServerFetch', method: 'GET' }),
     );
+  });
+});
+
+
+describe('translateBlocksViaServer — PDF D1 cache path', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const blocks: TextBlock[] = [
+    { id: 'pdfjs-p0', xpath: '', tag: 'p', text: 'Hello PDF world.' },
+  ];
+
+  it('posts extracted PDF text to /fanyi/page using the canonical source URL', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers(),
+      text: async () => (
+        '<html><body><div data-fanyi-block-id="pdfjs-p0">' +
+        '<span class="fanyi-original">Hello PDF world.</span>' +
+        '<span class="fanyi-translation">你好，PDF 世界。</span>' +
+        '</div></body></html>'
+      ),
+    });
+
+    const result = await translateBlocksViaServer(
+      baseConfig,
+      blocks,
+      'https://arxiv.org/pdf/2601.12345v2.pdf#page=3',
+      'arXiv paper',
+      { sourceLang: 'en', targetLang: 'zh' },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(baseConfig.serverUrl);
+    expect(options.method).toBe('POST');
+    const body = JSON.parse(options.body);
+    expect(body.url).toBe('https://arxiv.org/pdf/2601.12345v2.pdf');
+    expect(body.source).toBe('en');
+    expect(body.target).toBe('zh');
+    expect(body.contentHash).toBe(computeBlocksFingerprint(blocks));
+    expect(body.blocks).toEqual([{ id: 'pdfjs-p0', tag: 'p', text: 'Hello PDF world.' }]);
+    expect(body.html).toContain('data-fanyi-block-id="pdfjs-p0"');
+    expect(body.html).not.toContain('%PDF-');
+    expect(result.get('pdfjs-p0')).toBe('你好，PDF 世界。');
+  });
+
+  it('surfaces D1 save failures without discarding the returned translation', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'X-Translate-Warning': 'D1 write failed' }),
+      text: async () => (
+        '<html><body><p data-fanyi-block-id="pdfjs-p0">' +
+        '<span class="fanyi-original">Hello PDF world.</span>' +
+        '<span class="fanyi-translation">你好，PDF 世界。</span>' +
+        '</p></body></html>'
+      ),
+    });
+    const onWarning = vi.fn();
+    const result = await translateBlocksViaServer(
+      baseConfig, blocks, 'https://arxiv.org/pdf/2601.12345.pdf', 'Paper',
+      { sourceLang: 'en', targetLang: 'zh' }, onWarning,
+    );
+    expect(result.get('pdfjs-p0')).toBe('你好，PDF 世界。');
+    expect(onWarning).toHaveBeenCalledWith(expect.stringContaining('D1 write failed'));
+  });
+
+  it('rejects local file URLs instead of writing ambiguous cache entries', async () => {
+    await expect(
+      translateBlocksViaServer(baseConfig, blocks, 'file:///Users/me/paper.pdf', 'Paper'),
+    ).rejects.toThrow('公开的 HTTP(S)');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

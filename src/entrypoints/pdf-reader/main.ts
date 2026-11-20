@@ -196,6 +196,7 @@ async function translateAll(): Promise<void> {
       : config.sourceLang;
     const targetLang = config.targetLang || 'zh';
     const eligible = paragraphs.filter(p => !p.translated && !isLikelyMath(p.text) && p.text.length >= (p.heading ? 4 : 18));
+    let cacheWarning: string | undefined;
     if (config.useServerTranslation && !config.useLocalAgent) {
       const serverBlocks: TextBlock[] = eligible.map((paragraph, index) => ({
         id: paragraph.id,
@@ -210,6 +211,7 @@ async function translateAll(): Promise<void> {
         sourceUrl,
         titleNode.textContent || 'arXiv paper',
         { sourceLang, targetLang },
+        (message) => { cacheWarning = message; },
       );
       for (const paragraph of eligible) paragraph.translated = translatedMap.get(paragraph.id);
       renderPaper();
@@ -238,7 +240,10 @@ async function translateAll(): Promise<void> {
     }
     }
     translated = paragraphs.every(p => isLikelyMath(p.text) || p.text.length < (p.heading ? 4 : 18) || !!p.translated);
-    status(translated ? '翻译完成。共翻译 '+paragraphs.filter(p=>p.translated).length+' 段。' : '部分段落未返回译文，可再次点击重试。');
+    const completionMessage = translated
+      ? '翻译完成。共翻译 '+paragraphs.filter(p=>p.translated).length+' 段。'
+      : '部分段落未返回译文，可再次点击重试。';
+    status(cacheWarning ? `${completionMessage} ${cacheWarning}` : completionMessage, !!cacheWarning || !translated);
     translateButton.textContent = translated ? '翻译完成' : '重试未完成段落';
     translateButton.disabled = translated;
   } catch (error) {

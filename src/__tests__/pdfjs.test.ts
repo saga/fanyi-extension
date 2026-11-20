@@ -173,6 +173,39 @@ describe('isPdfJsViewer', () => {
   });
 });
 
+
+describe('resolvePdfSourceUrl', () => {
+  let mod: typeof import('../entrypoints/content/pdfjs');
+
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    mod = await import('../entrypoints/content/pdfjs');
+  });
+
+  it('extracts the public PDF URL from an extension-hosted viewer', () => {
+    const viewer = 'chrome-extension://viewer/index.html?file=' +
+      encodeURIComponent('https://arxiv.org/pdf/2601.12345v2.pdf');
+    expect(mod.resolvePdfSourceUrl(viewer, '')).toBe('https://arxiv.org/pdf/2601.12345v2.pdf');
+  });
+
+  it('uses a direct PDF URL and removes the page fragment', () => {
+    expect(mod.resolvePdfSourceUrl('https://arxiv.org/pdf/2601.12345.pdf#page=7', ''))
+      .toBe('https://arxiv.org/pdf/2601.12345.pdf');
+  });
+
+  it('uses the public referrer when the viewer URL has no source parameter', () => {
+    expect(mod.resolvePdfSourceUrl(
+      'moz-extension://viewer/viewer.html',
+      'https://arxiv.org/pdf/2601.12345.pdf#page=2',
+    )).toBe('https://arxiv.org/pdf/2601.12345.pdf');
+  });
+
+  it('rejects viewers without a public HTTP(S) source URL', () => {
+    expect(() => mod.resolvePdfSourceUrl('chrome-extension://viewer/index.html', ''))
+      .toThrow('无法识别 PDF 的原始 HTTP(S) 地址');
+  });
+});
+
 // =============================================================================
 // isPdfJsTranslated
 // =============================================================================

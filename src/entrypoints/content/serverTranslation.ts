@@ -421,14 +421,6 @@ export function applyServerTranslatedHtml(
 }
 
 /**
- * 通过服务端翻译页面。
- * 发送包含 data-fanyi-block-id 的 HTML 到 /fanyi/page，
- * 解析返回的双语对照 HTML，提取 .fanyi-translation 文本并回填到当前 DOM。
- *
- * 失败语义：任何错误（4xx / 5xx / 网络错误）都抛 ServerTranslationError，
- * 由调用方直接展示给用户，不再静默降级到本地翻译。
- */
-/**
  * Translate extracted PDF blocks through the normal webpage endpoint.
  * A deterministic synthetic HTML document lets PDF.js share /fanyi/page's
  * D1 cache and history records. The PDF binary itself is never uploaded.
@@ -439,6 +431,7 @@ export async function translateBlocksViaServer(
   pageUrl: string,
   title: string,
   languageOverrides: { sourceLang?: string; targetLang?: string } = {},
+  onCacheWarning?: (message: string) => void,
 ): Promise<Map<string, string>> {
   if (!blocks.length) return new Map();
 
@@ -516,15 +509,26 @@ export async function translateBlocksViaServer(
     );
   }
 
+  const cacheWarning = response.headers?.get?.('X-Translate-Warning')?.trim();
+  if (cacheWarning) {
+    const message = `译文已返回，但 Vocal Saga 未能写入 D1 缓存：${cacheWarning}`;
+    logger.warn('[ServerTranslation] PDF translation returned without a D1 cache record:', cacheWarning);
+    onCacheWarning?.(message);
+  }
+
   const translatedHtml = await response.text();
   const translatedDoc = new DOMParser().parseFromString(
     translatedHtml.replace(/<base\b[^>]*>/gi, ''),
     'text/html',
   );
   const result = new Map<string, string>();
-  const elements = Array.from(translatedDoc.querySelectorAll('[data-fanyi-block-id]'));
+  const elements = new Map(
+    Array.from(translatedDoc.querySelectorAll('[data-fanyi-block-id]')).map((element) => [
+      element.getAttribute('data-fanyi-block-id') || '', element,
+    ]),
+  );
   for (const block of blocks) {
-    const element = elements.find((candidate) => candidate.getAttribute('data-fanyi-block-id') === block.id);
+    const element = elements.get(block.id);
     if (!element) continue;
     const translated = element.querySelector('.fanyi-translation')?.textContent?.trim();
     if (!translated || translated === block.text) continue;
@@ -537,6 +541,10 @@ export async function translateBlocksViaServer(
   return result;
 }
 
+/**
+ * Translate the current webpage through /fanyi/page and apply returned bilingual spans.
+ * Any HTTP, network or mapping error is surfaced to the caller; do not silently fall back.
+ */
 export async function translateViaServer(
   config: Config,
   blocks: TextBlock[],

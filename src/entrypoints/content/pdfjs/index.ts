@@ -591,6 +591,8 @@ export interface PdfJsTranslationResult {
   paragraphCount: number;
   /** 跳过的段落数（过短/无文本） */
   skippedCount: number;
+  /** 翻译成功但 D1 缓存写入失败时的提示。 */
+  cacheWarning?: string;
 }
 
 /**
@@ -661,9 +663,13 @@ export async function translatePdfJsViewer(
   }
 
   let translations: Map<string, string>;
+  let cacheWarning: string | undefined;
   if (config.useServerTranslation && !config.useLocalAgent) {
     onStatus('正在提交远程翻译并检查服务器缓存…', 'loading');
-    translations = await translateBlocksViaServer(config, blocks, pageUrl, document.title || 'PDF');
+    translations = await translateBlocksViaServer(
+      config, blocks, pageUrl, document.title || 'PDF', {},
+      (message) => { cacheWarning = message; },
+    );
   } else {
     translations = await translateParagraphs(
       chunks,
@@ -700,6 +706,7 @@ export async function translatePdfJsViewer(
     translated: renderedCount > 0,
     paragraphCount: renderedCount,
     skippedCount,
+    ...(cacheWarning ? { cacheWarning } : {}),
   };
 }
 

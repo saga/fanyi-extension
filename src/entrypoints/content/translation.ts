@@ -116,11 +116,12 @@ export function createTranslationController(
           );
           isTranslatedState = result.translated;
           if (result.translated) {
+            const completionMessage = result.skippedCount > 0
+              ? `翻译完成（${result.paragraphCount} 段，${result.skippedCount} 段过短已跳过）`
+              : `翻译完成（${result.paragraphCount} 段）`;
             showStatus(
-              result.skippedCount > 0
-                ? `翻译完成（${result.paragraphCount} 段，${result.skippedCount} 段过短已跳过）`
-                : `翻译完成（${result.paragraphCount} 段）`,
-              'success',
+              result.cacheWarning ? `${completionMessage}；${result.cacheWarning}` : completionMessage,
+              result.cacheWarning ? 'error' : 'success',
             );
             setTimeout(hideStatus, 5000);
           } else {
