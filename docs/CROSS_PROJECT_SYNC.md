@@ -737,3 +737,16 @@ Local Agent 模式下，两个仓库统一遵循 **Server-only persistence**：
 
 回归测试必须验证：Local Agent 模式不读写扩展 IndexedDB；文学记忆编辑只提交 Server；Server 失败不会产生本地持久化副本；清空浏览器 IndexedDB 后仍能恢复完整项目。
 
+
+## 普通网页 PDF 翻译与 D1 页面缓存（2026-11-20）
+
+这里的 PDF.js viewer / arXiv 论文翻译属于普通网页翻译，不属于 Local Agent 的 EPUB/PDF 小说项目流程。
+
+- 普通网页 PDF.js viewer 在 TranslationController.start() 中提前分流，不进入常规 handleFullTranslation()。因此必须显式处理远程服务器路由，不能假定普通网页的 /fanyi/page 路由会自动覆盖 PDF。
+- 当 useServerTranslation=true 且 useLocalAgent=false 时，PDF.js viewer 与独立 arXiv 阅读器将浏览器已提取的 TextBlock[] 包装为带 data-fanyi-block-id 的轻量 HTML，并提交到 POST /fanyi/page。请求 URL 使用公开 PDF 原始 URL（去掉 page fragment），并附带 block fingerprint、源/目标语言、Provider、PromptStyle 与 quality mode。
+- Vocal Saga 的 /fanyi/page 负责按 URL/语言/翻译配置读取 D1 候选记录；未命中时翻译并通过 savePageTranslation() 写入 translations 表。该记录与普通网页翻译共用首页列表和详情页，因此可以在 s.sunxiunan.com 的翻译记录中看到。
+- 不上传 PDF 二进制。PDF.js textLayer 已提取文本后，客户端只发送文本块和原始来源 URL。浏览器内置 viewer 的 chrome-extension:// / resource:// 地址不能作为缓存主键，必须从 file/src/url/source/pdf 参数或可信 HTTP(S) referrer 解析原始 PDF URL；无法得到公开 HTTP(S) URL 时，远程缓存路径应明确失败，而不是保存含糊记录。
+- 服务端返回 X-Translate-Warning 表示译文已返回但 D1 写入失败。PDF 阅读器必须显示该警告，不得把“拿到译文”误报成“已缓存”。
+- 若用户选择直接 Provider，或启用 Local Agent，PDF.js 继续沿用对应的原有执行路径，不会写入 Vocal Saga 的网页翻译记录。Local Agent 小说文档依旧由 local-agent-service 项目 SQLite 管理，不能混入 /fanyi/page。
+
+回归测试覆盖 PDF viewer URL 解包、合成页面请求、PDF fragment 归一化、block 映射、非法本地 URL 拒绝，以及 D1 写入失败警告。
