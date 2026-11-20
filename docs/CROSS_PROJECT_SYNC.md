@@ -565,7 +565,7 @@ prepareHtmlForServer 时在 clone 上把 `link[rel=stylesheet]` 替换为
 
 ### B. 短期:高价值低风险
 
-- [x] **A2**：`scripts/check-sync.ts` 使用仓库相对路径和环境变量；同步清单现已从 18 组扩展到 26 组，CI 结果以本次运行状态为准。
+- [x] **A2**：`scripts/check-sync.ts` 使用仓库相对路径和环境变量；同步清单现包含 25 组（17 组网页翻译共享模块 + 8 组文档解析模块），CI 结果以本次运行状态为准。
 - [ ] **A3**：`cacheKey.json` 与 `chunkRetry.json` 目前只在 `vocal-saga/shared-test-cases/` 中；尚未让两个仓库的测试共同读取同一份 fixtures，当前只能算共享样例原型。
 - [x] **S2**:`cacheKey.ts` 加入 `provider` + `promptStyle` 维度 — 当前 key 不含 provider,切换 LLM 后读到旧 provider 的脏缓存 ✅ 已完成:generateTranslationCacheKey 新增 provider + promptStyle 可选参数,向后兼容,pipeline.ts 全链路透传
 - [x] **S6**:`/force/*` 路由跳过 chunk 缓存 — 当前只跳过 D1,`translateChunk` 内部仍查 chunk 缓存,导致"强制刷新"不彻底;两端同步增加 `skipCache` 参数 ✅ 已完成:translateChunk 新增 skipCache 参数,/force/* 路由透传 skipCache=true,跳过 chunk 缓存读取但保留写入

@@ -15,7 +15,7 @@ import {
  *   3. 短文本保护（<80 有效字符不判）
  *   4. MAX_SAMPLE_CHARS 采样窗口
  *   5. htmlLang 只作辅助信号（加分，不单独决定）
- *   6. shouldUseJapaneseSource 的真值表（用户手工选择永远优先）
+ *   6. 日语识别只用于源语言推断，不会改变用户选择的文风
  */
 
 // ── 语料 ────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ describe('detectLanguage — 假名是日语的主证据', () => {
     // 4 个假名 + 96 汉字：kanaRatio = 0.04 虽然过了 0.03 的比例门槛，
     // 但 kana 数量不足 5，判不出 ja；
     // 而 zh 分支要求 kana === 0（避免把少量假名的日文当成中文），也判不出 zh。
-    // 结果落在 unknown —— 这是安全的默认：不自动升级文风，走通用直译。
+    // 结果落在 unknown —— 调用方继续使用配置的源语言，不猜测，也不改变文风。
     const r = detectLanguage('あ'.repeat(4) + '漢'.repeat(96));
     expect(r.language).toBe('unknown');
     expect(r.evidence.meaningful).toBe(100);
