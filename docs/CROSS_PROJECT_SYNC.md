@@ -4,7 +4,7 @@
 >
 > **范围**：共享网页翻译核心逻辑（DOM 提取、分块、缓存、Prompt、站点规则、内容检测）按下面的同步分类维护。扩展入口、云端路由和本机 Agent 的调度/SQLite 状态机属于各自项目，不复制成同一份实现；但文档翻译请求字段、事件语义、取消/恢复和候选译文规则必须保持契约一致。
 >
-> **更新日期**：2026-10-19。自动同步检查清单已扩展为 **26 组**：18 组网页翻译共享模块 + 8 组纯函数文档解析模块。`cacheKey.ts` 和 `service/_service.ts` 存在有意的平台扩展差异，按语义契约校验，不纳入字节级比较。
+> **更新日期**：2026-11-20。自动同步检查清单包含 **25 组**：17 组网页翻译共享模块 + 8 组纯函数文档解析模块。原日语专属文风及其自动升级策略已移除；日语仍作为普通源语言处理。`cacheKey.ts` 和 `service/_service.ts` 存在有意的平台扩展差异，按语义契约校验，不纳入字节级比较。
 
 ## 项目定位
 
@@ -40,7 +40,6 @@
 | service/jinyong-prompt | `src/entrypoints/service/jinyong-prompt.ts` | `lib/translate/service/jinyong-prompt.ts` |
 | service/acheng-prompt | `src/entrypoints/service/acheng-prompt.ts` | `lib/translate/service/acheng-prompt.ts` |
 | service/wangxiaobo-prompt | `src/entrypoints/service/wangxiaobo-prompt.ts` | `lib/translate/service/wangxiaobo-prompt.ts` |
-| service/japanese-natural-zh-prompt | `src/entrypoints/service/japanese-natural-zh-prompt.ts` | `lib/translate/service/japanese-natural-zh-prompt.ts` |
 | rules/ | `src/rules/` | `lib/translate/rules/` |
 | **文档解析** | `src/entrypoints/utils/document/` | `lib/translate/document/` |
 | 文档翻译责任边界 | Local Agent 模式下 EPUB/PDF 原始文件由本机服务解析、分段和持久化；扩展读取分页片段并负责阅读器 UI/范围选择/结果呈现。未启用 Local Agent 时仍可使用扩展解析器 | Worker 只接收结构化 segments，既不解析原始文件也不维护项目 |
@@ -61,18 +60,16 @@
 
 修改这些文件时，**核心逻辑**必须同步到另一个项目，但**实现细节**可根据两端差异保留。
 
-> **同步校验**：在 `vocal-saga` 根目录运行 `npx tsx scripts/check-sync.ts`；默认查找同级 `../fanyi-extension`，也可通过 `VOCAL_SAGA_PATH` 与 `FANYI_EXTENSION_PATH` 指定仓库路径。该脚本维护静态 `SYNC_PAIRS` 清单，并逐字节检查本节中的 26 组同步对；新增、删除或移动同步对时必须同时更新脚本和本节。`cacheKey.ts` 与 `service/_service.ts` 按语义契约维护，不参与字节级比较。
+> **同步校验**：在 `vocal-saga` 根目录运行 `npx tsx scripts/check-sync.ts`；默认查找同级 `../fanyi-extension`，也可通过 `VOCAL_SAGA_PATH` 与 `FANYI_EXTENSION_PATH` 指定仓库路径。该脚本维护静态 `SYNC_PAIRS` 清单，并逐字节检查本节中的 25 组同步对；新增、删除或移动同步对时必须同时更新脚本和本节。`cacheKey.ts` 与 `service/_service.ts` 按语义契约维护，不参与字节级比较。
 >
-> **当前检查范围**：静态清单包含 26 组同步对，两个仓库的 GitHub Actions 均运行该检查；最近一次实际运行结果以 [vocal-saga Actions](https://github.com/devweekly/vocal-saga/actions) 与 [fanyi-extension Actions](https://github.com/saga/fanyi-extension/actions) 为准。2026-09-11 的 20 组结果仅是历史记录。
+> **当前检查范围**：静态清单包含 25 组同步对，两个仓库的 GitHub Actions 均运行该检查；最近一次实际运行结果以 [vocal-saga Actions](https://github.com/devweekly/vocal-saga/actions) 与 [fanyi-extension Actions](https://github.com/saga/fanyi-extension/actions) 为准。2026-09-11 的 20 组结果仅是历史记录。
 >
 > **2026-09-11 第二轮（prompt 全量中文化 + 骨架抽取）**：所有 prompt 改为中文，并抽成
 > 「共用骨架 + 各自文风段落」，`jinyong` / `acheng` / `wangxiaobo` 三个文风文件
 > **从"已知分叉、各自维护"改为正式同步对**（此前两端正文差异很大，是最大的漂移隐患）。
 > 新增同步对：`service/prompt-contract`、`service/prompt-style`、`service/default-prompt`、
-> `service/jinyong-prompt`、`service/acheng-prompt`、`service/wangxiaobo-prompt`、
-> `service/japanese-natural-zh-prompt`（见 §4.6）。
-> 原 `service/japanese-source-prompt` 重命名为 `service/japanese-natural-zh-prompt`，
-> 文风名 `ja-source` 同步改为 `ja-source-natural`。
+> `service/jinyong-prompt`、`service/acheng-prompt`、`service/wangxiaobo-prompt`（见 §4.6）。
+> 原日语专属文风及自动升级行为已于 2026-11-20 移除，日语页面统一使用用户选择的文风。
 >
 > **2026-09-11 第一轮**：按"以 fanyi-extension 为 canonical"完成全量 re-sync：原 9 项漂移已收敛，其中 1 项为真实产品差异（`rules/*` 的 `promptInstructions`），已在 server 端补齐字段。新增 `service/glossaryTerms`、`languageDetector` 为同步对（见 §4.5、§6.5）。
 >
@@ -113,16 +110,16 @@
 - **架构**：所有 prompt **全量中文**，并拆成「共用骨架 + 各自文风段落」两层。
   - `prompt-contract.ts` — 共用骨架：`<翻译契约>`、`<原文安全策略>`、`renderGlossaryBlock()`、`renderOutputFormat()`、`resolveLanguageName()`、`composeSystemContent()`。**不 import 任何文风模块**（否则与 `prompt-style.ts` 形成循环依赖）。
   - `prompt-style.ts` — 唯一调度出口：`PromptStyle` 联合类型 + `buildStyledSystemContent()`。
-  - `default-prompt.ts` / `jinyong-prompt.ts` / `acheng-prompt.ts` / `wangxiaobo-prompt.ts` / `japanese-natural-zh-prompt.ts` — 各自只导出 `buildXxxSystemContent()`，内部只提供 persona 段落。
+  - `default-prompt.ts` / `jinyong-prompt.ts` / `acheng-prompt.ts` / `wangxiaobo-prompt.ts` — 各自只导出 `buildXxxSystemContent()`，内部只提供 persona 段落。
 - **拼装顺序**（固定）：persona → `<翻译契约>` → `<原文安全策略>` → `<术语表>`（可选，无术语时整段省略）→ `<输出格式>`。
-- **`PromptStyle`**：`'default' | 'jinyong' | 'acheng' | 'wangxiaobo' | 'ja-source-natural'`。
+- **`PromptStyle`**：`'default' | 'jinyong' | 'acheng' | 'wangxiaobo'`。
   定义在 `prompt-style.ts`；`shared.ts`（服务端）与 `deepseek.ts`（扩展端）各自 `export type { PromptStyle }` 再导出，让既有引用无需改动。
 - **两端入口签名不同**（不是同步对）：
   - 扩展端 `deepseek.ts` 的 `buildSystemContent(sourceLang, targetLang, sitePrompt?, glossary?, style?)` — 多一个 `sitePrompt`，由它在本函数返回值之后追加 `Site-specific rules:`。
   - 服务端 `shared.ts` 的 `buildSystemContent(sourceLang, targetLang, glossary?, style?)` — 薄封装，服务端无站点规则。
   - ⚠️ `sitePrompt` 在两个签名里的**位置不同**（扩展端在 `glossary` 之前），调用方不要按位置猜参数。
 - **check-sync: ✅ 完全一致**（2026-09-11 验证，7 个文件全部 byte-identical）
-- **测试**：两端各有 `prompt-style-switch` 测试（互为镜像，服务端 `tests/prompt-style-switch.test.ts`、扩展端 `src/__tests__/prompt-style-switch.test.ts`）。其中一条用例逐字比对五种文风的 `<翻译契约>` 段落，锁住「核心规则完全共用」这条结构约束。
+- **测试**：两端各有 `prompt-style-switch` 测试（互为镜像，服务端 `tests/prompt-style-switch.test.ts`、扩展端 `src/__tests__/prompt-style-switch.test.ts`）。其中一条用例逐字比对四种文风的 `<翻译契约>` 段落，锁住「核心规则完全共用」这条结构约束。
 - **2026-09-11 前的问题**：`jinyong` / `acheng` / `wangxiaobo` 三个 prompt 文件**不是同步对且正文差异很大**
   （扩展端 acheng 是旧版、把"短句"当风格本身；vocal-saga 端已修正为"只在提升清晰度时拆句"）。
   本轮统一为中文后正式纳入同步对，消除该漂移隐患。
@@ -139,27 +136,14 @@
 
 ### 6.5 `languageDetector.ts`（2026-09-11 新增同步对）
 - `detectLanguage(text, options?)` — 确定性页面语言检测：基于 Unicode 假名（平假名 `\u3040-\u309f` + 片假名 `\u30a0-\u30ff`）与汉字比例，返回 `{ language, confidence, kanaRatio, kanjiRatio, evidence }`。**不调 LLM**。
-- `shouldUseJapaneseSource(configuredStyle, detected, targetLang)` — 是否把风格升级为 `ja-source-natural` 的**唯一策略出口**。
 - 关键约束：
   - 短文本护栏 `meaningful < 80` → 返回 `unknown`；采样上限 `MAX_SAMPLE_CHARS = 20000`。
   - 判 `ja` 需 `kana >= 5`；判 `zh` 需 `kana === 0`（即假名是主证据，汉字不足为凭）。
   - `htmlLang` 仅作辅助证据，不单独定案。
-  - **用户手工选择的风格永远优先**：仅当配置为 `default`/未设置、检测为 `ja`、且目标语言非日语时才升级。
-- **检测粒度：每页/每文档一次**（不是每 chunk）。保持 DeepSeek prompt 前缀稳定以命中 KV 缓存，并避免同页内文风割裂。
-- **接线**：网页翻译使用服务端 pipeline.ts；结构化文档先由扩展解析。非 Local Agent 的轻量文档路径可由 document/useDocumentTranslation.ts 管理扩展侧分批、进度、重试和导出，云端只用 lib/app.ts 的 /api/translate/document/segments 对单次请求做无状态翻译。只要 documentUseLocalAgent=true，阅读页的继续翻译/下一页/下几页/强制重译/失败重试与 Agent Workspace 必须统一使用 /api/documents/projects/:projectId/runs，由 local-agent-service 的 executeRun 执行，不能再进入 useDocumentTranslation.ts 的本地 Provider 循环。长文档项目、人物记忆、初译 context_delta、审校、恢复与全书审计只能由 local-agent-service 维护。解析出的网页风格经 TranslateChunkMessage.promptStyle 传到 background，handleTranslateChunk / handleTranslateChunkStream 用 message.promptStyle ?? config.promptStyle，同一值同时喂给缓存 key 与 service（否则 ja-source-natural 产物会落进 default 缓存桶）。
+  - **检测用途**：`detectLanguage` 只用于 PDF 阅读器在 `sourceLang=auto` 时提供源语言提示；日语检测不再改变任何 PromptStyle。
+- **接线**：网页翻译使用服务端 pipeline.ts；结构化文档先由扩展解析。非 Local Agent 的轻量文档路径可由 document/useDocumentTranslation.ts 管理扩展侧分批、进度、重试和导出，云端只用 lib/app.ts 的 /api/translate/document/segments 对单次请求做无状态翻译。只要 documentUseLocalAgent=true，阅读页的继续翻译/下一页/下几页/强制重译/失败重试与 Agent Workspace 必须统一使用 /api/documents/projects/:projectId/runs，由 local-agent-service 的 executeRun 执行，不能再进入 useDocumentTranslation.ts 的本地 Provider 循环。长文档项目、人物记忆、初译 context_delta、审校、恢复与全书审计只能由 local-agent-service 维护。解析出的网页风格经 TranslateChunkMessage.promptStyle 传到 background，handleTranslateChunk / handleTranslateChunkStream 用 message.promptStyle ?? config.promptStyle，同一值同时喂给缓存 key 与 service（确保缓存 key 与实际发送的 Prompt 使用同一文风）。
 - **check-sync: ✅ 完全一致**（2026-09-11 验证）
-- **测试**：两端各有 `languageDetector` 测试（各 36 用例，互为镜像）：服务端 `tests/languageDetector.test.ts`、扩展端 `src/__tests__/languageDetector.test.ts`。含 `shouldUseJapaneseSource` 15 例真值表。
-
-### 6.6 `service/japanese-natural-zh-prompt.ts`（2026-09-11 新增同步对，原 `japanese-source-prompt.ts`）
-- `buildJapaneseNaturalZhSystemContent(sourceLang, targetLang, glossary?)` — `ja-source-natural` 文风的 persona 段落（契约/安全策略/术语表/输出格式来自 §4.6 的 `prompt-contract.ts`）。
-- **定位**：日语原文 → 中文时的**源语言感知**——保留原文的克制、谨慎、判断强度、论述节奏，**不是**文学模仿，也**不是**「日式中文」cosplay。
-- **文风段落**：`<日语原文特点>` + `<中文表达原则>` + `<判断强度>`，其中 `<判断强度>` 显式列出 `〜と考えられる` / `〜かもしれない` 等"推测"表达，要求保留其不确定性（不能被译成确定结论）。
-- **命名变更**：文风名 `ja-source` → `ja-source-natural`，文件 `japanese-source-prompt.ts` → `japanese-natural-zh-prompt.ts`。
-  理由：`ja-natural` 之类命名容易被理解成反方向的「中文 → 日语自然化」，而本模式方向永远是 **日语 → 非日语**。
-- **护栏**：`targetLang` 以 `ja` 开头时回退 `buildDefaultSystemContent`（ja → ja 无意义；zh → ja 属于「日语自然化」方向，与本模式无关）。护栏实现在 `prompt-style.ts`，各文风文件不重复。
-- **check-sync: ✅ 完全一致**（2026-09-11 验证）
-- **UI 入口**：扩展端 `content/configPanel.ts` 与 `popup/App.vue` 的 `<select>` 均有 `日语原文汉译` 选项（`value="ja-source-natural"`）。
-- **不做**：中文 → 日语方向（`chinese-to-japanese-prompt.ts`）本轮**未实现**，属于独立需求，不应复用本文件。
+- **测试**：两端各有 `languageDetector` 测试（各 36 用例，互为镜像）：服务端 `tests/languageDetector.test.ts`、扩展端 `src/__tests__/languageDetector.test.ts`。仅覆盖确定性语言识别行为。
 
 ### 7. `tech-products.json`
 - 已知技术产品 / 出版物列表
@@ -535,7 +519,7 @@ prepareHtmlForServer 时在 clone 上把 `link[rel=stylesheet]` 替换为
 - [ ] `extractGlossaryLocal` 逻辑
 - [ ] `tech-products.json`
 - [ ] `sanitizeDocumentTerms`、`document_terms` 清洗与站点规则注入；`Glossary` 在服务端包含额外内部字段，不能再描述为仅有 `document_terms`。
-- [ ] `detectLanguage` / `shouldUseJapaneseSource`（含短文本护栏、kana 阈值）
+- [x] `detectLanguage`（短文本护栏、kana 阈值）；只负责源语言判断，不切换文风。
 - [ ] `buildJapaneseNaturalZhSystemContent`（含 `targetLang` 为日语时回退 default）
 - [ ] prompt 共用骨架（`<翻译契约>` / `<原文安全策略>` / `<输出格式>` / 术语表渲染）
 - [ ] `composeSystemContent` 的拼装顺序与 `resolveLanguageName` 的语言名映射
@@ -606,7 +590,7 @@ prepareHtmlForServer 时在 clone 上把 `link[rel=stylesheet]` 替换为
 ### E. 同步流程改进
 
 - [x] **A2 实现**：`scripts/check-sync.ts` 使用仓库相对路径和环境变量定位两个仓库；缺少任一仓库时立即以清晰错误退出。
-- [x] **CI 集成**：两个仓库的 GitHub Actions 都运行跨仓库逐字节检查；任一同步对漂移时 CI 失败。当前静态清单为 26 组。
+- [x] **CI 集成**：两个仓库的 GitHub Actions 都运行跨仓库逐字节检查；任一同步对漂移时 CI 失败。当前静态清单为 25 组。
 - [ ] **A3 实现**：`cacheKey` / `chunkRetry` fixtures 尚未被两端测试共同读取；需纳入两个仓库可复用的测试路径后才算完成。
 - [ ] **版本标记**：当前没有发布并被两端依赖的共享包版本；未来引入共享包时再补充版本锁定。
 
