@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { DocumentReaderPage } from '../entrypoints/utils/document/pagination';
 import type { DocumentSegment } from '../entrypoints/utils/document/types';
 import {
@@ -16,6 +17,22 @@ function page(id: string, title: string, ids: string[]): DocumentReaderPage {
   const items = segments(ids);
   return { id, title, sectionTitle: title, segments: items, charCount: items.length };
 }
+
+describe('双模型对比结果展示', () => {
+  it('逐段只显示原文与译文，不再重复片段 ID 和「模型 X 译文」标签', () => {
+    const template = readFileSync(
+      process.cwd() + '/src/entrypoints/document/DocumentModelComparison.vue', 'utf8',
+    );
+    expect(template).not.toContain('· 原文');
+    expect(template).not.toContain('译文</small>');
+    expect(template).toContain('class="comparison-source-text"');
+    expect(template).toContain('font-size: 1.05rem');
+    const readerCss = readFileSync(
+      process.cwd() + '/src/entrypoints/document/documentReaderStyles.css', 'utf8',
+    );
+    expect(readerCss).toContain('max-width: 76rem');
+  });
+});
 
 describe('双模型对比面板选项', () => {
   it('Workbuddy 下拉含 auto、目录模型，且保留 A/B 自定义标识', () => {

@@ -85,9 +85,7 @@
             <header><strong>模型 A</strong><span>{{ activeComparison.modelA?.provider }} / {{ activeComparison.modelA?.requestedModel }}</span><em :class="'status-' + activeComparison.modelA?.status">{{ statusLabel(activeComparison.modelA?.status) }}</em></header>
             <p v-if="activeComparison.modelA?.error" class="comparison-error">{{ activeComparison.modelA.error }}</p>
             <article v-for="source in activeComparison.source" :key="'a-' + source.id" class="comparison-segment">
-              <small>{{ source.id }} · 原文</small>
               <p class="comparison-source-text">{{ source.text }}</p>
-              <small>模型 A 译文</small>
               <p>{{ activeComparison.modelA?.translations?.[source.id] || missingLabel(activeComparison.modelA, source.id) }}</p>
             </article>
           </section>
@@ -95,9 +93,7 @@
             <header><strong>模型 B</strong><span>{{ activeComparison.modelB?.provider }} / {{ activeComparison.modelB?.requestedModel }}</span><em :class="'status-' + activeComparison.modelB?.status">{{ statusLabel(activeComparison.modelB?.status) }}</em></header>
             <p v-if="activeComparison.modelB?.error" class="comparison-error">{{ activeComparison.modelB.error }}</p>
             <article v-for="source in activeComparison.source" :key="'b-' + source.id" class="comparison-segment">
-              <small>{{ source.id }} · 原文</small>
               <p class="comparison-source-text">{{ source.text }}</p>
-              <small>模型 B 译文</small>
               <p>{{ activeComparison.modelB?.translations?.[source.id] || missingLabel(activeComparison.modelB, source.id) }}</p>
             </article>
           </section>
@@ -267,17 +263,17 @@ onBeforeUnmount(stopPolling);
 <style scoped>
 .model-comparison { display: grid; gap: 16px; }
 .comparison-heading, .comparison-actions, .comparison-result-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.comparison-models, .comparison-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.comparison-model, .comparison-column { min-width: 0; border: 1px solid var(--border-color, #ddd); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
+.comparison-models, .comparison-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.comparison-model, .comparison-column { min-width: 0; border: 1px solid var(--border-color, #ddd); border-radius: 10px; padding: 18px; display: grid; gap: 10px; }
 .comparison-model label, .comparison-history, .comparison-scope { display: grid; gap: 6px; }
 .comparison-scope { min-width: 220px; }
 .comparison-model input, .comparison-model select, .comparison-history select, .comparison-scope select { width: 100%; min-width: 0; }
 .comparison-column > header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.comparison-column > header span, .comparison-result-meta, .comparison-segment small { color: var(--muted-color, #777); font-size: 12px; }
-.comparison-column > header em { margin-left: auto; font-size: 12px; font-style: normal; }
-.comparison-segment { border-top: 1px solid var(--border-color, #ddd); padding-top: 8px; }
-.comparison-segment p { white-space: pre-wrap; line-height: 1.65; margin: 6px 0 0; }
-.comparison-segment .comparison-source-text { color: var(--muted-color, #777); padding-bottom: 8px; border-bottom: 1px dashed var(--border-color, #ddd); }
+.comparison-column > header span, .comparison-result-meta { color: var(--muted-color, #777); font-size: 13px; }
+.comparison-column > header em { margin-left: auto; font-size: 13px; font-style: normal; }
+.comparison-segment { border-top: 1px solid var(--border-color, #ddd); padding-top: 12px; }
+.comparison-segment p { white-space: pre-wrap; line-height: 1.75; margin: 8px 0 0; font-size: 1.05rem; }
+.comparison-segment .comparison-source-text { color: var(--muted-color, #777); padding-bottom: 10px; border-bottom: 1px dashed var(--border-color, #ddd); font-size: .98rem; }
 .comparison-empty { color: var(--muted-color, #777); padding: 18px 0; }
 .comparison-error { color: #b42318; white-space: pre-wrap; }
 .status-completed { color: #16803c; }
