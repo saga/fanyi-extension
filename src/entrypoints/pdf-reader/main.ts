@@ -3,6 +3,8 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { getConfig } from '../utils/config';
 import { detectLanguage } from '../utils/languageDetector';
+import { translateBlocksViaServer } from '../content/serverTranslation';
+import type { TextBlock } from '../utils/blockExtractor';
 import type { TranslateChunkMessage, TranslateChunkResponse } from '../../types/messages';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -194,6 +196,25 @@ async function translateAll(): Promise<void> {
       : config.sourceLang;
     const targetLang = config.targetLang || 'zh';
     const eligible = paragraphs.filter(p => !p.translated && !isLikelyMath(p.text) && p.text.length >= (p.heading ? 4 : 18));
+    if (config.useServerTranslation && !config.useLocalAgent) {
+      const serverBlocks: TextBlock[] = eligible.map((paragraph, index) => ({
+        id: paragraph.id,
+        xpath: '',
+        tag: paragraph.heading ? 'h2' : 'p',
+        text: paragraph.text,
+        context: { headingPath: [], position: index },
+      }));
+      const translatedMap = await translateBlocksViaServer(
+        config,
+        serverBlocks,
+        sourceUrl,
+        titleNode.textContent || 'arXiv paper',
+        { sourceLang, targetLang },
+      );
+      for (const paragraph of eligible) paragraph.translated = translatedMap.get(paragraph.id);
+      renderPaper();
+      status('服务器翻译已返回 '+eligible.filter(p => !!p.translated).length+' / '+eligible.length+' 段。');
+    } else {
     const batchSize = 8;
     let done = 0;
     for (let offset=0; offset<eligible.length; offset+=batchSize) {
@@ -214,6 +235,7 @@ async function translateAll(): Promise<void> {
       done += batch.length;
       renderPaper();
       status('正在翻译：'+done+' / '+eligible.length+' 段');
+    }
     }
     translated = paragraphs.every(p => isLikelyMath(p.text) || p.text.length < (p.heading ? 4 : 18) || !!p.translated);
     status(translated ? '翻译完成。共翻译 '+paragraphs.filter(p=>p.translated).length+' 段。' : '部分段落未返回译文，可再次点击重试。');

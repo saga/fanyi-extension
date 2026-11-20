@@ -19,8 +19,8 @@
  *      同时覆盖 mozilla.github.io demo、Firefox 内置 PDF 查看器、其他站点自托管实例
  *   2. 从所有已渲染的 `.textLayer span` 收集文字，按视觉位置（top 坐标）分组为行，
  *      再按垂直间距/缩进启发式聚合成段落（保留上下文，提升翻译质量）
- *   3. 复用现有 `buildChunks()` 切分翻译块，通过 `browser.runtime.sendMessage`
- *      走 background → DeepSeek 路径（与普通翻译同一通道）
+ *   3. 复用现有 `buildChunks()` 切分翻译块；远程网页翻译走 `/fanyi/page` 与普通网页共用 D1 缓存，
+ *      其他配置沿用 Background Provider 路径
  *   4. 在每个段落下方渲染可见的 `div.fanyi-pdfjs-translation` 覆盖层
  *      （半透明白底 + 左侧蓝色边条 + pointer-events:none 不阻挡选择）
  *
@@ -32,7 +32,8 @@
 import browser from 'webextension-polyfill';
 import { buildChunks, type Chunk } from '../../utils/chunkBuilder';
 import type { TextBlock } from '../../utils/blockExtractor';
-import { detectLanguage, shouldUseJapaneseSource } from '../../utils/languageDetector';
+import { translateBlocksViaServer } from '../serverTranslation';
+import type { Config } from '../../utils/config';
 import type { PromptStyle } from '../../service/deepseek';
 import type { TranslationState } from '../translationTypes';
 import type {
@@ -406,6 +407,44 @@ const TRANSLATE_CONCURRENCY = 4;
  * （`applyBlockTranslation` 注入 .fanyi-original / .fanyi-translation span），
  * 对 PDF.js 透明 span 无效。这里只收集译文，由 `renderOverlay` 负责渲染。
  */
+/**
+ * Resolve the public source PDF URL from common PDF.js viewer wrappers.
+ * The browser's built-in viewer can live on chrome-extension://; its file/src
+ * query parameter or document referrer carries the stable server-cache identity.
+ */
+export function resolvePdfSourceUrl(
+  href = window.location.href,
+  referrer = document.referrer,
+): string {
+  const isPublicHttpUrl = (value: string): string | null => {
+    try {
+      const url = new URL(value);
+      if ((url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password) {
+        url.hash = '';
+        return url.href;
+      }
+    } catch { /* Try the next candidate. */ }
+    return null;
+  };
+
+  try {
+    const viewerUrl = new URL(href);
+    const hashParams = new URLSearchParams(viewerUrl.hash.replace(/^#/, ''));
+    for (const key of ['file', 'src', 'url', 'source', 'pdf']) {
+      const candidate = viewerUrl.searchParams.get(key) || hashParams.get(key);
+      if (!candidate) continue;
+      const resolved = isPublicHttpUrl(candidate);
+      if (resolved) return resolved;
+    }
+  } catch { /* href may be an extension-internal URL. */ }
+
+  const direct = isPublicHttpUrl(href);
+  if (direct) return direct;
+  const fromReferrer = isPublicHttpUrl(referrer);
+  if (fromReferrer) return fromReferrer;
+  throw new Error('无法识别 PDF 的原始 HTTP(S) 地址。远程翻译需要使用 PDF 的公开来源 URL 才能写入服务器缓存。');
+}
+
 async function translateParagraphs(
   chunks: Chunk[],
   sourceLang: string,
@@ -570,7 +609,7 @@ export interface PdfJsTranslationResult {
  * @param onStatus 状态提示回调（msg, type）
  */
 export async function translatePdfJsViewer(
-  config: { sourceLang: string; targetLang: string; useServerTranslation?: boolean; provider?: string; deepseekApiKey?: string },
+  config: Config,
   state: TranslationState,
   onStatus: (msg: string, type: 'loading' | 'success' | 'error') => void,
 ): Promise<PdfJsTranslationResult> {
@@ -612,36 +651,29 @@ export async function translatePdfJsViewer(
     `[PdfJs] ${lines.length} lines → ${paragraphs.length} paragraphs (${translatable.length} translatable, ${skippedCount} skipped) → ${chunks.length} chunks`,
   );
 
-  // ── 文档级语言检测（整份 PDF 只做一次）──
-  // 与网页翻译同一策略：日语原文 → 非日语目标语言时把 default 自动升级为
-  // ja-source-natural（保留原文的克制、论述顺序与限定语气）。
-  // 检测基于全部段落而不是单 chunk：单 chunk 可能过短而触发短文本保护，
-  // 会导致同一 PDF 内各 chunk 文风不一致。
-  // PDF 没有 html lang，故不传辅助信号（假名证据已足够）。
-  const detected = detectLanguage(blocks.map((b) => b.text).join('\n'));
-  const effectiveStyle: PromptStyle = shouldUseJapaneseSource(
-    config.promptStyle,
-    detected.language,
-    config.targetLang,
-  )
-    ? 'ja-source-natural'
-    : config.promptStyle;
-  if (effectiveStyle !== config.promptStyle) {
-    logger.debug(
-      `[PdfJs] Source detected as ${detected.language} ` +
-        `(kanaRatio=${detected.kanaRatio.toFixed(3)}, confidence=${detected.confidence.toFixed(2)}) ` +
-        `→ promptStyle ${config.promptStyle} auto-upgraded to ${effectiveStyle}`,
-    );
+  // 源语言不再隐式切换文风；PDF 与普通网页遵循同一份用户文风配置。
+  let pageUrl: string;
+  try {
+    pageUrl = resolvePdfSourceUrl();
+  } catch (error) {
+    if (config.useServerTranslation && !config.useLocalAgent) throw error;
+    pageUrl = window.location.href;
   }
 
-  const translations = await translateParagraphs(
-    chunks,
-    config.sourceLang,
-    config.targetLang,
-    window.location.href,
-    (current, total) => onStatus(`PDF 翻译进度: ${current}/${total}`, 'loading'),
-    effectiveStyle,
-  );
+  let translations: Map<string, string>;
+  if (config.useServerTranslation && !config.useLocalAgent) {
+    onStatus('正在提交远程翻译并检查服务器缓存…', 'loading');
+    translations = await translateBlocksViaServer(config, blocks, pageUrl, document.title || 'PDF');
+  } else {
+    translations = await translateParagraphs(
+      chunks,
+      config.sourceLang,
+      config.targetLang,
+      pageUrl,
+      (current, total) => onStatus(`PDF 翻译进度: ${current}/${total}`, 'loading'),
+      config.promptStyle,
+    );
+  }
 
   // 渲染覆盖层
   let renderedCount = 0;

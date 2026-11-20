@@ -428,6 +428,115 @@ export function applyServerTranslatedHtml(
  * 失败语义：任何错误（4xx / 5xx / 网络错误）都抛 ServerTranslationError，
  * 由调用方直接展示给用户，不再静默降级到本地翻译。
  */
+/**
+ * Translate extracted PDF blocks through the normal webpage endpoint.
+ * A deterministic synthetic HTML document lets PDF.js share /fanyi/page's
+ * D1 cache and history records. The PDF binary itself is never uploaded.
+ */
+export async function translateBlocksViaServer(
+  config: Config,
+  blocks: TextBlock[],
+  pageUrl: string,
+  title: string,
+  languageOverrides: { sourceLang?: string; targetLang?: string } = {},
+): Promise<Map<string, string>> {
+  if (!blocks.length) return new Map();
+
+  let canonicalUrl: URL;
+  try {
+    canonicalUrl = new URL(pageUrl);
+  } catch {
+    throw new ServerTranslationError('无法识别 PDF 的原始网页地址，不能写入服务器页面缓存。', 0);
+  }
+  if ((canonicalUrl.protocol !== 'https:' && canonicalUrl.protocol !== 'http:') ||
+      canonicalUrl.username || canonicalUrl.password) {
+    throw new ServerTranslationError('PDF 服务器缓存只接受公开的 HTTP(S) 原始地址。', 0);
+  }
+  canonicalUrl.hash = '';
+
+  const provider = config.provider || 'deepseek';
+  const apiKey = config.deepseekApiKey?.trim();
+  if (provider === 'deepseek' && !apiKey) {
+    throw new ServerTranslationError('DeepSeek API Key 未配置，服务端翻译（DeepSeek）需要 API Key', 0);
+  }
+
+  const escapeHtml = (value: string): string => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const safeTags = new Set(['p', 'div', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+  const html = [
+    '<!doctype html><html><head><meta charset="utf-8"><title>',
+    escapeHtml(title || canonicalUrl.pathname.split('/').pop() || 'PDF'),
+    '</title></head><body><main>',
+    ...blocks.map((block) => {
+      const tag = safeTags.has(block.tag) ? block.tag : 'p';
+      return `<${tag} data-fanyi-block-id="${escapeHtml(block.id)}">${escapeHtml(block.text)}</${tag}>`;
+    }),
+    '</main></body></html>',
+  ].join('');
+
+  const source = languageOverrides.sourceLang || config.sourceLang || 'auto';
+  const target = languageOverrides.targetLang || config.targetLang || 'zh';
+  const body: Record<string, unknown> = {
+    html,
+    url: canonicalUrl.href,
+    blocks: blocks.map(({ id, tag, text }) => ({ id, tag, text })),
+    source,
+    target,
+    mode: 'bilingual',
+    provider,
+    promptStyle: config.promptStyle || 'default',
+    translationMode: 'technical',
+    qualityMode: config.webEnhancedQuality ? 'enhanced' : 'fast',
+    contentHash: computeBlocksFingerprint(blocks),
+    client: buildClientInfo(),
+    sessionId: getSessionId(),
+  };
+  if (provider === 'deepseek' && apiKey) body.apiKey = apiKey;
+
+  const response = await requestTranslationServer(getDefaultServerUrl(config), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Session-Id': getSessionId() },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    let detail = errorBody.slice(0, 400);
+    try {
+      const parsed = JSON.parse(errorBody) as { error?: unknown; detail?: unknown };
+      if (typeof parsed.error === 'string') detail = parsed.error;
+      if (typeof parsed.detail === 'string' && parsed.detail !== detail) detail += ` — ${parsed.detail}`;
+    } catch { /* Keep the plain response body. */ }
+    throw new ServerTranslationError(
+      `PDF 服务端翻译失败: ${response.status} ${response.statusText}${detail ? ` — ${detail}` : ''}`,
+      response.status,
+    );
+  }
+
+  const translatedHtml = await response.text();
+  const translatedDoc = new DOMParser().parseFromString(
+    translatedHtml.replace(/<base\b[^>]*>/gi, ''),
+    'text/html',
+  );
+  const result = new Map<string, string>();
+  const elements = Array.from(translatedDoc.querySelectorAll('[data-fanyi-block-id]'));
+  for (const block of blocks) {
+    const element = elements.find((candidate) => candidate.getAttribute('data-fanyi-block-id') === block.id);
+    if (!element) continue;
+    const translated = element.querySelector('.fanyi-translation')?.textContent?.trim();
+    if (!translated || translated === block.text) continue;
+    if (!isSameBlockText(getServerOriginalText(element), block.text)) {
+      logger.warn('[ServerTranslation] PDF block mapping mismatch; ignoring cached translation:', block.id);
+      continue;
+    }
+    result.set(block.id, translated);
+  }
+  return result;
+}
+
 export async function translateViaServer(
   config: Config,
   blocks: TextBlock[],
