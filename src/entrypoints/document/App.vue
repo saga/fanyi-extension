@@ -390,6 +390,7 @@
           :service-url="readerConfig?.documentLocalAgentUrl || 'http://127.0.0.1:8789'"
           :token="readerConfig?.documentLocalAgentToken || ''"
           :segments="visibleSegments"
+          :pages="pages"
           :source-lang="sourceLang"
           :target-lang="targetLang"
           :translation-mode="effectiveDocumentTranslationMode"

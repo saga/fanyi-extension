@@ -20,7 +20,13 @@
             </select>
           </label>
           <label>模型标识
-            <input v-model.trim="modelA.model" placeholder="auto 或模型名称" />
+            <select v-if="modelA.provider === 'workbuddy'" v-model="modelA.model">
+              <option v-for="option in modelOptions" :key="option" :value="option">
+                {{ option === 'auto' ? 'auto（默认）' : option }}
+              </option>
+            </select>
+            <input v-else v-model.trim="modelA.model" placeholder="auto 或模型名称" />
+            <small class="muted">Workbuddy 列表来自本机服务；OpenCode 手动填写</small>
           </label>
         </div>
         <div class="comparison-model">
@@ -32,15 +38,28 @@
             </select>
           </label>
           <label>模型标识
-            <input v-model.trim="modelB.model" placeholder="auto 或模型名称" />
+            <select v-if="modelB.provider === 'workbuddy'" v-model="modelB.model">
+              <option v-for="option in modelOptions" :key="option" :value="option">
+                {{ option === 'auto' ? 'auto（默认）' : option }}
+              </option>
+            </select>
+            <input v-else v-model.trim="modelB.model" placeholder="auto 或模型名称" />
+            <small class="muted">Workbuddy 列表来自本机服务；OpenCode 手动填写</small>
           </label>
         </div>
       </div>
 
       <div class="comparison-actions">
-        <span class="muted small">本次范围：当前页 {{ segments.length }} 个原文片段</span>
-        <button class="btn primary" type="button" :disabled="running || loading || !segments.length || !modelsValid" @click="startComparison">
-          {{ running ? '两份初译执行中…' : '翻译当前页并对比' }}
+        <label class="comparison-scope">对比范围
+          <select v-model="scopeKey">
+            <option v-for="scope in scopeOptions" :key="scope.key" :value="scope.key" :disabled="scope.disabled">
+              {{ scope.label }}
+            </option>
+          </select>
+        </label>
+        <span class="muted small">本次范围：{{ comparisonSegments.length }} 个原文片段</span>
+        <button class="btn primary" type="button" :disabled="running || loading || !scopeValid || !modelsValid" @click="startComparison">
+          {{ running ? '两份初译执行中…' : '翻译所选范围并对比' }}
         </button>
       </div>
       <p v-if="error" class="comparison-error">{{ error }}</p>
@@ -92,6 +111,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { workspaceApi } from './documentWorkspaceClient';
+import type { DocumentReaderPage } from '@/entrypoints/utils/document/pagination';
+import { buildComparisonScopes, buildModelOptions, CURRENT_PAGE_SCOPE_KEY } from './modelComparisonOptions';
 
 type ModelChoice = { provider: 'workbuddy' | 'opencode'; model: string };
 type ComparisonRecord = {
@@ -104,12 +125,15 @@ const props = defineProps<{
   serviceUrl: string;
   token: string;
   segments: Array<{ id: string; text: string }>;
+  pages: DocumentReaderPage[];
   sourceLang: string;
   targetLang: string;
   translationMode: 'technical' | 'literary';
 }>();
 const modelA = ref<ModelChoice>({ provider: 'workbuddy', model: 'auto' });
 const modelB = ref<ModelChoice>({ provider: 'opencode', model: 'auto' });
+const modelOptions = ref<string[]>(['auto']);
+const scopeKey = ref<string>(CURRENT_PAGE_SCOPE_KEY);
 const history = ref<ComparisonRecord[]>([]);
 const selectedId = ref('');
 const activeComparison = ref<ComparisonRecord | null>(null);
@@ -118,6 +142,10 @@ const error = ref('');
 let pollHandle: ReturnType<typeof setInterval> | null = null;
 const modelsValid = computed(() => !!modelA.value.model.trim() && !!modelB.value.model.trim() &&
   !(modelA.value.provider === modelB.value.provider && modelA.value.model.trim() === modelB.value.model.trim()));
+const scopeOptions = computed(() => buildComparisonScopes(props.pages, props.segments));
+const selectedScope = computed(() => scopeOptions.value.find((item) => item.key === scopeKey.value) ?? scopeOptions.value[0] ?? null);
+const comparisonSegments = computed(() => selectedScope.value?.segmentIds ?? []);
+const scopeValid = computed(() => !!selectedScope.value && !selectedScope.value.disabled && comparisonSegments.value.length > 0);
 const running = computed(() => ['pending', 'running'].includes(activeComparison.value?.modelA?.status) ||
   ['pending', 'running'].includes(activeComparison.value?.modelB?.status));
 const endpoint = computed(() => '/api/documents/projects/' + encodeURIComponent(props.projectId || '') + '/model-comparisons');
@@ -129,6 +157,17 @@ function missingLabel(result: any, id: string) {
   if (result?.status === 'failed') return '模型调用失败';
   if (result?.status === 'partial' && result?.missingSegmentIds?.includes(id)) return '模型未返回此片段';
   return '等待模型返回…';
+}
+/** Workbuddy 模型下拉直接复用本机服务已有的模型目录，不另造一份静态列表。 */
+async function loadModelOptions() {
+  try {
+    const response = await workspaceApi<{ data?: Array<{ id?: string }> }>(props.serviceUrl, props.token, '/api/codebuddy/models');
+    const ids = (response.data || []).map((item) => String(item?.id || '').trim()).filter(Boolean);
+    modelOptions.value = buildModelOptions(ids, [modelA.value.model, modelB.value.model]);
+  } catch {
+    // 服务未启动时仍允许手输 auto / 模型标识，不让面板整体不可用。
+    modelOptions.value = buildModelOptions([], [modelA.value.model, modelB.value.model]);
+  }
 }
 async function loadHistory() {
   if (!props.projectId) return;
@@ -187,13 +226,13 @@ function syncPolling() {
   }
 }
 async function startComparison() {
-  if (!props.projectId || !props.segments.length || !modelsValid.value) return;
+  if (!props.projectId || !scopeValid.value || !modelsValid.value) return;
   loading.value = true; error.value = '';
   try {
     const response = await workspaceApi<{ comparison: ComparisonRecord }>(props.serviceUrl, props.token, endpoint.value, {
       method: 'POST',
       body: JSON.stringify({
-        segmentIds: props.segments.map((segment) => segment.id),
+        segmentIds: comparisonSegments.value,
         models: [modelA.value, modelB.value],
         sourceLang: props.sourceLang,
         targetLang: props.targetLang,
@@ -218,7 +257,10 @@ watch(() => props.projectId, () => {
   history.value = [];
   void loadHistory();
 });
-onMounted(() => { void loadHistory(); });
+onMounted(() => {
+  void loadHistory();
+  void loadModelOptions();
+});
 onBeforeUnmount(stopPolling);
 </script>
 
@@ -227,8 +269,9 @@ onBeforeUnmount(stopPolling);
 .comparison-heading, .comparison-actions, .comparison-result-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .comparison-models, .comparison-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .comparison-model, .comparison-column { min-width: 0; border: 1px solid var(--border-color, #ddd); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
-.comparison-model label, .comparison-history { display: grid; gap: 6px; }
-.comparison-model input, .comparison-model select, .comparison-history select { width: 100%; min-width: 0; }
+.comparison-model label, .comparison-history, .comparison-scope { display: grid; gap: 6px; }
+.comparison-scope { min-width: 220px; }
+.comparison-model input, .comparison-model select, .comparison-history select, .comparison-scope select { width: 100%; min-width: 0; }
 .comparison-column > header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .comparison-column > header span, .comparison-result-meta, .comparison-segment small { color: var(--muted-color, #777); font-size: 12px; }
 .comparison-column > header em { margin-left: auto; font-size: 12px; font-style: normal; }
