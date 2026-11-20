@@ -463,9 +463,13 @@ export async function translateBlocksViaServer(
     .replace(/'/g, '&#39;');
   const safeTags = new Set(['p', 'div', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
   const html = [
-    '<!doctype html><html><head><meta charset="utf-8"><title>',
+    '<!doctype html><html data-vs-pdf-text-cache="true"><head><meta charset="utf-8"><title>',
     escapeHtml(title || canonicalUrl.pathname.split('/').pop() || 'PDF'),
-    '</title></head><body><main>',
+    '</title><style data-vs-pdf-text-layout>',
+    'body{max-width:860px;margin:0 auto;padding:32px 24px;font:16px/1.75 system-ui,-apple-system,sans-serif;color:#1f2937}',
+    'main{display:block;overflow-wrap:anywhere}',
+    '[data-fanyi-block-id]{margin:0 0 1.1em}',
+    '</style></head><body><main>',
     ...blocks.map((block) => {
       const tag = safeTags.has(block.tag) ? block.tag : 'p';
       return `<${tag} data-fanyi-block-id="${escapeHtml(block.id)}">${escapeHtml(block.text)}</${tag}>`;
