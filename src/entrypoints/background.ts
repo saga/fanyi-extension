@@ -543,10 +543,7 @@ export default defineBackground({
           .filter((value): value is string => !!value)
           .join('\n\n');
 
-        // 文风：优先使用 content script 页级语言检测后的结果（message.promptStyle）。
-        // 缺省回退 config.promptStyle —— 兼容旧调用方，以及无页面上下文的调用点。
-        // 必须与 cacheKey 用同一个值：否则 ja-source-natural 的译文会被写进 default 的
-        // 缓存条目，后续同页面翻译命中脏缓存、文风来回跳。
+        // 文风由调用方显式传递；缺省时回退用户配置。缓存 key 与 Prompt 必须使用同一值。
         const promptStyle = message.promptStyle ?? config.promptStyle;
         const translationProfileHash = config.useLocalAgent && codeBuddyTaskProfiles?.translation
           ? String(simpleHash(JSON.stringify(codeBuddyTaskProfiles.translation))) : '';

@@ -98,8 +98,7 @@ function buildPanelHtml(isMobile: boolean): string {
       <div class="fanyi-config-row">
         <label>翻译文风</label>
         <select class="fanyi-prompt-style">
-          <option value="default">通用直译</option>
-          <option value="ja-source-natural">日语原文汉译</option>
+          <option value="default">通用自然翻译</option>
           <option value="jinyong">金庸武侠</option>
           <option value="acheng">阿城白描</option>
           <option value="wangxiaobo">王小波大白话</option>

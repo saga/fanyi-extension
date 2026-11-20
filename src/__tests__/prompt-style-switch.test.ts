@@ -46,7 +46,6 @@ const STYLE_MARKER: Record<PromptStyle, string> = {
   jinyong: '<文风>',
   acheng: '<文风>',
   wangxiaobo: '<文风>',
-  'ja-source-natural': '<日语原文特点>',
 };
 
 const ALL_STYLES = Object.keys(STYLE_MARKER) as PromptStyle[];
@@ -64,7 +63,6 @@ describe('buildSystemContent 文风切换', () => {
   it('不传 style 时走 default', () => {
     const content = build(sourceLang, targetLang);
     expect(content).toContain(STYLE_MARKER.default);
-    expect(content).not.toContain('<日语原文特点>');
   });
 
   it('非法 style 也回退 default（不抛错、不产出空 prompt）', () => {
@@ -120,8 +118,7 @@ describe('buildSystemContent 文风切换', () => {
   });
 
   it('源语言为 auto 时不得假定为英语', () => {
-    // ja-source-natural 例外：这个文风本身就限定源语言是日语。
-    for (const style of ALL_STYLES.filter((item) => item !== 'ja-source-natural')) {
+    for (const style of ALL_STYLES) {
       const content = build('auto', 'zh', undefined, style);
       expect(content, `${style} 把 auto 当成了具体语言`).not.toContain('输入语言：英语');
       expect(content, `${style} 应明确写出自动检测`).toContain('自动检测');
@@ -186,46 +183,11 @@ describe('literary webpage reviewer prompt', () => {
   });
 });
 
-describe('ja-source-natural 文风', () => {
-  it('ja → zh 时生效，包含日语原文特点与判断强度清单', () => {
-    const content = build('ja', targetLang, undefined, 'ja-source-natural');
-    expect(content).toContain('<日语原文特点>');
-    expect(content).toContain('<中文表达原则>');
-    expect(content).toContain('<判断强度>');
-    expect(content).toContain('保留日本文章的味道');
-    // 判断强度清单：日语的"推测"不能被译成"结论"
-    expect(content).toContain('〜と考えられる');
-    expect(content).toContain('〜かもしれない');
-    // 不能串到文学风格
-    expect(content).not.toContain('金庸');
-    expect(content).not.toContain('阿城');
-    expect(content).not.toContain('王小波');
-  });
-
-  it('目标语言为日语时回退 default（护栏）', () => {
-    // ja → ja 无意义；zh → ja 属于「日语自然化」方向，与本模式无关。
-    // 配置过期 / 手工错配时必须回退，不能硬用错 prompt 产出坏结果。
-    for (const target of ['ja', 'ja-JP', 'JA']) {
-      const content = build('ja', target, undefined, 'ja-source-natural');
-      expect(content).not.toContain('<日语原文特点>');
-      expect(content).toContain(STYLE_MARKER.default);
-    }
-  });
-
-  it('目标语言为英语 / 韩语时同样生效（不止中文）', () => {
-    for (const target of ['en', 'ko']) {
-      const content = build('ja', target, undefined, 'ja-source-natural');
-      expect(content).toContain('<日语原文特点>');
-    }
-  });
-
-});
-
 describe('sitePrompt 追加（扩展端特有）', () => {
   it('文学风格正确追加 sitePrompt', () => {
     // 扩展端特有的站点规则：不进入 persona，而是在整段 prompt 之后追加
     const sitePrompt = 'Skip code blocks on github.com';
-    for (const style of ['jinyong', 'acheng', 'wangxiaobo', 'ja-source-natural'] as PromptStyle[]) {
+    for (const style of ['jinyong', 'acheng', 'wangxiaobo'] as PromptStyle[]) {
       const content = buildSystemContent(sourceLang, targetLang, sitePrompt, undefined, style);
       expect(content).toContain('Site-specific rules:');
       expect(content).toContain(sitePrompt);
