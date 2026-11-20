@@ -505,6 +505,8 @@ describe('translateBlocksViaServer — PDF D1 cache path', () => {
     expect(body.contentHash).toBe(computeBlocksFingerprint(blocks));
     expect(body.blocks).toEqual([{ id: 'pdfjs-p0', tag: 'p', text: 'Hello PDF world.' }]);
     expect(body.html).toContain('data-fanyi-block-id="pdfjs-p0"');
+    expect(body.html).toContain('data-vs-pdf-text-cache="true"');
+    expect(body.html).toContain('data-vs-pdf-text-layout');
     expect(body.html).not.toContain('%PDF-');
     expect(result.get('pdfjs-p0')).toBe('你好，PDF 世界。');
   });
