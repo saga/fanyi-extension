@@ -78,6 +78,12 @@ export function createTranslationController(
   let isTranslatedState = false;
   let domObserver: DOMObserverManager | null = null;
   let overlayHider: OverlayHider | null = null;
+  // 通过函数读取/复位，避免调用方赋值 null 后控制流把变量收窄成 null，
+  // 导致 catch 分支里 `overlayHider?.stop()` 被判成 never。
+  const stopOverlayHider = (): void => {
+    overlayHider?.stop();
+    overlayHider = null;
+  };
   const ctx = { isMobile };
 
   return {
@@ -141,8 +147,7 @@ export function createTranslationController(
       showStatus('正在提取文本...', 'loading');
 
       // 清理上一次翻译遗留的弹层猎手，避免重复 MutationObserver 泄漏。
-      overlayHider?.stop();
-      overlayHider = null;
+      stopOverlayHider();
 
       try {
         const result = await handleFullTranslation(
@@ -162,8 +167,7 @@ export function createTranslationController(
         // Failure can happen before the normal cleanup point (for example, an empty page
         // or a failed server request). Do not leave a MutationObserver hiding future dialogs
         // or walker attributes that can contaminate the next extraction.
-        overlayHider?.stop();
-        overlayHider = null;
+        stopOverlayHider();
         cleanupTempAttrs();
         showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
       } finally {
@@ -174,8 +178,7 @@ export function createTranslationController(
     restore(silent = false) {
       isTranslatedState = false;
       // 停止动态弹层猎手（Poptins 等弹层不再需要隐藏）。
-      overlayHider?.stop();
-      overlayHider = null;
+      stopOverlayHider();
       // PDF.js viewer：移除覆盖层 div（不需要恢复 span 文本，原文 span 始终未修改）
       if (isPdfJsViewer(document)) {
         restorePdfJsViewer(document);

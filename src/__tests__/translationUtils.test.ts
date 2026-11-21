@@ -66,7 +66,7 @@ describe('translationUtils', () => {
     const nodeMap = new Map<string, Node>([['b1', document.createElement('div')]]);
     mod.warnOnNodeMapMismatch(blocks, nodeMap);
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0][0]).toContain('NodeMap mismatch');
+    expect(warn.mock.calls[0]![0]).toContain('NodeMap mismatch');
   });
 
   // ---- saveOriginalTexts ----

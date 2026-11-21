@@ -218,7 +218,7 @@ async function refreshChatOptions() {
     } else {
       const config = await getConfig();
       const base = (config.localAgentUrl || 'http://127.0.0.1:8789').replace(/\/+$/, '');
-      const headers = config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {};
+      const headers: Record<string, string> = config.localAgentToken ? { Authorization: 'Bearer ' + config.localAgentToken } : {};
       const [capabilityResponse, skillResponse] = await Promise.all([
         fetch(base + '/api/agent/capabilities', { headers }),
         fetch(base + '/api/agent/skills', { headers }),

@@ -209,7 +209,7 @@ const config = ref<Config>({
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
-});
+} as Config);
 
 const apiStatus = ref<'checking' | 'ok' | 'fail' | 'unknown'>('unknown');
 /** 后端返回的失败原因（如「端口没在监听」），比笼统的「不可用」更可操作。 */
@@ -371,7 +371,7 @@ async function triggerTranslate() {
     }
     if (isArxivPdf) {
       const readerUrl = browser.runtime.getURL(
-        'pdf-reader.html?url=' + encodeURIComponent(currentUrl),
+        `/pdf-reader.html?url=${encodeURIComponent(currentUrl)}`,
       );
       await browser.tabs.update(tab.id, { url: readerUrl });
       window.close();
@@ -403,7 +403,7 @@ async function openChat() {
  * 而且 Firefox Android 根本没有侧栏 API，标签页在两端行为一致。
  */
 async function openDocument() {
-  await browser.tabs.create({ url: browser.runtime.getURL('document.html') });
+  await browser.tabs.create({ url: browser.runtime.getURL('/document.html') });
   window.close();
 }
 

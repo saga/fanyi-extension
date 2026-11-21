@@ -141,13 +141,13 @@ describe('fetchCaptions', () => {
 
     const captions = await fetchCaptions('abc123');
     expect(captions).toHaveLength(2);
-    expect(captions[0].text).toBe('Hello world');
-    expect(captions[0].startMs).toBe(0);
-    expect(captions[0].durationMs).toBe(2000);
-    expect(captions[1].text).toBe('Second line');
+    expect(captions[0]!.text).toBe('Hello world');
+    expect(captions[0]!.startMs).toBe(0);
+    expect(captions[0]!.durationMs).toBe(2000);
+    expect(captions[1]!.text).toBe('Second line');
 
     // 验证 URL 构造：包含 pot/potc 和 json3
-    const fetchUrl = globalFetch.mock.calls[0][0];
+    const fetchUrl = globalFetch.mock.calls[0]![0];
     expect(fetchUrl).toContain('fmt=json3');
     expect(fetchUrl).toContain('pot=TOKEN');
     expect(fetchUrl).toContain('potc=SIG');
@@ -222,8 +222,8 @@ describe('fetchCaptions', () => {
 
     const captions = await fetchCaptions('asr123');
     expect(captions.length).toBeGreaterThanOrEqual(2);
-    expect(captions[0].text).toBe('Hello world.');
-    expect(captions[1].text).toBe('Second line.');
+    expect(captions[0]!.text).toBe('Hello world.');
+    expect(captions[1]!.text).toBe('Second line.');
   });
 
   it('parses karaoke subtitles by selecting main kanji track', async () => {
@@ -269,7 +269,7 @@ describe('fetchCaptions', () => {
 
     const captions = await fetchCaptions('kara123');
     expect(captions.length).toBe(1);
-    expect(captions[0].text).toBe('こんにちは');
+    expect(captions[0]!.text).toBe('こんにちは');
   });
 });
 
@@ -296,7 +296,7 @@ describe('translateCaptions', () => {
     };
     globalFetch.mockResolvedValue(mockResponse);
 
-    const captions: CaptionEvent[] = [
+    const captions: [CaptionEvent, CaptionEvent] = [
       { startMs: 0, durationMs: 1000, text: 'Hello' },
       { startMs: 1000, durationMs: 1000, text: 'World' },
     ];

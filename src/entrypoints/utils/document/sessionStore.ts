@@ -8,6 +8,7 @@
 
 import type { Glossary } from '../../service/_service';
 import type { LiteraryBookMemory, LiteraryReviewFinding } from './literary';
+import { createEmptyLiteraryMemory } from './literary';
 import type { ParsedDocument } from './types';
 
 const DATABASE_NAME = 'fanyi-document-reader';
@@ -233,9 +234,7 @@ function sessionFromCreate(input: CreateActiveDocumentSessionInput, now: number)
     done: 0,
     failedBatches: [],
     error: '',
-    literaryMemory: {
-      version: 1, entities: [], relationships: [], styleGuide: {}, chapterSummaries: [], recentExamples: [],
-    },
+    literaryMemory: createEmptyLiteraryMemory(),
     literaryStatus: {
       enabled: input.literaryMode,
       bookProfileReady: false,

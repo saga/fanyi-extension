@@ -23,7 +23,7 @@ vi.mock('../entrypoints/content/inlineStylesheets', () => ({
 
 import { applyBlockTranslation } from '../entrypoints/utils/translationDisplay';
 
-const baseConfig: Config = {
+const baseConfig = {
   sourceLang: 'en',
   targetLang: 'zh',
   deepseekApiKey: 'sk-test-api-key',
@@ -37,7 +37,7 @@ const baseConfig: Config = {
   },
   useServerTranslation: true,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
-};
+} as Config;
 
 /** 用 blocks 构造服务端返回的双语 HTML（译文用 «原文» 标记，便于断言配对）。 */
 function buildBilingualHtml(blocks: TextBlock[]): string {
@@ -216,7 +216,7 @@ describe('checkServerCache - contentHash plumbing', () => {
 
     await checkServerCache(baseConfig, blocks);
 
-    const url = fetchMock.mock.calls[0][0] as string;
+    const url = fetchMock.mock.calls[0]?.[0] as string;
     expect(url).toContain(`contentHash=${encodeURIComponent(fingerprint)}`);
   });
 

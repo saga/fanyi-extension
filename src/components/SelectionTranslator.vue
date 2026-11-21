@@ -20,9 +20,26 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { translateText } from '@/entrypoints/utils/translateApi';
+import { getConfig } from '@/entrypoints/utils/config';
+import type { TranslateChunkResponse } from '@/types/messages';
 
 import { logger } from '../utils/logger';
+
+/** Translate a single selected text block through the background translation API. */
+async function translateText(text: string): Promise<{ translatedText: string }> {
+  const config = await getConfig();
+  const response = (await browser.runtime.sendMessage({
+    action: 'translateChunk',
+    jsonContent: JSON.stringify([{ id: 'selection', text }]),
+    sourceLang: config.sourceLang,
+    targetLang: config.targetLang,
+  })) as TranslateChunkResponse;
+  const entry = response.success ? response.result[0] : undefined;
+  if (!entry) {
+    throw new Error(response.success ? '未返回译文' : response.error);
+  }
+  return { translatedText: entry[1] };
+}
 const visible = ref(false);
 const position = ref({ x: 0, y: 0 });
 const sourceText = ref('');

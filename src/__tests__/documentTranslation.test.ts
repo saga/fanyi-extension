@@ -135,12 +135,17 @@ describe('文档翻译服务端模式', () => {
       failedBatches: [2],
       error: '上次请求被中断',
       literaryMemory: {
-        version: 1,
+        version: 2,
         entities: [{ source: 'Alice', target: '艾丽丝', kind: 'person' }],
         relationships: [{ subject: 'Alice', predicate: 'protects', object: 'Bob' }],
+        rejectedItems: [],
+        styleGuideStatus: 'candidate',
         styleGuide: { narrativeVoice: '克制的第三人称' },
         chapterSummaries: [{ chapter: 'Chapter One', summary: 'Alice enters the room.' }],
         recentExamples: [],
+        characterVoices: [],
+        relationshipVoiceRules: [],
+        voiceAnchors: [],
       },
       literaryStatus: {
         enabled: true,

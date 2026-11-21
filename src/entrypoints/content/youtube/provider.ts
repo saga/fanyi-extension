@@ -444,7 +444,7 @@ function selectTrack(playerData: PlayerData): CaptionTrack | null {
   const asr = tracks.find((t) => t.kind === 'asr');
   if (asr) return asr;
 
-  return tracks[0];
+  return tracks[0] ?? null;
 }
 
 // =============================================================================
@@ -864,6 +864,7 @@ function parseScrollingAsrSubtitles(
     const segs = event.segs;
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i];
+      if (!seg) continue;
       const text = seg.utf8 || '';
       const offsetMs = seg.tOffsetMs || 0;
       const segStart = event.tStartMs + offsetMs;
@@ -1016,7 +1017,7 @@ function parseStylizedKaraokeSubtitles(events: YoutubeTimedText[]): SubtitleFrag
       return right.trackId - left.trackId;
     });
 
-    return tracks[0].trackId;
+    return tracks[0]?.trackId ?? null;
   }
 
   function pushStylizedFragment(result: SubtitleFragment[], fragment: SubtitleFragment) {

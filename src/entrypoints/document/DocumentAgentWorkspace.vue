@@ -430,6 +430,7 @@ interface Segment {
   text: string;
   kind?: string;
   contextPath?: string;
+  chapter?: string;
   page?: number | null;
   level?: number;
   marker?: string;
@@ -832,7 +833,7 @@ async function loadExistingProject() {
     }
 
     const isLocalAgentBook = /^(epub|pdf)$/i.test(props.format);
-    let projectId: string | null = null;
+    let projectId = '';
     let hasSourceChanged = false;
     let result: any = null;
 
@@ -1514,7 +1515,7 @@ async function acceptCandidates(segmentIds?: string[], automatic = false): Promi
   const projectId = project.value.projectId as string;
   const runId = activeRun.value.runId as string;
   // Snapshot candidates before the response changes their run-segment status.
-  const candidates = (activeRun.value.segments || [])
+  const candidates: Array<{ id: string; text: string }> = (activeRun.value.segments || [])
     .filter((segment: any) => segment.status === 'candidate' && typeof segment.candidateTranslation === 'string')
     .map((segment: any) => ({ id: segment.id as string, text: segment.candidateTranslation as string }));
   const requested = segmentIds?.length ? new Set(segmentIds) : new Set(candidates.map((item) => item.id));

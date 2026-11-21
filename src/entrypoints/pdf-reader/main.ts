@@ -47,7 +47,7 @@ function normalizeLine(text: string): string {
 }
 
 function splitColumns(items: PdfTextItem[], pageWidth: number): PdfTextItem[][] {
-  const xs = items.map(item => item.transform[4]).filter(Number.isFinite).sort((a,b)=>a-b);
+  const xs = items.map(item => item.transform[4]).filter((x): x is number => typeof x === 'number' && Number.isFinite(x)).sort((a,b)=>a-b);
   if (xs.length < 20) return [items];
   let bestGap = 0;
   let splitX = 0;
@@ -56,27 +56,27 @@ function splitColumns(items: PdfTextItem[], pageWidth: number): PdfTextItem[][] 
     if (gap > bestGap) { bestGap = gap; splitX = (xs[i]! + xs[i-1]!)/2; }
   }
   if (bestGap < pageWidth * 0.075 || splitX < pageWidth * 0.3 || splitX > pageWidth * 0.7) return [items];
-  const left = items.filter(item => item.transform[4] < splitX);
-  const right = items.filter(item => item.transform[4] >= splitX);
+  const left = items.filter(item => item.transform[4]! < splitX);
+  const right = items.filter(item => item.transform[4]! >= splitX);
   if (left.length < 8 || right.length < 8) return [items];
   return [left, right];
 }
 
 function itemsToLines(items: PdfTextItem[]): string[] {
   const sorted = [...items].sort((a,b) => {
-    const ay = a.transform[5], by = b.transform[5];
-    return Math.abs(ay-by) > 2 ? by-ay : a.transform[4]-b.transform[4];
+    const ay = a.transform[5]!, by = b.transform[5]!;
+    return Math.abs(ay-by) > 2 ? by-ay : a.transform[4]!-b.transform[4]!;
   });
   const lines: Array<{ y:number; parts:PdfTextItem[] }> = [];
   for (const item of sorted) {
     if (!item.str?.trim()) continue;
-    const y = item.transform[5];
+    const y = item.transform[5]!;
     let line = lines.find(candidate => Math.abs(candidate.y-y) <= 2.5);
     if (!line) { line = {y,parts:[]}; lines.push(line); }
     line.parts.push(item);
   }
   return lines.sort((a,b)=>b.y-a.y).map(line =>
-    normalizeLine(line.parts.sort((a,b)=>a.transform[4]-b.transform[4]).map(item=>item.str).join(' '))
+    normalizeLine(line.parts.sort((a,b)=>a.transform[4]!-b.transform[4]!).map(item=>item.str).join(' '))
   ).filter(Boolean);
 }
 

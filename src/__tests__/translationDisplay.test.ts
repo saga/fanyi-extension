@@ -163,7 +163,7 @@ describe('restoreBlock', () => {
 
     expect(p.querySelector('strong')?.textContent).toBe('world');
     expect(p.children.length).toBe(1);
-    expect(p.children[0].tagName).toBe('STRONG');
+    expect(p.children[0]!.tagName).toBe('STRONG');
   });
 });
 

@@ -68,7 +68,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
       JSON.stringify([{ id: 'b1', text: 'test' }]),
       'en',
       'zh',
-      []
+      { document_terms: [] }
     );
 
     const { values } = await consumeStream(stream);
@@ -90,7 +90,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
       JSON.stringify([{ id: 'b1', text: 'hello' }]),
       'en',
       'zh',
-      []
+      { document_terms: [] }
     );
 
     await expect(consumeStream(stream)).rejects.toThrow('DeepSeek API error: HTTP 401');
@@ -109,7 +109,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
       JSON.stringify([{ id: 'b1', text: 'hello' }]),
       'en',
       'zh',
-      []
+      { document_terms: [] }
     );
 
     await expect(consumeStream(stream)).rejects.toThrow('response body is null');
@@ -123,7 +123,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
       JSON.stringify([{ id: 'b1', text: 'hello' }]),
       'en',
       'zh',
-      []
+      { document_terms: [] }
     );
 
     const { returnValue } = await consumeStream(stream);
@@ -138,7 +138,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
       JSON.stringify([{ id: 'b1', text: 'hello' }]),
       'en',
       'zh',
-      []
+      { document_terms: [] }
     );
 
     const { values } = await consumeStream(stream);
@@ -160,7 +160,7 @@ describe('DeepSeekTranslationService.translateStream', () => {
     await consumeStream(stream);
 
     const fetchCall = globalFetch.mock.calls[0];
-    const body = JSON.parse(fetchCall[1].body);
+    const body = JSON.parse(fetchCall?.[1].body);
     expect(body.messages[0].content).toContain('React');
     expect(body.messages[0].content).toContain('<术语表>');
     });

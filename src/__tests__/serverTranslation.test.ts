@@ -27,7 +27,7 @@ vi.mock('../entrypoints/content/inlineStylesheets', () => ({
 
 import { applyBlockTranslation } from '../entrypoints/utils/translationDisplay';
 
-const baseConfig: Config = {
+const baseConfig = {
   sourceLang: 'en',
   targetLang: 'zh',
   deepseekApiKey: 'sk-test-api-key',
@@ -41,7 +41,7 @@ const baseConfig: Config = {
   },
   useServerTranslation: true,
   serverUrl: 'https://s.sunxiunan.com/fanyi/page',
-};
+} as Config;
 
 describe('translateViaServer', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -100,7 +100,7 @@ describe('translateViaServer', () => {
     const result = await translateViaServer(baseConfig, blocks, nodeMap);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, options] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0]!;
     expect(url).toBe(baseConfig.serverUrl);
     expect(options.method).toBe('POST');
     expect(options.headers['Content-Type']).toBe('application/json');
@@ -155,7 +155,7 @@ describe('translateViaServer', () => {
 
     await translateViaServer(baseConfig, blocks, nodeMap);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(body.html).toContain('Hello world');
     expect(body.html).not.toContain('fanyi-inline-original');
     expect(body.html).not.toContain('fanyi-inline-translation');
@@ -193,7 +193,7 @@ describe('translateViaServer', () => {
     const nodeMap = new Map<string, Node>([['b1', document.querySelector('p')!]]);
     const result = await translateViaServer(baseConfig, blocks, nodeMap);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(body.html).toContain('<style id="source-css">body{color:red}</style>');
     expect(body.html).toContain('data-fanyi-block-id="b1"');
     expect(body.html).not.toContain('oversized-test-script');
@@ -222,7 +222,7 @@ describe('translateViaServer', () => {
     const nodeMap = new Map<string, Node>([['b1', document.querySelector('p')!]]);
 
     const result = await translateViaServer(baseConfig, blocks, nodeMap);
-    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const requestBody = JSON.parse(fetchMock.mock.calls[0]![1].body);
 
     expect(new TextEncoder().encode(requestBody.html).byteLength).toBeGreaterThan(4_000_000);
     expect(requestBody.html).toContain('<style id="source-css">article{color:red}</style>');
@@ -285,7 +285,7 @@ describe('translateViaServer', () => {
     await translateViaServer(config, blocks, nodeMap);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
     // provider 直接复用本地 provider 配置，服务端据此选择 LLM
     expect(body.provider).toBe('openrouter');
     expect(body.apiKey).toBeUndefined();
@@ -411,7 +411,7 @@ describe('checkServerCache', () => {
 
     expect(result).toBe(cachedHtml);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = fetchMock.mock.calls[0][0] as string;
+    const url = fetchMock.mock.calls[0]![0] as string;
     expect(url).toContain('/fanyi/page/check');
     expect(url).toContain(`url=${encodeURIComponent(window.location.href)}`);
     expect(url).toContain('source=en');
@@ -495,7 +495,7 @@ describe('translateBlocksViaServer — PDF D1 cache path', () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, options] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0]!;
     expect(url).toBe(baseConfig.serverUrl);
     expect(options.method).toBe('POST');
     const body = JSON.parse(options.body);
@@ -649,7 +649,7 @@ describe('applyServerTranslatedHtml', () => {
 
 
   it('invalidates server cache for changed prose but ignores short counters', () => {
-    const base: TextBlock[] = [
+    const base: [TextBlock, TextBlock, TextBlock] = [
       { id: 'b1', xpath: '', tag: 'p', text: 'This paragraph describes a stable implementation detail.' },
       { id: 'b2', xpath: '', tag: 'span', text: '73%' },
       { id: 'b3', xpath: '', tag: 'span', text: '73 views' },

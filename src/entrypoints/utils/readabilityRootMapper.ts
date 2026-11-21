@@ -75,7 +75,7 @@ function extractAnchors(text: string, maxAnchors: number, minLen: number): strin
     .map((s) => s.trim())
     .filter((p) => p.length >= minLen);
   if (paras.length === 0) return [];
-  if (paras.length === 1) return [paras[0]];
+  if (paras.length === 1) return [paras[0]!];
 
   const idxs = new Set<number>([0, paras.length - 1]);
   const extra = maxAnchors - 2;
@@ -89,6 +89,7 @@ function extractAnchors(text: string, maxAnchors: number, minLen: number): strin
   const anchors: string[] = [];
   for (const i of ordered) {
     const p = paras[i];
+    if (p === undefined) continue;
     if (!anchors.includes(p)) anchors.push(p);
     if (anchors.length >= maxAnchors) break;
   }
@@ -146,7 +147,10 @@ function locateAnchor(doc: Document, anchor: string): Element | null {
         return;
       }
       const children = (node as Element).childNodes;
-      for (let i = 0; i < children.length; i++) walk(children[i]);
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child) walk(child);
+      }
     }
   };
   walk(doc.body);
@@ -205,9 +209,10 @@ export function mapReadabilityToRoot(
   if (blocks.length === 0) return null;
 
   // LCA = 跨所有命中锚段落的最小稳定正文容器
-  let root: Element | null = blocks[0];
+  // blocks is non-empty here (checked above); fall back to null defensively.
+  let root: Element | null = blocks[0] ?? null;
   for (let i = 1; i < blocks.length; i++) {
-    root = lowestCommonAncestor(root, blocks[i]);
+    root = lowestCommonAncestor(root, blocks[i] ?? null);
     if (!root) break;
   }
   if (!root) return null;

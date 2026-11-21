@@ -9,7 +9,7 @@
  */
 import browser from 'webextension-polyfill';
 
-browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
+browser.runtime.onMessage.addListener(((msg: unknown, _sender, sendResponse) => {
   const m = msg as { type?: string; html?: string };
   if (m?.type === 'parseHtml' && typeof m.html === 'string') {
     try {
@@ -25,4 +25,4 @@ browser.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
     return true;
   }
   return undefined;
-});
+}) as browser.Runtime.OnMessageListener);

@@ -36,6 +36,8 @@ jobs:
           VOCAL_SAGA_PATH: ${{ github.workspace }}/.cross-sync/vocal-saga
           FANYI_EXTENSION_PATH: ${{ github.workspace }}
         run: pnpm dlx tsx .cross-sync/vocal-saga/scripts/check-sync.ts
+      - name: Type check
+        run: pnpm compile
       - name: Unit tests
         run: pnpm test
       - name: Build Chrome extension

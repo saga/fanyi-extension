@@ -1,4 +1,4 @@
-import { storage } from '@wxt-dev/storage';
+import { storage, type StorageItemKey } from '@wxt-dev/storage';
 import { shardedCache } from './shardedStorage';
 
 export interface CacheEntry<T> {
@@ -9,11 +9,12 @@ export interface CacheEntry<T> {
 
 export class CacheManager {
   private memoryCache = new Map<string, CacheEntry<any>>();
-  private storageKey: string;
+  private storageKey: StorageItemKey;
   private defaultTTL: number;
 
   constructor(storageKey: string, defaultTTL = 24 * 60 * 60 * 1000) {
-    this.storageKey = storageKey;
+    // Callers may supply any namespaced key string; narrow it to the API's key type.
+    this.storageKey = storageKey as StorageItemKey;
     this.defaultTTL = defaultTTL;
   }
 

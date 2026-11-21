@@ -89,10 +89,14 @@ export function useContextGraph(deps: ContextGraphDeps) {
   /** 服务不可达时的连续重连上限，避免本机服务长期离线时无限轮询。 */
   const CONTEXT_GRAPH_RECONNECT_MAX_ATTEMPTS = 20;
   let contextGraphReconnectAttempts = 0;
-  const contextGraphStatusLabel = computed(() => ({
-    'not-started': '尚未运行', queued: '等待执行', running: '运行中',
-    completed: '已完成', failed: '失败',
-  }[contextGraphState.value.status] || contextGraphState.value.status || '未知'));
+  const contextGraphStatusLabel = computed(() => {
+    const status = contextGraphState.value.status;
+    const labels: Record<string, string> = {
+      'not-started': '尚未运行', queued: '等待执行', running: '运行中',
+      completed: '已完成', failed: '失败',
+    };
+    return labels[String(status)] || status || '未知';
+  });
   const contextGraphPhaseLabel = computed(() => {
     const run = contextGraphState.value;
     const phase = run.phase;

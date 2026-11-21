@@ -362,7 +362,7 @@ async function analyzeLiteraryChapterViaLocalAgent(
   isCurrentRun: (runId: number) => boolean,
 ): Promise<{ memory: LiteraryBookMemory; analyzed: boolean; warning?: string } | null> {
   const sampled = selectLiteraryChapterSample(segments);
-  if (!sampled.length) return { memory, analyzed: false, warning: '当前内容没有足够的正文片段供实体分析' };
+  if (!sampled.length) return { memory: memory ?? createEmptyLiteraryMemory(), analyzed: false, warning: '当前内容没有足够的正文片段供实体分析' };
   if (!options.useLocalAgent) {
     throw new Error('文学书籍模式需要启用本机 Local Agent；云端只支持单次片段翻译，不提供全书记忆或独立审校。');
   }
@@ -387,7 +387,6 @@ async function analyzeLiteraryChapterViaLocalAgent(
       provider,
       runtime: options.localAgentProvider || 'workbuddy',
       model: options.localAgentModel || 'auto',
-      ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   }, '书籍实体分析');
   let data: { memory?: unknown; analyzed?: unknown; warning?: unknown; error?: string; requestId?: string };
@@ -410,7 +409,7 @@ async function reviewLiteraryBatchViaLocalAgent(
   segments: DocumentSegment[],
   drafts: Map<string, string>,
   options: TranslateOptions,
-  memory: LiteraryBookMemory,
+  memory: LiteraryBookMemory | undefined,
   runId: number,
   isCurrentRun: (runId: number) => boolean,
   precedingSegments: DocumentSegment[] = [],
@@ -454,7 +453,6 @@ async function reviewLiteraryBatchViaLocalAgent(
       provider,
       runtime: options.localAgentProvider || 'workbuddy',
       model: options.localAgentModel || 'auto',
-      ...(provider === 'deepseek' && options.apiKey ? { apiKey: options.apiKey } : {}),
     }),
   }, '文学审校');
   let data: { translations?: unknown; reviewedIds?: unknown; missingIds?: unknown; findings?: unknown; reviewFindings?: unknown; error?: string; requestId?: string };
@@ -951,7 +949,7 @@ export function useDocumentTranslation() {
       const current = round === 0 ? pending : pending.slice(0, Math.max(1, Math.ceil(pending.length / 2)));
       const rest = round === 0 ? [] : pending.slice(current.length);
       const missing = new Set(await sendRound(current));
-      if (!isCurrentRun(runId)) return false;
+      if (!isCurrentRun(runId)) return new Map();
       pending = [...rest, ...current.filter((segment) => missing.has(segment.id))];
     }
     let missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
@@ -965,7 +963,7 @@ export function useDocumentTranslation() {
         type: 'json_schema',
         json_schema: TRANSLATIONS_OBJECT_SCHEMA,
       }));
-      if (!isCurrentRun(runId)) return false;
+      if (!isCurrentRun(runId)) return new Map();
       missingIds = getMissingDocumentBatchIds(expectedIds, state.value.translations);
     }
     if (missingIds.length) {

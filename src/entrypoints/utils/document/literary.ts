@@ -131,6 +131,12 @@ export interface CharacterVoiceAnchor {
   attributionConfidence?: number;
   tags: string[];
 }
+/** Voice anchors injected into the prompt deliberately omit review metadata. */
+export type LiteraryVoiceContextAnchor = Pick<
+  CharacterVoiceAnchor,
+  | 'anchorId' | 'speakerId' | 'addresseeId' | 'source' | 'target'
+  | 'chapter' | 'segmentId' | 'tags' | 'attributionEvidence' | 'attributionConfidence'
+>;
 export interface LiteraryVoiceContext {
   version: 1;
   policyVersion: 'character-voice-v4-default-adoption';
@@ -151,7 +157,7 @@ export interface LiteraryVoiceContext {
   recentExamples: LiteraryExample[];
   characterVoices: CharacterVoiceProfile[];
   relationshipVoiceRules: RelationshipVoiceRule[];
-  voiceAnchors: CharacterVoiceAnchor[];
+  voiceAnchors: LiteraryVoiceContextAnchor[];
   constraints: string[];
 }
 
@@ -193,7 +199,7 @@ export interface ChineseEditorialProfileCandidate {
   profile: LiteraryStyleGuide;
   evidenceRefs: Array<{ segmentId: string; targetExcerpt: string; observation: string; aspect: string }>;
 }
-export interface ChineseEditorialProfile extends ChineseEditorialProfileCandidate {
+export interface ChineseEditorialProfile extends Omit<ChineseEditorialProfileCandidate, 'status'> {
   status: 'candidate' | 'confirmed' | 'rejected';
   profileVersion?: number;
   confirmationSource?: LiteraryConfirmationSource;
@@ -497,14 +503,17 @@ export function sanitizeLiteraryMemory(input: unknown): LiteraryBookMemory {
     if (avoid.length) styleGuide.avoid = avoid;
   }
   const rejectedItems: LiteraryMemoryRejection[] = Array.isArray(raw.rejectedItems)
-    ? raw.rejectedItems.slice(-2000).flatMap((item: any) => {
+    ? raw.rejectedItems.slice(-2000).flatMap((item: any): LiteraryMemoryRejection[] => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
         if (item.type === 'entity') {
           const source = safeText(item.source, 120);
           if (!source) return [];
+          const aliases: string[] = Array.isArray(item.aliases)
+            ? Array.from(new Set((item.aliases as unknown[]).map((value) => safeText(value, 80)).filter(Boolean))).slice(0, 8)
+            : [];
           return [{
             type: 'entity' as const, source, kind: entityKind(item.kind),
-            aliases: Array.isArray(item.aliases) ? Array.from(new Set(item.aliases.map((value: unknown) => safeText(value, 80)).filter(Boolean))).slice(0, 8) : [],
+            aliases,
           }];
         }
         if (item.type === 'relationship') {
@@ -861,8 +870,10 @@ function mergeCharacterVoices(existing: CharacterVoiceProfile[], incoming: Chara
       ...(!conflicts ? { voiceCore: { ...candidate.voiceCore, ...prior.voiceCore } } : {}),
       ...(!prior.role && candidate.role ? { role: candidate.role } : {}),
       ...(!prior.traits?.length && candidate.traits?.length ? { traits: candidate.traits } : {}),
-      status: prior.status === 'rejected' ? 'rejected' : 'confirmed',
-      ...(prior.status !== 'rejected' ? { confirmationSource: candidate.confirmationSource || 'model-default' } : { confirmationSource: undefined }),
+      // The early continue above already excludes 'rejected'; this branch always
+      // produces a confirmed profile, so keep that explicitly for the checker.
+      status: 'confirmed',
+      confirmationSource: candidate.confirmationSource || 'model-default',
       ...mergeCharacterVoiceConfidence(prior, candidate),
       aliases: Array.from(new Set([...prior.aliases, ...candidate.aliases])).slice(0, 12),
       evidence: [...prior.evidence, ...candidate.evidence].filter((item, index, all) =>

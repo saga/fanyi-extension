@@ -29,12 +29,12 @@ describe('DeepSeekTranslationService API methods', () => {
         JSON.stringify([{ id: 'b1', text: 'hello' }]),
         'en',
         'zh',
-        []
+        { document_terms: [] }
       );
 
       expect(result).toBe('{"translations":[{"id":"b1","translated_text":"你好"}]}');
       expect(globalFetch).toHaveBeenCalledTimes(1);
-      const fetchCall = globalFetch.mock.calls[0];
+      const fetchCall = globalFetch.mock.calls[0]!;
       expect(fetchCall[1].headers.Authorization).toBe('Bearer test-api-key');
       const body = JSON.parse(fetchCall[1].body);
       expect(body.model).toBe('deepseek-v4-flash');
@@ -53,14 +53,14 @@ describe('DeepSeekTranslationService API methods', () => {
       globalFetch.mockResolvedValue(mockResponse);
 
       await service.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined);
-      expect(JSON.parse(globalFetch.mock.calls[0][1].body).response_format).toEqual({ type: 'json_object' });
+      expect(JSON.parse(globalFetch.mock.calls[0]?.[1].body).response_format).toEqual({ type: 'json_object' });
 
       const schema = { type: 'array', items: { type: 'object' } };
       await service.translate(
         JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined, undefined,
         { type: 'json_schema', json_schema: schema },
       );
-      expect(JSON.parse(globalFetch.mock.calls[1][1].body).response_format).toEqual({
+      expect(JSON.parse(globalFetch.mock.calls[1]?.[1].body).response_format).toEqual({
         type: 'json_schema', json_schema: schema,
       });
     });
@@ -85,7 +85,7 @@ describe('DeepSeekTranslationService API methods', () => {
       );
 
       const fetchCall = globalFetch.mock.calls[0];
-      const body = JSON.parse(fetchCall[1].body);
+      const body = JSON.parse(fetchCall?.[1].body);
       expect(body.messages[0].content).toContain('React');
       expect(body.messages[0].content).toContain('<术语表>');
       expect(body.messages[0].content).toContain('此列表不是“必须保留英文”的命令');
@@ -112,7 +112,7 @@ describe('DeepSeekTranslationService API methods', () => {
       );
 
       const fetchCall = globalFetch.mock.calls[0];
-      const body = JSON.parse(fetchCall[1].body);
+      const body = JSON.parse(fetchCall?.[1].body);
       expect(body.messages[0].content).not.toContain('<术语表>');
     });
 
@@ -142,7 +142,7 @@ describe('DeepSeekTranslationService API methods', () => {
         localService.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined),
       ).rejects.toThrow(/本机 Agent 服务 error: HTTP 502.*local-req-502.*opencode.*42 chars/s);
       expect(globalFetch).toHaveBeenCalledTimes(1);
-      expect(globalFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
+      expect(globalFetch.mock.calls[0]![0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
     });
 
     it('turns a stalled fetch into a loud timeout error instead of hanging forever', async () => {
@@ -164,7 +164,7 @@ describe('DeepSeekTranslationService API methods', () => {
         localService.translate(JSON.stringify([{ id: 'b1', text: 'hello' }]), 'en', 'zh', undefined),
       ).rejects.toThrow(/本机 Agent 服务连接失败[\s\S]*不会回退到远程 API/);
       expect(globalFetch).toHaveBeenCalledTimes(1);
-      expect(globalFetch.mock.calls[0][0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
+      expect(globalFetch.mock.calls[0]![0]).toBe('http://127.0.0.1:8789/v1/chat/completions');
     });
 
     it('should handle network errors', async () => {

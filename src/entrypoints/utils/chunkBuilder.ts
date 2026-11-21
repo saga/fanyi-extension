@@ -164,12 +164,16 @@ export function mergeSegmentTranslations(
 
   for (const [originalId, group] of groups) {
     group.sort((a, b) => a.segmentIndex! - b.segmentIndex!);
-    if (group.length !== group[0].segmentCount || group.some((block, index) => block.segmentIndex !== index)) continue;
+    const first = group[0];
+    if (!first) continue;
+    if (group.length !== first.segmentCount || group.some((block, index) => block.segmentIndex !== index)) continue;
     if (group.some((block) => !translations.get(block.id)?.trim())) continue;
 
-    let text = translations.get(group[0].id)!;
+    let text = translations.get(first.id)!;
     for (let index = 1; index < group.length; index++) {
-      text += (group[index].separatorBefore ?? ' ') + translations.get(group[index].id)!;
+      const segment = group[index];
+      if (!segment) continue;
+      text += (segment.separatorBefore ?? ' ') + translations.get(segment.id)!;
     }
     merged.set(originalId, text);
   }
@@ -206,6 +210,7 @@ export function buildChunks(blocks: TextBlock[], options: ChunkBuildOptions = {}
   const inputBlocks = expandOversizedBlocks(blocks);
   for (let i = 0; i < inputBlocks.length; i++) {
     const block = inputBlocks[i];
+    if (!block) continue;
     const blockTokens = estimateTokens(block.text) + 20;
 
     const isBoundary = isStructuralBoundary(block);
@@ -227,6 +232,7 @@ export function buildChunks(blocks: TextBlock[], options: ChunkBuildOptions = {}
         if (nextBoundary && nextBoundary - i < 5) {
           for (let j = i; j <= nextBoundary; j++) {
             const b = inputBlocks[j];
+            if (!b) continue;
             currentBlocks.push(b);
             currentTokens += estimateTokens(b.text) + 20;
           }
@@ -265,7 +271,8 @@ export function buildChunks(blocks: TextBlock[], options: ChunkBuildOptions = {}
 
 function findNextBoundary(blocks: TextBlock[], startIndex: number): number | null {
   for (let i = startIndex + 1; i < blocks.length; i++) {
-    if (isStructuralBoundary(blocks[i])) return i;
+    const block = blocks[i];
+    if (block && isStructuralBoundary(block)) return i;
   }
   return null;
 }

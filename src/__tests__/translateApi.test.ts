@@ -198,7 +198,7 @@ describe('cacheTranslation', () => {
     await cacheTranslation('test-key', data);
 
     expect(mockCache.set).toHaveBeenCalledTimes(1);
-    const [key, storedObj, ttl] = mockCache.set.mock.calls[0];
+    const [key, storedObj, ttl] = mockCache.set.mock.calls[0]!;
     expect(key).toBe('test-key');
     expect(storedObj).toEqual({ b1: '你好', b2: '世界' });
     expect(ttl).toBe(7 * 24 * 60 * 60 * 1000);

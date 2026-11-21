@@ -28,7 +28,7 @@ describe('DeepSeekTranslationService.translate prompt', () => {
   });
 
   async function captureRequestBody() {
-    return JSON.parse(globalFetch.mock.calls[0][1].body);
+    return JSON.parse(globalFetch.mock.calls[0]?.[1].body);
   }
 
   it('instructs the model to translate every block (no omissions)', async () => {

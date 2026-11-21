@@ -355,6 +355,7 @@ export async function translateAhead(
   for (let i = 0; i < captions.length; i++) {
     if (signal?.aborted) return;
     const c = captions[i];
+    if (!c) break;
     if (c.status === 'done' || c.status === 'translating') continue;
     // 字幕在 [fromMs-lookback, endMs] 范围内
     if (c.startMs + c.durationMs < fromMs - lookbackMs) continue;

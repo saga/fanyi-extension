@@ -678,9 +678,7 @@ export function useLiteraryMemoryEditor(deps: LiteraryMemoryEditorDeps) {
       { method: 'POST', body: JSON.stringify({ action }) },
     );
     literaryMemory.value = sanitizeLiteraryMemory(response.current?.memory ?? literaryMemory.value);
-    persistenceMessage.value = action === 'accept-update' ? '已启用新版中文文学编辑档案。'
-      : action === 'reject-update' ? '已拒绝档案更新，继续使用原版本。'
-      : action === 'confirm' ? '已确认中文文学编辑档案。' : '已拒绝中文文学编辑档案。';
+    persistenceMessage.value = '已拒绝中文文学编辑档案。';
   }
 
   function markChineseEditorialProfileModified() {

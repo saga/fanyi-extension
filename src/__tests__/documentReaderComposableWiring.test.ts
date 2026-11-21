@@ -109,6 +109,11 @@ describe('document reader composable wiring', () => {
     );
     const runHandler = source.indexOf('async function runWorkspaceTranslation');
     expect(runHandler).toBeGreaterThan(-1);
+    const preprocessingImport = source.indexOf("from './documentPreprocessing';");
+    expect(preprocessingImport).toBeGreaterThan(-1);
+    // 回归：曾漏掉这个导入，点击翻译时抛 ReferenceError，按钮闪一下且没有任何 Run 被创建。
+    expect(source.slice(preprocessingImport - 300, preprocessingImport))
+      .toContain('shouldUseLightweightLiterarySelection');
     const readinessCheck = source.indexOf('await prepareContextGraphForTranslation(', runHandler);
     const runCreation = source.indexOf("'/api/documents/projects/' + encodeURIComponent(project.projectId) + '/runs'", runHandler);
     expect(readinessCheck).toBeGreaterThan(runHandler);

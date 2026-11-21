@@ -192,10 +192,11 @@ export function setupDynamicContentObserver(
             promptStyle,
           translationMode: config.translationMode || 'technical',
              }) as TranslateChunkResponse;
-          if (response.success && response.result.length > 0) {
+          const firstEntry = response.success ? response.result[0] : undefined;
+          if (firstEntry) {
             const node = findNodeByText(block.text);
             if (node) {
-              applyBlockTranslation(node, response.result[0][1]);
+              applyBlockTranslation(node, firstEntry[1]);
               state.translatedBlocks.add(block.id);
             }
           }

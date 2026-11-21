@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const destroySpy = vi.fn().mockResolvedValue(undefined);
 
-const sampleItems = [
+const sampleItems: Array<{ str: string; transform: number[]; height: number; width?: number }> = [
   { str: 'Hello World fanyi test', transform: [1, 0, 0, 12, 72, 720], height: 12 },
   { str: 'Second line of text', transform: [1, 0, 0, 12, 72, 690], height: 12 },
   { str: 'Third paragraph here', transform: [1, 0, 0, 12, 72, 660], height: 12 },

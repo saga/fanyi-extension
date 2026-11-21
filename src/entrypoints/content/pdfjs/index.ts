@@ -248,8 +248,9 @@ export function collectLines(doc: Document): PdfLine[] {
   let currentTextLayer: HTMLElement | null = null;
 
   const flushGroup = (): void => {
-    if (currentGroup.length === 0) return;
-    const textLayer = currentGroup[0].textLayer;
+    const first = currentGroup[0];
+    if (!first) return;
+    const textLayer = first.textLayer;
     // 行内按 left 排序
     currentGroup.sort((a, b) => a.rect.left - b.rect.left);
     // 计算行边界
@@ -273,7 +274,7 @@ export function collectLines(doc: Document): PdfLine[] {
         spans: currentGroup.map((s) => s.span),
         text,
         textLayer,
-        page: currentGroup[0].page,
+        page: first.page,
         left,
         top,
         right,
@@ -336,7 +337,7 @@ export function groupLinesIntoParagraphs(lines: PdfLine[]): PdfParagraph[] {
       : line.height;
     const largeGap = gap > avgLineHeight * PARAGRAPH_GAP_RATIO;
     const indentChange = Math.abs(line.left - current.left) > PARAGRAPH_INDENT_PX;
-    const prevEndedSentence = sentenceEndRe.test(current.lines[current.lines.length - 1].text);
+    const prevEndedSentence = sentenceEndRe.test(current.lines.at(-1)?.text ?? '');
 
     if (samePage && !largeGap && !indentChange && !prevEndedSentence) {
       current.lines.push(line);
@@ -370,7 +371,7 @@ function makeParagraph(line: PdfLine): PdfParagraph {
     top: line.top,
     right: line.right,
     bottom: line.bottom,
-    fontSize: getSpanFontSize(line.spans[0]),
+    fontSize: getSpanFontSize(line.spans[0]!),
   };
 }
 

@@ -53,7 +53,7 @@ function isNoiseBlock(block: TextBlock): boolean {
  * 从提取结果中移除基于文本特征的噪声块。
  * 返回 [filteredBlocks, removedCount]。
  */
-function filterNoiseBlocks(blocks: TextBlock[]): TextBlock[][] {
+function filterNoiseBlocks(blocks: TextBlock[]): [TextBlock[], TextBlock[]] {
   const kept: TextBlock[] = [];
   const removed: TextBlock[] = [];
 
@@ -364,7 +364,9 @@ function chooseBestRoot(candidate: Element): Element {
     p = p.parentElement;
   }
 
-  let best = list[0];
+  // list always contains at least the candidate itself in practice; keep the
+  // original return semantics when it is empty by asserting the first slot.
+  let best = list[0]!;
   let bestScore = -Infinity;
   for (const node of list) {
     const result = scoreArticleContainer(node);
@@ -394,6 +396,11 @@ interface RootExtractionAssessment {
   extractedTextLength: number;
   coverage: number;
   qualityScore: number;
+}
+
+interface BestEffortRoot {
+  candidate: ContentRoot;
+  assessment: RootExtractionAssessment;
 }
 
 function containsOpenShadowRoot(root: Element): boolean {
@@ -522,7 +529,10 @@ function hasMultipleContentRegions(main: Element): boolean {
 function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
   const seen = new Set<Element>();
   const pageUrl = pageUrlOverride ?? (typeof window !== 'undefined' ? window.location.href : '');
-  let bestEffort: { candidate: ContentRoot; assessment: RootExtractionAssessment } | null = null;
+  // Hold the best-effort root in an object property: the checker resets narrowing
+  // of dotted names after the candidate-evaluation calls, whereas a bare `let`
+  // assigned only inside the nested closure would be narrowed to `never` here.
+  const bestEffortState: { current: BestEffortRoot | null } = { current: null };
 
   const addCandidate = (
     element: Element | null | undefined,
@@ -567,9 +577,9 @@ function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
         '[hidden], [aria-hidden="true"], [contenteditable]:not([contenteditable="false"])',
       ) &&
       assessment.extractedTextLength > 0 &&
-      (!bestEffort || assessment.qualityScore > bestEffort.assessment.qualityScore)
+      (!bestEffortState.current || assessment.qualityScore > bestEffortState.current.assessment.qualityScore)
     ) {
-      bestEffort = { candidate, assessment };
+      bestEffortState.current = { candidate, assessment };
     }
     return null;
   };
@@ -669,6 +679,7 @@ function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
   const selectedBody = evaluateCandidate(bodyCandidate);
   if (selectedBody) return selectedBody;
 
+  const bestEffort = bestEffortState.current;
   if (bestEffort) {
     logger.warn(
       '[ContentHelper] No root candidate passed extraction quality checks; using best-effort root ' +
@@ -732,7 +743,7 @@ function hideBodyOverlays(doc: Document, articleRoot: Element): void {
       let isExtensionUi = cls.contains('selection-translator');
       if (!isExtensionUi) {
         for (let i = 0; i < cls.length; i++) {
-          if (cls[i].startsWith('fanyi-')) {
+          if (cls[i]?.startsWith('fanyi-')) {
             isExtensionUi = true;
             break;
           }
@@ -784,7 +795,7 @@ export function createOverlayHider(articleRoot?: Element | null): OverlayHider {
     const cls = el.classList;
     if (cls.contains('selection-translator')) return true;
     for (let i = 0; i < cls.length; i++) {
-      if (cls[i].startsWith('fanyi-')) return true;
+      if (cls[i]?.startsWith('fanyi-')) return true;
     }
     return false;
   }

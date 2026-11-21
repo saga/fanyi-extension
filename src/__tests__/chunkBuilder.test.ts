@@ -31,7 +31,7 @@ describe('buildChunks', () => {
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.every((part) => part.text.length <= 2400)).toBe(true);
     expect(parts.map((part) => part.id)).not.toContain('b1');
-    const reconstructed = parts[0].text + parts.slice(1)
+    const reconstructed = parts[0]!.text + parts.slice(1)
       .map((part) => (part.separatorBefore ?? '') + part.text).join('');
     expect(reconstructed).toBe(longText);
 
@@ -64,8 +64,8 @@ describe('buildChunks', () => {
 
     const chunks = buildChunks(blocks);
     expect(chunks.length).toBe(1);
-    expect(chunks[0].blocks).toHaveLength(2);
-    expect(chunks[0].id).toBe('chunk1');
+    expect(chunks[0]!.blocks).toHaveLength(2);
+    expect(chunks[0]!.id).toBe('chunk1');
   });
 
   it('splits chunks at heading boundaries when exceeding target tokens', () => {
@@ -107,7 +107,7 @@ describe('buildChunks', () => {
 
     const chunks = buildChunks(blocks);
     // estimateTokens = ceil(100/4) + 20 = 45
-    expect(chunks[0].estimatedTokens).toBe(45);
+    expect(chunks[0]?.estimatedTokens).toBe(45);
   });
 
   it('preserves block order within chunks', () => {
@@ -168,11 +168,11 @@ describe('buildChunks', () => {
 
     expect(chunks.length).toBeGreaterThanOrEqual(3);
     // chunk1 and chunk2 warmup: each ≤ 400 tokens
-    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(420);
-    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[0]!.estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[1]!.estimatedTokens).toBeLessThanOrEqual(420);
     // chunk3+ normal: each ≤ 800 tokens
     for (let i = 2; i < chunks.length; i++) {
-      expect(chunks[i].estimatedTokens).toBeLessThanOrEqual(820);
+      expect(chunks[i]!.estimatedTokens).toBeLessThanOrEqual(820);
     }
   });
 
@@ -184,8 +184,8 @@ describe('buildChunks', () => {
     const chunks = buildChunks(blocks);
 
     expect(chunks.length).toBeGreaterThanOrEqual(3);
-    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(420);
-    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[0]!.estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[1]!.estimatedTokens).toBeLessThanOrEqual(420);
   });
 
   it('third chunk is larger than warmup chunks', () => {
@@ -195,8 +195,8 @@ describe('buildChunks', () => {
 
     const chunks = buildChunks(blocks);
 
-    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(420);
-    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[0]?.estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[1]?.estimatedTokens).toBeLessThanOrEqual(420);
     const normalChunks = chunks.slice(2);
     expect(normalChunks.length).toBeGreaterThan(0);
     // At least one normal chunk exceeds warmup limit
@@ -223,7 +223,7 @@ describe('buildChunks', () => {
 
     const chunks = buildChunks(blocks);
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].blocks).toHaveLength(3);
+    expect(chunks[0]!.blocks).toHaveLength(3);
   });
 
   it('warmup split works with heading boundaries', () => {

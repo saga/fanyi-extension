@@ -202,11 +202,11 @@ function isConsentSdkContainer(el: Element): boolean {
 // 结构 boost
 // =============================================================================
 
-const STRUCTURE_BOOST: Record<string, number> = {
+const STRUCTURE_BOOST = {
   article: 1.3,
   main: 1.2,
   section: 1.02,
-};
+} satisfies Record<string, number>;
 
 // =============================================================================
 // utils
@@ -260,10 +260,12 @@ export function scoreElement(el: Element): number {
   let linkTextLength = 0;
   for (let i = 0; i < aEls.length; i++) {
     const a = aEls[i];
+    if (!a) continue;
     const children = a.childNodes;
     for (let j = 0; j < children.length; j++) {
-      if (children[j].nodeType === 3 /* TEXT_NODE */) {
-        linkTextLength += (children[j].textContent || '').length;
+      const child = children[j];
+      if (child?.nodeType === 3 /* TEXT_NODE */) {
+        linkTextLength += (child.textContent || '').length;
       }
     }
   }
@@ -312,7 +314,9 @@ export function scoreElement(el: Element): number {
     let total = 0;
 
     for (let i = 0; i < siblings.length; i++) {
-      const len = (siblings[i].textContent || '').length;
+      const sibling = siblings[i];
+      if (!sibling) continue;
+      const len = (sibling.textContent || '').length;
       total += len;
       if (len > maxSiblingText) maxSiblingText = len;
     }
@@ -391,14 +395,15 @@ export function collectCandidates(doc: Document): Element[] {
   }
 
   const semantic = doc.querySelectorAll('article, main');
-  for (let i = 0; i < semantic.length; i++) add(semantic[i]);
+  for (let i = 0; i < semantic.length; i++) add(semantic[i] ?? null);
 
   const roles = doc.querySelectorAll('[role="main"], [role="article"], [role="region"]');
-  for (let i = 0; i < roles.length; i++) add(roles[i]);
+  for (let i = 0; i < roles.length; i++) add(roles[i] ?? null);
 
   const nodes = doc.querySelectorAll('div, section, article, main');
   for (let i = 0; i < nodes.length; i++) {
     const el = nodes[i];
+    if (!el) continue;
     const tokens = tokenizeClass(el);
 
     const hasToken = tokens.some((t) => POSITIVE_TOKENS.has(t));
@@ -412,12 +417,13 @@ export function collectCandidates(doc: Document): Element[] {
   const td = doc.querySelectorAll('td');
   for (let i = 0; i < td.length; i++) {
     const t = td[i];
+    if (!t) continue;
     if ((t.textContent || '').trim().length > 1000) add(t);
   }
 
   const original = candidates.slice();
   for (let i = 0; i < original.length; i++) {
-    let p = original[i].parentElement;
+    let p = original[i]?.parentElement;
     for (let j = 0; j < 2 && p && p !== doc.body; j++) {
       add(p);
       p = p.parentElement;
@@ -428,6 +434,7 @@ export function collectCandidates(doc: Document): Element[] {
     const children = doc.body.children;
     for (let i = 0; i < children.length; i++) {
       const c = children[i];
+      if (!c) continue;
       if (c.tagName === 'DIV' || c.tagName === 'SECTION') add(c);
     }
   }
@@ -452,7 +459,7 @@ export interface ContentRoot {
   /** 选中的根元素，供 extractBlocks 直接使用 */
   element: Element;
   /** root 来源 */
-  source: 'site-rule' | 'selector' | 'readability' | 'scoring' | 'body-fallback';
+  source: 'site-rule' | 'selector' | 'readability' | 'scoring' | 'body-fallback' | 'multi-region-main';
   /** 置信度 0..1 */
   confidence: number;
   /** 支撑证据 */

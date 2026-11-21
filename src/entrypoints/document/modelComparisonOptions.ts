@@ -15,7 +15,7 @@ export interface ComparisonScopeOption {
   disabled: boolean;
 }
 
-type ScopePage = { id: string; title: string; segments: Array<{ id: string }> };
+type ScopePage = { id: string; title: string; sectionTitle?: string; segments: Array<{ id: string }> };
 
 /**
  * Workbuddy 用本机 /api/codebuddy/models 的下拉；auto 始终可选。
@@ -59,7 +59,7 @@ export function buildComparisonScopes(
   const current = describe('当前页', currentSegments.map((segment) => segment.id));
   current.key = CURRENT_PAGE_SCOPE_KEY;
   // EPUB 长章会被切成多个阅读页；同章节的页额外提供「整章」选项，超过上限时禁用。
-  const chapters = new Map<string, { title: string; pages: typeof pages }>();
+  const chapters = new Map<string, { title: string; pages: ScopePage[] }>();
   for (const item of pages) {
     const title = item.sectionTitle || item.title;
     const group = chapters.get(title) || { title, pages: [] };

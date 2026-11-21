@@ -4,8 +4,9 @@ export function getCenterPoint(touches: TouchList, count: number): { x: number; 
   let centerX = 0;
   let centerY = 0;
   for (let i = 0; i < touches.length; i++) {
-    centerX += touches[i].clientX;
-    centerY += touches[i].clientY;
+    // Loop bounds guarantee an item; fall back to 0 defensively for sparse lists.
+    centerX += touches[i]?.clientX ?? 0;
+    centerY += touches[i]?.clientY ?? 0;
   }
   centerX /= touches.length;
   centerY /= touches.length;

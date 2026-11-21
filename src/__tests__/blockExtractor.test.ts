@@ -34,7 +34,7 @@ describe('extractBlocks - Text Length Filtering', () => {
 
     const blocks = extractBlocks(document);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0].text).toContain('longer paragraph');
+    expect(blocks[0]!.text).toContain('longer paragraph');
   });
 
   it('keeps long readable paragraphs below the safety ceiling', () => {
@@ -43,8 +43,8 @@ describe('extractBlocks - Text Length Filtering', () => {
 
     const blocks = extractBlocks(document);
     expect(blocks).toHaveLength(2);
-    expect(blocks[0].text).toContain('This is a long but valid paragraph.');
-    expect(blocks[0].text.length).toBeGreaterThan(16_384);
+    expect(blocks[0]!.text).toContain('This is a long but valid paragraph.');
+    expect(blocks[0]!.text.length).toBeGreaterThan(16_384);
   });
 
   it('rejects pathological single-block text above the safety ceiling', () => {
@@ -53,7 +53,7 @@ describe('extractBlocks - Text Length Filtering', () => {
 
     const blocks = extractBlocks(document);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0].text).toBe('Normal length paragraph here.');
+    expect(blocks[0]!.text).toBe('Normal length paragraph here.');
   });
 
   it('should accept text at boundary (exactly 3 chars)', () => {
@@ -86,7 +86,7 @@ describe('findBlockNode', () => {
     const blocks = extractBlocks(document);
     expect(blocks).toHaveLength(1);
 
-    const node = findBlockNode(blocks[0], document);
+    const node = findBlockNode(blocks[0]!, document);
     expect(node).toBeTruthy();
     expect(node!.textContent).toContain('Test paragraph');
   });
@@ -987,7 +987,7 @@ describe('extractBlocks - paragraphs declared via data-as="p" (Mintlify docs)', 
     const blocks = extractBlocks(document);
     // 只有段落本身; 嵌套 <span> 不能变成第二个块 (否则句子会碎片化)。
     expect(blocks).toHaveLength(1);
-    expect(blocks[0].tag).toBe('span');
+    expect(blocks[0]!.tag).toBe('span');
   });
 
   it('only treats data-as="p" as a paragraph declaration, not other data-as values', () => {
@@ -1017,7 +1017,7 @@ describe('extractBlocks - paragraphs declared via data-as="p" (Mintlify docs)', 
 
     const para = document.querySelector('span[data-as="p"]') as HTMLElement;
     // 提取阶段必须给段落打上 block id —— 服务端就是靠它回填译文的。
-    expect(para.dataset.fanyiBlockId).toBe(blocks[0].id);
+    expect(para.dataset.fanyiBlockId).toBe(blocks[0]!.id);
 
     const link = para.querySelector('a');
     expect(link).not.toBeNull();
@@ -1107,8 +1107,8 @@ describe('extractBlocks - Mintlify heading anchors leak a ZWSP (regression)', ()
     const para = blocks.find((b) => b.tag === 'span');
     expect(para).toBeDefined();
     // headingPath 也是送给模型的上下文，同样不能带 ZWSP
-    expect(para!.context.headingPath).toContain('Interrupt decision types');
-    for (const h of para!.context.headingPath) {
+    expect(para!.context!.headingPath).toContain('Interrupt decision types');
+    for (const h of para!.context!.headingPath) {
       expect(h.startsWith('\u200b')).toBe(false);
     }
   });

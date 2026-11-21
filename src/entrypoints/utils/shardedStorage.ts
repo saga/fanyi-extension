@@ -6,11 +6,11 @@
 // 3. Storage 配额/权限等故障只会导致缓存 miss，不会阻断翻译；
 // 4. 旧版单对象缓存会在首次使用时尽力迁移。缓存仅是加速层，迁移失败不影响翻译本身。
 
-import { storage } from '@wxt-dev/storage';
+import { storage, type StorageItemKey } from '@wxt-dev/storage';
 
 const DEFAULT_PREFIX = 'translation';
 const DEFAULT_INDEX_KEY = 'local:meta:translationCache:index';
-type StorageKey = string;
+type StorageKey = StorageItemKey;
 
 interface CacheEntry<T> {
   data: T;
@@ -37,7 +37,7 @@ function isCacheEntry<T>(value: unknown): value is CacheEntry<T> {
 export class ShardedCache {
   private prefix: string;
   private indexKey: StorageKey;
-  private legacyStorageKey?: string;
+  private legacyStorageKey?: StorageKey;
   private memoryCache = new Map<string, CacheEntry<unknown>>();
   private writeQueue: Promise<void> = Promise.resolve();
   private migration: Promise<void> | null = null;
@@ -45,18 +45,19 @@ export class ShardedCache {
 
   constructor(
     prefix: string = DEFAULT_PREFIX,
-    indexKey: StorageKey = DEFAULT_INDEX_KEY,
+    indexKey: string = DEFAULT_INDEX_KEY,
     legacyStorageKey?: string,
     defaultTTL = 7 * 24 * 60 * 60 * 1000,
   ) {
     this.prefix = prefix;
-    this.indexKey = indexKey;
-    this.legacyStorageKey = legacyStorageKey;
+    // Key strings are namespaced by the caller; narrow them to the storage API's key type.
+    this.indexKey = indexKey as StorageKey;
+    this.legacyStorageKey = legacyStorageKey as StorageKey | undefined;
     this.defaultTTL = defaultTTL;
   }
 
   private makeKey(cacheKey: string): StorageKey {
-    return 'local:' + this.prefix + ':' + cacheKey;
+    return `local:${this.prefix}:${cacheKey}` as StorageKey;
   }
 
   /** 将写操作排队；即使前一个操作失败，队列也可继续工作。 */

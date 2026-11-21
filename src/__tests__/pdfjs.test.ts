@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { TranslationState } from '../entrypoints/content/translationTypes';
+import type { Config } from '../entrypoints/utils/config';
 
 /**
  * PDF.js viewer 翻译模块单元测试。
@@ -259,7 +260,7 @@ describe('collectLines', () => {
     makePdfJsViewer([page]);
     const lines = mod.collectLines(document);
     expect(lines).toHaveLength(1);
-    expect(lines[0].text).toBe('Hello');
+    expect(lines[0]!.text).toBe('Hello');
   });
 
 
@@ -273,7 +274,7 @@ describe('collectLines', () => {
     makePdfJsViewer([page]);
     const lines = mod.collectLines(document);
     expect(lines).toHaveLength(1);
-    expect(lines[0].text).toBe('Hello World');
+    expect(lines[0]!.text).toBe('Hello World');
   });
 
   it('separates spans with top difference exceeding tolerance', () => {
@@ -295,7 +296,7 @@ describe('collectLines', () => {
     makePdfJsViewer([page]);
     const lines = mod.collectLines(document);
     expect(lines).toHaveLength(1);
-    expect(lines[0].text).toBe('AB');
+    expect(lines[0]!.text).toBe('AB');
   });
 
 
@@ -340,9 +341,9 @@ describe('groupLinesIntoParagraphs', () => {
     ]);
     const paragraphs = buildAndGroup([page]);
     expect(paragraphs).toHaveLength(1);
-    expect(paragraphs[0].text).toContain('Line one');
-    expect(paragraphs[0].text).toContain('Line two');
-    expect(paragraphs[0].text).toContain('Line three');
+    expect(paragraphs[0]!.text).toContain('Line one');
+    expect(paragraphs[0]!.text).toContain('Line two');
+    expect(paragraphs[0]!.text).toContain('Line three');
   });
 
   it('splits paragraphs on large vertical gap (> 1.5x line height)', () => {
@@ -392,7 +393,7 @@ describe('groupLinesIntoParagraphs', () => {
     ]);
     const paragraphs = buildAndGroup([page]);
     expect(paragraphs).toHaveLength(1);
-    expect(paragraphs[0].fontSize).toBe('18px');
+    expect(paragraphs[0]!.fontSize).toBe('18px');
   });
 });
 
@@ -446,7 +447,7 @@ describe('translatePdfJsViewer', () => {
     const onStatus = vi.fn();
     await expect(
       mod.translatePdfJsViewer(
-        { sourceLang: 'en', targetLang: 'zh' },
+        { sourceLang: 'en', targetLang: 'zh' } as Config,
         state,
         onStatus,
       ),
@@ -464,7 +465,7 @@ describe('translatePdfJsViewer', () => {
     const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
     const onStatus = vi.fn();
     const result = await mod.translatePdfJsViewer(
-      { sourceLang: 'en', targetLang: 'zh' },
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
       state,
       onStatus,
     );
@@ -474,8 +475,8 @@ describe('translatePdfJsViewer', () => {
     // 覆盖层已渲染
     const overlays = document.querySelectorAll('.fanyi-pdfjs-translation');
     expect(overlays.length).toBe(2);
-    expect(overlays[0].textContent).toBe('[译] Hello world.');
-    expect(overlays[1].textContent).toBe('[译] Second paragraph.');
+    expect(overlays[0]!.textContent).toBe('[译] Hello world.');
+    expect(overlays[1]!.textContent).toBe('[译] Second paragraph.');
     // state 已填充
     expect(state.originalTexts.size).toBe(2);
     expect(state.translatedBlocks.size).toBe(2);
@@ -494,7 +495,7 @@ describe('translatePdfJsViewer', () => {
 
     const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
     const result = await mod.translatePdfJsViewer(
-      { sourceLang: 'en', targetLang: 'zh' },
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
       state,
       vi.fn(),
     );
@@ -515,7 +516,7 @@ describe('translatePdfJsViewer', () => {
 
     const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
     const result = await mod.translatePdfJsViewer(
-      { sourceLang: 'en', targetLang: 'zh' },
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
       state,
       vi.fn(),
     );
@@ -534,13 +535,13 @@ describe('translatePdfJsViewer', () => {
 
     const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
     await mod.translatePdfJsViewer(
-      { sourceLang: 'en', targetLang: 'zh' },
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
       state,
       vi.fn(),
     );
 
     expect(mockSendMessage).toHaveBeenCalled();
-    const call = mockSendMessage.mock.calls[0][0];
+    const call = mockSendMessage.mock.calls[0]![0];
     expect(call.action).toBe('translateChunk');
     expect(call.sourceLang).toBe('en');
     expect(call.targetLang).toBe('zh');
@@ -557,7 +558,7 @@ describe('translatePdfJsViewer', () => {
 
     const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
     await mod.translatePdfJsViewer(
-      { sourceLang: 'en', targetLang: 'zh' },
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
       state,
       vi.fn(),
     );

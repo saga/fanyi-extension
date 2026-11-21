@@ -68,7 +68,7 @@ describe('DOMObserverManager', () => {
     await wait(50);
 
     expect(onNewContent).toHaveBeenCalled();
-    const blocks = onNewContent.mock.calls[0][0] as TextBlock[];
+    const blocks = onNewContent.mock.calls[0]![0] as TextBlock[];
     expect(blocks.length).toBeGreaterThanOrEqual(1);
     expect(blocks.some((b: TextBlock) => b.text.includes('Hello world'))).toBe(true);
   });

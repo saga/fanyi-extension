@@ -128,7 +128,7 @@
                 </select>
                 <small class="muted">选择 CodeBuddy SDK 可识别的模型；列表来自本机服务 /api/codebuddy/models。</small>
               </label>
-              <label v-if="codeBuddyContextWindowOptions[task.key]?.options.length >= 2" class="setting-field">
+              <label v-if="hasMultipleContextWindowOptions(task.key)" class="setting-field">
                 <span>上下文窗口档位（可选）</span>
                 <select :value="String(config.documentCodeBuddyTaskProfiles[task.key].contextWindow ?? '')"
                   @change="onContextWindowChange(task.key, $event)">
@@ -362,6 +362,7 @@ const config = ref<Config>({
   provider: 'deepseek',
   promptStyle: 'default',
   translationMode: 'technical',
+  webEnhancedQuality: false,
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
@@ -375,6 +376,12 @@ const config = ref<Config>({
   localAgentUrl: 'http://127.0.0.1:8789',
   localAgentModel: 'auto',
   localAgentToken: '',
+  chatBackend: 'remote',
+  chatModel: '',
+  chatThinkingMode: 'adaptive',
+  chatEffort: 'medium',
+  chatSkillIds: [],
+  remoteServiceToken: '',
   documentSourceLang: 'auto',
   documentTargetLang: 'zh',
   documentDeepseekApiKey: '',
@@ -394,10 +401,17 @@ const config = ref<Config>({
   documentBatchMaxSourceChars: 8000,
   documentTranslationConcurrency: 4,
   documentReviewConcurrency: 2,
+  documentReviewStrength: 'medium',
   documentPrecedingContextSegments: 4,
   documentContextBudgetChars: 18000,
   documentMaxModelAttempts: 2,
   documentLiteraryReviewEnabled: true,
+  documentEnglishFontFamily: 'Georgia',
+  documentChineseFontFamily: 'Noto Serif CJK SC',
+  documentEnglishFontSize: 17,
+  documentChineseFontSize: 18,
+  documentSystemPromptOverride: '',
+  documentUserPromptTemplate: '',
 });
 const codeBuddyTaskOptions: Array<{ key: DocumentCodeBuddyTaskKey; label: string; description: string }> = [
   { key: 'translation', label: '文档初译', description: '优先忠实原文与规范输出；默认不思考，用较低推理强度提高批量吞吐。' },
@@ -417,6 +431,9 @@ const builtInTaskPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>
 const builtInTaskUserPrompts = ref<Partial<Record<DocumentCodeBuddyTaskKey, string>>>({});
 const codeBuddyModels = ref<Array<{ id: string; credits?: number | null }>>([]);
 const codeBuddyContextWindowOptions = ref<Partial<Record<DocumentCodeBuddyTaskKey, CodeBuddyContextWindowOption>>>({});
+function hasMultipleContextWindowOptions(taskKey: DocumentCodeBuddyTaskKey): boolean {
+  return (codeBuddyContextWindowOptions.value[taskKey]?.options?.length ?? 0) >= 2;
+}
 const codeBuddyContextOptionsRequestVersion = ref(0);
 const promptPreviewLoading = ref(false);
 const promptPreviewError = ref('');

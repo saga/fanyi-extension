@@ -1,5 +1,5 @@
 import browser from 'webextension-polyfill';
-import { DeepSeekTranslationService, type PromptStyle } from './service/deepseek';
+import { DeepSeekTranslationService, type PromptStyle, type TranslationMode } from './service/deepseek';
 import { getConfig } from './utils/config';
 import {
   getCachedTranslation,
@@ -18,6 +18,7 @@ import type { SiteRule } from '../rules/types';
 import type {
   BackgroundMessage,
   BackgroundResponse,
+  ChunkTrace,
   TranslateChunkMessage,
   TranslateChunkStreamMessage,
   TranslateChunkResponse,
@@ -816,7 +817,7 @@ export default defineBackground({
         // 传给 content 端的诊断包：把上面 [ChunkTrace] 的关键字段集中
         // 起来，content 收到 missing 时直接 console.log 出来，定位根因
         // 不用再翻 background console。
-        const trace = {
+        const trace: ChunkTrace = {
           inputBytes,
           estInputTokens,
           reservedMaxTokens,
@@ -1244,6 +1245,8 @@ export default defineBackground({
             choices?: Array<{ message?: { content?: unknown } }>;
             error?: { message?: string } | string;
             message?: string;
+            usage?: unknown;
+            model?: string;
           };
           if (!response.ok) {
             const detail = typeof data.error === 'string' ? data.error : data.error?.message || data.message;

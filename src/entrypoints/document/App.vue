@@ -1179,7 +1179,7 @@ import {
   workspaceApi,
   WorkspaceApiError,
 } from './documentWorkspaceClient';
-import { preprocessingGateTitle, resolveDocumentTranslationMode, styleGuideBadge as computeStyleGuideBadge } from './documentPreprocessing';
+import { preprocessingGateTitle, resolveDocumentTranslationMode, shouldUseLightweightLiterarySelection, styleGuideBadge as computeStyleGuideBadge } from './documentPreprocessing';
 import { extractGlossaryLocal } from '@/entrypoints/utils/glossaryExtractor';
 import type { Glossary } from '@/entrypoints/service/_service';
 import { buildStyledSystemContent } from '@/entrypoints/service/prompt-style';
@@ -3267,7 +3267,7 @@ async function ensureDocumentWorkspaceInternal(
     workspaceActiveRun.value = (refreshed.runs || []).find((run) =>
       ['queued', 'running', 'awaiting_acceptance', 'partial', 'paused'].includes(run.status)) || null;
     const accepted = await loadWorkspaceAcceptedTranslations(
-      base, token, project.projectId, refreshed.project.segmentCount || doc.value.segments.length,
+      base, token, project.projectId, refreshed.project.segmentCount || doc.value?.segments.length || 0,
     );
     if (!isCurrent()) return null;
     await replaceCurrentTranslations(accepted);

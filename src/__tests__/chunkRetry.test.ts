@@ -120,8 +120,8 @@ describe('buildRetryChunk', () => {
     ]);
     const retry = buildRetryChunk(parent, ['b3', 'b1']);
     expect(retry.blocks.map((b) => b.id)).toEqual(['b1', 'b3']);
-    expect(retry.blocks[0].text).toBe('one');
-    expect(retry.blocks[1].text).toBe('three');
+    expect(retry.blocks[0]!.text).toBe('one');
+    expect(retry.blocks[1]!.text).toBe('three');
   });
 
 

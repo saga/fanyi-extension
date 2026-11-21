@@ -19,8 +19,8 @@ describe('warmup-then-parallel integration', () => {
     const chunks = buildChunks(blocks);
 
     // chunk1 and chunk2 are warmup-sized: 2 blocks each (400 tokens)
-    expect(chunks[0].estimatedTokens).toBeLessThanOrEqual(420);
-    expect(chunks[1].estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[0]?.estimatedTokens).toBeLessThanOrEqual(420);
+    expect(chunks[1]?.estimatedTokens).toBeLessThanOrEqual(420);
     // Later chunks can be larger (up to TARGET=800)
     const normalChunks = chunks.slice(2);
     expect(normalChunks.some(c => c.estimatedTokens > 420)).toBe(true);

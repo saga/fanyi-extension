@@ -149,7 +149,7 @@ export class CaptionOverlay {
       this.lastShownIdx < this.captions.length
     ) {
       const c = this.captions[this.lastShownIdx];
-      if (currentMs >= c.startMs && currentMs < c.startMs + c.durationMs) {
+      if (c && currentMs >= c.startMs && currentMs < c.startMs + c.durationMs) {
         idx = this.lastShownIdx;
       }
     }
@@ -158,7 +158,7 @@ export class CaptionOverlay {
       // 线性查找（字幕不多，通常 < 1000 条）
       for (let i = 0; i < this.captions.length; i++) {
         const c = this.captions[i];
-        if (currentMs >= c.startMs && currentMs < c.startMs + c.durationMs) {
+        if (c && currentMs >= c.startMs && currentMs < c.startMs + c.durationMs) {
           idx = i;
           break;
         }
@@ -173,6 +173,7 @@ export class CaptionOverlay {
     }
 
     const caption = this.captions[idx];
+    if (!caption) return;
 
     // 判断是否需要刷新 DOM：
     // 1. idx 变了（切换到新字幕）
