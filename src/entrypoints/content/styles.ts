@@ -101,6 +101,81 @@ export function getStyles(isMobile: boolean): string {
       box-sizing: border-box;
     }
 
+    /*
+     * 移动端稳定入口：悬浮按钮。
+     * 右下角放置，避开底部状态条；touch-action 交给浏览器默认（不拦截滚动）。
+     */
+    .fanyi-floating-btn {
+      position: fixed;
+      right: 16px;
+      bottom: 20px;
+      width: 52px;
+      height: 52px;
+      border: none;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #409eff, #66b1ff);
+      color: #fff;
+      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.3);
+      z-index: 999998;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .fanyi-floating-btn:active { transform: scale(0.94); }
+    .fanyi-floating-btn-label { font-size: 20px; font-weight: 700; line-height: 1; }
+
+    /* 配置面板（长按悬浮按钮打开）。移动端宽度撑满，避免遮挡状态条。 */
+    .fanyi-config-panel {
+      position: fixed;
+      left: 50%;
+      bottom: 84px;
+      transform: translateX(-50%);
+      width: ${isMobile ? 'min(420px, calc(100vw - 32px))' : '420px'};
+      max-height: 70vh;
+      overflow-y: auto;
+      background: #fff;
+      color: #1f2328;
+      border-radius: 12px;
+      box-shadow: 0 6px 28px rgba(0, 0, 0, 0.28);
+      z-index: 999999;
+      font-size: 14px;
+    }
+    .fanyi-config-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #eaeef2;
+      font-weight: 700;
+    }
+    .fanyi-config-close {
+      border: none;
+      background: transparent;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      color: #57606a;
+    }
+    .fanyi-config-body { padding: 12px 16px; display: grid; gap: 10px; }
+    .fanyi-config-row { display: grid; gap: 4px; }
+    .fanyi-config-row label { font-size: 12px; color: #57606a; }
+    .fanyi-config-row input,
+    .fanyi-config-row select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .fanyi-config-switch label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+    .fanyi-config-switch input { width: auto; }
+    .fanyi-config-actions { display: flex; gap: 8px; }
+
     .fanyi-btn-save,
     .fanyi-btn-translate,
     .fanyi-btn-restore {

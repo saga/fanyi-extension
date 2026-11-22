@@ -30,6 +30,7 @@ import {
   extractVideoId,
 } from './content/youtube';
 import { setupTouchEvents } from './content/touchGesture';
+import { setupMobileControls } from './content/mobileControls';
 import type { ContentMessage } from '../types/messages';
 
 import { logger } from '../utils/logger';
@@ -73,11 +74,16 @@ export default defineContentScript({
     style.textContent = getStyles(isMobile);
     (document.head || document.documentElement).appendChild(style);
 
-    // === 触屏手势（仅移动端） ===
-    // Firefox Android 没有 popup 右键菜单，固定用三击翻译手势启动。
+    // === 移动端入口 ===
+    // 悬浮按钮是稳定入口（单击翻译/恢复，长按配置）；三击手势是快捷方式。
     // 桌面端走 popup / 快捷键 / 右键菜单。
     if (isMobile) {
       setupTouchEvents(() => handleAction('translate'));
+      setupMobileControls({
+        onTranslate: () => handleAction('translate'),
+        onRestore: () => handleAction('restore'),
+        isTranslated: () => state.translatedBlocks.size > 0,
+      });
     }
 
     // === YouTube 字幕翻译：改为与整页翻译一致，需要点击翻译按钮才启动 ===
