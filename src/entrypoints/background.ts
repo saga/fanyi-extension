@@ -35,8 +35,13 @@ import type {
   FetchRemoteCssResponse,
   ProxyServerFetchMessage,
   ProxyServerFetchResponse,
+  OpenPdfReaderMessage,
+  OpenPdfReaderResponse,
+  FetchPdfBinaryMessage,
+  FetchPdfBinaryResponse,
   PageContext,
 } from '../types/messages';
+import { isPdfUrl } from './utils/pdfSource';
 import { MAX_CSS_SHEET_BYTES } from './utils/cssSnapshotLimits';
 import { buildChatSystem, type ChatMessage } from './service/chat';
 import { openSidePanel } from './utils/sidePanel';
@@ -379,6 +384,14 @@ export default defineBackground({
             await handleFetchRemoteCss(message, sendResponse as (r: FetchRemoteCssResponse) => void);
           } else if (message.action === 'proxyServerFetch') {
             await handleProxyServerFetch(message, sendResponse as (r: ProxyServerFetchResponse) => void);
+          } else if (message.action === 'openPdfReader') {
+            await handleOpenPdfReader(
+              message,
+              sender,
+              sendResponse as (r: OpenPdfReaderResponse) => void,
+            );
+          } else if (message.action === 'fetchPdfBinary') {
+            await handleFetchPdfBinary(message, sendResponse as (r: FetchPdfBinaryResponse) => void);
           } else {
             // Unknown action, don't keep port open
             sendResponse({ success: false, error: 'Unknown action' });
@@ -443,6 +456,107 @@ export default defineBackground({
           success: false,
           error: controller.signal.aborted
             ? 'Stylesheet request timed out'
+            : error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    /**
+     * 把 PDF 外壳页（iframe/embed 包裹的 PDF）替换成扩展自带的 PDF 阅读器。
+     * 不硬编码任何站点：URL 形态由 findPdfSource 在页面侧判定，这里只做一次复核。
+     */
+    async function handleOpenPdfReader(
+      message: OpenPdfReaderMessage,
+      sender: browser.Runtime.MessageSender,
+      sendResponse: (response: OpenPdfReaderResponse) => void,
+    ): Promise<void> {
+      if (!isPdfUrl(message.url)) {
+        sendResponse({ success: false, error: 'Not a PDF URL' });
+        return;
+      }
+      const readerUrl = browser.runtime.getURL(
+        `/pdf-reader.html?url=${encodeURIComponent(message.url)}`,
+      );
+      try {
+        const tabId = message.tabId ?? sender.tab?.id;
+        if (tabId !== undefined) await browser.tabs.update(tabId, { url: readerUrl });
+        else await browser.tabs.create({ url: readerUrl });
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    /**
+     * Fetch PDF bytes in the background so the reader can feed pdf.js with `data`.
+     * Keeps cookies (many publishers require the session) and caps the payload.
+     */
+    async function handleFetchPdfBinary(
+      message: FetchPdfBinaryMessage,
+      sendResponse: (response: FetchPdfBinaryResponse) => void,
+    ): Promise<void> {
+      let url: URL;
+      try {
+        url = new URL(message.url);
+      } catch {
+        sendResponse({ success: false, error: 'Invalid PDF URL' });
+        return;
+      }
+      if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) {
+        sendResponse({ success: false, error: 'Only credential-free HTTP(S) PDF URLs are allowed' });
+        return;
+      }
+
+      const MAX_PDF_BYTES = 30 * 1024 * 1024;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        const response = await fetch(url.href, {
+          signal: controller.signal,
+          credentials: 'include',
+          redirect: 'follow',
+        });
+        const declared = Number(response.headers.get('content-length') || 0);
+        if (declared > MAX_PDF_BYTES) {
+          sendResponse({ success: false, error: `PDF exceeds ${MAX_PDF_BYTES} byte limit` });
+          return;
+        }
+        if (!response.ok) {
+          sendResponse({ success: false, error: `PDF download failed (HTTP ${response.status})` });
+          return;
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.byteLength > MAX_PDF_BYTES) {
+          sendResponse({ success: false, error: `PDF exceeds ${MAX_PDF_BYTES} byte limit` });
+          return;
+        }
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        const disposition = response.headers.get('content-disposition') || '';
+        const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+        const plainName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+        let fileName: string | undefined;
+        try {
+          fileName = encodedName ? decodeURIComponent(encodedName) : plainName || undefined;
+        } catch {
+          fileName = plainName || undefined;
+        }
+        sendResponse({
+          success: true,
+          base64: btoa(binary),
+          status: response.status,
+          contentType: response.headers.get('content-type') || '',
+          fileName,
+        });
+      } catch (error) {
+        sendResponse({
+          success: false,
+          error: controller.signal.aborted
+            ? 'PDF download timed out'
             : error instanceof Error ? error.message : String(error),
         });
       } finally {

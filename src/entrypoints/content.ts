@@ -31,7 +31,8 @@ import {
 } from './content/youtube';
 import { setupTouchEvents } from './content/touchGesture';
 import { setupMobileControls } from './content/mobileControls';
-import type { ContentMessage } from '../types/messages';
+import { findPdfSource } from './utils/pdfSource';
+import type { ContentMessage, FindPdfSourceResponse } from '../types/messages';
 
 import { logger } from '../utils/logger';
 // ============================================================
@@ -158,6 +159,15 @@ export default defineContentScript({
           // 侧栏（side panel）通过该消息向 background 取页面正文。
           // 返回 Promise 让 background 的 sendMessage 收到响应。
           return handleExtractChatContext();
+        case 'findPdfSource': {
+          // 外壳页（如 stamp.jsp → iframe PDF）本身没有正文。popup 在启动翻译前
+          // 询问内容脚本，挖掘 iframe/embed 找到真正的 PDF 地址。
+          const source = findPdfSource(document, window.location.href);
+          const response: FindPdfSourceResponse = source
+            ? { success: true, url: source.url, via: source.via }
+            : { success: false };
+          return response;
+        }
       }
     }) as browser.Runtime.OnMessageListener);
 

@@ -187,6 +187,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getConfig, setConfig, type Config } from '@/entrypoints/utils/config';
 import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 import { openSidePanel } from '@/entrypoints/utils/sidePanel';
+import { isPdfUrl } from '@/entrypoints/utils/pdfSource';
 
 const config = ref<Config>({
   sourceLang: 'auto',
@@ -357,32 +358,43 @@ async function checkApiKey() {
 
 async function triggerTranslate() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
-    const currentUrl = tab.url || '';
-    // Firefox's built-in PDF viewer is a privileged page: content scripts cannot run there.
-    // For arXiv PDFs, replace this tab with our own responsive reader (no new tab and no
-    // document-translation project). The reader keeps the source URL so Back restores the PDF.
-    let isArxivPdf = false;
-    try {
-      const url = new URL(currentUrl);
-      isArxivPdf = /(^|\.)arxiv\.org$/i.test(url.hostname) && /^\/pdf\//.test(url.pathname);
-    } catch {
-      isArxivPdf = false;
-    }
-    if (isArxivPdf) {
-      const readerUrl = browser.runtime.getURL(
-        `/pdf-reader.html?url=${encodeURIComponent(currentUrl)}`,
-      );
-      await browser.tabs.update(tab.id, { url: readerUrl });
-      window.close();
-      return;
-    }
+  if (!tab?.id) return;
+  const currentUrl = tab.url || '';
 
-    // 普通网页仍走原有网页翻译消息通道。
-    browser.runtime.sendMessage({ action: 'relayToContent', tabId: tab.id, message: { action: 'translatePage' } })
-      .catch(() => {});
-    window.close();
+  // PDF 阅读器不再限定 arXiv：直接 PDF URL，或「HTML 外壳 + PDF iframe/embed」
+  // 都由内容脚本挖掘出真实 PDF 地址后切换阅读器。浏览器原生 viewer 里没有
+  // 可翻译 DOM，普通整页翻译必然得到 "No translatable content found"。
+  let pdfUrl: string | null = isPdfUrl(currentUrl) ? currentUrl : null;
+  if (!pdfUrl) {
+    try {
+      const relayed = await browser.runtime.sendMessage({
+        action: 'relayToContent',
+        tabId: tab.id,
+        message: { action: 'findPdfSource' },
+      }) as {
+        success: boolean;
+        response?: { success: boolean; url?: string } | null;
+      };
+      if (relayed.success && relayed.response?.success && relayed.response.url) {
+        pdfUrl = relayed.response.url;
+      }
+    } catch {
+      // No content script (native viewer / restricted page): fall through to normal route.
+    }
   }
+  if (pdfUrl) {
+    const readerUrl = browser.runtime.getURL(
+      `/pdf-reader.html?url=${encodeURIComponent(pdfUrl)}`,
+    );
+    await browser.tabs.update(tab.id, { url: readerUrl });
+    window.close();
+    return;
+  }
+
+  // 普通网页仍走原有网页翻译消息通道。
+  browser.runtime.sendMessage({ action: 'relayToContent', tabId: tab.id, message: { action: 'translatePage' } })
+    .catch(() => {});
+  window.close();
 }
 
 async function openChat() {

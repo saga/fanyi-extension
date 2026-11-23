@@ -180,6 +180,32 @@ export type ProxyServerFetchResponse =
   | { success: true; status: number; statusText: string; body: string; headers?: Record<string, string> }
   | { success: false; error: string };
 
+/** Replace the current tab with the built-in PDF reader for a discovered PDF URL. */
+export interface OpenPdfReaderMessage {
+  action: 'openPdfReader';
+  url: string;
+  /** Optional when sent from popup; content scripts rely on sender.tab.id. */
+  tabId?: number;
+}
+
+export type OpenPdfReaderResponse =
+  | { success: true }
+  | { success: false; error: string };
+
+/**
+ * Background fetch for the PDF reader. Extension pages can usually fetch with host
+ * permissions, but using the background keeps credential/CSP behaviour consistent
+ * across Chrome and Firefox. Binary is capped by the handler.
+ */
+export interface FetchPdfBinaryMessage {
+  action: 'fetchPdfBinary';
+  url: string;
+}
+
+export type FetchPdfBinaryResponse =
+  | { success: true; base64: string; status: number; contentType: string; fileName?: string }
+  | { success: false; error: string };
+
 /** 发往 background 的所有消息类型。 */
 export type BackgroundMessage =
   | TranslateChunkMessage
@@ -190,7 +216,9 @@ export type BackgroundMessage =
   | GetPageContextMessage
   | RelayToContentMessage
   | FetchRemoteCssMessage
-  | ProxyServerFetchMessage;
+  | ProxyServerFetchMessage
+  | OpenPdfReaderMessage
+  | FetchPdfBinaryMessage;
 
 // ============================================================
 // Content-script-bound messages (background → content script)
@@ -217,13 +245,23 @@ export interface ExtractChatContextMessage {
   action: 'extractChatContext';
 }
 
+/** Ask the content script to mine its DOM for a PDF source (wrapper pages). */
+export interface FindPdfSourceMessage {
+  action: 'findPdfSource';
+}
+
+export type FindPdfSourceResponse =
+  | { success: true; url: string; via: string }
+  | { success: false };
+
 /** 发往 content script 的所有消息类型。 */
 export type ContentMessage =
   | TranslatePageMessage
   | RestoreOriginalMessage
   | ToggleTranslationMessage
   | TranslationStreamUpdateMessage
-  | ExtractChatContextMessage;
+  | ExtractChatContextMessage
+  | FindPdfSourceMessage;
 
 // ============================================================
 // Responses
@@ -362,7 +400,9 @@ export type BackgroundResponse =
   | GetPageContextResponse
   | RelayToContentResponse
   | FetchRemoteCssResponse
-  | ProxyServerFetchResponse;
+  | ProxyServerFetchResponse
+  | OpenPdfReaderResponse
+  | FetchPdfBinaryResponse;
 
 // ============================================================
 // Listener 签名（替换 onMessage.addListener 的 `any` 入参）

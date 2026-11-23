@@ -5,7 +5,8 @@ import { getConfig } from '../utils/config';
 import { detectLanguage } from '../utils/languageDetector';
 import { translateBlocksViaServer } from '../content/serverTranslation';
 import type { TextBlock } from '../utils/blockExtractor';
-import type { TranslateChunkMessage, TranslateChunkResponse } from '../../types/messages';
+import { isPdfUrl } from '../utils/pdfSource';
+import type { FetchPdfBinaryResponse, TranslateChunkMessage, TranslateChunkResponse } from '../../types/messages';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -28,11 +29,17 @@ function status(message: string, error = false): void {
   statusNode.classList.toggle('error', error);
 }
 
-function isArxivPdfUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return /(^|\.)arxiv\.org$/i.test(url.hostname) && /^\/pdf\//.test(url.pathname);
-  } catch { return false; }
+/** Fetch through the background so cookies/session and extension host permissions apply. */
+async function downloadPdf(url: string): Promise<{ data: Uint8Array; fileName?: string }> {
+  const response = await browser.runtime.sendMessage({
+    action: 'fetchPdfBinary',
+    url,
+  }) as FetchPdfBinaryResponse;
+  if (!response.success) throw new Error(response.error);
+  const binary = atob(response.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return { data: bytes, fileName: response.fileName };
 }
 
 function isLikelyMath(text: string): boolean {
@@ -105,12 +112,17 @@ function linesToParagraphs(lines: string[], page: number): Paragraph[] {
 }
 
 async function extractPdf(url: string): Promise<void> {
-  if (!isArxivPdfUrl(url)) throw new Error('当前版本仅支持 arXiv 论文 PDF 地址（arxiv.org/pdf/...）。');
-  status('正在下载并解析论文…');
-  const loadingTask = pdfjs.getDocument({url, withCredentials:false});
+  if (!isPdfUrl(url)) throw new Error('不是有效的 HTTP(S) PDF 地址。');
+  status('正在下载并解析 PDF…');
+  const { data, fileName } = await downloadPdf(url);
+  const loadingTask = pdfjs.getDocument({ data, url });
   try {
     const pdf = await loadingTask.promise;
-    titleNode.textContent = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'arXiv paper');
+    let fallbackTitle = 'PDF paper';
+    try {
+      fallbackTitle = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || fallbackTitle);
+    } catch { /* Keep the fallback title. */ }
+    titleNode.textContent = fileName || fallbackTitle;
     const all: Paragraph[] = [];
     for (let pageNo=1; pageNo<=pdf.numPages; pageNo++) {
       status('正在提取 PDF：第 '+pageNo+' / '+pdf.numPages+' 页');
@@ -268,7 +280,7 @@ translateButton.addEventListener('click', () => void translateAll());
 document.querySelector<HTMLButtonElement>('#back')!.addEventListener('click', () => history.back());
 
 if (!sourceUrl) {
-  status('缺少 PDF 地址。请从 arXiv PDF 页面点击扩展翻译。', true);
+  status('缺少 PDF 地址。请在 PDF 页面或包含 PDF 的页面点击扩展翻译。', true);
   translateButton.disabled = true;
 } else {
   void extractPdf(sourceUrl).catch(error => status(error instanceof Error ? error.message : String(error), true));

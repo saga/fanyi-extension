@@ -1,4 +1,6 @@
+import browser from 'webextension-polyfill';
 import { prepareDocument, createOverlayHider, type OverlayHider } from '../utils/contentHelper';
+import { findPdfSource } from '../utils/pdfSource';
 import { getDomainParkingPageMessage } from '../utils/domainParkingGuard';
 import { buildNodeMap } from '../utils/blockExtractor';
 import { buildChunks } from '../utils/chunkBuilder';
@@ -52,6 +54,36 @@ export type { TranslationState };
  *   - 动态内容监听：翻译完成后，DOM 变化触发的新 block 走单块翻译
  *   - 服务端翻译失败直接抛错：由 start() 的 catch 展示给用户，不再静默降级到本地翻译
  */
+
+/** Empty-page errors are the only ones worth mining for a wrapped PDF. */
+function isEmptyContentError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /No translatable content found|没有找到可翻译的内容/.test(error.message);
+}
+
+/**
+ * Try to recover from "No translatable content found" by mining iframes/embeds.
+ * Returns true when the tab is being replaced with the PDF reader.
+ */
+async function tryOpenPdfReaderForEmptyPage(error: unknown): Promise<boolean> {
+  if (!isEmptyContentError(error)) return false;
+  const source = findPdfSource(document, window.location.href);
+  if (!source) return false;
+  try {
+    const response = (await browser.runtime.sendMessage({
+      action: 'openPdfReader',
+      url: source.url,
+    })) as { success: boolean; error?: string } | undefined;
+    if (!response?.success) {
+      logger.warn('[PdfReader] Failed to open reader:', response?.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.warn('[PdfReader] openPdfReader threw:', err);
+    return false;
+  }
+}
 
 // ============================================================
 // 顶层 Controller：暴露给 index.ts 的三个动作
@@ -169,6 +201,12 @@ export function createTranslationController(
         // or walker attributes that can contaminate the next extraction.
         stopOverlayHider();
         cleanupTempAttrs();
+        // 空页面常见于「HTML 外壳 + PDF iframe」。挖掘 iframe/embed 找到 PDF 后
+        // 直接切到扩展的 PDF 阅读器；找不到时仍按原逻辑报错。
+        if (await tryOpenPdfReaderForEmptyPage(error)) {
+          showStatus('已找到 PDF，正在打开阅读器…', 'success');
+          return;
+        }
         showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
       } finally {
         isTranslating = false;
