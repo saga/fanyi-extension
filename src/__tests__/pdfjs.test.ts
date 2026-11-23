@@ -424,6 +424,7 @@ describe('translatePdfJsViewer', () => {
   });
 
   afterEach(() => {
+    mod.stopPdfJsPageWatcher();
     if (restoreRect) restoreRect();
   });
 
@@ -566,5 +567,130 @@ describe('translatePdfJsViewer', () => {
     const taggedSpan = document.querySelector('[data-fanyi-pdfjs-line]');
     expect(taggedSpan).not.toBeNull();
     expect(taggedSpan?.getAttribute('data-fanyi-pdfjs-line')).toBe('pdfjs-p0');
+  });
+
+  it('translates pages rendered after the initial pass (scroll-down case)', async () => {
+    mockEchoTranslate();
+    const page1 = makePage(1, [
+      makeSpan('Welcome to Leafline.', { left: 10, top: 10, right: 200, bottom: 25 }),
+    ]);
+    const viewer = document.createElement('div');
+    viewer.id = 'viewer';
+    viewer.classList.add('pdfViewer');
+    viewer.appendChild(page1);
+    document.body.appendChild(viewer);
+
+    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
+    await mod.translatePdfJsViewer(
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
+      state,
+      vi.fn(),
+    );
+    expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(1);
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+
+    // PDF.js lazily renders page 3 when the reader scrolls down.
+    const page3 = makePage(3, [
+      makeSpan('Leafline uses the PDF.js annotation editor.', { left: 10, top: 10, right: 300, bottom: 25 }),
+    ]);
+    viewer.appendChild(page3);
+    mod.refreshPdfJsPageWatcher();
+
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(2);
+    });
+    const overlays = Array.from(document.querySelectorAll('.fanyi-pdfjs-translation')) as HTMLElement[];
+    const lateOverlay = overlays.find((el) => el.dataset.fanyiPdfjsPage === '3');
+    expect(lateOverlay?.textContent).toBe('[译] Leafline uses the PDF.js annotation editor.');
+    expect(mockSendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('restores cached overlays after a textLayer rebuild without another API call', async () => {
+    mockEchoTranslate();
+    const page = makePage(1, [
+      makeSpan('Hello world.', { left: 10, top: 10, right: 200, bottom: 25 }),
+    ]);
+    makePdfJsViewer([page]);
+
+    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
+    await mod.translatePdfJsViewer(
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
+      state,
+      vi.fn(),
+    );
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+
+    // Zoom re-renders the textLayer and drops our overlay div.
+    const layer = page.querySelector('.textLayer')!;
+    layer.innerHTML = '';
+    layer.appendChild(makeSpan('Hello world.', { left: 10, top: 10, right: 200, bottom: 25 }));
+    mod.refreshPdfJsPageWatcher();
+
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(1);
+    });
+    expect(document.querySelector('.fanyi-pdfjs-translation')!.textContent).toBe('[译] Hello world.');
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops watching after restore', async () => {
+    mockEchoTranslate();
+    const page1 = makePage(1, [
+      makeSpan('Hello world.', { left: 10, top: 10, right: 200, bottom: 25 }),
+    ]);
+    const viewer = document.createElement('div');
+    viewer.id = 'viewer';
+    viewer.classList.add('pdfViewer');
+    viewer.appendChild(page1);
+    document.body.appendChild(viewer);
+
+    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
+    await mod.translatePdfJsViewer(
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
+      state,
+      vi.fn(),
+    );
+    mod.restorePdfJsViewer(document);
+    expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(0);
+    const callsAfterRestore = mockSendMessage.mock.calls.length;
+
+    viewer.appendChild(makePage(3, [
+      makeSpan('Annotate this PDF.', { left: 10, top: 10, right: 200, bottom: 25 }),
+    ]));
+    mod.refreshPdfJsPageWatcher();
+    await new Promise((resolve) => setTimeout(resolve, 650));
+
+    expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(0);
+    expect(mockSendMessage).toHaveBeenCalledTimes(callsAfterRestore);
+  });
+
+  it('applies the hidden toggle state to overlays added incrementally', async () => {
+    mockEchoTranslate();
+    const page1 = makePage(1, [
+      makeSpan('Welcome to Leafline.', { left: 10, top: 10, right: 200, bottom: 25 }),
+    ]);
+    const viewer = document.createElement('div');
+    viewer.id = 'viewer';
+    viewer.classList.add('pdfViewer');
+    viewer.appendChild(page1);
+    document.body.appendChild(viewer);
+
+    const state: TranslationState = { originalTexts: new Map(), translatedBlocks: new Set(), translatedTexts: new Map() };
+    await mod.translatePdfJsViewer(
+      { sourceLang: 'en', targetLang: 'zh' } as Config,
+      state,
+      vi.fn(),
+    );
+    mod.togglePdfJsViewer(document);
+
+    viewer.appendChild(makePage(3, [
+      makeSpan('Press Escape to leave.', { left: 10, top: 10, right: 200, bottom: 25 }),
+    ]));
+    mod.refreshPdfJsPageWatcher();
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('.fanyi-pdfjs-translation')).toHaveLength(2);
+    });
+    const overlays = Array.from(document.querySelectorAll('.fanyi-pdfjs-translation')) as HTMLElement[];
+    expect(overlays.every((el) => el.style.display === 'none')).toBe(true);
   });
 });

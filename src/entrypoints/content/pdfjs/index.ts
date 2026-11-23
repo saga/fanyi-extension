@@ -24,9 +24,12 @@
  *   4. 在每个段落下方渲染可见的 `div.fanyi-pdfjs-translation` 覆盖层
  *      （半透明白底 + 左侧蓝色边条 + pointer-events:none 不阻挡选择）
  *
+ * 滚动/缩放后的增量处理：
+ *   - PDF.js 只为视口附近的页面渲染 textLayer，首轮翻译时后面的页面还没有 span。
+ *     翻译完成后挂 MutationObserver，新页面 textLayer 出现时增量翻译并渲染覆盖层。
+ *   - textLayer 重建（缩放/翻页）时用 page + 段落文本签名复用已有译文，不重复请求 API。
+ *
  * 不处理（v1 范围外）：
- *   - 缩放后 textLayer 重建：用户重新点击翻译即可
- *   - 滚动到新页面时自动翻译：同上
  *   - 多栏 PDF 的栏检测：每段独立翻译，可能跨栏，但可读
  */
 import browser from 'webextension-polyfill';
@@ -71,6 +74,159 @@ export function isPdfJsViewer(doc: Document): boolean {
 /** 当前文档是否已被本模块翻译过（用于防止重复翻译 + restore 判定）。 */
 export function isPdfJsTranslated(doc: Document): boolean {
   return doc.querySelector('.fanyi-pdfjs-translation') !== null;
+}
+
+// ============================================================
+// 滚动后新渲染页面的增量翻译（PDF.js 只渲染视口附近的页面）
+// ============================================================
+
+/** DOM 变化后等待 textLayer 稳定再提取，避免逐 span 渲染触发多次请求。 */
+const PAGE_WATCH_DEBOUNCE_MS = 500;
+
+interface PdfJsPageWatcher {
+  /** 手动触发一次检查（测试/外部强制刷新用）。 */
+  refresh(): void;
+  stop(): void;
+}
+
+/** 当前挂载的增量翻译观察者；restore 时必须停止，否则按钮恢复后又把译文加回来。 */
+let pdfJsPageWatcher: PdfJsPageWatcher | null = null;
+
+/** toggle 隐藏状态，新建的覆盖层要跟随当前显示状态。 */
+let pdfJsOverlaysHidden = false;
+
+/**
+ * 启动 PDF.js 增量翻译观察。
+ *
+ * 首轮翻译只覆盖当时已渲染的页面；用户向下滚动后，PDF.js 才为后续页面创建
+ * textLayer span。这里观察 #viewer 的 DOM 变化，对新出现的页面做增量翻译，
+ * 并在 textLayer 因缩放/翻页重建时按「页码 + 段落文本」复用已有译文。
+ */
+export function startPdfJsPageWatcher(
+  config: Config,
+  state: TranslationState,
+  onStatus: (msg: string, type: 'loading' | 'success' | 'error') => void,
+): void {
+  stopPdfJsPageWatcher();
+
+  // 用首轮翻译的原文→译文映射作为缓存种子，避免对已翻译页面重复请求。
+  const translations = new Map<string, string>();
+  for (const [id, translated] of state.translatedTexts) {
+    const original = state.originalTexts.get(id);
+    if (original && translated) translations.set(original, translated);
+  }
+
+  // 已尝试过的段落不再因为同一段 DOM 变化反复翻译（失败时也不无限重试）。
+  const attempted = new Set<string>();
+  const pageSignatures = new Map<number, string>();
+  for (const [pageNo, paras] of groupParagraphsByPage(collectParagraphs(document))) {
+    pageSignatures.set(pageNo, paragraphSignature(paras));
+    for (const para of paras) attempted.add(para.text);
+  }
+
+  let stopped = false;
+  let running = false;
+  let pending = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let cachedPageUrl: string | null = null;
+
+  const getPageUrl = (): string => {
+    if (cachedPageUrl) return cachedPageUrl;
+    try {
+      cachedPageUrl = resolvePdfSourceUrl();
+    } catch {
+      cachedPageUrl = window.location.href;
+    }
+    return cachedPageUrl;
+  };
+
+  const processPages = async (): Promise<void> => {
+    const byPage = groupParagraphsByPage(collectParagraphs(document));
+    for (const [pageNo, paras] of byPage) {
+      if (stopped) return;
+      const signature = paragraphSignature(paras);
+      if (pageSignatures.get(pageNo) === signature) {
+        // textLayer 可能因缩放/翻页被重建，按缓存重新挂覆盖层（不发请求）。
+        ensurePageOverlays(paras, translations, state);
+        continue;
+      }
+
+      const missing = paras.filter((p) => !translations.has(p.text) && !attempted.has(p.text));
+      for (const para of paras) attempted.add(para.text);
+      if (missing.length > 0) {
+        onStatus('正在翻译新页面...', 'loading');
+        try {
+          const newlyTranslated = await translateNewParagraphs(missing, config, getPageUrl());
+          for (const [text, translated] of newlyTranslated) translations.set(text, translated);
+          if (newlyTranslated.size > 0) {
+            onStatus(`新页面翻译完成（${newlyTranslated.size} 段）`, 'success');
+          }
+        } catch (error) {
+          logger.warn('[PdfJs] incremental page translation failed:', error);
+        }
+      }
+      ensurePageOverlays(paras, translations, state);
+      pageSignatures.set(pageNo, signature);
+    }
+  };
+
+  const run = async (): Promise<void> => {
+    if (running) {
+      pending = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        pending = false;
+        await processPages();
+      } while (pending && !stopped);
+    } finally {
+      running = false;
+    }
+  };
+
+  const scheduleRun = (): void => {
+    if (stopped) return;
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void run();
+    }, PAGE_WATCH_DEBOUNCE_MS);
+  };
+
+  const observer = new MutationObserver((records) => {
+    // 自己插入/移除覆盖层不应该再次触发检查。
+    const relevant = records.some((record) =>
+      [...record.addedNodes, ...record.removedNodes].some((node) =>
+        !(node instanceof Element && node.classList.contains('fanyi-pdfjs-translation')),
+      ),
+    );
+    if (relevant) scheduleRun();
+  });
+  const viewer = document.getElementById('viewer') || document.body;
+  observer.observe(viewer, { childList: true, subtree: true });
+
+  const watcher: PdfJsPageWatcher = {
+    refresh: scheduleRun,
+    stop() {
+      stopped = true;
+      if (timer !== null) clearTimeout(timer);
+      observer.disconnect();
+      if (pdfJsPageWatcher === watcher) pdfJsPageWatcher = null;
+    },
+  };
+  pdfJsPageWatcher = watcher;
+}
+
+/** 停止增量翻译观察（restore 时调用）。 */
+export function stopPdfJsPageWatcher(): void {
+  pdfJsPageWatcher?.stop();
+}
+
+/** 手动触发一次增量检查，供测试或外部强制刷新使用。 */
+export function refreshPdfJsPageWatcher(): void {
+  pdfJsPageWatcher?.refresh();
 }
 
 // ============================================================
@@ -394,6 +550,109 @@ function getSpanFontSize(span: HTMLElement): string {
   }
 }
 
+/** 收集当前 DOM 中所有可翻译的 PDF.js 段落。 */
+export function collectParagraphs(doc: Document): PdfParagraph[] {
+  return groupLinesIntoParagraphs(collectLines(doc)).filter((para) => para.text.length >= 3);
+}
+
+/** 从 .page 元素读取页码；没有页码时归到 0。 */
+function pageNumber(page: HTMLElement): number {
+  const value = page.getAttribute('data-page-number');
+  const parsed = value ? parseInt(value, 10) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function groupParagraphsByPage(paragraphs: PdfParagraph[]): Map<number, PdfParagraph[]> {
+  const grouped = new Map<number, PdfParagraph[]>();
+  for (const para of paragraphs) {
+    const pageNo = pageNumber(para.page);
+    const list = grouped.get(pageNo) || [];
+    list.push(para);
+    grouped.set(pageNo, list);
+  }
+  return grouped;
+}
+
+/**
+ * 页面文本签名。textLayer 重建后文本不变即命中缓存，无需重复翻译。
+ * 用控制字符而不是空格拼接，避免两段文本边界不同的页面被误判为同一页。
+ */
+function paragraphSignature(paragraphs: PdfParagraph[]): string {
+  return paragraphs.map((para) => para.text).join('\u0001');
+}
+
+/**
+ * 按已有译文为页面补齐覆盖层。
+ *
+ * textLayer 在缩放/翻页时会被 PDF.js 重建，旧覆盖层随之消失。这里以段落文本
+ * 为 key 重建覆盖层；已有且位置正确的覆盖层保持不动，避免反复插入。
+ */
+function ensurePageOverlays(
+  paragraphs: PdfParagraph[],
+  translations: Map<string, string>,
+  state: TranslationState,
+): void {
+  if (paragraphs.length === 0) return;
+  const layer = paragraphs[0]!.textLayer;
+  const expectedKeys = new Set(paragraphs.map((para) => para.text));
+
+  for (const el of Array.from(layer.querySelectorAll('.fanyi-pdfjs-translation'))) {
+    const key = el.getAttribute('data-fanyi-pdfjs-key');
+    if (!key || !expectedKeys.has(key)) el.remove();
+  }
+
+  for (const [i, para] of paragraphs.entries()) {
+    const translated = translations.get(para.text);
+    if (!translated) continue;
+    const expectedTop = `${para.bottom + 2}px`;
+    const alreadyRendered = Array.from(layer.querySelectorAll('.fanyi-pdfjs-translation'))
+      .some((el) => el.getAttribute('data-fanyi-pdfjs-key') === para.text
+        && (el as HTMLElement).style.top === expectedTop);
+    if (alreadyRendered) continue;
+
+    const overlay = renderOverlay(para, translated, para.text);
+    if (pdfJsOverlaysHidden) overlay.style.display = 'none';
+    const id = `pdfjs-w${pageNumber(para.page)}-${i}`;
+    state.originalTexts.set(id, para.text);
+    state.translatedTexts.set(id, translated);
+    state.translatedBlocks.add(id);
+  }
+}
+
+/** 翻译新出现页面的段落，返回「段落原文 → 译文」映射。 */
+async function translateNewParagraphs(
+  paragraphs: PdfParagraph[],
+  config: Config,
+  pageUrl: string,
+): Promise<Map<string, string>> {
+  const blocks: TextBlock[] = paragraphs.map((para, i) => ({
+    id: `pdfjs-watch-${i}`,
+    xpath: '',
+    tag: 'div',
+    text: para.text,
+    context: { headingPath: [], position: i },
+  }));
+
+  const byId: Map<string, string> = config.useServerTranslation && !config.useLocalAgent
+    ? await translateBlocksViaServer(config, blocks, pageUrl, document.title || 'PDF', {})
+    : await translateParagraphs(
+      buildChunks(blocks),
+      config.sourceLang,
+      config.targetLang,
+      pageUrl,
+      undefined,
+      config.promptStyle,
+    );
+
+  const result = new Map<string, string>();
+  blocks.forEach((block, i) => {
+    const translated = byId.get(block.id);
+    const para = paragraphs[i];
+    if (translated && para) result.set(para.text, translated);
+  });
+  return result;
+}
+
 // ============================================================
 // 翻译调度
 // ============================================================
@@ -530,10 +789,17 @@ async function translateOneChunk(
  *
  * 挂载到 .textLayer（与 span 同父级，坐标系一致）。
  */
-function renderOverlay(para: PdfParagraph, translatedText: string): HTMLElement {
+function renderOverlay(
+  para: PdfParagraph,
+  translatedText: string,
+  key: string = para.text,
+): HTMLElement {
   const overlay = document.createElement('div');
   overlay.className = 'fanyi-pdfjs-translation';
   overlay.textContent = translatedText;
+  // 增量翻译用它判断覆盖层是否还在、位置是否需要随 textLayer 重建而更新。
+  overlay.dataset.fanyiPdfjsKey = key;
+  overlay.dataset.fanyiPdfjsPage = String(pageNumber(para.page));
 
   // 定位
   overlay.style.position = 'absolute';
@@ -699,6 +965,11 @@ export async function translatePdfJsViewer(
     document.body.dataset.fanyiTranslated = 'true';
   }
 
+  // PDF.js 只渲染视口附近的页面。首轮完成后继续观察，滚动到后续页面时增量翻译。
+  if (renderedCount > 0) {
+    startPdfJsPageWatcher(config, state, onStatus);
+  }
+
   logger.debug(
     `[PdfJs] Translation complete: ${renderedCount}/${translatable.length} paragraphs rendered`,
   );
@@ -718,6 +989,8 @@ export async function translatePdfJsViewer(
  * 覆盖层是独立 div，直接删除即可。
  */
 export function restorePdfJsViewer(doc: Document): void {
+  stopPdfJsPageWatcher();
+  pdfJsOverlaysHidden = false;
   const overlays = doc.querySelectorAll('.fanyi-pdfjs-translation');
   for (const el of Array.from(overlays)) {
     el.remove();
@@ -735,9 +1008,12 @@ export function restorePdfJsViewer(doc: Document): void {
  * PDF.js 的译文是独立 div（不是 span 的子元素），直接 toggle display 即可。
  */
 export function togglePdfJsViewer(doc: Document): void {
-  const overlays = doc.querySelectorAll('.fanyi-pdfjs-translation');
-  for (const el of Array.from(overlays)) {
-    const htmlEl = el as HTMLElement;
-    htmlEl.style.display = htmlEl.style.display === 'none' ? '' : 'none';
+  const overlays = Array.from(doc.querySelectorAll('.fanyi-pdfjs-translation')) as HTMLElement[];
+  // 以当前可见状态为准，保证后续增量翻译出来的覆盖层跟随同一个开关。
+  pdfJsOverlaysHidden = overlays.length > 0
+    ? overlays[0]!.style.display !== 'none'
+    : !pdfJsOverlaysHidden;
+  for (const el of overlays) {
+    el.style.display = pdfJsOverlaysHidden ? 'none' : '';
   }
 }
