@@ -16,7 +16,7 @@
 
 export interface PdfSource {
   url: string;
-  via: 'self' | 'iframe' | 'embed' | 'object';
+  via: 'self' | 'iframe' | 'embed' | 'object' | 'link';
 }
 
 const MAX_IFRAMES = 32;
@@ -47,6 +47,45 @@ export function isPdfUrl(value: string): boolean {
   if (/\/pdf\//i.test(path) && !/\.(?:html?|php|jsp|aspx?)$/i.test(lastSegment)) return true;
   const format = parsed.searchParams.get('type') || parsed.searchParams.get('format') || '';
   return /pdf/i.test(format);
+}
+
+/**
+ * Paper landing pages sometimes inject their inline PDF viewer only on wide,
+ * hover-capable screens. On narrower/touch screens they leave only ordinary
+ * `<a href="...pdf">Read the paper</a>` links. Treat such links as the PDF source
+ * only when the page clearly presents them as the primary document.
+ *
+ * Avoid hijacking ordinary articles that merely have one "Download PDF" link:
+ * require either two+ links to the same PDF with a paper/PDF action label, or
+ * a primary label on a `/paper/`-style landing page.
+ */
+function findPdfLink(doc: Document, base: string, pageHref: string): PdfSource | null {
+  const groups = new Map<string, { url: string; labels: string[] }>();
+
+  for (const anchor of Array.from(doc.querySelectorAll('a[href]'))) {
+    const url = absoluteUrl(anchor.getAttribute('href') || '', base);
+    if (!url || !isPdfUrl(url)) continue;
+    const label = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const group = groups.get(url) || { url, labels: [] };
+    group.labels.push(label);
+    groups.set(url, group);
+  }
+
+  let paperLandingPage = false;
+  try {
+    paperLandingPage = /(^|\/)papers?(\/|$)/i.test(new URL(pageHref).pathname);
+  } catch {
+    paperLandingPage = false;
+  }
+
+  const primaryLabel = /^(read|open|view|download|see)\s+(the\s+)?(paper|pdf|article|preprint|full\s+text)\b|^pdf$|^paper$/i;
+  for (const group of groups.values()) {
+    const hasPrimaryLabel = group.labels.some((label) => primaryLabel.test(label));
+    if (hasPrimaryLabel && (group.labels.length >= 2 || paperLandingPage)) {
+      return { url: group.url, via: 'link' };
+    }
+  }
+  return null;
 }
 
 /**
@@ -104,5 +143,9 @@ export function findPdfSource(doc: Document, href = doc.URL || ''): PdfSource | 
     return null;
   };
 
-  return scan(doc, 0);
+  const embedded = scan(doc, 0);
+  if (embedded) return embedded;
+
+  // Last resort: a paper landing page whose JS-driven viewer did not render.
+  return findPdfLink(doc, baseFor(doc), self || '');
 }

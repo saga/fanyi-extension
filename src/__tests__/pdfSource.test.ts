@@ -67,6 +67,33 @@ describe('findPdfSource', () => {
     expect(found?.url).toContain('/paper');
   });
 
+  it('mines the primary PDF link when a paper page has no rendered object/embed', () => {
+    const doc = document.implementation.createHTMLDocument();
+    doc.body.innerHTML = `
+      <main>
+        <a href="Solid-State.pdf?v=20261125a">Read the paper</a>
+        <a href="Solid-State.pdf?v=20261125a" download>Download PDF</a>
+        <a href="/benchmarks/">Replication kit</a>
+      </main>`;
+    const found = findPdfSource(doc, 'https://example.org/paper/');
+    expect(found?.via).toBe('link');
+    expect(found?.url).toBe('https://example.org/paper/Solid-State.pdf?v=20261125a');
+  });
+
+  it('accepts a single primary PDF link on a /paper/ landing page', () => {
+    const doc = document.implementation.createHTMLDocument();
+    doc.body.innerHTML = '<a href="/files/paper.pdf">Open the PDF</a>';
+    const found = findPdfSource(doc, 'https://example.org/paper/');
+    expect(found?.via).toBe('link');
+    expect(found?.url).toBe('https://example.org/files/paper.pdf');
+  });
+
+  it('does not hijack ordinary articles with one incidental PDF link', () => {
+    const doc = document.implementation.createHTMLDocument();
+    doc.body.innerHTML = '<article><p>Article text.</p><a href="/appendix.pdf">Download PDF</a></article>';
+    expect(findPdfSource(doc, 'https://example.org/blog/post')).toBeNull();
+  });
+
   it('returns null for ordinary pages without a PDF source', () => {
     const doc = document.implementation.createHTMLDocument();
     doc.body.innerHTML = '<p>Hello world</p><iframe src="/related.html"></iframe>';
