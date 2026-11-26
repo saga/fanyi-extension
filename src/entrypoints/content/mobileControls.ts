@@ -8,6 +8,8 @@
  *
  * 按钮自身带 fanyi-floating-btn 类，touchGesture 会跳过它，避免双重触发。
  */
+import browser from 'webextension-polyfill';
+import { getConfig } from '../utils/config';
 import { showConfigPanel } from './configPanel';
 
 const LONG_PRESS_MS = 550;
@@ -31,6 +33,20 @@ export function setupMobileControls(handlers: MobileControlHandlers): () => void
   button.setAttribute('aria-label', '翻译控制');
   button.innerHTML = '<span class="fanyi-floating-btn-label">译</span>';
   document.body.appendChild(button);
+
+  // Keep the control in sync when the user changes its visibility in the extension popup.
+  void getConfig().then((config) => {
+    button.hidden = config.mobileFloatingButtonEnabled === false;
+  }).catch(() => {});
+  const onStorageChanged = (
+    changes: Record<string, browser.Storage.StorageChange>,
+    areaName: string,
+  ) => {
+    if (areaName !== 'local') return;
+    const updated = changes['local:config']?.newValue as { mobileFloatingButtonEnabled?: boolean } | undefined;
+    if (updated) button.hidden = updated.mobileFloatingButtonEnabled === false;
+  };
+  browser.storage.onChanged.addListener(onStorageChanged);
 
   let longPressTimer: number | undefined;
   let longPressed = false;
@@ -101,6 +117,7 @@ export function setupMobileControls(handlers: MobileControlHandlers): () => void
     button.removeEventListener('pointerup', handlePointerUp);
     button.removeEventListener('pointercancel', handlePointerCancel);
     button.removeEventListener('click', handleClick);
+    browser.storage.onChanged.removeListener(onStorageChanged);
     button.remove();
   };
 }
