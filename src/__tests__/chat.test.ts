@@ -47,6 +47,37 @@ describe('chat service', () => {
     expect(injected).toContain('\\u003c/untrusted_webpage_context_json\\u003e');
   });
 
+  it.each([
+    ['deepseek', 'https://api.deepseek.com/v1', 'deepseek-chat'],
+    ['gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'],
+    ['openai', 'https://api.openai.com/v1', 'gpt-4.1-mini'],
+    ['compatible', 'https://api.example.com/v1', 'custom-model'],
+  ] as const)('uses the OpenAI-compatible endpoint for %s', async (provider, baseUrl, model) => {
+    const sse = ['data: {"choices":[{"delta":{"content":"ok"}}]}\\n\\n', 'data: [DONE]\\n\\n'];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSSE(sse),
+      text: async () => '',
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const settings = { provider, baseUrl, apiKey: 'test-key', model };
+    for await (const _partial of chatStream('', [{ role: 'user', content: 'hello' }], { api: settings })) {
+      // consume the stream
+    }
+
+    expect(fetchMock).toHaveBeenCalledWith(baseUrl + '/chat/completions', expect.objectContaining({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-key',
+      },
+    }));
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body)).model).toBe(model);
+  });
+
   it('chatStream yields incremental full text from SSE', async () => {
     const sse = [
       'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
