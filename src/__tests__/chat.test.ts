@@ -53,7 +53,7 @@ describe('chat service', () => {
     ['openai', 'https://api.openai.com/v1', 'gpt-4.1-mini'],
     ['compatible', 'https://api.example.com/v1', 'custom-model'],
   ] as const)('uses the OpenAI-compatible endpoint for %s', async (provider, baseUrl, model) => {
-    const sse = ['data: {"choices":[{"delta":{"content":"ok"}}]}\\n\\n', 'data: [DONE]\\n\\n'];
+    const sse = ['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n'];
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
