@@ -643,6 +643,9 @@ async function refreshPermissionStatus() {
     const pageUrl = new URL(rawUrl);
     if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') {
       pagePermissionState.value = 'unknown';
+      if (pageUrl.protocol === 'file:') {
+        chatOptionsError.value = '本地文件页面需要在扩展详情中手动开启“允许访问文件网址”；about:、浏览器内部页和 PDF 查看器不支持自动读取。';
+      }
       return;
     }
     const originPattern = `${pageUrl.protocol}//${pageUrl.host}/*`;
@@ -707,7 +710,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: var(--chat-viewport-height, 100dvh);
-  min-height: 100vh;
   min-height: 0;
   overflow: hidden;
   /* 适配刘海屏 / 手势条 */
@@ -1109,7 +1111,7 @@ onUnmounted(() => {
      三个控件挤在一行会超出视口，导致发送按钮跑到屏幕外。wrap 保证控件不越界。 */
   flex-wrap: wrap;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px 10px max(8px, env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #ececec;
   flex-shrink: 0;
