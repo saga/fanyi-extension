@@ -558,7 +558,7 @@ async function send() {
     }
   }
 
-  // 把当前问题追加进历史，连同之前的多轮对话一起发给模型
+  // 确保刚刚编辑的 Provider / API Key / Model 已写入 storage，再由 background 读取。\n  await saveChatSettings();\n\n  // 把当前问题追加进历史，连同之前的多轮对话一起发给模型
   const history = [
     ...messages.value.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: question },
@@ -708,7 +708,7 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden;
   /* 适配刘海屏 / 手势条 */
-  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  padding: env(safe-area-inset-top) 0 0;
   background: #f7f8fa;
   color: #1a1a1a;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
