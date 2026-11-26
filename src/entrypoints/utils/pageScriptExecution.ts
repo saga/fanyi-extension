@@ -8,7 +8,7 @@ export async function executePageScript<T = unknown>(tabId: number, source: stri
   if (browserApi?.runtime?.getBrowserInfo) {
     try {
       const info = await browserApi.runtime.getBrowserInfo();
-      const major = Number.parseInt(String(info.version).split('.')[0], 10);
+      const major = Number.parseInt((String(info.version).split('.')[0] ?? ''), 10);
       supportsMainWorld = supportsMainWorld && Number.isFinite(major) && major >= 128;
     } catch { supportsMainWorld = false; }
   }

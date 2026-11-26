@@ -57,6 +57,8 @@ describe('NetworkCaptureController', () => {
     onCompleted.fire({ requestId: 'req-1', statusCode: 200, timeStamp: 145 });
 
     const record = controller.snapshot().requests[0];
+    expect(record).toBeDefined();
+    if (!record) throw new Error('Expected captured Firefox request');
     expect(record.url).toContain('access_token=%5BREDACTED%5D');
     expect(record.requestHeaders?.Authorization).toBe('[REDACTED]');
     expect(record.requestHeaders?.Accept).toBe('application/json');
@@ -111,6 +113,8 @@ describe('NetworkCaptureController', () => {
     await Promise.resolve();
 
     const record = controller.snapshot().requests[0];
+    expect(record).toBeDefined();
+    if (!record) throw new Error('Expected captured Chromium request');
     expect(record.url).toContain('token=%5BREDACTED%5D');
     expect(record.status).toBe(200);
     expect(record.responseHeaders?.['set-cookie']).toBe('[REDACTED]');
@@ -130,7 +134,7 @@ describe('NetworkCaptureController', () => {
     };
     const controller = createNetworkCaptureController({ webRequest });
     await controller.start(4, false);
-    expect(events[0].addListener).toHaveBeenCalledWith(
+    expect(events[0]!.addListener).toHaveBeenCalledWith(
       expect.any(Function), { urls: ['<all_urls>'], tabId: 4 }, undefined,
     );
     await controller.stop();
