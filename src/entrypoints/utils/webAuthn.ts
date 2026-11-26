@@ -4,8 +4,8 @@ export function getWebAuthnCapability(
   userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent,
 ): WebAuthnCapability {
   if (!credentials?.create || !credentials?.get) return { available: false, reason: '当前扩展页面没有可用的 WebAuthn Credentials API' };
-  const firefoxVersion = Number(userAgent.match(/Firefox\\/(\\d+)/i)?.[1] ?? 0);
-  const chromiumVersion = Number(userAgent.match(/(?:Chrome|Chromium)\\/(\\d+)/i)?.[1] ?? 0);
+  const firefoxVersion = Number(userAgent.match(/Firefox\/(\d+)/i)?.[1] ?? 0);
+  const chromiumVersion = Number(userAgent.match(/(?:Chrome|Chromium)\/(\d+)/i)?.[1] ?? 0);
   if (firefoxVersion > 0 && firefoxVersion < 150) return { available: false, reason: '扩展 RP ID WebAuthn 需要 Firefox 150 或更高版本' };
   if (chromiumVersion > 0 && chromiumVersion < 122) return { available: false, reason: '扩展 RP ID WebAuthn 需要 Chrome 122 或更高版本' };
   return { available: true };
