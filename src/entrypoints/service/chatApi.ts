@@ -15,7 +15,7 @@ export const CHAT_API_DEFAULTS: Record<ChatApiProvider, { baseUrl: string; model
 };
 
 export function normalizeChatApiBaseUrl(value: string): string {
-  const trimmed = value.trim().replace(/\\/+$/, '');
+  const trimmed = value.trim().replace(/\/+$/, '');
   if (!trimmed) return '';
   let url: URL;
   try {
@@ -34,7 +34,8 @@ export function normalizeChatApiBaseUrl(value: string): string {
 
 export function validateChatApiSettings(settings: ChatApiSettings): string[] {
   const issues: string[] = [];
-  const defaults = CHAT_API_DEFAULTS[settings.provider];
+  const defaults = CHAT_API_DEFAULTS[settings.provider] ?? CHAT_API_DEFAULTS.compatible;
+  if (!Object.prototype.hasOwnProperty.call(CHAT_API_DEFAULTS, settings.provider)) issues.push('不支持的 API Provider');
   const baseUrl = settings.baseUrl.trim() || defaults.baseUrl;
   const model = settings.model.trim() || defaults.model;
   if (!settings.apiKey.trim()) issues.push('尚未填写 API Key');
