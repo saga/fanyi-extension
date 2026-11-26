@@ -133,6 +133,7 @@ import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse } from '@/types/messages';
 import type { ChatUsage } from '@/entrypoints/service/chat';
 import { getConfig, setConfig } from '@/entrypoints/utils/config';
+import { createChatHistoryKey as historyKey } from './chatHistory';
 
 interface ChatTurn {
   role: 'user' | 'assistant';
@@ -318,25 +319,6 @@ function applyManualContext() {
 }
 
 const HISTORY_PREFIX = 'chatHistory:';
-
-/** 历史按 tab + 页面 URL 隔离；同一标签页导航到新页面时不能复用旧页面对话。 */
-function historyKey(tabId: number, url: string): string {
-  let normalized = url.trim();
-  try {
-    const parsed = new URL(normalized);
-    parsed.hash = '';
-    parsed.hostname = parsed.hostname.toLowerCase();
-    normalized = parsed.toString();
-  } catch {
-    normalized = normalized || 'manual-context';
-  }
-  // 短而稳定的键，避免把完整 URL（可能含敏感查询参数）写入 storage key。
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < normalized.length; i++) {
-    hash = Math.imul(hash ^ normalized.charCodeAt(i), 0x01000193);
-  }
-  return `${HISTORY_PREFIX}${tabId}:${(hash >>> 0).toString(16)}`;
-}
 
 function historyStore() {
   return (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
