@@ -628,7 +628,7 @@ async function refreshPermissionStatus() {
     pagePermissionState.value = await browser.permissions.contains({ origins: [originPattern] }) ? 'granted' : 'missing';
   } catch {
     pagePermissionState.value = 'unknown';
-    if (debuggerPermissionState.value === 'checking') debuggerPermissionState.value = 'unknown' as typeof debuggerPermissionState.value;
+    if (debuggerPermissionState.value === 'checking') debuggerPermissionState.value = 'unknown';
   }
 }
 
@@ -641,7 +641,12 @@ async function requestPageAccess() {
     if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') return;
     const granted = await browser.permissions.request({ origins: [`${pageUrl.protocol}//${pageUrl.host}/*`] });
     await refreshPermissionStatus();
-    if (!granted) chatOptionsError.value = '浏览器未授予当前网站访问权限；请在扩展管理页面的“网站访问权限”中允许访问。';
+    if (granted) {
+      chatOptionsError.value = '已获得当前网站访问权限，正在刷新原网页以加载内容脚本。';
+      await browser.tabs.reload(tabId);
+    } else {
+      chatOptionsError.value = '浏览器未授予当前网站访问权限；请在扩展管理页面的网站访问权限中允许访问。';
+    }
   } catch (error) {
     chatOptionsError.value = error instanceof Error ? error.message : '申请网页访问权限失败';
   }
