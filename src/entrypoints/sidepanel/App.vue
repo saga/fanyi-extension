@@ -14,7 +14,7 @@
 
     <!-- 对话执行配置独立于网页/文档翻译配置；远端调用 Vocal Saga Cloud，本地调用 local-agent-service。 -->
     <details class="chat-settings" :open="!isMobile">
-      <summary>模型与权限 <span class="settings-summary">{{ backendSummary }}</span></summary>
+      <summary>模型与权限 <span class="settings-summary">{{ backendSummary }} · {{ pagePermissionLabel }}{{ chatConfigIssues.length ? ' · 配置未完成' : '' }}</span></summary>
       <section class="chat-controls">
         <label>执行服务
           <select v-model="chatBackend" :disabled="streaming" @change="onBackendChange">
@@ -69,11 +69,6 @@
             <option v-for="skill in availableSkills" :key="skill.id" :value="skill.id">{{ skill.name }}</option>
           </select>
         </label>
-        <div v-if="chatConfigIssues.length" class="chat-config-warning" role="alert">
-          <strong>配置未完成</strong>
-          <span>{{ chatConfigIssues.join('；') }}</span>
-        </div>
-        <div v-if="chatOptionsError" class="chat-options-error" role="status">{{ chatOptionsError }}</div>
         <div class="permission-status">
           <span>网页访问：{{ pagePermissionLabel }}</span>
           <span>Debugger：{{ debuggerPermissionLabel }}</span>
@@ -81,6 +76,11 @@
         </div>
       </section>
     </details>
+
+    <div v-if="chatConfigIssues.length" class="banner config-warning" role="alert">
+      对话配置未完成：{{ chatConfigIssues.join('；') }}
+    </div>
+    <div v-if="chatOptionsError" class="banner config-error" role="alert">{{ chatOptionsError }}</div>
 
     <!-- KV Cache 命中率指示（多轮时 system 前缀命中缓存，输入 token 大幅下降） -->
     <div v-if="usageText" class="usage-hint">{{ usageText }}</div>
@@ -189,7 +189,7 @@ const chatApiBaseUrl = ref('');
 const chatApiKey = ref('');
 const previousApiProvider = ref<'deepseek' | 'gemini' | 'openai' | 'compatible'>('deepseek');
 const pagePermissionState = ref<'checking' | 'granted' | 'missing' | 'unknown'>('checking');
-const debuggerPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
+const debuggerPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported' | 'unknown'>('checking');
 const chatModel = ref('');
 const chatThinkingMode = ref<'disabled' | 'adaptive' | 'enabled'>('adaptive');
 const chatEffort = ref<'low' | 'medium' | 'high' | 'xhigh'>('medium');
@@ -203,7 +203,7 @@ const chatOptionsError = ref('');
 const isMobile = computed(() => window.matchMedia?.('(max-width: 640px)').matches ?? false);
 const backendSummary = computed(() => chatBackend.value === 'api'
   ? `${chatProvider.value} · ${chatModel.value || '未选择模型'}`
-  : chatBackend.value === 'remote' ? 'Vocal Saga' : chatBackend.value === 'workbuddy' ? 'Workbuddy' : 'OpenCode');
+  : chatBackend.value === 'remote' ? 'Vocal Saga' : chatBackend.value === 'workbuddy' ? 'Workbuddy' : chatBackend.value === 'opencode' ? 'OpenCode' : '模型 API');
 const chatConfigIssues = computed(() => {
   if (chatBackend.value === 'api') {
     return validateChatApiSettings({
@@ -220,7 +220,7 @@ const pagePermissionLabel = computed(() => ({
   checking: '检查中', granted: '可访问', missing: '未授权', unknown: '无法确认',
 }[pagePermissionState.value]));
 const debuggerPermissionLabel = computed(() => ({
-  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: 'Firefox 不支持',
+  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: 'Firefox 不支持', unknown: '无法确认',
 }[debuggerPermissionState.value]));
 const canSend = computed(() => input.value.trim().length > 0 && !!pageContext.value && !streaming.value);
 
@@ -647,13 +647,26 @@ async function requestPageAccess() {
   }
 }
 
+function syncVisualViewport() {
+  const height = window.visualViewport?.height || window.innerHeight;
+  document.documentElement.style.setProperty('--chat-viewport-height', `${Math.round(height)}px`);
+}
+
 onMounted(async () => {
+  syncVisualViewport();
+  window.visualViewport?.addEventListener('resize', syncVisualViewport);
+  window.visualViewport?.addEventListener('scroll', syncVisualViewport);
+  window.addEventListener('resize', syncVisualViewport);
   // 模型目录不可用不应阻塞正文加载和基础对话。
   void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });
   void refreshPermissionStatus();
   await initChat();
 });
 onUnmounted(() => {
+  window.visualViewport?.removeEventListener('resize', syncVisualViewport);
+  window.visualViewport?.removeEventListener('scroll', syncVisualViewport);
+  window.removeEventListener('resize', syncVisualViewport);
+  document.documentElement.style.removeProperty('--chat-viewport-height');
   disconnectPort();
 });
 </script>
@@ -667,8 +680,8 @@ onUnmounted(() => {
 .chat-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
+  height: var(--chat-viewport-height, 100dvh);
+  min-height: 100vh;
   min-height: 0;
   overflow: hidden;
   /* 适配刘海屏 / 手势条 */
@@ -903,6 +916,15 @@ onUnmounted(() => {
   background: #eef4ff;
   color: #409eff;
   flex-shrink: 0;
+}
+
+.banner.config-warning {
+  background: #fffbe6;
+  color: #ad6800;
+}
+.banner.config-error {
+  background: #fff2f0;
+  color: #cf1322;
 }
 
 .banner.ok {
