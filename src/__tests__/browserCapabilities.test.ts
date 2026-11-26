@@ -49,7 +49,11 @@ describe('cross-browser capability adapters', () => {
   });
 
   it('detects WebAuthn API and extracts extension origin for RP validation', () => {
-    expect(getWebAuthnCapability({ create: vi.fn(), get: vi.fn() } as any).available).toBe(true);
+    const credentials = { create: vi.fn(), get: vi.fn() } as any;
+    expect(getWebAuthnCapability(credentials, 'Firefox/149').available).toBe(false);
+    expect(getWebAuthnCapability(credentials, 'Chrome/121').available).toBe(false);
+    expect(getWebAuthnCapability(credentials, 'Firefox/150').available).toBe(true);
+    expect(getWebAuthnCapability(credentials, 'Chrome/122').available).toBe(true);
     const credential = { response: { clientDataJSON: new TextEncoder().encode(JSON.stringify({ origin: 'moz-extension://stable-id' })).buffer } } as any;
     expect(getWebAuthnClientOrigin(credential)).toBe('moz-extension://stable-id');
   });
