@@ -100,7 +100,9 @@
       仍能让用户粘贴正文继续对话，实现"任何页面都能聊"。
     -->
     <div v-if="manualMode" class="manual-context">
-      <div class="manual-label">无法自动读取本页（可能被 Chrome 屏蔽 / 扩展未授权）。粘贴正文继续对话：</div>
+      <div class="manual-label">无法自动读取本页（可能是浏览器受限页面，或扩展尚未获得网站访问权限）。</div>
+      <button v-if="pagePermissionState === 'missing'" class="manual-btn" type="button" @click="requestPageAccess">授权当前网站并刷新</button>
+      <div class="manual-label">也可以粘贴正文继续对话：</div>
       <textarea
         v-model="manualText"
         class="manual-input"
@@ -189,6 +191,7 @@ const chatApiBaseUrl = ref('');
 const chatApiKey = ref('');
 const previousApiProvider = ref<'deepseek' | 'gemini' | 'openai' | 'compatible'>('deepseek');
 const pagePermissionState = ref<'checking' | 'granted' | 'missing' | 'unknown'>('checking');
+const currentPageOriginPattern = ref('');
 const debuggerPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported' | 'unknown'>('checking');
 const chatModel = ref('');
 const chatThinkingMode = ref<'disabled' | 'adaptive' | 'enabled'>('adaptive');
@@ -543,13 +546,11 @@ async function send() {
     try {
       const endpoint = new URL(chatApiBaseUrl.value.trim() || CHAT_API_DEFAULTS[chatProvider.value].baseUrl);
       const originPattern = `${endpoint.protocol}//${endpoint.host}/*`;
-      const hasAccess = await browser.permissions.contains({ origins: [originPattern] });
-      if (!hasAccess) {
-        const granted = await browser.permissions.request({ origins: [originPattern] });
-        if (!granted) {
-          chatOptionsError.value = `尚未授予模型 API 主机访问权限：${endpoint.host}`;
-          return;
-        }
+      // permissions.request also resolves true for an origin that is already granted.
+      const granted = await browser.permissions.request({ origins: [originPattern] });
+      if (!granted) {
+        chatOptionsError.value = `尚未授予模型 API 主机访问权限：${endpoint.host}`;
+        return;
       }
     } catch (error) {
       chatOptionsError.value = error instanceof Error ? error.message : '无法检查模型 API 主机权限';
@@ -642,6 +643,7 @@ async function refreshPermissionStatus() {
       return;
     }
     const originPattern = `${pageUrl.protocol}//${pageUrl.host}/*`;
+    currentPageOriginPattern.value = originPattern;
     pagePermissionState.value = await browser.permissions.contains({ origins: [originPattern] }) ? 'granted' : 'missing';
   } catch {
     pagePermissionState.value = 'unknown';
@@ -652,11 +654,10 @@ async function refreshPermissionStatus() {
 async function requestPageAccess() {
   try {
     const tabId = getSourceTabId();
-    if (tabId == null) return;
-    const tab = await browser.tabs.get(tabId);
-    const pageUrl = new URL(tab.url || '');
-    if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') return;
-    const granted = await browser.permissions.request({ origins: [`${pageUrl.protocol}//${pageUrl.host}/*`] });
+    const originPattern = currentPageOriginPattern.value;
+    if (tabId == null || !originPattern) return;
+    // Invoke request before any awaited operation so the browser still sees the user gesture.
+    const granted = await browser.permissions.request({ origins: [originPattern] });
     await refreshPermissionStatus();
     if (granted) {
       chatOptionsError.value = '已获得当前网站访问权限，正在刷新原网页以加载内容脚本。';
