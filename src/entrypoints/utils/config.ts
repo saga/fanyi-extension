@@ -95,7 +95,10 @@ export interface Config {
   localAgentToken: string;
 
   /** 对话执行后端独立于翻译路由：remote 使用 Vocal Saga Cloud API；本地使用 local-agent-service。 */
-  chatBackend: 'remote' | 'workbuddy' | 'opencode';
+  chatBackend: 'remote' | 'workbuddy' | 'opencode' | 'api';
+  chatProvider: 'deepseek' | 'gemini' | 'openai' | 'compatible';
+  chatApiBaseUrl: string;
+  chatApiKey: string;
   chatModel: string;
   chatThinkingMode: 'disabled' | 'adaptive' | 'enabled';
   chatEffort: 'low' | 'medium' | 'high' | 'xhigh';
@@ -240,6 +243,9 @@ const defaultConfig: Config = {
   localAgentToken: '',
 
   chatBackend: 'remote',
+  chatProvider: 'deepseek',
+  chatApiBaseUrl: 'https://api.deepseek.com/v1',
+  chatApiKey: '',
   chatModel: '',
   chatThinkingMode: 'adaptive',
   chatEffort: 'medium',
