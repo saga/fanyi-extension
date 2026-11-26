@@ -539,6 +539,23 @@ async function send() {
     return;
   }
   chatOptionsError.value = '';
+  if (chatBackend.value === 'api') {
+    try {
+      const endpoint = new URL(chatApiBaseUrl.value.trim() || CHAT_API_DEFAULTS[chatProvider.value].baseUrl);
+      const originPattern = `${endpoint.protocol}//${endpoint.host}/*`;
+      const hasAccess = await browser.permissions.contains({ origins: [originPattern] });
+      if (!hasAccess) {
+        const granted = await browser.permissions.request({ origins: [originPattern] });
+        if (!granted) {
+          chatOptionsError.value = `尚未授予模型 API 主机访问权限：${endpoint.host}`;
+          return;
+        }
+      }
+    } catch (error) {
+      chatOptionsError.value = error instanceof Error ? error.message : '无法检查模型 API 主机权限';
+      return;
+    }
+  }
 
   // 把当前问题追加进历史，连同之前的多轮对话一起发给模型
   const history = [
