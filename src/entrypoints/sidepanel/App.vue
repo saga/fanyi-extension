@@ -558,7 +558,10 @@ async function send() {
     }
   }
 
-  // 确保刚刚编辑的 Provider / API Key / Model 已写入 storage，再由 background 读取。\n  await saveChatSettings();\n\n  // 把当前问题追加进历史，连同之前的多轮对话一起发给模型
+  // 确保刚刚编辑的 Provider / API Key / Model 已写入 storage，再由 background 读取。
+  await saveChatSettings();
+
+  // 把当前问题追加进历史，连同之前的多轮对话一起发给模型
   const history = [
     ...messages.value.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user' as const, content: question },
