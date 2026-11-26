@@ -48,8 +48,8 @@ describe('chat service', () => {
   });
 
   it.each([
-    ['deepseek', 'https://api.deepseek.com/v1', 'deepseek-chat'],
-    ['gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'],
+    ['deepseek', 'https://api.deepseek.com', 'deepseek-flash'],
+    ['gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-3.8-flash'],
     ['openai', 'https://api.openai.com/v1', 'gpt-4.1-mini'],
     ['compatible', 'https://api.example.com/v1', 'custom-model'],
   ] as const)('uses the OpenAI-compatible endpoint for %s', async (provider, baseUrl, model) => {
