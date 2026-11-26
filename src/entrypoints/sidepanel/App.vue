@@ -513,6 +513,7 @@ async function send() {
       assistantTurn.content = '⚠️ ' + (m.message || '对话出错');
       streaming.value = false;
       disconnectPort();
+      void saveHistory();
       scrollToBottom();
     }
   });
@@ -530,7 +531,11 @@ async function send() {
   });
 }
 
-onMounted(async () => {\n  // 模型/Skill 目录不可用不应阻塞网页正文加载和基础对话。\n  void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });\n  await initChat();\n});
+onMounted(async () => {
+  // 模型/Skill 目录不可用不应阻塞网页正文加载和基础对话。
+  void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });
+  await initChat();
+});
 onUnmounted(disconnectPort);
 </script>
 
