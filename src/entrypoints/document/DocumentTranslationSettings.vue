@@ -363,6 +363,7 @@ const config = ref<Config>({
   promptStyle: 'default',
   translationMode: 'technical',
   webEnhancedQuality: false,
+  mobileFloatingButtonEnabled: true,
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
