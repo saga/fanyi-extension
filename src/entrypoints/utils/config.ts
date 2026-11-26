@@ -79,6 +79,8 @@ export interface Config {
   /** Optional lightweight webpage context on the remote service; off by default. */
   webEnhancedQuality: boolean;
   floatingBallPosition?: { x: number; y: number };
+  /** Show the quick translation button on mobile webpages. */
+  mobileFloatingButtonEnabled: boolean;
   shortcuts: ShortcutConfig;
   /** 是否使用服务端翻译（发送到 /fanyi/page） */
   useServerTranslation: boolean;
@@ -228,6 +230,7 @@ const defaultConfig: Config = {
   promptStyle: 'default',
   translationMode: 'technical',
   webEnhancedQuality: false,
+  mobileFloatingButtonEnabled: true,
   shortcuts: {
     translatePage: 'Alt+T',
     translateSelection: 'Alt+S',
