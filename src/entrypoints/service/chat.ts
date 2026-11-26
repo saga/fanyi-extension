@@ -1,6 +1,7 @@
 import { parseSSEStream, parseSSEStreamWithUsage, type SSEUsage } from './streamParser';
 import type { PageContext } from '../../types/messages';
 import { logger } from '../../utils/logger';
+import { getChatApiEndpoint, getChatApiModel, type ChatApiSettings } from './chatApi';
 
 const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
@@ -31,6 +32,8 @@ export interface ChatOptions {
   signal?: AbortSignal;
   /** KV Cache 命中遥测：流结束（含 usage）后回传归一化用量，用于观察缓存命中率。 */
   onUsage?: (usage: ChatUsage) => void;
+  /** Optional OpenAI-compatible provider settings; omitted preserves the legacy DeepSeek defaults. */
+  api?: ChatApiSettings;
 }
 
 function buildHeaders(apiKey: string): Record<string, string> {
@@ -41,17 +44,18 @@ function buildHeaders(apiKey: string): Record<string, string> {
 }
 
 function buildBody(messages: ChatMessage[], stream: boolean, opts?: ChatOptions): string {
+  const provider = opts?.api?.provider || 'deepseek';
   const body: Record<string, unknown> = {
-    model: MODEL,
+    model: opts?.api ? getChatApiModel(opts.api) : MODEL,
     messages,
     temperature: CHAT_TEMPERATURE,
     max_tokens: CHAT_MAX_TOKENS,
-    user_id: USER_ID,
-    thinking: { type: 'disabled' },
     stream,
   };
-  // 流式下需显式开启才能拿到 usage（含 prompt_cache_hit/miss_tokens）
-  if (stream) body.stream_options = { include_usage: true };
+  // DeepSeek supports cache telemetry in the final SSE frame; other compatible APIs
+  // are not assumed to implement this provider-specific extension.
+  if (stream && provider === 'deepseek') body.stream_options = { include_usage: true };
+  if (provider === 'deepseek') body.user_id = USER_ID;
   // 原生 JSON 模式：结构化输出，避免偶发非 JSON 触发上层整段重解析
   if (opts?.jsonMode) body.response_format = { type: 'json_object' };
   return JSON.stringify(body);
@@ -121,20 +125,21 @@ export async function* chatStream(
   messages: ChatMessage[],
   opts?: ChatOptions,
 ): AsyncGenerator<string, void, unknown> {
-  const response = await fetch(DEFAULT_API_URL, {
+  const endpoint = opts?.api ? getChatApiEndpoint(opts.api) : DEFAULT_API_URL;
+  const response = await fetch(endpoint, {
     method: 'POST',
-    headers: buildHeaders(apiKey),
+    headers: buildHeaders(opts?.api?.apiKey ?? apiKey),
     body: buildBody(messages, true, opts),
     signal: opts?.signal,
   });
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API error: HTTP ${response.status} - ${text.substring(0, 200)}`);
+    throw new Error(`Chat API error: HTTP ${response.status} - ${text.substring(0, 200)}`);
   }
 
   if (!response.body) {
-    throw new Error('DeepSeek API error: response body is null');
+    throw new Error('Chat API error: response body is null');
   }
 
   const reader = response.body.getReader();
@@ -152,7 +157,7 @@ export async function* chatStream(
 
   // 偶发空内容（DeepSeek 已知问题，JSON 模式更常见）→ 抛错交由上层提示重试
   if (!full.trim()) {
-    throw new Error('DeepSeek 返回了空内容，请重试');
+    throw new Error('模型返回了空内容，请检查模型 ID 或重试');
   }
 }
 
@@ -163,11 +168,13 @@ export async function chat(
   opts?: ChatOptions,
 ): Promise<string> {
   const body = buildBody(messages, false, opts);
+  const endpoint = opts?.api ? getChatApiEndpoint(opts.api) : DEFAULT_API_URL;
+  const key = opts?.api?.apiKey ?? apiKey;
 
   const tryOnce = async (): Promise<string> => {
-    const response = await fetch(DEFAULT_API_URL, {
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: buildHeaders(apiKey),
+      headers: buildHeaders(key),
       body,
       signal: opts?.signal,
     });
@@ -180,7 +187,7 @@ export async function chat(
     const data = JSON.parse(await response.text());
     const content = data.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error('DeepSeek 返回了无效响应: 缺少 choices[0].message.content');
+      throw new Error('模型返回了无效响应：缺少 choices[0].message.content');
     }
     return content as string;
   };
