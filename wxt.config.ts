@@ -33,10 +33,12 @@ export default defineConfig({
         'tabs',
         'activeTab',
         'scripting',
-        'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*', 'https://api.deepseek.com/*',
-        // Cross-origin CSS is fetched by the background context to bypass page CORS.
-        'https://*/*', 'http://*/*',
-        'http://127.0.0.1:8789/*', 'http://localhost:8789/*', 'file:///*'];
+        'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*',
+        'https://api.deepseek.com/*', 'https://generativelanguage.googleapis.com/*', 'https://api.openai.com/*',
+        'http://127.0.0.1:8789/*', 'http://localhost:8789/*'];
+      // Firefox uses MV2 optional_permissions; ask for the active site only when the user opens web chat.
+      // Chrome's debugger API has no Firefox implementation, including Firefox Android.
+      manifest.optional_permissions = ['https://*/*', 'http://*/*', 'file:///*'];
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
@@ -56,14 +58,15 @@ export default defineConfig({
         'offscreen'];
       manifest.host_permissions = [
         'https://api.deepseek.com/*',
+        'https://generativelanguage.googleapis.com/*',
+        'https://api.openai.com/*',
         'https://s.sunxiunan.com/*',
         'https://ss.dal.workers.dev/*',
         'http://127.0.0.1:8789/*',
         'http://localhost:8789/*',
-        'https://*/*',
-        'http://*/*',
-        'file:///*',
       ];
+      // Keep broad page access optional; the chat page requests only the current site's origin.
+      manifest.optional_host_permissions = ['https://*/*', 'http://*/*', 'file:///*'];
       manifest.commands = {
         'translate-page': {
           suggested_key: {
