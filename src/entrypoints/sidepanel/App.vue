@@ -261,9 +261,17 @@ async function loadChatOptions() {
   chatBackend.value = config.chatBackend || 'remote';
   chatProvider.value = config.chatProvider || 'deepseek';
   previousApiProvider.value = chatProvider.value;
-  chatApiBaseUrl.value = config.chatApiBaseUrl || CHAT_API_DEFAULTS[chatProvider.value].baseUrl;
+  const savedApiBaseUrl = config.chatApiBaseUrl || '';
+  chatApiBaseUrl.value = chatProvider.value === 'deepseek' && savedApiBaseUrl === 'https://api.deepseek.com/v1'
+    ? CHAT_API_DEFAULTS.deepseek.baseUrl
+    : savedApiBaseUrl || CHAT_API_DEFAULTS[chatProvider.value].baseUrl;
   chatApiKey.value = config.chatApiKey || '';
-  chatModel.value = config.chatModel || (chatBackend.value === 'api' ? CHAT_API_DEFAULTS[chatProvider.value].model : '');
+  const savedModel = config.chatModel || '';
+  const obsoleteDefaultModel = (chatProvider.value === 'deepseek' && ['deepseek-chat', 'deepseek-v4-flash'].includes(savedModel))
+    || (chatProvider.value === 'gemini' && savedModel === 'gemini-2.5-flash');
+  chatModel.value = chatBackend.value === 'api'
+    ? (!savedModel || obsoleteDefaultModel ? CHAT_API_DEFAULTS[chatProvider.value].model : savedModel)
+    : savedModel;
   chatThinkingMode.value = config.chatThinkingMode || 'adaptive';
   chatEffort.value = config.chatEffort || 'medium';
   chatSkillIds.value = config.chatSkillIds || [];
