@@ -43,7 +43,8 @@ import type {
 } from '../types/messages';
 import { isPdfUrl } from './utils/pdfSource';
 import { MAX_CSS_SHEET_BYTES } from './utils/cssSnapshotLimits';
-import { buildChatSystem, type ChatMessage } from './service/chat';
+import { buildChatSystem, chatStream, type ChatMessage } from './service/chat';
+import { validateChatApiSettings } from './service/chatApi';
 import { openSidePanel } from './utils/sidePanel';
 import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
 
@@ -1303,7 +1304,7 @@ export default defineBackground({
       port.onMessage.addListener(async (msg: unknown) => {
         const m = msg as {
           type?: string; context?: PageContext; history?: ChatMessage[]; jsonMode?: boolean;
-          backend?: 'remote' | 'workbuddy' | 'opencode'; model?: string;
+          backend?: 'remote' | 'workbuddy' | 'opencode' | 'api'; model?: string;
           thinkingMode?: 'disabled' | 'adaptive' | 'enabled';
           effort?: 'low' | 'medium' | 'high' | 'xhigh'; skillIds?: string[];
           remoteServiceToken?: string;
@@ -1319,6 +1320,29 @@ export default defineBackground({
             ...(m.history ?? []),
           ];
           let response: Response;
+          if (backend === 'api') {
+            const apiSettings = {
+              provider: config.chatProvider || 'deepseek',
+              baseUrl: config.chatApiBaseUrl || '',
+              apiKey: config.chatApiKey || '',
+              model: m.model || config.chatModel || '',
+            } as const;
+            const issues = validateChatApiSettings(apiSettings);
+            if (issues.length) throw new Error('网页对话 API 配置不完整：' + issues.join('；'));
+            let finalText = '';
+            for await (const partial of chatStream('', llmMessages, {
+              jsonMode: m.jsonMode === true,
+              signal: controller.signal,
+              api: apiSettings,
+              onUsage: (usage) => port.postMessage({ type: 'usage', usage }),
+            })) {
+              finalText = partial;
+              port.postMessage({ type: 'partial', text: partial });
+            }
+            if (!finalText.trim()) throw new Error('模型没有返回内容，请检查模型 ID 和 API 配置');
+            port.postMessage({ type: 'done', text: finalText, provider: apiSettings.provider, model: apiSettings.model });
+            return;
+          }
           if (backend === 'remote') {
             const token = (m.remoteServiceToken || config.remoteServiceToken || '').trim();
             if (!token) throw new Error('请先配置 Vocal Saga 远端服务 Token');
