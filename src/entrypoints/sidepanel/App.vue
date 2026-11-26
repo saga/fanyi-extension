@@ -70,9 +70,8 @@
           </select>
         </label>
         <div class="permission-status">
-          <span>网页访问：{{ pagePermissionLabel }}</span>
+          <span>网站访问：{{ pagePermissionLabel }}</span>
           <span>Debugger：{{ debuggerPermissionLabel }}</span>
-          <button v-if="pagePermissionState === 'missing'" type="button" @click="requestPageAccess">授权当前网站</button>
         </div>
       </section>
     </details>
@@ -100,8 +99,12 @@
       仍能让用户粘贴正文继续对话，实现"任何页面都能聊"。
     -->
     <div v-if="manualMode" class="manual-context">
-      <div class="manual-label">无法自动读取本页（可能是浏览器受限页面，或扩展尚未获得网站访问权限）。</div>
-      <button v-if="pagePermissionState === 'missing'" class="manual-btn" type="button" @click="requestPageAccess">授权当前网站并刷新</button>
+      <div class="manual-label">
+        无法自动读取本页。扩展会依次尝试 Content Script、Scripting 和 Chrome Debugger。
+        浏览器内部页面、扩展页面、Chrome Web Store 和浏览器 PDF 查看器仍可能被浏览器禁止读取；
+        本地文件还需要在扩展详情中开启“允许访问文件网址”。
+        <span v-if="pagePermissionState === 'missing'">当前扩展尚未获得全站访问权限，请在扩展管理页将网站访问设置为“所有网站”。</span>
+      </div>
       <div class="manual-label">也可以粘贴正文继续对话：</div>
       <textarea
         v-model="manualText"
@@ -193,7 +196,6 @@ const chatApiBaseUrl = ref('');
 const chatApiKey = ref('');
 const previousApiProvider = ref<'deepseek' | 'gemini' | 'openai' | 'compatible'>('deepseek');
 const pagePermissionState = ref<'checking' | 'granted' | 'missing' | 'unknown'>('checking');
-const currentPageOriginPattern = ref('');
 const debuggerPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported' | 'unknown'>('checking');
 const chatModel = ref('');
 const chatThinkingMode = ref<'disabled' | 'adaptive' | 'enabled'>('adaptive');
@@ -222,7 +224,10 @@ const chatConfigIssues = computed(() => {
   return [];
 });
 const pagePermissionLabel = computed(() => ({
-  checking: '检查中', granted: '可访问', missing: '未授权', unknown: '无法确认',
+  checking: '检查中',
+  granted: '所有网站',
+  missing: '未获得全站访问权限',
+  unknown: '浏览器受限页面 / 未知',
 }[pagePermissionState.value]));
 const debuggerPermissionLabel = computed(() => ({
   checking: '检查中', granted: '已授权', missing: '未授权', unsupported: 'Firefox 不支持', unknown: '无法确认',
@@ -556,10 +561,10 @@ async function send() {
     try {
       const endpoint = new URL(chatApiBaseUrl.value.trim() || CHAT_API_DEFAULTS[chatProvider.value].baseUrl);
       const originPattern = `${endpoint.protocol}//${endpoint.host}/*`;
-      // permissions.request also resolves true for an origin that is already granted.
-      const granted = await browser.permissions.request({ origins: [originPattern] });
+      // 主机权限由 Manifest 的 <all_urls> 统一授予；不再在发送消息时逐个申请 API 域名。
+      const granted = await browser.permissions.contains({ origins: [originPattern] });
       if (!granted) {
-        chatOptionsError.value = `尚未授予模型 API 主机访问权限：${endpoint.host}`;
+        chatOptionsError.value = `扩展尚未获得全站访问权限，无法访问模型 API 主机：${endpoint.host}。请在扩展管理页将网站访问设置为“所有网站”。`;
         return;
       }
     } catch (error) {
@@ -643,46 +648,36 @@ async function refreshPermissionStatus() {
   pagePermissionState.value = 'checking';
   debuggerPermissionState.value = 'checking';
   try {
-    const firefox = /Firefox\//i.test(navigator.userAgent);
-    if (firefox) debuggerPermissionState.value = 'unsupported';
-    else debuggerPermissionState.value = await browser.permissions.contains({ permissions: ['debugger'] }) ? 'granted' : 'missing';
+    const firefox = /Firefox\\//i.test(navigator.userAgent);
+    if (firefox) {
+      debuggerPermissionState.value = 'unsupported';
+    } else {
+      debuggerPermissionState.value = await browser.permissions.contains({ permissions: ['debugger'] })
+        ? 'granted'
+        : 'missing';
+    }
+
+    // 全站权限在 Manifest 中统一声明，安装/升级时由浏览器一次性授予。
+    pagePermissionState.value = await browser.permissions.contains({ origins: ['<all_urls>'] })
+      ? 'granted'
+      : 'missing';
 
     const tabId = getSourceTabId();
     const tab = tabId == null ? null : await browser.tabs.get(tabId).catch(() => null);
     const rawUrl = tab?.url || pageContext.value?.url || '';
+    if (!rawUrl) return;
+
     const pageUrl = new URL(rawUrl);
-    if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') {
+    if (pageUrl.protocol === 'file:') {
       pagePermissionState.value = 'unknown';
-      if (pageUrl.protocol === 'file:') {
-        chatOptionsError.value = '本地文件页面需要在扩展详情中手动开启“允许访问文件网址”；about:、浏览器内部页和 PDF 查看器不支持自动读取。';
-      }
-      return;
+      chatOptionsError.value = '读取本地文件还需要在扩展详情页开启“允许访问文件网址”。';
+    } else if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') {
+      pagePermissionState.value = 'unknown';
+      chatOptionsError.value = '当前是浏览器内部或扩展页面，浏览器可能禁止扩展读取其内容。';
     }
-    const originPattern = `${pageUrl.protocol}//${pageUrl.host}/*`;
-    currentPageOriginPattern.value = originPattern;
-    pagePermissionState.value = await browser.permissions.contains({ origins: [originPattern] }) ? 'granted' : 'missing';
   } catch {
     pagePermissionState.value = 'unknown';
     if (debuggerPermissionState.value === 'checking') debuggerPermissionState.value = 'unknown';
-  }
-}
-
-async function requestPageAccess() {
-  try {
-    const tabId = getSourceTabId();
-    const originPattern = currentPageOriginPattern.value;
-    if (tabId == null || !originPattern) return;
-    // Invoke request before any awaited operation so the browser still sees the user gesture.
-    const granted = await browser.permissions.request({ origins: [originPattern] });
-    await refreshPermissionStatus();
-    if (granted) {
-      chatOptionsError.value = '已获得当前网站访问权限，正在刷新原网页以加载内容脚本。';
-      await browser.tabs.reload(tabId);
-    } else {
-      chatOptionsError.value = '浏览器未授予当前网站访问权限；请在扩展管理页面的网站访问权限中允许访问。';
-    }
-  } catch (error) {
-    chatOptionsError.value = error instanceof Error ? error.message : '申请网页访问权限失败';
   }
 }
 

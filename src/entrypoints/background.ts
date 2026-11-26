@@ -47,6 +47,7 @@ import { buildChatSystem, chatStream, type ChatMessage } from './service/chat';
 import { validateChatApiSettings } from './service/chatApi';
 import { openSidePanel } from './utils/sidePanel';
 import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
+import { getPageHtmlViaDebugger } from './utils/debuggerPageReader';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -1245,12 +1246,15 @@ export default defineBackground({
 
     /**
      * 兜底：用 offscreen 文档解析页面取正文。
-     * 流程：scripting.executeScript 拿 HTML → 发 offscreen 用 DOMParser 抽正文。
-     * 失败（无 offscreen API / 页面不可注入）返回 null，让 UI 走手动粘贴。
+     * 流程：Content Script → scripting.executeScript → Chrome Debugger/CDP 拿 HTML
+     * → offscreen DOMParser 抽正文。浏览器保留页面仍无法绕过访问限制。
      */
     async function getPageContextViaOffscreen(tabId: number): Promise<PageContext | null> {
       try {
-        const html = await getPageHtmlViaScripting(tabId);
+        // Scripting 是轻量首选；只有脚本注入失败时才短暂 attach Debugger。
+        // Debugger 读取后会立即 detach，不长期占用 DevTools 调试会话。
+        const scriptingHtml = await getPageHtmlViaScripting(tabId);
+        const html = scriptingHtml || await getPageHtmlViaDebugger(tabId);
         if (!html) return null;
         const text = (await parseHtmlViaOffscreen(html))
           .replace(/\s+/g, ' ')

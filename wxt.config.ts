@@ -28,17 +28,16 @@ export default defineConfig({
       // Firefox (Desktop & Android)
       // 需要访问默认翻译服务端 s.sunxiunan.com，以及 DeepSeek API。
       // 桌面 Firefox 完整支持 contextMenus，Android Firefox 会静默忽略不支持的 API。
-      manifest.permissions = ['storage', 
-        'contextMenus', 
+      // 网页翻译和网页对话需要直接访问用户打开的任意网站，因此安装时申请全站访问。
+      // Firefox 不实现 Chrome debugger API；页面读取仍由 Content Script + Scripting 完成。
+      manifest.permissions = [
+        'storage',
+        'contextMenus',
         'tabs',
         'activeTab',
         'scripting',
-        'https://s.sunxiunan.com/*', 'https://ss.dal.workers.dev/*',
-        'https://api.deepseek.com/*', 'https://generativelanguage.googleapis.com/*', 'https://api.openai.com/*',
-        'http://127.0.0.1:8789/*', 'http://localhost:8789/*'];
-      // Firefox uses MV2 optional_permissions; ask for the active site only when the user opens web chat.
-      // Chrome's debugger API has no Firefox implementation, including Firefox Android.
-      manifest.optional_permissions = ['https://*/*', 'http://*/*', 'file:///*'];
+        '<all_urls>',
+      ];
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
@@ -50,23 +49,18 @@ export default defineConfig({
       };
     } else {
       // Chrome & other Chromium browsers
-      manifest.permissions = ['storage', 'contextMenus',
-        'debugger',         
+      // debugger 用于常规页面读取失败时的 Chrome DevTools Protocol 兜底。
+      // <all_urls> 覆盖网页翻译、网页对话和自定义 API 主机，不再逐站点申请权限。
+      manifest.permissions = [
+        'storage',
+        'contextMenus',
+        'debugger',
         'tabs',
         'activeTab',
         'scripting',
-        'offscreen'];
-      manifest.host_permissions = [
-        'https://api.deepseek.com/*',
-        'https://generativelanguage.googleapis.com/*',
-        'https://api.openai.com/*',
-        'https://s.sunxiunan.com/*',
-        'https://ss.dal.workers.dev/*',
-        'http://127.0.0.1:8789/*',
-        'http://localhost:8789/*',
+        'offscreen',
       ];
-      // Keep broad page access optional; the chat page requests only the current site's origin.
-      manifest.optional_host_permissions = ['https://*/*', 'http://*/*', 'file:///*'];
+      manifest.host_permissions = ['<all_urls>'];
       manifest.commands = {
         'translate-page': {
           suggested_key: {
