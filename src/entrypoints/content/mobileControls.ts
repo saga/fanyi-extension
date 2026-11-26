@@ -44,7 +44,7 @@ export function setupMobileControls(handlers: MobileControlHandlers): () => void
     areaName: string,
   ) => {
     if (areaName !== 'local') return;
-    const updated = changes['local:config']?.newValue as { mobileFloatingButtonEnabled?: boolean } | undefined;
+    const updated = (changes.config?.newValue ?? changes['local:config']?.newValue) as { mobileFloatingButtonEnabled?: boolean } | undefined;
     if (updated) button.hidden = updated.mobileFloatingButtonEnabled === false;
   };
   browser.storage.onChanged.addListener(onStorageChanged);
