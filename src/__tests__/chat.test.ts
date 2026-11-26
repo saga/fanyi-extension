@@ -54,13 +54,12 @@ describe('chat service', () => {
     ['compatible', 'https://api.example.com/v1', 'custom-model'],
   ] as const)('uses the OpenAI-compatible endpoint for %s', async (provider, baseUrl, model) => {
     const sse = ['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n'];
-    const fetchMock = vi.fn().mockResolvedValue({
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
       status: 200,
       body: makeSSE(sse),
       text: async () => '',
     });
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const settings = { provider, baseUrl, apiKey: 'test-key', model };
     for await (const _partial of chatStream('', [{ role: 'user', content: 'hello' }], { api: settings })) {
