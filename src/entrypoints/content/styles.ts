@@ -126,6 +126,7 @@ export function getStyles(isMobile: boolean): string {
       user-select: none;
       -webkit-tap-highlight-color: transparent;
     }
+    .fanyi-floating-btn[hidden] { display: none !important; }
     .fanyi-floating-btn:active { transform: scale(0.94); opacity: 1; }
     .fanyi-floating-btn:hover, .fanyi-floating-btn:focus-visible { opacity: 1; }
     .fanyi-floating-btn-label { font-size: 14px; font-weight: 600; line-height: 1; }
