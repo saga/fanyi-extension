@@ -73,7 +73,7 @@ describe('chat service', () => {
         Authorization: 'Bearer test-key',
       },
     }));
-    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(request.body)).model).toBe(model);
   });
 
