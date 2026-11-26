@@ -24,6 +24,7 @@ const defaultConfig: Config = {
   promptStyle: 'default',
   translationMode: 'technical',
   webEnhancedQuality: false,
+  mobileFloatingButtonEnabled: true,
   documentEnglishFontFamily: 'Georgia',
   documentChineseFontFamily: 'Noto Serif CJK SC',
   documentEnglishFontSize: 17,
