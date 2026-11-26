@@ -13,45 +13,74 @@
     </header>
 
     <!-- 对话执行配置独立于网页/文档翻译配置；远端调用 Vocal Saga Cloud，本地调用 local-agent-service。 -->
-    <section class="chat-controls">
-      <label>执行服务
-        <select v-model="chatBackend" :disabled="streaming" @change="onBackendChange">
-          <option value="remote">Vocal Saga 远端服务</option>
-          <option value="workbuddy">本地 Workbuddy</option>
-          <option value="opencode">本地 OpenCode</option>
-        </select>
-      </label>
-      <label>模型
-        <input v-model="chatModel" list="chat-model-options" :disabled="streaming" placeholder="自动 / 输入模型 ID" @change="saveChatSettings" />
-        <datalist id="chat-model-options">
-          <option v-for="model in availableModels" :key="model.id" :value="model.id" />
-        </datalist>
-      </label>
-      <label>思考模式
-        <select v-model="chatThinkingMode" :disabled="streaming" @change="saveChatSettings">
-          <option value="disabled">关闭</option>
-          <option value="adaptive">自适应</option>
-          <option value="enabled">开启</option>
-        </select>
-      </label>
-      <label>思考强度
-        <select v-model="chatEffort" :disabled="streaming" @change="saveChatSettings">
-          <option value="low">低</option>
-          <option value="medium">中</option>
-          <option value="high">高</option>
-          <option value="xhigh">极高</option>
-        </select>
-      </label>
-      <label v-if="chatBackend === 'remote'">远端服务 Token
-        <input v-model="remoteServiceToken" type="password" autocomplete="off" placeholder="Vocal Saga AUTH_KEY" @change="onRemoteTokenChange" />
-      </label>
-      <label v-if="chatBackend !== 'remote' && availableSkills.length">Agent Skills（服务端）
-        <select v-model="chatSkillIds" multiple :disabled="streaming" @change="saveChatSettings">
-          <option v-for="skill in availableSkills" :key="skill.id" :value="skill.id">{{ skill.name }}</option>
-        </select>
-      </label>
-      <div v-if="chatOptionsError" class="chat-options-error">{{ chatOptionsError }}</div>
-    </section>
+    <details class="chat-settings" :open="!isMobile">
+      <summary>模型与权限 <span class="settings-summary">{{ backendSummary }}</span></summary>
+      <section class="chat-controls">
+        <label>执行服务
+          <select v-model="chatBackend" :disabled="streaming" @change="onBackendChange">
+            <option value="remote">Vocal Saga 远端服务</option>
+            <option value="workbuddy">本地 Workbuddy</option>
+            <option value="opencode">本地 OpenCode</option>
+            <option value="api">直接调用模型 API</option>
+          </select>
+        </label>
+        <template v-if="chatBackend === 'api'">
+          <label>API Provider
+            <select v-model="chatProvider" :disabled="streaming" @change="onApiProviderChange">
+              <option value="deepseek">DeepSeek</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="openai">OpenAI</option>
+              <option value="compatible">OpenAI-compatible</option>
+            </select>
+          </label>
+          <label class="wide-field">API Base URL
+            <input v-model="chatApiBaseUrl" :disabled="streaming" autocomplete="url" spellcheck="false" placeholder="https://api.example.com/v1" @change="saveChatSettings" />
+          </label>
+          <label class="wide-field">API Key
+            <input v-model="chatApiKey" type="password" :disabled="streaming" autocomplete="off" placeholder="输入 API Key" @change="saveChatSettings" />
+          </label>
+        </template>
+        <label>模型 ID
+          <input v-model="chatModel" list="chat-model-options" :disabled="streaming" placeholder="输入模型 ID" @change="saveChatSettings" />
+          <datalist id="chat-model-options">
+            <option v-for="model in availableModels" :key="model.id" :value="model.id" />
+          </datalist>
+        </label>
+        <label>思考模式
+          <select v-model="chatThinkingMode" :disabled="streaming" @change="saveChatSettings">
+            <option value="disabled">关闭</option>
+            <option value="adaptive">自适应</option>
+            <option value="enabled">开启</option>
+          </select>
+        </label>
+        <label>思考强度
+          <select v-model="chatEffort" :disabled="streaming" @change="saveChatSettings">
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+            <option value="xhigh">极高</option>
+          </select>
+        </label>
+        <label v-if="chatBackend === 'remote'" class="wide-field">远端服务 Token
+          <input v-model="remoteServiceToken" type="password" autocomplete="off" placeholder="Vocal Saga AUTH_KEY" @change="onRemoteTokenChange" />
+        </label>
+        <label v-if="chatBackend !== 'remote' && chatBackend !== 'api' && availableSkills.length" class="wide-field">Agent Skills（服务端）
+          <select v-model="chatSkillIds" multiple :disabled="streaming" @change="saveChatSettings">
+            <option v-for="skill in availableSkills" :key="skill.id" :value="skill.id">{{ skill.name }}</option>
+          </select>
+        </label>
+        <div v-if="chatConfigIssues.length" class="chat-config-warning" role="alert">
+          <strong>配置未完成</strong>
+          <span>{{ chatConfigIssues.join('；') }}</span>
+        </div>
+        <div v-if="chatOptionsError" class="chat-options-error" role="status">{{ chatOptionsError }}</div>
+        <div class="permission-status">
+          <span>网页访问：{{ pagePermissionLabel }}</span>
+          <span>Debugger：{{ debuggerPermissionLabel }}</span>
+          <button v-if="pagePermissionState === 'missing'" type="button" @click="requestPageAccess">授权当前网站</button>
+        </div>
+      </section>
+    </details>
 
     <!-- KV Cache 命中率指示（多轮时 system 前缀命中缓存，输入 token 大幅下降） -->
     <div v-if="usageText" class="usage-hint">{{ usageText }}</div>
@@ -134,6 +163,7 @@ import type { PageContext, GetPageContextResponse } from '@/types/messages';
 import type { ChatUsage } from '@/entrypoints/service/chat';
 import { getConfig, setConfig } from '@/entrypoints/utils/config';
 import { createChatHistoryKey as historyKey } from './chatHistory';
+import { CHAT_API_DEFAULTS, validateChatApiSettings } from '@/entrypoints/service/chatApi';
 
 interface ChatTurn {
   role: 'user' | 'assistant';
@@ -153,7 +183,13 @@ const currentPort = ref<browser.Runtime.Port | null>(null);
 // 手动输入上下文模式：自动读取失败时启用，让用户粘贴正文继续对话
 const manualMode = ref(false);
 const manualText = ref('');
-const chatBackend = ref<'remote' | 'workbuddy' | 'opencode'>('remote');
+const chatBackend = ref<'remote' | 'workbuddy' | 'opencode' | 'api'>('remote');
+const chatProvider = ref<'deepseek' | 'gemini' | 'openai' | 'compatible'>('deepseek');
+const chatApiBaseUrl = ref('');
+const chatApiKey = ref('');
+const previousApiProvider = ref<'deepseek' | 'gemini' | 'openai' | 'compatible'>('deepseek');
+const pagePermissionState = ref<'checking' | 'granted' | 'missing' | 'unknown'>('checking');
+const debuggerPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
 const chatModel = ref('');
 const chatThinkingMode = ref<'disabled' | 'adaptive' | 'enabled'>('adaptive');
 const chatEffort = ref<'low' | 'medium' | 'high' | 'xhigh'>('medium');
@@ -164,6 +200,28 @@ const availableSkills = ref<Array<{ id: string; name: string; description: strin
 const chatOptionsError = ref('');
 
 
+const isMobile = computed(() => window.matchMedia?.('(max-width: 640px)').matches ?? false);
+const backendSummary = computed(() => chatBackend.value === 'api'
+  ? `${chatProvider.value} · ${chatModel.value || '未选择模型'}`
+  : chatBackend.value === 'remote' ? 'Vocal Saga' : chatBackend.value === 'workbuddy' ? 'Workbuddy' : 'OpenCode');
+const chatConfigIssues = computed(() => {
+  if (chatBackend.value === 'api') {
+    return validateChatApiSettings({
+      provider: chatProvider.value,
+      baseUrl: chatApiBaseUrl.value,
+      apiKey: chatApiKey.value,
+      model: chatModel.value,
+    });
+  }
+  if (chatBackend.value === 'remote') return remoteServiceToken.value.trim() ? [] : ['尚未填写 Vocal Saga 远端服务 Token'];
+  return [];
+});
+const pagePermissionLabel = computed(() => ({
+  checking: '检查中', granted: '可访问', missing: '未授权', unknown: '无法确认',
+}[pagePermissionState.value]));
+const debuggerPermissionLabel = computed(() => ({
+  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: 'Firefox 不支持',
+}[debuggerPermissionState.value]));
 const canSend = computed(() => input.value.trim().length > 0 && !!pageContext.value && !streaming.value);
 
 /** KV Cache 命中率摘要：多轮对话时 system 前缀命中缓存，命中率越高越省 token。 */
@@ -179,6 +237,9 @@ async function saveChatSettings() {
   try {
     await setConfig({
       chatBackend: chatBackend.value,
+      chatProvider: chatProvider.value,
+      chatApiBaseUrl: chatApiBaseUrl.value.trim(),
+      chatApiKey: chatApiKey.value.trim(),
       chatModel: chatModel.value.trim(),
       chatThinkingMode: chatThinkingMode.value,
       chatEffort: chatEffort.value,
@@ -193,7 +254,11 @@ async function saveChatSettings() {
 async function loadChatOptions() {
   const config = await getConfig();
   chatBackend.value = config.chatBackend || 'remote';
-  chatModel.value = config.chatModel || '';
+  chatProvider.value = config.chatProvider || 'deepseek';
+  previousApiProvider.value = chatProvider.value;
+  chatApiBaseUrl.value = config.chatApiBaseUrl || CHAT_API_DEFAULTS[chatProvider.value].baseUrl;
+  chatApiKey.value = config.chatApiKey || '';
+  chatModel.value = config.chatModel || CHAT_API_DEFAULTS[chatProvider.value].model;
   chatThinkingMode.value = config.chatThinkingMode || 'adaptive';
   chatEffort.value = config.chatEffort || 'medium';
   chatSkillIds.value = config.chatSkillIds || [];
@@ -206,6 +271,11 @@ async function refreshChatOptions() {
   availableSkills.value = [];
   chatOptionsError.value = '';
   try {
+    if (chatBackend.value === 'api') {
+      const defaults = CHAT_API_DEFAULTS[chatProvider.value];
+      availableModels.value = defaults.model ? [{ id: defaults.model }] : [];
+      return;
+    }
     if (chatBackend.value === 'remote') {
       const config = await getConfig();
       const token = remoteServiceToken.value.trim() || config.remoteServiceToken;
@@ -246,7 +316,27 @@ async function onRemoteTokenChange() {
 }
 
 async function onBackendChange() {
-  chatModel.value = '';
+  if (chatBackend.value === 'api') {
+    const defaults = CHAT_API_DEFAULTS[chatProvider.value];
+    chatModel.value = defaults.model;
+    chatApiBaseUrl.value = defaults.baseUrl;
+  } else {
+    chatModel.value = '';
+  }
+  await saveChatSettings();
+  await refreshChatOptions();
+}
+
+async function onApiProviderChange() {
+  const previousDefaults = CHAT_API_DEFAULTS[previousApiProvider.value];
+  const nextDefaults = CHAT_API_DEFAULTS[chatProvider.value];
+  if (!chatApiBaseUrl.value || chatApiBaseUrl.value === previousDefaults.baseUrl) {
+    chatApiBaseUrl.value = nextDefaults.baseUrl;
+  }
+  if (!chatModel.value || chatModel.value === previousDefaults.model) {
+    chatModel.value = nextDefaults.model;
+  }
+  previousApiProvider.value = chatProvider.value;
   await saveChatSettings();
   await refreshChatOptions();
 }
@@ -444,6 +534,11 @@ function disconnectPort() {
 async function send() {
   const question = input.value.trim();
   if (!question || !pageContext.value || streaming.value) return;
+  if (chatConfigIssues.value.length) {
+    chatOptionsError.value = '请先补全配置：' + chatConfigIssues.value.join('；');
+    return;
+  }
+  chatOptionsError.value = '';
 
   // 把当前问题追加进历史，连同之前的多轮对话一起发给模型
   const history = [
@@ -513,12 +608,54 @@ async function send() {
   });
 }
 
+async function refreshPermissionStatus() {
+  pagePermissionState.value = 'checking';
+  debuggerPermissionState.value = 'checking';
+  try {
+    const firefox = /Firefox\//i.test(navigator.userAgent);
+    if (firefox) debuggerPermissionState.value = 'unsupported';
+    else debuggerPermissionState.value = await browser.permissions.contains({ permissions: ['debugger'] }) ? 'granted' : 'missing';
+
+    const tabId = getSourceTabId();
+    const tab = tabId == null ? null : await browser.tabs.get(tabId).catch(() => null);
+    const rawUrl = tab?.url || pageContext.value?.url || '';
+    const pageUrl = new URL(rawUrl);
+    if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') {
+      pagePermissionState.value = 'unknown';
+      return;
+    }
+    const originPattern = `${pageUrl.protocol}//${pageUrl.host}/*`;
+    pagePermissionState.value = await browser.permissions.contains({ origins: [originPattern] }) ? 'granted' : 'missing';
+  } catch {
+    pagePermissionState.value = 'unknown';
+    if (debuggerPermissionState.value === 'checking') debuggerPermissionState.value = 'unknown' as typeof debuggerPermissionState.value;
+  }
+}
+
+async function requestPageAccess() {
+  try {
+    const tabId = getSourceTabId();
+    if (tabId == null) return;
+    const tab = await browser.tabs.get(tabId);
+    const pageUrl = new URL(tab.url || '');
+    if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') return;
+    const granted = await browser.permissions.request({ origins: [`${pageUrl.protocol}//${pageUrl.host}/*`] });
+    await refreshPermissionStatus();
+    if (!granted) chatOptionsError.value = '浏览器未授予当前网站访问权限；请在扩展管理页面的“网站访问权限”中允许访问。';
+  } catch (error) {
+    chatOptionsError.value = error instanceof Error ? error.message : '申请网页访问权限失败';
+  }
+}
+
 onMounted(async () => {
-  // 模型/Skill 目录不可用不应阻塞网页正文加载和基础对话。
+  // 模型目录不可用不应阻塞正文加载和基础对话。
   void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });
+  void refreshPermissionStatus();
   await initChat();
 });
-onUnmounted(disconnectPort);
+onUnmounted(() => {
+  disconnectPort();
+});
 </script>
 
 <style scoped>
@@ -530,7 +667,10 @@ onUnmounted(disconnectPort);
 .chat-root {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   /* 适配刘海屏 / 手势条 */
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   background: #f7f8fa;
@@ -645,43 +785,116 @@ onUnmounted(disconnectPort);
 }
 
 
+.chat-settings {
+  flex: 0 0 auto;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
+.chat-settings > summary {
+  min-height: 42px;
+  padding: 9px 12px;
+  color: #262626;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-settings > summary::-webkit-details-marker { display: none; }
+.settings-summary {
+  min-width: 0;
+  color: #8c8c8c;
+  font-size: 11px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 8px 12px;
+  gap: 10px 12px;
+  padding: 10px 12px 12px;
   background: #fff;
-  border-bottom: 1px solid #ececec;
-  flex-shrink: 0;
 }
 .chat-controls label {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  color: #666;
-  font-size: 11px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 150px;
+  color: #595959;
+  font-size: 12px;
+  flex: 1 1 170px;
 }
+.chat-controls .wide-field { flex-basis: 100%; }
 .chat-controls select,
 .chat-controls input {
-  min-width: 92px;
-  max-width: 190px;
-  height: 30px;
-  padding: 3px 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 36px;
+  padding: 6px 10px;
   border: 1px solid #d9d9d9;
   border-radius: 6px;
   background: #fff;
-  color: #333;
+  color: #262626;
   font: inherit;
 }
-.chat-controls select[multiple] {
-  height: 58px;
-  min-width: 150px;
+.chat-controls select:focus,
+.chat-controls input:focus {
+  border-color: #1677ff;
+  outline: 2px solid rgb(22 119 255 / 12%);
+}
+.chat-controls select[multiple] { height: 76px; }
+.chat-config-warning {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  color: #ad6800;
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .chat-options-error {
   flex-basis: 100%;
-  color: #c4564f;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.permission-status {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #8c8c8c;
   font-size: 11px;
+}
+.permission-status button {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  background: #e6f4ff;
+  color: #0958d9;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .chat-settings:not([open]) { flex-shrink: 0; }
+  .chat-settings[open] .chat-controls {
+    max-height: min(48dvh, 360px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .chat-controls label { flex-basis: 100%; }
 }
 
 .banner {
@@ -770,8 +983,10 @@ onUnmounted(disconnectPort);
 }
 
 .messages {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding: 12px;
   display: flex;
