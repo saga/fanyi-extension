@@ -107,15 +107,16 @@ export function getStyles(isMobile: boolean): string {
      */
     .fanyi-floating-btn {
       position: fixed;
-      right: 16px;
-      bottom: 20px;
-      width: 52px;
-      height: 52px;
-      border: none;
+      right: 12px;
+      bottom: 16px;
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(255, 255, 255, 0.55);
       border-radius: 50%;
-      background: linear-gradient(135deg, #409eff, #66b1ff);
-      color: #fff;
-      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.3);
+      background: rgba(55, 65, 81, 0.58);
+      color: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.14);
+      opacity: 0.68;
       z-index: 999998;
       display: flex;
       align-items: center;
@@ -125,8 +126,9 @@ export function getStyles(isMobile: boolean): string {
       user-select: none;
       -webkit-tap-highlight-color: transparent;
     }
-    .fanyi-floating-btn:active { transform: scale(0.94); }
-    .fanyi-floating-btn-label { font-size: 20px; font-weight: 700; line-height: 1; }
+    .fanyi-floating-btn:active { transform: scale(0.94); opacity: 1; }
+    .fanyi-floating-btn:hover, .fanyi-floating-btn:focus-visible { opacity: 1; }
+    .fanyi-floating-btn-label { font-size: 14px; font-weight: 600; line-height: 1; }
 
     /* 配置面板（长按悬浮按钮打开）。移动端宽度撑满，避免遮挡状态条。 */
     .fanyi-config-panel {
