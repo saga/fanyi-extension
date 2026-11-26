@@ -648,7 +648,7 @@ async function refreshPermissionStatus() {
   pagePermissionState.value = 'checking';
   debuggerPermissionState.value = 'checking';
   try {
-    const firefox = /Firefox\\//i.test(navigator.userAgent);
+    const firefox = /Firefox\//i.test(navigator.userAgent);
     if (firefox) {
       debuggerPermissionState.value = 'unsupported';
     } else {
