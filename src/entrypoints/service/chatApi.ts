@@ -8,8 +8,8 @@ export interface ChatApiSettings {
 }
 
 export const CHAT_API_DEFAULTS: Record<ChatApiProvider, { baseUrl: string; model: string }> = {
-  deepseek: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-  gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash' },
+  deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash' },
+  gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-3.8-flash' },
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1-mini' },
   compatible: { baseUrl: '', model: '' },
 };
