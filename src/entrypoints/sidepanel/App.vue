@@ -144,6 +144,8 @@
       >JSON</button>
       <textarea
         v-model="input"
+        enterkeyhint="send"
+        autocapitalize="sentences"
         class="input"
         rows="1"
         :placeholder="status === 'ready' ? (jsonMode ? '要求以 JSON 形式回答…' : '输入你的问题…') : '请先加载页面内容'"
@@ -760,7 +762,7 @@ onUnmounted(() => {
   border: 1px solid #d9d9d9;
   border-radius: 8px;
   background: #fff;
-  color: #409eff;
+  color: #1677ff;
   cursor: pointer;
   min-height: 36px;
 }
@@ -801,6 +803,12 @@ onUnmounted(() => {
   .src-url {
     display: none;
   }
+  .close-btn {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+  .reload-btn { min-height: 40px; }
   .src-title {
     max-width: 50vw;
   }
@@ -808,14 +816,14 @@ onUnmounted(() => {
   /* 移动端输入区：压缩两侧固定控件的占位，让"输入框 + 发送"尽量保持同一行；
      发送按钮独占一行时靠 wrap 兜底，不会溢出视口。 */
   .json-toggle {
-    min-width: 38px;
-    min-height: 40px;
+    min-width: 40px;
+    min-height: 44px;
     padding: 0 6px;
     font-size: 11px;
   }
   .send-btn {
     min-width: 48px;
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 10px;
     font-size: 14px;
   }
@@ -942,7 +950,7 @@ onUnmounted(() => {
   padding: 8px 12px;
   font-size: 12px;
   background: #eef4ff;
-  color: #409eff;
+  color: #1677ff;
   flex-shrink: 0;
 }
 
@@ -956,13 +964,13 @@ onUnmounted(() => {
 }
 
 .banner.ok {
-  background: #f0f9eb;
-  color: #67a646;
+  background: #f6ffed;
+  color: #52c41a;
 }
 
 .banner.error {
   background: #fef0f0;
-  color: #f56c6c;
+  color: #ff4d4f;
 }
 
 /* KV Cache 命中率提示条 */
@@ -1013,7 +1021,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 .manual-input:focus {
-  border-color: #409eff;
+  border-color: #1677ff;
 }
 .manual-btn {
   align-self: flex-end;
@@ -1022,13 +1030,13 @@ onUnmounted(() => {
   font-weight: 600;
   border: none;
   border-radius: 8px;
-  background: #409eff;
+  background: #1677ff;
   color: #fff;
   cursor: pointer;
   min-height: 36px;
 }
 .manual-btn:disabled {
-  background: #a0cfff;
+  background: #91caff;
   cursor: default;
 }
 
@@ -1065,7 +1073,7 @@ onUnmounted(() => {
   border: 1px solid #ececec;
   border-radius: 8px;
   padding: 10px 12px;
-  color: #409eff;
+  color: #1677ff;
   cursor: pointer;
   text-align: left;
 }
@@ -1092,7 +1100,7 @@ onUnmounted(() => {
 }
 
 .msg.user .bubble {
-  background: #409eff;
+  background: #1677ff;
   color: #fff;
   border-bottom-right-radius: 4px;
 }
@@ -1132,8 +1140,8 @@ onUnmounted(() => {
 }
 
 .json-toggle.active {
-  border-color: #409eff;
-  background: #409eff;
+  border-color: #1677ff;
+  background: #1677ff;
   color: #fff;
 }
 
@@ -1160,7 +1168,7 @@ onUnmounted(() => {
 }
 
 .input:focus {
-  border-color: #409eff;
+  border-color: #1677ff;
 }
 
 .input:disabled {
@@ -1174,7 +1182,7 @@ onUnmounted(() => {
   padding: 0 16px;
   border: none;
   border-radius: 12px;
-  background: #409eff;
+  background: #1677ff;
   color: #fff;
   font-size: 15px;
   font-weight: 600;
@@ -1182,7 +1190,7 @@ onUnmounted(() => {
 }
 
 .send-btn:disabled {
-  background: #a0cfff;
+  background: #91caff;
   cursor: default;
 }
 </style>
