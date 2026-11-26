@@ -7,8 +7,25 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { showConfigPanel } = vi.hoisted(() => ({ showConfigPanel: vi.fn() }));
+const { showConfigPanel, addStorageListener, removeStorageListener } = vi.hoisted(() => ({
+  showConfigPanel: vi.fn(),
+  addStorageListener: vi.fn(),
+  removeStorageListener: vi.fn(),
+}));
 vi.mock('../entrypoints/content/configPanel', () => ({ showConfigPanel }));
+vi.mock('../entrypoints/utils/config', () => ({
+  getConfig: vi.fn().mockResolvedValue({ mobileFloatingButtonEnabled: true }),
+}));
+vi.mock('webextension-polyfill', () => ({
+  default: {
+    storage: {
+      onChanged: {
+        addListener: addStorageListener,
+        removeListener: removeStorageListener,
+      },
+    },
+  },
+}));
 
 import { setupMobileControls } from '../entrypoints/content/mobileControls';
 
