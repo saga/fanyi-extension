@@ -258,7 +258,7 @@ async function loadChatOptions() {
   previousApiProvider.value = chatProvider.value;
   chatApiBaseUrl.value = config.chatApiBaseUrl || CHAT_API_DEFAULTS[chatProvider.value].baseUrl;
   chatApiKey.value = config.chatApiKey || '';
-  chatModel.value = config.chatModel || CHAT_API_DEFAULTS[chatProvider.value].model;
+  chatModel.value = config.chatModel || (chatBackend.value === 'api' ? CHAT_API_DEFAULTS[chatProvider.value].model : '');
   chatThinkingMode.value = config.chatThinkingMode || 'adaptive';
   chatEffort.value = config.chatEffort || 'medium';
   chatSkillIds.value = config.chatSkillIds || [];
