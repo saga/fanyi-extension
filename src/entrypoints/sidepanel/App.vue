@@ -319,21 +319,39 @@ function applyManualContext() {
 
 const HISTORY_PREFIX = 'chatHistory:';
 
-/**
- * 把当前对话（页上下文 + 多轮消息 + KV 命中）存到 storage.session，
- * 让 side panel 重开同一 tab 时恢复，并在 popup / side panel 间共享。
- * 用 session（浏览器重启即清），避免 tabId 复用读到别的页的历史。
- */
+/** 历史按 tab + 页面 URL 隔离；同一标签页导航到新页面时不能复用旧页面对话。 */
+function historyKey(tabId: number, url: string): string {
+  let normalized = url.trim();
+  try {
+    const parsed = new URL(normalized);
+    parsed.hash = '';
+    parsed.hostname = parsed.hostname.toLowerCase();
+    normalized = parsed.toString();
+  } catch {
+    normalized = normalized || 'manual-context';
+  }
+  // 短而稳定的键，避免把完整 URL（可能含敏感查询参数）写入 storage key。
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < normalized.length; i++) {
+    hash = Math.imul(hash ^ normalized.charCodeAt(i), 0x01000193);
+  }
+  return `${HISTORY_PREFIX}${tabId}:${(hash >>> 0).toString(16)}`;
+}
+
+function historyStore() {
+  return (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
+}
+
+/** 把当前对话存到 session；同一 tab 的不同 URL 使用不同记录。 */
 async function saveHistory() {
   const sid = getSourceTabId();
-  if (sid == null) return;
-  const store = (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
+  const context = pageContext.value;
+  if (sid == null || !context) return;
+  const store = historyStore();
   try {
-    // webextension-polyfill 的 StorageArea.set 只接受单个 items 对象（1 参），
-    // 不能用 set(key, value) 两参形式（会静默抛错、历史写不进去）。
     await store.set({
-      [HISTORY_PREFIX + sid]: {
-        pageContext: pageContext.value,
+      [historyKey(sid, context.url)]: {
+        pageContext: context,
         messages: messages.value.map((m) => ({ role: m.role, content: m.content })),
         usage: lastUsage.value,
         savedAt: Date.now(),
@@ -344,18 +362,35 @@ async function saveHistory() {
   }
 }
 
-/** 恢复历史。返回是否成功恢复（有消息则视为恢复成功）。 */
+/** 仅恢复当前标签页当前 URL 的历史，绝不把上一页面的对话带到新页面。 */
 async function loadHistory(): Promise<boolean> {
   const sid = getSourceTabId();
   if (sid == null) return false;
-  const store = (browser.storage as { session?: typeof browser.storage } & typeof browser.storage).session ?? browser.storage;
+  const store = historyStore();
   try {
-    const result = (await store.get(HISTORY_PREFIX + sid)) as Record<string, any> | undefined;
-    const data = result?.[HISTORY_PREFIX + sid];
-    if (data && Array.isArray(data.messages) && data.messages.length > 0) {
-      pageContext.value = (data.pageContext as PageContext) ?? null;
+    const tab = await browser.tabs.get(sid);
+    const url = tab.url || '';
+    const key = historyKey(sid, url);
+    const result = (await store.get(key)) as Record<string, any> | undefined;
+    const data = result?.[key];
+    if (data && Array.isArray(data.messages) && data.messages.length > 0
+      && data.pageContext && historyKey(sid, data.pageContext.url || '') === key) {
+      pageContext.value = data.pageContext as PageContext;
       messages.value = data.messages as ChatTurn[];
       lastUsage.value = (data.usage as ChatUsage) ?? null;
+      return true;
+    }
+
+    // 兼容升级前按 tabId 保存的历史，但必须先核对 URL，避免跨页面串话。
+    const legacyKey = HISTORY_PREFIX + sid;
+    const legacyResult = (await store.get(legacyKey)) as Record<string, any> | undefined;
+    const legacy = legacyResult?.[legacyKey];
+    if (legacy?.pageContext && historyKey(sid, legacy.pageContext.url || '') === key
+      && Array.isArray(legacy.messages) && legacy.messages.length > 0) {
+      pageContext.value = legacy.pageContext as PageContext;
+      messages.value = legacy.messages as ChatTurn[];
+      lastUsage.value = (legacy.usage as ChatUsage) ?? null;
+      await store.set({ [key]: legacy });
       return true;
     }
   } catch {
@@ -364,7 +399,7 @@ async function loadHistory(): Promise<boolean> {
   return false;
 }
 
-/** 初始化：优先恢复历史，否则实时取页正文。 */
+/** 初始化：先读当前页面对应的历史；没有匹配记录才重新提取正文。 */
 async function initChat() {
   const restored = await loadHistory();
   if (restored && pageContext.value) {
@@ -445,6 +480,16 @@ async function send() {
 
   const port = browser.runtime.connect({ name: 'chat' });
   currentPort.value = port;
+  port.onDisconnect.addListener(() => {
+    // Background service worker 重启或端口意外断开时，不能让 UI 永久停留在生成中。
+    if (currentPort.value !== port) return;
+    currentPort.value = null;
+    if (streaming.value) {
+      assistantTurn.content = assistantTurn.content || '⚠️ 对话连接意外中断，请重试。';
+      streaming.value = false;
+      void saveHistory();
+    }
+  });
   port.onMessage.addListener((msg: unknown) => {
     const m = msg as {
       type?: string;
@@ -485,7 +530,7 @@ async function send() {
   });
 }
 
-onMounted(async () => { await loadChatOptions(); await initChat(); });
+onMounted(async () => {\n  // 模型/Skill 目录不可用不应阻塞网页正文加载和基础对话。\n  void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });\n  await initChat();\n});
 onUnmounted(disconnectPort);
 </script>
 
