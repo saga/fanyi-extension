@@ -57,7 +57,7 @@ describe('chat service', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
       status: 200,
-      body: makeSSE(sse),
+      body: makeSSE(sse) as unknown as ReadableStream<Uint8Array<ArrayBuffer>>,
       text: async () => '',
     });
 
