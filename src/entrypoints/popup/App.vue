@@ -120,6 +120,14 @@
         <input type="checkbox" v-model="config.useServerTranslation" :disabled="config.useLocalAgent" @change="saveConfig" />
         <span>通过远程服务翻译当前页面</span>
       </label>
+      <label class="switch-item">
+        <input
+          type="checkbox"
+          v-model="config.mobileFloatingButtonEnabled"
+          @change="saveConfig"
+        />
+        <span>显示移动端网页悬浮翻译按钮</span>
+      </label>
       <label class="switch-item quality-mode-item">
         <input
           type="checkbox"
