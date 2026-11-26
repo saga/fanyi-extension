@@ -22,6 +22,7 @@ import type browser from 'webextension-polyfill';
 import type { Config } from '../entrypoints/utils/config';
 import type { Glossary } from '../entrypoints/service/_service';
 import type { PromptStyle, TranslationMode } from '../entrypoints/service/deepseek';
+import type { NetworkCaptureSnapshot } from '../entrypoints/utils/networkCapture';
 
 // ============================================================
 // 公共子类型
@@ -142,6 +143,14 @@ export interface GetPageContextMessage {
   sourceTabId?: number;
 }
 
+export type NetworkCaptureCommandMessage =
+  | { action: 'networkCaptureStart'; sourceTabId?: number; includeBodies?: boolean }
+  | { action: 'networkCaptureStop' }
+  | { action: 'networkCaptureClear' };
+export type NetworkCaptureCommandResponse =
+  | { success: true; snapshot: NetworkCaptureSnapshot }
+  | { success: false; error: string };
+
 /**
  * 消息中枢：popup / side panel 把"要发给 content script 的消息"统一交给
  * background 转发，集中控制失败处理（无 content script 时的友好错误）。
@@ -214,6 +223,7 @@ export type BackgroundMessage =
   | ClearCacheMessage
   | CheckConfigMessage
   | GetPageContextMessage
+  | NetworkCaptureCommandMessage
   | RelayToContentMessage
   | FetchRemoteCssMessage
   | ProxyServerFetchMessage
@@ -398,6 +408,7 @@ export type BackgroundResponse =
   | ClearCacheResponse
   | CheckConfigResponse
   | GetPageContextResponse
+  | NetworkCaptureCommandResponse
   | RelayToContentResponse
   | FetchRemoteCssResponse
   | ProxyServerFetchResponse

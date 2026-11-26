@@ -1,0 +1,139 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createNetworkCaptureController } from '../entrypoints/utils/networkCapture';
+
+function event() {
+  let listener: ((details: any) => unknown) | undefined;
+  return {
+    addListener: vi.fn((next: (details: any) => unknown) => { listener = next; }),
+    removeListener: vi.fn(),
+    fire(details: any) { return listener?.(details); },
+  };
+}
+
+describe('NetworkCaptureController', () => {
+  it('captures Firefox webRequest metadata and bounded text bodies while redacting secrets', async () => {
+    const onBeforeRequest = event();
+    const onBeforeSendHeaders = event();
+    const onHeadersReceived = event();
+    const onCompleted = event();
+    const onErrorOccurred = event();
+    const filter = {
+      ondata: undefined as ((event: { data: ArrayBuffer }) => void) | undefined,
+      onstop: undefined as (() => void) | undefined,
+      onerror: undefined as (() => void) | undefined,
+      write: vi.fn(),
+      close: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    const webRequest = {
+      onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
+      filterResponseData: vi.fn(() => filter),
+    };
+    const controller = createNetworkCaptureController({ webRequest });
+
+    const started = await controller.start(23, true);
+    expect(started.mode).toBe('firefox-webRequest');
+    expect(onBeforeRequest.addListener).toHaveBeenCalledWith(
+      expect.any(Function), { urls: ['<all_urls>'], tabId: 23 }, ['blocking', 'requestBody'],
+    );
+
+    onBeforeRequest.fire({
+      requestId: 'req-1', tabId: 23, url: 'https://example.test/api?access_token=abc',
+      method: 'POST', type: 'xmlhttprequest', timeStamp: 100,
+      requestBody: { formData: { prompt: ['hello'], api_key: ['secret-value'] } },
+    });
+    onBeforeSendHeaders.fire({
+      requestId: 'req-1',
+      requestHeaders: [{ name: 'Authorization', value: 'Bearer private' }, { name: 'Accept', value: 'application/json' }],
+    });
+    onHeadersReceived.fire({
+      requestId: 'req-1', statusCode: 200, statusLine: 'HTTP/2 200',
+      responseHeaders: [{ name: 'content-type', value: 'application/json; charset=utf-8' }],
+    });
+
+    const data = new TextEncoder().encode('{"result":"ok","access_token":"body-secret"}');
+    filter.ondata?.({ data: data.buffer });
+    filter.onstop?.();
+    onCompleted.fire({ requestId: 'req-1', statusCode: 200, timeStamp: 145 });
+
+    const record = controller.snapshot().requests[0];
+    expect(record.url).toContain('access_token=%5BREDACTED%5D');
+    expect(record.requestHeaders?.Authorization).toBe('[REDACTED]');
+    expect(record.requestHeaders?.Accept).toBe('application/json');
+    expect(record.requestBody).toContain('[REDACTED]');
+    expect(record.requestBody).not.toContain('secret-value');
+    expect(record.responseBody).toContain('[REDACTED]');
+    expect(record.responseBody).not.toContain('body-secret');
+    expect(record.durationMs).toBe(45);
+    expect(filter.write).toHaveBeenCalledTimes(1);
+    expect(filter.close).toHaveBeenCalledTimes(1);
+
+    await controller.stop();
+    expect(onBeforeRequest.removeListener).toHaveBeenCalledTimes(1);
+    expect(controller.snapshot().active).toBe(false);
+  });
+
+  it('uses Chromium CDP Network events and detaches when stopped', async () => {
+    const eventListeners = new Set<(...args: any[]) => void>();
+    const detachListeners = new Set<(...args: any[]) => void>();
+    const debuggerApi = {
+      onEvent: {
+        addListener: (listener: (...args: any[]) => void) => eventListeners.add(listener),
+        removeListener: (listener: (...args: any[]) => void) => eventListeners.delete(listener),
+      },
+      onDetach: {
+        addListener: (listener: (...args: any[]) => void) => detachListeners.add(listener),
+        removeListener: (listener: (...args: any[]) => void) => detachListeners.delete(listener),
+      },
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn(async (_target: unknown, method: string) => {
+        if (method === 'Network.getResponseBody') return { body: '{"ok":true}', base64Encoded: false };
+        return {};
+      }),
+      detach: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = createNetworkCaptureController({}, { debugger: debuggerApi });
+
+    await controller.start(9, true);
+    expect(debuggerApi.attach).toHaveBeenCalledWith({ tabId: 9 }, '1.3');
+
+    const emit = (method: string, params: any) => {
+      for (const listener of eventListeners) listener({ tabId: 9 }, method, params);
+    };
+    emit('Network.requestWillBeSent', {
+      requestId: 'cdp-1', type: 'Fetch',
+      request: { url: 'https://example.test/api?token=abc', method: 'GET', headers: { Accept: 'application/json' } },
+    });
+    emit('Network.responseReceived', {
+      requestId: 'cdp-1', response: { status: 200, statusText: 'OK', mimeType: 'application/json', headers: { 'set-cookie': 'secret' } },
+    });
+    emit('Network.loadingFinished', { requestId: 'cdp-1', encodedDataLength: 14 });
+    await Promise.resolve();
+
+    const record = controller.snapshot().requests[0];
+    expect(record.url).toContain('token=%5BREDACTED%5D');
+    expect(record.status).toBe(200);
+    expect(record.responseHeaders?.['set-cookie']).toBe('[REDACTED]');
+    expect(record.responseBody).toBe('{"ok":true}');
+
+    await controller.stop();
+    expect(debuggerApi.detach).toHaveBeenCalledWith({ tabId: 9 });
+    expect(controller.snapshot().active).toBe(false);
+    expect(eventListeners.size).toBe(0);
+  });
+
+  it('keeps capture opt-in and preserves records after stopping', async () => {
+    const events = [event(), event(), event(), event(), event()];
+    const webRequest = {
+      onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
+      onCompleted: events[3], onErrorOccurred: events[4],
+    };
+    const controller = createNetworkCaptureController({ webRequest });
+    await controller.start(4, false);
+    expect(events[0].addListener).toHaveBeenCalledWith(
+      expect.any(Function), { urls: ['<all_urls>'], tabId: 4 }, undefined,
+    );
+    await controller.stop();
+    expect(controller.snapshot().requests).toEqual([]);
+  });
+});

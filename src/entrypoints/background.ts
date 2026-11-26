@@ -48,6 +48,7 @@ import { validateChatApiSettings } from './service/chatApi';
 import { openSidePanel } from './utils/sidePanel';
 import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
 import { getPageHtmlViaDebugger } from './utils/debuggerPageReader';
+import { createNetworkCaptureController } from './utils/networkCapture';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -56,6 +57,15 @@ export default defineBackground({
   },
   main() {
     logger.debug('Background script loaded');
+
+    const networkCapture = createNetworkCaptureController(browser, (globalThis as any).chrome);
+    const networkInspectorPorts = new Set<browser.Runtime.Port>();
+    networkCapture.subscribe((snapshot) => {
+      for (const port of networkInspectorPorts) {
+        try { port.postMessage({ type: 'snapshot', snapshot }); }
+        catch { networkInspectorPorts.delete(port); }
+      }
+    });
 
     // Check which APIs are supported
     const isContextMenuSupported = !!browser.contextMenus;
@@ -380,6 +390,17 @@ export default defineBackground({
             await handleCheckConfig(sendResponse as (r: CheckConfigResponse) => void);
           } else if (message.action === 'getPageContext') {
             await handleGetPageContext(message, sendResponse as (r: GetPageContextResponse) => void);
+          } else if (message.action === 'networkCaptureStart') {
+            const tabId = await getActiveContentTabId(message.sourceTabId);
+            if (tabId == null) sendResponse({ success: false, error: '找不到可捕获网络请求的网页标签页' });
+            else {
+              try { sendResponse({ success: true, snapshot: await networkCapture.start(tabId, message.includeBodies === true) }); }
+              catch (error) { sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }); }
+            }
+          } else if (message.action === 'networkCaptureStop') {
+            sendResponse({ success: true, snapshot: await networkCapture.stop() });
+          } else if (message.action === 'networkCaptureClear') {
+            sendResponse({ success: true, snapshot: networkCapture.clear() });
           } else if (message.action === 'relayToContent') {
             await handleRelayToContent(message, sendResponse as (r: RelayToContentResponse) => void);
           } else if (message.action === 'fetchRemoteCss') {
@@ -1300,6 +1321,12 @@ export default defineBackground({
     // 端口方式比一次性 sendMessage 更适合长文本流式输出，且 Android 同样支持。
     // ============================================================
     browser.runtime.onConnect.addListener((port) => {
+      if (port.name === 'network-inspector') {
+        networkInspectorPorts.add(port);
+        port.postMessage({ type: 'snapshot', snapshot: networkCapture.snapshot() });
+        port.onDisconnect.addListener(() => networkInspectorPorts.delete(port));
+        return;
+      }
       if (port.name !== 'chat') return;
 
       const controller = new AbortController();

@@ -1,0 +1,424 @@
+/**
+ * Per-tab Network Inspector.
+ *
+ * Firefox (including Android) uses the background webRequest API. Chromium uses
+ * the DevTools Protocol Network domain through chrome.debugger. The inspector
+ * is opt-in, scoped to one tab, bounded in memory, and redacts credentials.
+ */
+export type NetworkCaptureMode = 'firefox-webRequest' | 'chromium-cdp';
+
+export interface NetworkRequestRecord {
+  id: string;
+  url: string;
+  method: string;
+  resourceType?: string;
+  startedAt: number;
+  durationMs?: number;
+  status?: number;
+  statusText?: string;
+  mimeType?: string;
+  error?: string;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseBody?: string;
+  bodyTruncated?: boolean;
+}
+
+export interface NetworkCaptureSnapshot {
+  active: boolean;
+  tabId: number | null;
+  startedAt: number | null;
+  includeBodies: boolean;
+  mode: NetworkCaptureMode | null;
+  requests: NetworkRequestRecord[];
+}
+
+const MAX_REQUESTS = 150;
+const MAX_BODY_BYTES = 32 * 1024;
+const SENSITIVE_KEY = /(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)/i;
+const TEXT_MIME = /(?:^text\/|json|xml|javascript|x-www-form-urlencoded|graphql)/i;
+
+function sanitizeUrl(input: string): string {
+  try {
+    const url = new URL(input);
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_KEY.test(key)) url.searchParams.set(key, '[REDACTED]');
+    }
+    return url.toString();
+  } catch {
+    return input;
+  }
+}
+
+function sanitizeValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) return '[MAX_DEPTH]';
+  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, depth + 1));
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      result[key] = SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeValue(item, depth + 1);
+    }
+    return result;
+  }
+  return value;
+}
+
+function sanitizeBody(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  const raw = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!raw) return undefined;
+  try {
+    return JSON.stringify(sanitizeValue(JSON.parse(raw)));
+  } catch {
+    return raw
+      .replace(/(Bearer\s+)[^\s"'&,]+/gi, '$1[REDACTED]')
+      .replace(/((?:api[_-]?key|access[_-]?token|password|secret)=)[^&\s]+/gi, '$1[REDACTED]')
+      .slice(0, MAX_BODY_BYTES);
+  }
+}
+
+function sanitizeHeaders(input: unknown): Record<string, string> {
+  if (!input || typeof input !== 'object') return {};
+  const result: Record<string, string> = {};
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      if (!item || typeof item.name !== 'string') continue;
+      result[item.name] = SENSITIVE_KEY.test(item.name) ? '[REDACTED]' : String(item.value ?? '');
+    }
+    return result;
+  }
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    result[key] = SENSITIVE_KEY.test(key) ? '[REDACTED]' : String(value ?? '');
+  }
+  return result;
+}
+
+function decodeBytes(chunks: Uint8Array[], total: number): string {
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    const part = chunk.subarray(0, Math.min(chunk.length, total - offset));
+    bytes.set(part, offset);
+    offset += part.length;
+    if (offset >= total) break;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function isTextMime(mimeType?: string): boolean {
+  return !!mimeType && TEXT_MIME.test(mimeType);
+}
+
+function cloneSnapshot(state: NetworkCaptureSnapshot): NetworkCaptureSnapshot {
+  return {
+    ...state,
+    requests: state.requests.map((item) => ({ ...item })),
+  };
+}
+
+type Listener = (snapshot: NetworkCaptureSnapshot) => void;
+
+export class NetworkCaptureController {
+  private state: NetworkCaptureSnapshot = {
+    active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [],
+  };
+  private listeners = new Set<Listener>();
+  private webListeners: Array<{ event: any; listener: (...args: any[]) => unknown }> = [];
+  private requestById = new Map<string, NetworkRequestRecord>();
+  private streams = new Map<string, { filter: any; chunks: Uint8Array[]; bytes: number }>();
+  private chromeApi: any;
+  private browserApi: any;
+  private debuggerTarget: { tabId: number } | null = null;
+  private debuggerEventListener?: (...args: any[]) => void;
+  private debuggerDetachListener?: (...args: any[]) => void;
+  private stopping = false;
+  private sequence = 0;
+
+  constructor(browserApi: any, chromeApi?: any) {
+    this.browserApi = browserApi;
+    this.chromeApi = chromeApi;
+  }
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    listener(this.snapshot());
+    return () => this.listeners.delete(listener);
+  }
+
+  snapshot(): NetworkCaptureSnapshot {
+    return cloneSnapshot(this.state);
+  }
+
+  private emit(): void {
+    const snapshot = this.snapshot();
+    for (const listener of this.listeners) listener(snapshot);
+  }
+
+  private upsert(record: NetworkRequestRecord): void {
+    this.requestById.set(record.id, record);
+    this.state.requests = [...this.requestById.values()]
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .slice(0, MAX_REQUESTS);
+    const retained = new Set(this.state.requests.map((item) => item.id));
+    for (const id of this.requestById.keys()) {
+      if (!retained.has(id)) this.requestById.delete(id);
+    }
+    this.emit();
+  }
+
+  async start(tabId: number, includeBodies = false): Promise<NetworkCaptureSnapshot> {
+    if (!Number.isInteger(tabId) || tabId < 0) throw new Error('无效的标签页 ID');
+    await this.stop();
+
+    const webRequest = this.browserApi?.webRequest;
+    const chromeDebugger = this.chromeApi?.debugger;
+    if (!chromeDebugger && webRequest?.onBeforeRequest?.addListener) {
+      this.state = {
+        active: true, tabId, startedAt: Date.now(), includeBodies,
+        mode: 'firefox-webRequest', requests: this.state.requests,
+      };
+      this.registerWebRequestListeners(webRequest, tabId, includeBodies);
+      this.emit();
+      return this.snapshot();
+    }
+    if (chromeDebugger?.attach && chromeDebugger?.sendCommand) {
+      await this.startChromium(chromeDebugger, tabId, includeBodies);
+      return this.snapshot();
+    }
+    throw new Error('当前浏览器没有可用的网络请求捕获 API');
+  }
+
+  private registerWebRequestListeners(web: any, tabId: number, includeBodies: boolean): void {
+    const filter = { urls: ['<all_urls>'], tabId };
+    const add = (event: any, listener: (...args: any[]) => unknown, extra?: string[]) => {
+      event.addListener(listener, filter, extra);
+      this.webListeners.push({ event, listener });
+    };
+
+    add(web.onBeforeRequest, (details: any) => {
+      if (!this.matchesTab(details.tabId)) return;
+      const id = String(details.requestId);
+      const record: NetworkRequestRecord = {
+        id, url: sanitizeUrl(details.url), method: details.method || 'GET',
+        resourceType: details.type, startedAt: details.timeStamp || Date.now(),
+      };
+      if (includeBodies && details.requestBody) {
+        record.requestBody = sanitizeBody({
+          formData: details.requestBody.formData,
+          raw: details.requestBody.raw?.map((part: any) => {
+            try {
+              const bytes = part.bytes ? new Uint8Array(part.bytes) : null;
+              return bytes ? new TextDecoder().decode(bytes) : undefined;
+            } catch { return undefined; }
+          }).filter(Boolean),
+        });
+      }
+      this.upsert(record);
+
+      // Firefox's filterResponseData is the response-body API on Android too.
+      // Always pass bytes through; only retain a small text/JSON preview.
+      if (includeBodies && details.type === 'xmlhttprequest' && typeof web.filterResponseData === 'function') {
+        try {
+          const stream = web.filterResponseData(id);
+          const capture = { filter: stream, chunks: [] as Uint8Array[], bytes: 0 };
+          this.streams.set(id, capture);
+          stream.ondata = (event: any) => {
+            const bytes = new Uint8Array(event.data);
+            if (capture.bytes < MAX_BODY_BYTES) {
+              const part = bytes.slice(0, Math.min(bytes.length, MAX_BODY_BYTES - capture.bytes));
+              capture.chunks.push(part);
+              capture.bytes += part.length;
+            }
+            stream.write(event.data);
+          };
+          stream.onstop = () => {
+            const current = this.requestById.get(id);
+            if (current && isTextMime(current.mimeType)) {
+              current.responseBody = sanitizeBody(decodeBytes(capture.chunks, capture.bytes));
+              current.bodyTruncated = capture.bytes >= MAX_BODY_BYTES;
+              this.upsert(current);
+            }
+            this.streams.delete(id);
+            try { stream.close(); } catch { /* stream already closed */ }
+          };
+          stream.onerror = () => {
+            this.streams.delete(id);
+            try { stream.disconnect(); } catch { /* ignore */ }
+          };
+        } catch {
+          // Some Firefox contexts expose webRequest but not filterResponseData.
+        }
+      }
+    }, includeBodies ? ['blocking', 'requestBody'] : undefined);
+
+    add(web.onBeforeSendHeaders, (details: any) => {
+      const record = this.requestById.get(String(details.requestId));
+      if (!record) return;
+      record.requestHeaders = sanitizeHeaders(details.requestHeaders);
+      this.upsert(record);
+    }, ['requestHeaders']);
+
+    add(web.onHeadersReceived, (details: any) => {
+      const record = this.requestById.get(String(details.requestId));
+      if (!record) return;
+      record.status = details.statusCode;
+      record.statusText = details.statusLine;
+      record.responseHeaders = sanitizeHeaders(details.responseHeaders);
+      record.mimeType = details.responseHeaders?.find((header: any) =>
+        String(header.name).toLowerCase() === 'content-type')?.value?.split(';')[0];
+      this.upsert(record);
+    }, ['responseHeaders']);
+
+    add(web.onCompleted, (details: any) => {
+      const record = this.requestById.get(String(details.requestId));
+      if (!record) return;
+      record.status = details.statusCode;
+      record.durationMs = Math.max(0, (details.timeStamp || Date.now()) - record.startedAt);
+      this.upsert(record);
+    });
+
+    add(web.onErrorOccurred, (details: any) => {
+      const record = this.requestById.get(String(details.requestId));
+      if (!record) return;
+      record.error = details.error || 'Network request failed';
+      record.durationMs = Math.max(0, (details.timeStamp || Date.now()) - record.startedAt);
+      this.upsert(record);
+    });
+  }
+
+  private matchesTab(tabId: number): boolean {
+    return this.state.active && this.state.tabId === tabId;
+  }
+
+  private async startChromium(debuggerApi: any, tabId: number, includeBodies: boolean): Promise<void> {
+    const target = { tabId };
+    this.debuggerTarget = target;
+    this.state = {
+      active: true, tabId, startedAt: Date.now(), includeBodies,
+      mode: 'chromium-cdp', requests: this.state.requests,
+    };
+    this.debuggerEventListener = (source: any, method: string, params: any) => {
+      if (source?.tabId !== tabId || !this.state.active) return;
+      const id = String(params?.requestId ?? '');
+      if (!id) return;
+      if (method === 'Network.requestWillBeSent') {
+        const request = params.request || {};
+        const record: NetworkRequestRecord = {
+          id, url: sanitizeUrl(String(request.url || '')), method: request.method || 'GET',
+          resourceType: params.type, startedAt: Date.now(),
+          requestHeaders: sanitizeHeaders(request.headers),
+          ...(includeBodies && request.postData ? { requestBody: sanitizeBody(request.postData) } : {}),
+        };
+        this.upsert(record);
+      } else if (method === 'Network.responseReceived') {
+        const record = this.requestById.get(id);
+        if (!record) return;
+        const response = params.response || {};
+        record.status = response.status;
+        record.statusText = response.statusText;
+        record.mimeType = response.mimeType;
+        record.responseHeaders = sanitizeHeaders(response.headers);
+        this.upsert(record);
+      } else if (method === 'Network.loadingFinished') {
+        const record = this.requestById.get(id);
+        if (!record) return;
+        record.durationMs = Math.max(0, Date.now() - record.startedAt);
+        this.upsert(record);
+        if (includeBodies && isTextMime(record.mimeType)
+          && Number(params.encodedDataLength || 0) <= MAX_BODY_BYTES) {
+          void debuggerApi.sendCommand(target, 'Network.getResponseBody', { requestId: id })
+            .then((result: any) => {
+              const current = this.requestById.get(id);
+              if (!current || !result || typeof result.body !== 'string') return;
+              let body = result.body;
+              if (result.base64Encoded) {
+                try {
+                  const binary = atob(body);
+                  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+                  body = new TextDecoder().decode(bytes);
+                } catch { return; }
+              }
+              current.responseBody = sanitizeBody(body);
+              this.upsert(current);
+            }).catch(() => {});
+        }
+      } else if (method === 'Network.loadingFailed') {
+        const record = this.requestById.get(id);
+        if (!record) return;
+        record.error = params.errorText || 'Network request failed';
+        record.durationMs = Math.max(0, Date.now() - record.startedAt);
+        this.upsert(record);
+      }
+    };
+    this.debuggerDetachListener = (source: any) => {
+      if (source?.tabId !== tabId || this.stopping) return;
+      this.state.active = false;
+      this.state.mode = null;
+      this.debuggerTarget = null;
+      this.emit();
+    };
+    debuggerApi.onEvent?.addListener(this.debuggerEventListener);
+    debuggerApi.onDetach?.addListener(this.debuggerDetachListener);
+    try {
+      await debuggerApi.attach(target, '1.3');
+      await debuggerApi.sendCommand(target, 'Network.enable', {
+        maxTotalBufferSize: 2 * 1024 * 1024,
+        maxResourceBufferSize: MAX_BODY_BYTES,
+      });
+      this.emit();
+    } catch (error) {
+      this.state.active = false;
+      this.state.mode = null;
+      this.debuggerTarget = null;
+      this.removeDebuggerListeners(debuggerApi);
+      throw new Error(error instanceof Error ? error.message : '无法连接 Chrome Debugger');
+    }
+  }
+
+  private removeDebuggerListeners(debuggerApi: any): void {
+    if (this.debuggerEventListener) debuggerApi.onEvent?.removeListener(this.debuggerEventListener);
+    if (this.debuggerDetachListener) debuggerApi.onDetach?.removeListener(this.debuggerDetachListener);
+    this.debuggerEventListener = undefined;
+    this.debuggerDetachListener = undefined;
+  }
+
+  async stop(): Promise<NetworkCaptureSnapshot> {
+    this.stopping = true;
+    for (const { event, listener } of this.webListeners) {
+      try { event.removeListener(listener); } catch { /* listener already removed */ }
+    }
+    this.webListeners = [];
+    for (const stream of this.streams.values()) {
+      try { stream.filter.disconnect(); } catch { /* request already completed */ }
+    }
+    this.streams.clear();
+
+    const target = this.debuggerTarget;
+    const debuggerApi = this.chromeApi?.debugger;
+    if (target && debuggerApi) {
+      this.removeDebuggerListeners(debuggerApi);
+      try { await debuggerApi.detach(target); } catch { /* tab closed or already detached */ }
+    }
+    this.debuggerTarget = null;
+    this.state.active = false;
+    this.state.tabId = null;
+    this.state.startedAt = null;
+    this.state.includeBodies = false;
+    this.state.mode = null;
+    this.stopping = false;
+    this.emit();
+    return this.snapshot();
+  }
+
+  clear(): NetworkCaptureSnapshot {
+    this.requestById.clear();
+    this.state.requests = [];
+    this.emit();
+    return this.snapshot();
+  }
+}
+
+export function createNetworkCaptureController(browserApi: any, chromeApi?: any): NetworkCaptureController {
+  return new NetworkCaptureController(browserApi, chromeApi);
+}

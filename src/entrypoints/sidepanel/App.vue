@@ -76,6 +76,27 @@
       </section>
     </details>
 
+    <details class="network-panel">
+      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? '采集中' : '已停止' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
+      <section class="network-inspector">
+        <div class="network-toolbar">
+          <button :disabled="networkSnapshot.active" @click="startNetworkCapture">开始</button>
+          <button :disabled="!networkSnapshot.active" @click="stopNetworkCapture">停止</button>
+          <button @click="clearNetworkCapture">清空</button>
+          <label><input v-model="networkIncludeBodies" type="checkbox" :disabled="networkSnapshot.active" /> 捕获正文</label>
+        </div>
+        <p class="network-help">仅捕获当前对话来源标签页。正文捕获默认关闭；开启后仅保留小体积文本/JSON，敏感字段脱敏。</p>
+        <p v-if="networkError" class="network-error">{{ networkError }}</p>
+        <div class="network-list">
+          <button v-for="item in networkSnapshot.requests" :key="item.id" @click="selectedNetworkId = item.id" :class="{ selected: selectedNetworkId === item.id }">
+            <b>{{ item.method }}</b><span>{{ item.status || item.error || '…' }}</span><span>{{ networkLabel(item.url) }}</span>
+          </button>
+          <p v-if="!networkSnapshot.requests.length">暂无请求。开始捕获后，在网页中执行操作。</p>
+        </div>
+        <pre v-if="selectedNetworkRequest">{{ JSON.stringify(selectedNetworkRequest, null, 2) }}</pre>
+      </section>
+    </details>
+
     <div v-if="chatConfigIssues.length" class="banner config-warning" role="alert">
       对话配置未完成：{{ chatConfigIssues.join('；') }}
     </div>
@@ -166,7 +187,8 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import browser from 'webextension-polyfill';
 import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
-import type { PageContext, GetPageContextResponse } from '@/types/messages';
+import type { PageContext, GetPageContextResponse, NetworkCaptureCommandResponse } from '@/types/messages';
+import type { NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
 import type { ChatUsage } from '@/entrypoints/service/chat';
 import { getConfig, setConfig } from '@/entrypoints/utils/config';
 import { createChatHistoryKey as historyKey } from './chatHistory';
@@ -178,6 +200,12 @@ interface ChatTurn {
 }
 
 const pageContext = ref<PageContext | null>(null);
+const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
+const networkIncludeBodies = ref(false);
+const networkError = ref('');
+const selectedNetworkId = ref('');
+let networkPort: browser.Runtime.Port | null = null;
+const selectedNetworkRequest = computed<NetworkRequestRecord | null>(() => networkSnapshot.value.requests.find((item) => item.id === selectedNetworkId.value) ?? networkSnapshot.value.requests[0] ?? null);
 const status = ref<'loading' | 'ready' | 'error'>('loading');
 const errorMsg = ref('');
 const messages = ref<ChatTurn[]>([]);
@@ -374,6 +402,36 @@ function scrollToBottom() {
     if (el) el.scrollTop = el.scrollHeight;
   });
 }
+
+function connectNetworkInspector() {
+  const port = browser.runtime.connect({ name: 'network-inspector' });
+  networkPort = port;
+  port.onMessage.addListener((message: unknown) => {
+    const event = message as { type?: string; snapshot?: NetworkCaptureSnapshot };
+    if (event.type !== 'snapshot' || !event.snapshot) return;
+    networkSnapshot.value = event.snapshot;
+    if (!event.snapshot.requests.some((item) => item.id === selectedNetworkId.value)) selectedNetworkId.value = event.snapshot.requests[0]?.id || '';
+  });
+  port.onDisconnect.addListener(() => { if (networkPort === port) networkPort = null; });
+}
+async function startNetworkCapture() {
+  networkError.value = '';
+  try {
+    const response = await browser.runtime.sendMessage({ action: 'networkCaptureStart', sourceTabId: getSourceTabId(), includeBodies: networkIncludeBodies.value }) as NetworkCaptureCommandResponse;
+    if (!response.success) throw new Error(response.error);
+    networkSnapshot.value = response.snapshot;
+    selectedNetworkId.value = response.snapshot.requests[0]?.id || '';
+  } catch (error) { networkError.value = error instanceof Error ? error.message : String(error); }
+}
+async function stopNetworkCapture() {
+  try { const response = await browser.runtime.sendMessage({ action: 'networkCaptureStop' }) as NetworkCaptureCommandResponse; if (!response.success) throw new Error(response.error); networkSnapshot.value = response.snapshot; }
+  catch (error) { networkError.value = error instanceof Error ? error.message : String(error); }
+}
+async function clearNetworkCapture() {
+  try { const response = await browser.runtime.sendMessage({ action: 'networkCaptureClear' }) as NetworkCaptureCommandResponse; if (!response.success) throw new Error(response.error); networkSnapshot.value = response.snapshot; selectedNetworkId.value = ''; }
+  catch (error) { networkError.value = error instanceof Error ? error.message : String(error); }
+}
+function networkLabel(url: string): string { try { const parsed = new URL(url); return parsed.host + parsed.pathname + parsed.search; } catch { return url; } }
 
 function getSourceTabId(): number | undefined {
   const params = new URLSearchParams(window.location.search);
@@ -687,6 +745,7 @@ function syncVisualViewport() {
 }
 
 onMounted(async () => {
+  connectNetworkInspector();
   syncVisualViewport();
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
   window.visualViewport?.addEventListener('scroll', syncVisualViewport);
@@ -697,6 +756,8 @@ onMounted(async () => {
   await initChat();
 });
 onUnmounted(() => {
+  try { networkPort?.disconnect(); } catch { /* already disconnected */ }
+  networkPort = null;
   window.visualViewport?.removeEventListener('resize', syncVisualViewport);
   window.visualViewport?.removeEventListener('scroll', syncVisualViewport);
   window.removeEventListener('resize', syncVisualViewport);
@@ -1196,4 +1257,17 @@ onUnmounted(() => {
   background: #91caff;
   cursor: default;
 }
+.network-panel { border-bottom: 1px solid #ececec; max-height: min(45dvh, 420px); overflow: auto; }
+.network-panel > summary { padding: 9px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.network-inspector { padding: 0 10px 10px; }
+.network-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.network-toolbar button { padding: 5px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; }
+.network-toolbar label, .network-help { font-size: 11px; color: #8c8c8c; }
+.network-list { max-height: 150px; overflow: auto; border: 1px solid #eee; }
+.network-list button { width: 100%; display: grid; grid-template-columns: 48px 55px minmax(0,1fr); gap: 6px; padding: 6px; border: 0; border-bottom: 1px solid #f3f3f3; text-align: left; background: #fff; font-size: 11px; }
+.network-list button.selected { background: #e6f4ff; }
+.network-list button span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.network-list p, .network-error { padding: 6px; font-size: 11px; }
+.network-error { color: #cf1322; }
+.network-inspector pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #fafafa; padding: 8px; }
 </style>
