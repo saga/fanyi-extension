@@ -32,6 +32,7 @@ export function setupMobileControls(handlers: MobileControlHandlers): () => void
   button.title = '点按翻译 / 恢复，长按打开设置';
   button.setAttribute('aria-label', '翻译控制');
   button.innerHTML = '<span class="fanyi-floating-btn-label">译</span>';
+  button.hidden = true;
   document.body.appendChild(button);
 
   // Keep the control in sync when the user changes its visibility in the extension popup.
