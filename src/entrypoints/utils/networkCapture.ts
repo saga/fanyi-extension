@@ -49,7 +49,7 @@ export interface NetworkCaptureSnapshot {
 
 const MAX_REQUESTS = 150;
 const MAX_BODY_BYTES = 32 * 1024;
-const SENSITIVE_KEY = /(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)/i;
+const SENSITIVE_KEY = /(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|client[-_]?secret|private[-_]?key|credential|session|auth|jwt)/i;
 const TEXT_MIME = /(?:^text\/|json|xml|javascript|x-www-form-urlencoded|graphql)/i;
 
 function sanitizeUrl(input: string): string {
@@ -67,8 +67,8 @@ function sanitizeUrl(input: string): string {
 function sanitizeText(value: string): string {
   return value
     .replace(/(Bearer\s+)[^\s"'&,]+/gi, '$1[REDACTED]')
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|session|authorization|credential)=)[^&\s]+/gi, '$1[REDACTED]')
-    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)["']?\s*[:=]\s*["']?)[^"'&,}\s]+(["']?)/gi, '$1[REDACTED]$2');
+    .replace(/((?:[a-z0-9_.-]*?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|client[_-]?secret|private[_-]?key|password|passwd|secret|session[_-]?(?:id|key|token)?|authorization|credential|auth)[a-z0-9_.-]*=))[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|client[-_]?secret|private[-_]?key|credential|session[_-]?(?:id|key|token)?|auth|jwt)["']?\s*[:=]\s*["']?)[^"'&,}\s]+(["']?)/gi, '$1[REDACTED]$2');
 }
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
