@@ -67,7 +67,7 @@ function sanitizeUrl(input: string): string {
 function sanitizeText(value: string): string {
   return value
     .replace(/(Bearer\s+)[^\s"'&,]+/gi, '$1[REDACTED]')
-    .replace(/((?:[a-z0-9_.-]*?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|client[_-]?secret|private[_-]?key|password|passwd|secret|session[_-]?(?:id|key|token)?|authorization|credential|auth)[a-z0-9_.-]*=))[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|client[_-]?secret|private[_-]?key|password|passwd|secret|session[_-]?(?:id|key|token)?|authorization|credential|auth)=)[^&\s]+/gi, '$1[REDACTED]')
     .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|client[-_]?secret|private[-_]?key|credential|session[_-]?(?:id|key|token)?|auth|jwt)["']?\s*[:=]\s*["']?)[^"'&,}\s]+(["']?)/gi, '$1[REDACTED]$2');
 }
 
