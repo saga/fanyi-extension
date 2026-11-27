@@ -99,6 +99,20 @@ describe('Agent tool execution gates', () => {
     }));
   });
 
+  it('does not run page tools when the chat has no real HTTP(S) page context', async () => {
+    const browserApi = {
+      tabs: { get: vi.fn() },
+      scripting: { executeScript: vi.fn() },
+    };
+    const request = validateAgentToolRequest({
+      tool: 'page.inspect', arguments: {}, reason: '读取页面',
+    });
+    await expect(executeAgentToolInExtension(request, 8, browserApi, undefined))
+      .rejects.toThrow(/没有已读取的 HTTP\(S\) 网页上下文/);
+    expect(browserApi.tabs.get).not.toHaveBeenCalled();
+    expect(browserApi.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
   it('rejects page actions when the source tab navigated since context extraction', async () => {
     const browserApi = {
       tabs: { get: vi.fn().mockResolvedValue({ url: 'https://other.example/' }) },

@@ -61,6 +61,9 @@ export async function previewAgentPageClick(
   browserApi: any = (globalThis as any).browser,
 ): Promise<PageActionResult> {
   if (!Number.isInteger(sourceTabId) || (sourceTabId as number) < 0) throw new Error('当前对话没有有效的来源标签页');
+  if (!expectedSourceUrl || !/^https?:\/\//i.test(expectedSourceUrl)) {
+    throw new Error('当前对话没有已读取的 HTTP(S) 网页上下文；请重新加载网页后再预览点击目标');
+  }
   if (expectedSourceUrl) {
     const tab = await browserApi.tabs.get(sourceTabId as number);
     if (!tab?.url || withoutHash(tab.url) !== withoutHash(expectedSourceUrl)) {
@@ -92,6 +95,9 @@ export async function executeAgentToolInExtension(
   const args = request.arguments;
   if (request.tool.startsWith('page.')) {
     if (!Number.isInteger(sourceTabId) || (sourceTabId as number) < 0) throw new Error('当前对话没有有效的来源标签页');
+    if (!expectedSourceUrl || !/^https?:\/\//i.test(expectedSourceUrl)) {
+      throw new Error('当前对话没有已读取的 HTTP(S) 网页上下文；请重新加载网页后再执行页面操作');
+    }
     if (expectedSourceUrl) {
       const tab = await browserApi.tabs.get(sourceTabId as number);
       if (!tab?.url || withoutHash(tab.url) !== withoutHash(expectedSourceUrl)) {
