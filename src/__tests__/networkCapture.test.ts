@@ -6,7 +6,7 @@ function event() {
   return {
     addListener: vi.fn((next: (details: any) => unknown) => { listener = next; }),
     removeListener: vi.fn(),
-    fire(details: any) { return listener?.(details); },
+    fire(...args: any[]) { return listener?.(...args); },
   };
 }
 
@@ -179,6 +179,42 @@ describe('NetworkCaptureController', () => {
 
     await controller.stop();
     expect(controller.snapshot().active).toBe(false);
+  });
+
+  it('automatically falls back when CDP is detached by DevTools', async () => {
+    const onBeforeRequest = event();
+    const onBeforeSendHeaders = event();
+    const onHeadersReceived = event();
+    const onCompleted = event();
+    const onErrorOccurred = event();
+    const webRequest = {
+      onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
+    };
+    const onEvent = event();
+    const onDetach = event();
+    const debuggerApi = {
+      onEvent, onDetach,
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue({}),
+      detach: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const started = await controller.start(66, true);
+    expect(started.mode).toBe('chromium-cdp');
+
+    onDetach.fire({ tabId: 66 }, 'canceled_by_user');
+    expect(controller.snapshot().active).toBe(true);
+    expect(controller.snapshot().mode).toBe('chromium-webRequest');
+    expect(onBeforeRequest.addListener).toHaveBeenCalled();
+
+    onBeforeRequest.fire({
+      requestId: 'after-devtools', tabId: 66, url: 'https://example.test/after-devtools',
+      method: 'GET', type: 'xmlhttprequest', timeStamp: 300,
+    });
+    expect(controller.snapshot().requests[0]?.id).toBe('after-devtools');
+
+    await controller.stop();
   });
 
   it('clears requests when automatic capture switches to a different source tab', async () => {
