@@ -327,7 +327,7 @@ describe('NetworkCaptureController', () => {
     const controller = createNetworkCaptureController({ webRequest });
     await controller.start(55, true);
 
-    const raw = new TextEncoder().encode('api_key=raw-secret&password=another-secret').buffer;
+    const raw = new TextEncoder().encode('api_key=raw-secret&password=another-secret&client_secret=third-secret&session_id=fourth-secret').buffer;
     events[0]!.fire({
       requestId: 'raw-body', tabId: 55, url: 'https://example.test/form',
       method: 'POST', type: 'xmlhttprequest', timeStamp: 1,
@@ -337,6 +337,8 @@ describe('NetworkCaptureController', () => {
     expect(rawRecord?.requestBody).toContain('[REDACTED]');
     expect(rawRecord?.requestBody).not.toContain('raw-secret');
     expect(rawRecord?.requestBody).not.toContain('another-secret');
+    expect(rawRecord?.requestBody).not.toContain('third-secret');
+    expect(rawRecord?.requestBody).not.toContain('fourth-secret');
 
     const largeRaw = new TextEncoder().encode(JSON.stringify({ note: 'x'.repeat(40 * 1024) })).buffer;
     events[0]!.fire({
