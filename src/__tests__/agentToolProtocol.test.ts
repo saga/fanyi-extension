@@ -23,6 +23,14 @@ describe('Agent tool protocol', () => {
     })).toThrow(/HTTP/);
   });
 
+  it('rejects oversized whole tool requests before processing arguments', () => {
+    expect(() => validateAgentToolRequest({
+      tool: 'page.inspect',
+      arguments: { ignored: 'x'.repeat(33000) },
+      reason: '检查页面',
+    })).toThrow(/32 KB/);
+  });
+
   it('requires RP ID and a server challenge for passkey operations', () => {
     expect(() => validateAgentToolRequest({
       tool: 'webauthn.create', arguments: { options: { rp: { id: 'example.com' }, user: { id: 'dQ==' } } }, reason: '注册',

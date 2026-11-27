@@ -67,6 +67,7 @@ function requireOptions(value: unknown, kind: 'create' | 'get'): Record<string, 
 export function validateAgentToolRequest(value: unknown): AgentToolRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('工具请求必须是 JSON 对象');
   const input = value as Record<string, unknown>;
+  if (JSON.stringify(input).length > 32768) throw new Error('Agent 工具请求超过 32 KB 限制');
   if (typeof input.tool !== 'string' || !TOOL_NAMES.has(input.tool as AgentToolName)) throw new Error('Agent 请求了不支持的工具');
   const args = input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments)
     ? input.arguments as Record<string, unknown> : {};
