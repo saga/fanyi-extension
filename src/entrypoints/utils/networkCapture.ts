@@ -87,7 +87,7 @@ function sanitizeBody(value: unknown): string | undefined {
   if (!raw) return undefined;
   let sanitized: string;
   try {
-    sanitized = JSON.stringify(sanitizeValue(JSON.parse(raw)));
+    sanitized = JSON.stringify(sanitizeValue(JSON.parse(raw))) ?? raw;
   } catch {
     sanitized = sanitizeText(raw);
   }
