@@ -141,10 +141,10 @@
             <button :disabled="!pageDomEnabled || !pageContext || pageDomLoading" @click="capturePageDom">
               {{ pageDomLoading ? '读取中…' : '读取当前页面 DOM' }}
             </button>
-            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；快照只在侧栏内存中显示，不进入聊天上下文。</p>
+            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；快照可能包含页面中的个人信息，只在侧栏内存中显示，不进入聊天上下文。</p>
             <p v-if="pageDomError" class="network-error">{{ pageDomError }}</p>
             <details v-if="pageDomSnapshot" class="page-dom-preview">
-              <summary>查看 DOM（{{ pageDomSnapshot.html.length }} 字符{{ pageDomSnapshot.truncated ? '，已截断' : '' }}）</summary>
+              <summary>查看 DOM（原始 {{ pageDomSnapshot.originalLength }} 字节{{ pageDomSnapshot.truncated ? '，已截断至 300 KB' : '' }}）</summary>
               <pre>{{ pageDomSnapshot.html }}</pre>
             </details>
           </div>
@@ -419,20 +419,6 @@ interface PendingAgentTool {
 
 const pageContext = ref<PageContext | null>(null);
 const resolvedSourceTabId = ref<number | undefined>(undefined);
-const pageControlEnabled = ref(false);
-const pageDomEnabled = ref(false);
-const pageNetworkEnabled = ref(false);
-const pageNetworkMode = ref<NetworkCapturePreference>('auto');
-const cookiePermissionGranted = ref(false);
-const cookieLoading = ref(false);
-const cookieError = ref('');
-const cookieRecords = ref<PageCookieRecord[]>([]);
-const revealedCookieKeys = ref<Set<string>>(new Set());
-const pageDomLoading = ref(false);
-const pageDomError = ref('');
-const pageDomSnapshot = ref<PageDomSnapshot | null>(null);
-const webRequestPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
-const cookiePermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
 const pageControlEnabled = ref(false);
 const pageDomEnabled = ref(false);
 const pageNetworkEnabled = ref(false);
@@ -855,6 +841,8 @@ async function onPageNetworkChange() {
   const granted = await requestNetworkPermissions();
   if (!granted) {
     if (!isFirefox.value && pageNetworkMode.value === 'auto' && debuggerPermissionState.value === 'granted') {
+      // webRequest is optional; continue with CDP only if its install-time permission exists.
+      pageNetworkMode.value = 'cdp';
       await ensureNetworkCapture();
     } else {
       pageNetworkEnabled.value = false;
@@ -962,12 +950,15 @@ async function capturePageDom() {
       func: () => {
         const html = document.documentElement?.outerHTML || '';
         const limit = 300 * 1024;
+        const bytes = new TextEncoder().encode(html);
         return {
           title: document.title,
           url: location.href,
-          html: html.slice(0, limit),
-          originalLength: html.length,
-          truncated: html.length > limit,
+          html: bytes.byteLength > limit
+            ? new TextDecoder().decode(bytes.subarray(0, limit))
+            : html,
+          originalLength: bytes.byteLength,
+          truncated: bytes.byteLength > limit,
         };
       },
     });
@@ -1586,7 +1577,6 @@ onMounted(async () => {
   void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });
   void refreshPermissionStatus();
   await initChat();
-  void ensureNetworkCapture();
 });
 onUnmounted(() => {
   networkInspectorEnabled = false;
