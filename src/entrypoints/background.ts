@@ -1429,13 +1429,17 @@ export default defineBackground({
           thinkingMode?: 'disabled' | 'adaptive' | 'enabled';
           effort?: 'low' | 'medium' | 'high' | 'xhigh'; skillIds?: string[];
           remoteServiceToken?: string;
+          pageControlEnabled?: boolean;
         };
 
         void (async () => {
           try {
             const config = await getConfig();
             const backend = m.backend || config.chatBackend || 'remote';
-            const system = buildChatSystem(m.context ?? null, m.jsonMode) + '\n\n' + buildAgentToolInstructions();
+            const pageToolInstruction = m.pageControlEnabled
+              ? buildAgentToolInstructions()
+              : buildAgentToolInstructions() + '\n\nPage Control 当前处于关闭状态：不要请求任何 page.* 工具，也不要尝试绕过此限制读取、操作或修改网页。用户可以在侧栏 Page Control 菜单中明确启用网页 DOM 能力后再使用。';
+            const system = buildChatSystem(m.context ?? null, m.jsonMode) + '\n\n' + pageToolInstruction;
             const llmMessages: ChatMessage[] = [
               { role: 'system', content: system },
               ...(m.history ?? []),
@@ -1529,6 +1533,18 @@ export default defineBackground({
               if (controller.signal.aborted) return;
               const completion = await complete();
               const toolRequest = parseAgentToolRequest(completion.content);
+              if (toolRequest?.tool.startsWith('page.') && m.pageControlEnabled !== true) {
+                const message = '当前 Page Control 的网页 DOM 读取与操作能力已关闭。请先在侧栏 Page Control 菜单中启用，再提出页面操作请求。';
+                port.postMessage({ type: 'partial', text: message });
+                port.postMessage({
+                  type: 'done',
+                  text: message,
+                  usage: completion.usage,
+                  provider: completion.provider,
+                  model: completion.model,
+                });
+                return;
+              }
               if (!toolRequest) {
                 if (!completion.streamed) port.postMessage({ type: 'partial', text: completion.content });
                 port.postMessage({
