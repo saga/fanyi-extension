@@ -59,6 +59,8 @@ export default defineConfig({
         'storage',
         'contextMenus',
         'debugger',
+        // CDP 不可用或 DevTools 接管时，自动降级为只读请求元数据采集。
+        'webRequest',
         'tabs',
         'activeTab',
         'scripting',
