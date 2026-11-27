@@ -244,11 +244,12 @@ let networkCaptureStartPromise: Promise<void> | null = null;
 let networkCaptureStartTabId: number | null = null;
 let agentToolHeartbeatTimer: number | null = null;
 const selectedNetworkRequest = computed<NetworkRequestRecord | null>(() => networkSnapshot.value.requests.find((item) => item.id === selectedNetworkId.value) ?? networkSnapshot.value.requests[0] ?? null);
-const networkModeLabel = computed(() => ({
-  'chromium-cdp': 'CDP',
-  'chromium-webRequest': 'webRequest',
-  'firefox-webRequest': 'webRequest',
-}[networkSnapshot.value.mode || ''] || '自动控制'));
+const networkModeLabel = computed(() => {
+  const mode = networkSnapshot.value.mode;
+  if (mode === 'chromium-cdp') return 'CDP';
+  if (mode === 'chromium-webRequest' || mode === 'firefox-webRequest') return 'webRequest';
+  return '自动控制';
+});
 const status = ref<'loading' | 'ready' | 'error'>('loading');
 const errorMsg = ref('');
 const messages = ref<ChatTurn[]>([]);
