@@ -53,9 +53,9 @@ function sanitizeUrl(input: string): string {
 
 function sanitizeText(value: string): string {
   return value
-    .replace(/(Bearer\\s+)[^\\s"'&,]+/gi, '$1[REDACTED]')
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|session|authorization|credential)=)[^&\\s]+/gi, '$1[REDACTED]')
-    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)["']?\\s*[:=]\\s*["']?)[^"'&,}\\s]+(["']?)/gi, '$1[REDACTED]$2');
+    .replace(/(Bearer\s+)[^\s"'&,]+/gi, '$1[REDACTED]')
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|session|authorization|credential)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)["']?\s*[:=]\s*["']?)[^"'&,}\s]+(["']?)/gi, '$1[REDACTED]$2');
 }
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
@@ -76,7 +76,7 @@ function limitBodyBytes(value: string): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(value);
   if (bytes.byteLength <= MAX_BODY_BYTES) return value;
-  const suffix = '\\n[TRUNCATED]';
+  const suffix = '\n[TRUNCATED]';
   const suffixBytes = encoder.encode(suffix).byteLength;
   return new TextDecoder().decode(bytes.subarray(0, MAX_BODY_BYTES - suffixBytes)) + suffix;
 }
