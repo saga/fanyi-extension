@@ -239,6 +239,7 @@ const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null
 const networkError = ref('');
 const selectedNetworkId = ref('');
 let networkPort: browser.Runtime.Port | null = null;
+let networkInspectorEnabled = false;
 let networkCaptureStartPromise: Promise<void> | null = null;
 let networkCaptureStartTabId: number | null = null;
 let agentToolHeartbeatTimer: number | null = null;
@@ -450,15 +451,33 @@ function scrollToBottom() {
 }
 
 function connectNetworkInspector() {
-  const port = browser.runtime.connect({ name: 'network-inspector' });
-  networkPort = port;
-  port.onMessage.addListener((message: unknown) => {
-    const event = message as { type?: string; snapshot?: NetworkCaptureSnapshot };
-    if (event.type !== 'snapshot' || !event.snapshot) return;
-    networkSnapshot.value = event.snapshot;
-    if (!event.snapshot.requests.some((item) => item.id === selectedNetworkId.value)) selectedNetworkId.value = event.snapshot.requests[0]?.id || '';
-  });
-  port.onDisconnect.addListener(() => { if (networkPort === port) networkPort = null; });
+  if (!networkInspectorEnabled || networkPort) return;
+  try {
+    const port = browser.runtime.connect({ name: 'network-inspector' });
+    networkPort = port;
+    port.onMessage.addListener((message: unknown) => {
+      const event = message as { type?: string; snapshot?: NetworkCaptureSnapshot };
+      if (event.type !== 'snapshot' || !event.snapshot) return;
+      networkSnapshot.value = event.snapshot;
+      if (!event.snapshot.requests.some((item) => item.id === selectedNetworkId.value)) {
+        selectedNetworkId.value = event.snapshot.requests[0]?.id || '';
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (networkPort !== port) return;
+      networkPort = null;
+      // Service worker 重启或短暂断连后自动重连，并恢复当前标签页的网络观测。
+      if (networkInspectorEnabled) {
+        window.setTimeout(() => {
+          if (!networkInspectorEnabled || networkPort) return;
+          connectNetworkInspector();
+          void ensureNetworkCapture();
+        }, 800);
+      }
+    });
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 /** 网络观测随当前对话来源自动启动；同一标签页已有会话时复用，不重复 attach。 */
@@ -1080,6 +1099,7 @@ function syncVisualViewport() {
 }
 
 onMounted(async () => {
+  networkInspectorEnabled = true;
   connectNetworkInspector();
   syncVisualViewport();
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
@@ -1092,6 +1112,7 @@ onMounted(async () => {
   void ensureNetworkCapture();
 });
 onUnmounted(() => {
+  networkInspectorEnabled = false;
   stopAgentToolHeartbeat();
   try { networkPort?.disconnect(); } catch { /* already disconnected */ }
   networkPort = null;
