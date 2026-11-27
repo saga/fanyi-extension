@@ -837,9 +837,12 @@ async function stopNetworkCapture(revokePermission = true) {
     networkError.value = error instanceof Error ? error.message : String(error);
   }
   if (revokePermission) {
-    const permissions = isFirefox.value ? ['webRequest', 'webRequestBlocking'] : ['webRequest'];
     try {
-      await browser.permissions.remove({ permissions });
+      if (isFirefox.value) {
+        await browser.permissions.remove({ permissions: ['webRequest', 'webRequestBlocking'] });
+      } else {
+        await browser.permissions.remove({ permissions: ['webRequest'] });
+      }
       webRequestPermissionState.value = 'missing';
     } catch {
       /* A browser may refuse to remove a permission declared by another feature. */
@@ -873,10 +876,11 @@ async function onPageDomControlChange() {
 
 async function requestNetworkPermissions(): Promise<boolean> {
   if (pageNetworkMode.value === 'cdp') return debuggerPermissionState.value === 'granted';
-  const permissions = isFirefox.value ? ['webRequest', 'webRequestBlocking'] : ['webRequest'];
   try {
     // Must be called directly from the user's Page Control interaction.
-    const granted = await browser.permissions.request({ permissions });
+    const granted = isFirefox.value
+      ? await browser.permissions.request({ permissions: ['webRequest', 'webRequestBlocking'] })
+      : await browser.permissions.request({ permissions: ['webRequest'] });
     webRequestPermissionState.value = granted ? 'granted' : 'missing';
     return granted;
   } catch (error) {
