@@ -148,6 +148,32 @@
               <pre>{{ pageDomSnapshot.html }}</pre>
             </details>
           </div>
+
+          <div class="page-control-section">
+            <strong>页面存储</strong>
+            <button :disabled="!pageDomEnabled || !pageContext || pageStorageLoading" @click="capturePageStorage">{{ pageStorageLoading ? '读取中…' : '读取 localStorage / sessionStorage' }}</button>
+            <p class="page-control-help">只读取当前页面 Origin 的 localStorage 和当前顶层标签页 sessionStorage。值默认遮蔽，只在侧栏内存中展示；不会保存到历史或发送给模型。</p>
+            <p v-if="pageStorageError" class="network-error">{{ pageStorageError }}</p>
+            <div v-if="pageStorageSnapshot" class="storage-preview">
+              <details>
+                <summary>localStorage（{{ pageStorageSnapshot.local.length }} 项）</summary>
+                <div v-for="entry in pageStorageSnapshot.local" :key="'local:' + entry.key" class="storage-row">
+                  <strong>{{ entry.key }}</strong>
+                  <code>{{ revealedStorageKeys.has('local:' + entry.key) ? entry.value : '••••••••' }}</code>
+                  <button @click="toggleStorageReveal('local:' + entry.key)">{{ revealedStorageKeys.has('local:' + entry.key) ? '隐藏' : '显示' }}</button>
+                </div>
+              </details>
+              <details>
+                <summary>sessionStorage（{{ pageStorageSnapshot.session.length }} 项）</summary>
+                <div v-for="entry in pageStorageSnapshot.session" :key="'session:' + entry.key" class="storage-row">
+                  <strong>{{ entry.key }}</strong>
+                  <code>{{ revealedStorageKeys.has('session:' + entry.key) ? entry.value : '••••••••' }}</code>
+                  <button @click="toggleStorageReveal('session:' + entry.key)">{{ revealedStorageKeys.has('session:' + entry.key) ? '隐藏' : '显示' }}</button>
+                </div>
+              </details>
+              <p v-if="pageStorageSnapshot.truncated" class="page-control-help">数据已达到 100 KB 上限并截断。</p>
+            </div>
+          </div>
         </template>
       </section>
     </details>
@@ -388,6 +414,17 @@ interface PageDomSnapshot {
   truncated: boolean;
 }
 
+interface PageStorageEntry {
+  key: string;
+  value: string;
+}
+
+interface PageStorageSnapshot {
+  local: PageStorageEntry[];
+  session: PageStorageEntry[];
+  truncated: boolean;
+}
+
 interface PageCookieRecord {
   name: string;
   value: string;
@@ -431,6 +468,10 @@ const revealedCookieKeys = ref<Set<string>>(new Set());
 const pageDomLoading = ref(false);
 const pageDomError = ref('');
 const pageDomSnapshot = ref<PageDomSnapshot | null>(null);
+const pageStorageLoading = ref(false);
+const pageStorageError = ref('');
+const pageStorageSnapshot = ref<PageStorageSnapshot | null>(null);
+const revealedStorageKeys = ref<Set<string>>(new Set());
 const webRequestPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
 const cookiePermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
 const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
@@ -768,6 +809,21 @@ function clearCookieSnapshot() {
   cookieError.value = '';
 }
 
+function clearPageSnapshots() {
+  pageDomSnapshot.value = null;
+  pageStorageSnapshot.value = null;
+  revealedStorageKeys.value = new Set();
+  pageDomError.value = '';
+  pageStorageError.value = '';
+}
+
+function toggleStorageReveal(key: string) {
+  const next = new Set(revealedStorageKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  revealedStorageKeys.value = next;
+}
+
 async function stopNetworkCapture(revokePermission = true) {
   try {
     const stopped = await browser.runtime.sendMessage({ action: 'networkCaptureStop' }) as NetworkCaptureCommandResponse;
@@ -797,7 +853,7 @@ async function onPageControlChange() {
   }
   pageDomEnabled.value = false;
   pageNetworkEnabled.value = false;
-  pageDomSnapshot.value = null;
+  clearPageSnapshots();
   await stopNetworkCapture(true);
   await disableCookieAccess();
 }
@@ -1003,7 +1059,7 @@ async function loadContext(preferredTabId?: number, restoreHistory = true) {
     void stopNetworkCapture(false);
   }
   clearCookieSnapshot();
-  pageDomSnapshot.value = null;
+  clearPageSnapshots();
   status.value = 'loading';
   errorMsg.value = '';
   pageContext.value = null;
@@ -1018,7 +1074,7 @@ async function loadContext(preferredTabId?: number, restoreHistory = true) {
       pageContext.value = resp.context;
       resolvedSourceTabId.value = resp.tabId ?? getSourceTabId();
       clearCookieSnapshot();
-      pageDomSnapshot.value = null;
+      clearPageSnapshots();
       void refreshPermissionStatus();
       void ensureNetworkCapture();
       // Firefox's desktop sidebar has no sourceTabId query parameter. Once
@@ -1566,6 +1622,75 @@ async function refreshPermissionStatus() {
   }
 }
 
+
+async function capturePageStorage() {
+  const pageUrl = pageContext.value?.url || '';
+  const tabId = getCurrentSourceTabId();
+  if (!pageControlEnabled.value || !pageDomEnabled.value || !pageUrl || tabId == null) return;
+
+  pageStorageLoading.value = true;
+  pageStorageError.value = '';
+  pageStorageSnapshot.value = null;
+  try {
+    const expectedUrl = normalizePageUrl(pageUrl);
+    const tab = await browser.tabs.get(tabId);
+    if (!tab.url || normalizePageUrl(tab.url) !== expectedUrl) {
+      throw new Error('来源标签页已导航，请先重新加载页面上下文。');
+    }
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const limit = 100 * 1024;
+        let used = 0;
+        let truncated = false;
+        const readStorage = (storage: Storage): Array<{ key: string; value: string }> => {
+          const items: Array<{ key: string; value: string }> = [];
+          for (let index = 0; index < storage.length; index++) {
+            const key = storage.key(index);
+            if (key === null) continue;
+            const value = storage.getItem(key) ?? '';
+            const bytes = new TextEncoder().encode(key + value).byteLength;
+            if (used + bytes > limit) {
+              truncated = true;
+              break;
+            }
+            used += bytes;
+            items.push({ key, value });
+          }
+          return items;
+        };
+        try {
+          return {
+            local: readStorage(window.localStorage),
+            session: readStorage(window.sessionStorage),
+            truncated,
+          };
+        } catch (error) {
+          return {
+            local: [],
+            session: [],
+            truncated: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    });
+    const result = results[0]?.result as (PageStorageSnapshot & { error?: string }) | undefined;
+    if (!result) throw new Error('浏览器没有返回页面存储数据。');
+    if (result.error) throw new Error(result.error);
+    pageStorageSnapshot.value = {
+      local: result.local,
+      session: result.session,
+      truncated: result.truncated,
+    };
+    revealedStorageKeys.value = new Set();
+  } catch (error) {
+    pageStorageError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    pageStorageLoading.value = false;
+  }
+}
+
 function syncVisualViewport() {
   const height = window.visualViewport?.height || window.innerHeight;
   document.documentElement.style.setProperty('--chat-viewport-height', `${Math.round(height)}px`);
@@ -1586,7 +1711,7 @@ onMounted(async () => {
 onUnmounted(() => {
   networkInspectorEnabled = false;
   clearCookieSnapshot();
-  pageDomSnapshot.value = null;
+  clearPageSnapshots();
   stopAgentToolHeartbeat();
   try { networkPort?.disconnect(); } catch { /* already disconnected */ }
   networkPort = null;
