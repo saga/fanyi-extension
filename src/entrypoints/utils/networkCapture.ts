@@ -51,8 +51,16 @@ function sanitizeUrl(input: string): string {
   }
 }
 
+function sanitizeText(value: string): string {
+  return value
+    .replace(/(Bearer\\s+)[^\\s"'&,]+/gi, '$1[REDACTED]')
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|session|authorization|credential)=)[^&\\s]+/gi, '$1[REDACTED]')
+    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)["']?\\s*[:=]\\s*["']?)[^"'&,}\\s]+(["']?)/gi, '$1[REDACTED]$2');
+}
+
 function sanitizeValue(value: unknown, depth = 0): unknown {
   if (depth > 8) return '[MAX_DEPTH]';
+  if (typeof value === 'string') return sanitizeText(value);
   if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, depth + 1));
   if (value && typeof value === 'object') {
     const result: Record<string, unknown> = {};
@@ -64,18 +72,26 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
   return value;
 }
 
+function limitBodyBytes(value: string): string {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(value);
+  if (bytes.byteLength <= MAX_BODY_BYTES) return value;
+  const suffix = '\\n[TRUNCATED]';
+  const suffixBytes = encoder.encode(suffix).byteLength;
+  return new TextDecoder().decode(bytes.subarray(0, MAX_BODY_BYTES - suffixBytes)) + suffix;
+}
+
 function sanitizeBody(value: unknown): string | undefined {
   if (value == null) return undefined;
   const raw = typeof value === 'string' ? value : JSON.stringify(value);
   if (!raw) return undefined;
+  let sanitized: string;
   try {
-    return JSON.stringify(sanitizeValue(JSON.parse(raw)));
+    sanitized = JSON.stringify(sanitizeValue(JSON.parse(raw)));
   } catch {
-    return raw
-      .replace(/(Bearer\s+)[^\s"'&,]+/gi, '$1[REDACTED]')
-      .replace(/((?:api[_-]?key|access[_-]?token|password|secret)=)[^&\s]+/gi, '$1[REDACTED]')
-      .slice(0, MAX_BODY_BYTES);
+    sanitized = sanitizeText(raw);
   }
+  return limitBodyBytes(sanitized);
 }
 
 function sanitizeHeaders(input: unknown): Record<string, string> {
