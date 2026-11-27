@@ -50,6 +50,7 @@ import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscree
 import { getPageHtmlViaDebugger } from './utils/debuggerPageReader';
 import { createNetworkCaptureController } from './utils/networkCapture';
 import { buildAgentToolInstructions, parseAgentToolRequest } from './utils/agentToolProtocol';
+import { isSidepanelPortUrl } from './utils/agentPortGuard';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -58,6 +59,11 @@ export default defineBackground({
   },
   main() {
     logger.debug('Background script loaded');
+
+    const sidepanelUrl = browser.runtime.getURL('sidepanel.html');
+    function isSidepanelPort(port: browser.Runtime.Port): boolean {
+      return isSidepanelPortUrl(port.sender?.url, sidepanelUrl);
+    }
 
     const networkCapture = createNetworkCaptureController(browser, (globalThis as any).chrome);
     const networkInspectorPorts = new Set<browser.Runtime.Port>();
@@ -111,13 +117,15 @@ export default defineBackground({
      * 桌面用 currentWindow；Android 该选项无效，靠 lastContentTabId。
      */
     async function getActiveContentTabId(sourceTabId?: number): Promise<number | null> {
-      if (typeof sourceTabId === 'number') {
+      if (sourceTabId !== undefined) {
+        // An explicit source tab is a security boundary, not a preference.
+        // Never silently redirect a stale/closed/restricted source to another tab.
+        if (!Number.isInteger(sourceTabId) || sourceTabId < 0) return null;
         try {
           const t = await browser.tabs.get(sourceTabId);
-          // 只接受可注入 content script 的普通网页；chat 页 / 非 http(s) 页回退
-          if (t && isWebUrl(t.url)) return sourceTabId;
+          return t && isWebUrl(t.url) ? sourceTabId : null;
         } catch {
-          /* tab 可能已关闭 */
+          return null;
         }
       }
       if (lastContentTabId != null) {
@@ -1323,12 +1331,22 @@ export default defineBackground({
     // ============================================================
     browser.runtime.onConnect.addListener((port) => {
       if (port.name === 'network-inspector') {
+        if (!isSidepanelPort(port)) {
+          logger.warn('[Background] rejected non-sidepanel network-inspector port:', port.sender?.url || '(unknown sender)');
+          port.disconnect();
+          return;
+        }
         networkInspectorPorts.add(port);
         port.postMessage({ type: 'snapshot', snapshot: networkCapture.snapshot() });
         port.onDisconnect.addListener(() => networkInspectorPorts.delete(port));
         return;
       }
       if (port.name !== 'chat') return;
+      if (!isSidepanelPort(port)) {
+        logger.warn('[Background] rejected non-sidepanel chat port:', port.sender?.url || '(unknown sender)');
+        port.disconnect();
+        return;
+      }
 
       const controller = new AbortController();
       const pendingToolResults = new Map<string, {
@@ -1415,7 +1433,7 @@ export default defineBackground({
                   finalText = partial;
                   // JSON 和工具请求先缓冲，避免把待确认的调用参数展示成普通回答。
                   const trimmed = partial.trimStart();
-                  if (!m.jsonMode && !trimmed.startsWith('{') && !trimmed.startsWith('```')) {
+                  if (!trimmed.startsWith('{') && !trimmed.startsWith('```')) {
                     port.postMessage({ type: 'partial', text: partial });
                     streamed = true;
                   }
@@ -1504,10 +1522,21 @@ export default defineBackground({
               const requestId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
               port.postMessage({ type: 'tool_request', requestId, request: toolRequest });
               const result = await waitForToolResult(requestId);
+              // Preserve the model's tool request as an assistant turn, then return
+              // only the execution result as untrusted user data. This keeps the
+              // protocol sequence coherent and avoids echoing large/passkey options.
+              llmMessages.push({
+                role: 'assistant',
+                content: JSON.stringify({
+                  type: 'agent_tool_call',
+                  tool: toolRequest.tool,
+                  arguments: toolRequest.arguments,
+                  reason: toolRequest.reason,
+                }),
+              });
               const toolResult = JSON.stringify({
                 type: 'untrusted_extension_tool_result',
                 tool: toolRequest.tool,
-                request: toolRequest,
                 approved: result.approved,
                 result: result.summary,
               }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');

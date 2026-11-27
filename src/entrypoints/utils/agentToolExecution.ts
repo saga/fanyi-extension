@@ -1,6 +1,7 @@
 import type { AgentToolRequest } from './agentToolProtocol';
 import { createExtensionPasskey, getExtensionPasskey, getWebAuthnClientOrigin, getWebAuthnCapability } from './webAuthn';
 import { listContextualIdentities, createTabInIdentity } from './contextualIdentities';
+import { executePageAction, type PageAction, type PageActionResult } from './pageScriptExecution';
 
 export interface AgentToolArtifact {
   title: string;
@@ -47,37 +48,79 @@ function serializeCredential(credential: PublicKeyCredential, operation: 'create
   return payload;
 }
 
+function withoutHash(value: string): string {
+  const url = new URL(value);
+  url.hash = '';
+  return url.href;
+}
+
+export async function previewAgentPageClick(
+  sourceTabId: number | undefined,
+  selector: string,
+  expectedSourceUrl: string | undefined,
+  browserApi: any = (globalThis as any).browser,
+): Promise<PageActionResult> {
+  if (!Number.isInteger(sourceTabId) || (sourceTabId as number) < 0) throw new Error('当前对话没有有效的来源标签页');
+  if (expectedSourceUrl) {
+    const tab = await browserApi.tabs.get(sourceTabId as number);
+    if (!tab?.url || withoutHash(tab.url) !== withoutHash(expectedSourceUrl)) {
+      throw new Error('来源标签页已导航到其他地址；请重新加载页面上下文后再试');
+    }
+  }
+  const result = (await executePageAction(
+    sourceTabId as number,
+    { type: 'clickPreview', selector, expectedPageUrl: expectedSourceUrl },
+    browserApi,
+    (globalThis as any).chrome,
+  )).result;
+  if (!result) throw new Error('无法解析页面点击目标');
+  return result;
+}
+
 /**
- * Called directly by the user's approval click. WebAuthn create/get are invoked
- * before the first asynchronous boundary so browsers retain transient user activation.
+ * Called directly by the user's approval click. The optional-permission request
+ * and WebAuthn operation are started before any earlier async preflight can lose
+ * the browser's transient user-activation context.
  */
 export async function executeAgentToolInExtension(
   request: AgentToolRequest,
   sourceTabId: number | undefined,
   browserApi: any = (globalThis as any).browser,
-): Promise<{ summary: string; artifact?: AgentToolArtifact }> {
+  expectedSourceUrl?: string,
+  expectedClickTarget?: PageActionResult['target'],
+): Promise<{ summary: string; artifact?: AgentToolArtifact; sourceTabId?: number }> {
   const args = request.arguments;
   if (request.tool.startsWith('page.')) {
     if (!Number.isInteger(sourceTabId) || (sourceTabId as number) < 0) throw new Error('当前对话没有有效的来源标签页');
-    const { executePageAction } = await import('./pageScriptExecution');
-    const action = request.tool === 'page.inspect' ? { type: 'inspect' as const, ...(args.selector ? { selector: String(args.selector) } : {}) }
-      : request.tool === 'page.find' ? { type: 'find' as const, text: String(args.text) }
-      : request.tool === 'page.highlight' ? { type: 'highlight' as const, text: String(args.text) }
-      : request.tool === 'page.scroll' ? { type: 'scroll' as const, selector: String(args.selector) }
-      : { type: 'click' as const, selector: String(args.selector) };
+    if (expectedSourceUrl) {
+      const tab = await browserApi.tabs.get(sourceTabId as number);
+      if (!tab?.url || withoutHash(tab.url) !== withoutHash(expectedSourceUrl)) {
+        throw new Error('来源标签页已导航到其他地址；请重新加载页面上下文后再执行操作');
+      }
+    }
+    const action: PageAction = request.tool === 'page.inspect' ? { type: 'inspect', ...(args.selector ? { selector: String(args.selector) } : {}) }
+      : request.tool === 'page.find' ? { type: 'find', text: String(args.text) }
+      : request.tool === 'page.highlight' ? { type: 'highlight', text: String(args.text) }
+      : request.tool === 'page.scroll' ? { type: 'scroll', selector: String(args.selector) }
+      : { type: 'click', selector: String(args.selector), expectedTarget: expectedClickTarget };
+    if (expectedSourceUrl) action.expectedPageUrl = expectedSourceUrl;
+    if (request.tool === 'page.click' && !expectedClickTarget) {
+      throw new Error('点击操作尚未完成目标预览确认');
+    }
     const result = (await executePageAction(sourceTabId as number, action, browserApi, (globalThis as any).chrome)).result;
     if (!result) throw new Error('页面操作没有返回结果');
+    if (!result.ok) throw new Error(result.message);
     return { summary: JSON.stringify(result) };
   }
 
   if (request.tool === 'browser.containers.list' || request.tool === 'browser.containers.open') {
-    // Firefox exposes this browser-specific permission; never attempt to emulate containers elsewhere.
+    // Firefox exposes this browser-specific API. Never emulate cookie isolation elsewhere.
     if (!browserApi?.runtime?.getBrowserInfo) throw new Error('当前浏览器不支持 Firefox Contextual Identities');
+    if (!browserApi?.permissions?.request) throw new Error('当前浏览器不支持扩展权限申请');
     const permissionList = request.tool === 'browser.containers.open'
       ? ['contextualIdentities', 'cookies'] : ['contextualIdentities'];
-    if (!browserApi?.permissions?.contains) throw new Error('当前浏览器不支持扩展权限检查');
-    const granted = await browserApi.permissions.contains({ permissions: permissionList });
-    if (!granted && (!browserApi.permissions.request || !(await browserApi.permissions.request({ permissions: permissionList })))) {
+    // Must be the first async API call after the explicit approval click.
+    if (!(await browserApi.permissions.request({ permissions: permissionList }))) {
       throw new Error('用户未授予 Firefox 容器所需权限');
     }
     if (!browserApi?.contextualIdentities?.query) throw new Error('当前 Firefox 版本或平台不提供容器身份 API');
@@ -87,8 +130,12 @@ export async function executeAgentToolInExtension(
     }
     const identity = identities.find((item) => item.name.toLocaleLowerCase() === String(args.identityName).toLocaleLowerCase());
     if (!identity) throw new Error('找不到指定 Firefox 容器；请先列出容器并使用准确名称');
-    const tab = await createTabInIdentity(String(args.url), identity.cookieStoreId, browserApi);
-    return { summary: `已在 Firefox 容器“${identity.name}”中打开 ${String(args.url)}（标签页 ID：${(tab as any)?.id ?? 'unknown'}）` };
+    const tab = await createTabInIdentity(String(args.url), identity.cookieStoreId, browserApi) as { id?: number } | undefined;
+    if (typeof tab?.id !== 'number') throw new Error('Firefox 未返回新建容器标签页 ID');
+    return {
+      summary: `已在 Firefox 容器“${identity.name}”中打开 ${String(args.url)}（标签页 ID：${tab.id}）`,
+      sourceTabId: tab.id,
+    };
   }
 
   if (request.tool === 'webauthn.capability') {
@@ -101,8 +148,11 @@ export async function executeAgentToolInExtension(
     const rpId = request.tool === 'webauthn.create'
       ? String((options.rp as Record<string, unknown>).id)
       : String(options.rpId);
+    // The manifest grants <all_urls>; do not await a permission preflight here.
+    // navigator.credentials.create/get must be invoked in the approval click's
+    // call stack to retain transient user activation. Browser enforcement is final.
     const operation = request.tool === 'webauthn.create' ? 'create' : 'get';
-    // Start the credential operation directly in the approval click handler.
+    // No await before navigator.credentials.create/get: this is still the approval click's call stack.
     const credentialPromise = operation === 'create'
       ? createExtensionPasskey(options)
       : getExtensionPasskey(options);

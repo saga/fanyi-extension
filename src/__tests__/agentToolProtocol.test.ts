@@ -32,6 +32,40 @@ describe('Agent tool protocol', () => {
     })).toThrow(/RP ID/);
   });
 
+  it('requires complete server-issued WebAuthn registration fields', () => {
+    expect(() => validateAgentToolRequest({
+      tool: 'webauthn.create',
+      arguments: {
+        options: {
+          rp: { id: 'example.com' },
+          user: { id: 'dXNlcg==', name: 'user@example.com', displayName: 'Example User' },
+          challenge: 'Y2hhbGxlbmdl',
+        },
+      },
+      reason: '注册 Passkey',
+    })).toThrow(/RP 名称/);
+
+    expect(() => validateAgentToolRequest({
+      tool: 'webauthn.create',
+      arguments: {
+        options: {
+          rp: { id: 'example.com', name: 'Example' },
+          user: { id: 'dXNlcg==', name: 'user@example.com' },
+          challenge: 'Y2hhbGxlbmdl',
+        },
+      },
+      reason: '注册 Passkey',
+    })).toThrow(/displayName/);
+  });
+
+  it('rejects credential-bearing URLs for container tabs', () => {
+    expect(() => validateAgentToolRequest({
+      tool: 'browser.containers.open',
+      arguments: { url: 'https://user:password@example.com', identityName: 'Work' },
+      reason: '打开页面',
+    })).toThrow(/账号或密码/);
+  });
+
   it('limits serialized WebAuthn options and documents the approval boundary', () => {
     expect(buildAgentToolInstructions()).toContain('用户都必须');
     expect(() => validateAgentToolRequest({
