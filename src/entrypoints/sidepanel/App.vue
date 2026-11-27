@@ -76,19 +76,95 @@
       </section>
     </details>
 
+    <details class="page-control-panel">
+      <summary>Page Control <span class="settings-summary">{{ pageControlEnabled ? '已启用' : '已关闭' }} · {{ pageControlSourceLabel }}</span></summary>
+      <section class="page-control-content">
+        <label class="page-control-master">
+          <input v-model="pageControlEnabled" type="checkbox" @change="onPageControlChange" />
+          启用当前网页的 Page Control
+        </label>
+        <p class="page-control-warning">只作用于当前对话来源标签页。网页操作仍采用固定工具和逐次确认，不开放任意 JavaScript / eval。</p>
+
+        <template v-if="pageControlEnabled">
+          <div class="page-control-row">
+            <label>
+              <input v-model="pageDomEnabled" type="checkbox" @change="onPageDomControlChange" />
+              网页 DOM 读取与操作
+            </label>
+            <span>{{ pageDomEnabled ? '已允许' : '关闭' }}</span>
+          </div>
+          <p class="page-control-help">开启后，Agent 可以按需读取可见内容、查找/高亮文字、滚动和点击页面控件。点击、提交等动作仍需单独批准；不支持任意脚本执行。</p>
+
+          <div class="page-control-row">
+            <label>
+              <input v-model="pageNetworkEnabled" type="checkbox" @change="onPageNetworkChange" />
+              网络请求捕获
+            </label>
+            <select v-model="pageNetworkMode" :disabled="!pageNetworkEnabled || isFirefox" @change="onPageNetworkModeChange">
+              <option value="auto">自动选择</option>
+              <option value="cdp">CDP / Debugger</option>
+              <option value="webRequest">webRequest</option>
+            </select>
+          </div>
+          <p class="page-control-help">自动模式在 Chromium 优先使用 CDP，失败后降级；Firefox 使用 webRequest。CDP 可读取受支持的文本响应体；Chrome MV3 webRequest 备用通道主要提供请求元数据和请求体，不提供通用响应体读取。</p>
+          <div class="page-control-permissions">
+            <span>Debugger：{{ debuggerPermissionLabel }}</span>
+            <span>webRequest：{{ webRequestPermissionLabel }}</span>
+            <span>Cookie：{{ cookiePermissionLabel }}</span>
+          </div>
+          <p v-if="!isFirefox" class="page-control-help">Chrome 的 debugger 是安装期声明权限，不能通过 runtime optional permission 单独弹窗申请；实际 CDP attach/detach 由上面的网络开关控制。</p>
+
+          <div class="page-control-section">
+            <strong>当前站点 Cookie</strong>
+            <div class="page-control-actions">
+              <button :disabled="!pageContext || cookieLoading" @click="readSiteCookies">{{ cookieLoading ? '读取中…' : cookiePermissionGranted ? '重新读取当前站点 Cookie' : '授权并读取当前站点 Cookie' }}</button>
+              <button :disabled="!cookiePermissionGranted" @click="disableCookieAccess">关闭 Cookie 访问</button>
+            </div>
+            <p class="page-control-help">仅查询当前页面 URL 匹配的 Cookie，包括 HttpOnly Cookie。值默认隐藏，按需逐条显示；数据只在侧栏内存中展示，不写入聊天历史，也不会发送给模型。</p>
+            <p v-if="cookieError" class="network-error">{{ cookieError }}</p>
+            <div v-if="cookieRecords.length" class="cookie-list">
+              <div v-for="cookie in cookieRecords" :key="cookieKey(cookie)" class="cookie-row">
+                <div class="cookie-meta">
+                  <strong>{{ cookie.name }}</strong>
+                  <span>{{ cookie.domain }}{{ cookie.path }}</span>
+                  <span>{{ [cookie.httpOnly ? 'HttpOnly' : '', cookie.secure ? 'Secure' : '', cookie.sameSite].filter(Boolean).join(' · ') }}</span>
+                </div>
+                <code>{{ revealedCookieKeys.has(cookieKey(cookie)) ? cookie.value : '••••••••' }}</code>
+                <button @click="toggleCookieReveal(cookie)">{{ revealedCookieKeys.has(cookieKey(cookie)) ? '隐藏' : '显示' }}</button>
+              </div>
+            </div>
+            <p v-else-if="cookiePermissionGranted && !cookieLoading" class="page-control-help">当前页面 URL 没有可读取的 Cookie，或浏览器未返回匹配项。</p>
+          </div>
+
+          <div class="page-control-section">
+            <strong>完整 DOM 快照</strong>
+            <button :disabled="!pageDomEnabled || !pageContext || pageDomLoading" @click="capturePageDom">
+              {{ pageDomLoading ? '读取中…' : '读取当前页面 DOM' }}
+            </button>
+            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；快照只在侧栏内存中显示，不进入聊天上下文。</p>
+            <p v-if="pageDomError" class="network-error">{{ pageDomError }}</p>
+            <details v-if="pageDomSnapshot" class="page-dom-preview">
+              <summary>查看 DOM（{{ pageDomSnapshot.html.length }} 字符{{ pageDomSnapshot.truncated ? '，已截断' : '' }}）</summary>
+              <pre>{{ pageDomSnapshot.html }}</pre>
+            </details>
+          </div>
+        </template>
+      </section>
+    </details>
+
     <details class="network-panel">
-      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? networkModeLabel + ' 自动采集中' : networkError ? '自动采集不可用' : '自动检测中' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
+      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? networkModeLabel + ' 采集中' : networkError ? '采集不可用' : '手动关闭' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
       <section class="network-inspector">
         <div class="network-toolbar">
           <button @click="clearNetworkCapture">清空</button>
         </div>
-        <p class="network-help">面板打开后自动捕获当前对话来源标签页的网络请求，并根据浏览器能力选择 CDP/Debugger 或 webRequest。请求正文自动采集，仅保留受限长度的文本/JSON并脱敏；关闭面板后自动释放控制会话。</p>
+        <p class="network-help">只在 Page Control 启用并打开“网络请求捕获”后开始。范围限定当前来源标签页；最多保留 150 条请求，每个正文最多 32 KB，并对凭证字段脱敏。</p>
         <p v-if="networkError" class="network-error">{{ networkError }}</p>
         <div class="network-list">
           <button v-for="item in networkSnapshot.requests" :key="item.id" @click="selectedNetworkId = item.id" :class="{ selected: selectedNetworkId === item.id }">
             <b>{{ item.method }}</b><span>{{ item.status || item.error || '…' }}</span><span>{{ networkLabel(item.url) }}</span>
           </button>
-          <p v-if="!networkSnapshot.requests.length">尚未检测到请求。页面上下文就绪后会自动开始采集。</p>
+          <p v-if="!networkSnapshot.requests.length">没有缓存的网络请求。</p>
         </div>
         <pre v-if="selectedNetworkRequest">{{ JSON.stringify(selectedNetworkRequest, null, 2) }}</pre>
       </section>
@@ -211,7 +287,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import browser from 'webextension-polyfill';
 import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse, NetworkCaptureCommandResponse } from '@/types/messages';
-import type { NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
+import type { NetworkCapturePreference, NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
 import { shouldUseJsonMode, type ChatUsage } from '@/entrypoints/service/chat';
 import type { AgentToolRequest } from '@/entrypoints/utils/agentToolProtocol';
 import { executeAgentToolInExtension, previewAgentPageClick, type AgentToolArtifact } from '@/entrypoints/utils/agentToolExecution';
@@ -225,6 +301,27 @@ interface ChatTurn {
   content: string;
 }
 
+interface PageCookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite?: string;
+  session: boolean;
+  expirationDate?: number;
+  storeId?: string;
+}
+
+interface PageDomSnapshot {
+  title: string;
+  url: string;
+  html: string;
+  originalLength: number;
+  truncated: boolean;
+}
+
 interface PendingAgentTool {
   requestId: string;
   request: AgentToolRequest;
@@ -235,6 +332,20 @@ interface PendingAgentTool {
 
 const pageContext = ref<PageContext | null>(null);
 const resolvedSourceTabId = ref<number | undefined>(undefined);
+const pageControlEnabled = ref(false);
+const pageDomEnabled = ref(false);
+const pageNetworkEnabled = ref(false);
+const pageNetworkMode = ref<NetworkCapturePreference>('auto');
+const cookiePermissionGranted = ref(false);
+const cookieLoading = ref(false);
+const cookieError = ref('');
+const cookieRecords = ref<PageCookieRecord[]>([]);
+const revealedCookieKeys = ref<Set<string>>(new Set());
+const pageDomLoading = ref(false);
+const pageDomError = ref('');
+const pageDomSnapshot = ref<PageDomSnapshot | null>(null);
+const webRequestPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
+const cookiePermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
 const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
 const networkError = ref('');
 const selectedNetworkId = ref('');
@@ -284,6 +395,17 @@ const agentCredentialCopied = ref(false);
 
 
 const isMobile = computed(() => window.matchMedia?.('(max-width: 640px)').matches ?? false);
+const isFirefox = computed(() => typeof (browser.runtime as any).getBrowserInfo === 'function');
+const pageControlSourceLabel = computed(() => {
+  try { return pageContext.value?.url ? new URL(pageContext.value.url).host : '无来源页面'; }
+  catch { return '无来源页面'; }
+});
+const webRequestPermissionLabel = computed(() => ({
+  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
+}[webRequestPermissionState.value]));
+const cookiePermissionLabel = computed(() => ({
+  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
+}[cookiePermissionState.value]));
 const backendSummary = computed(() => chatBackend.value === 'api'
   ? `${chatProvider.value} · ${chatModel.value || '未选择模型'}`
   : chatBackend.value === 'remote' ? 'Vocal Saga' : chatBackend.value === 'workbuddy' ? 'Workbuddy' : chatBackend.value === 'opencode' ? 'OpenCode' : '模型 API');
@@ -467,12 +589,12 @@ function connectNetworkInspector() {
     port.onDisconnect.addListener(() => {
       if (networkPort !== port) return;
       networkPort = null;
-      // Service worker 重启或短暂断连后自动重连，并恢复当前标签页的网络观测。
+      // Service worker 重启或短暂断连后自动重连；只有用户仍开启网络捕获时才恢复。
       if (networkInspectorEnabled) {
         window.setTimeout(() => {
           if (!networkInspectorEnabled || networkPort) return;
           connectNetworkInspector();
-          void ensureNetworkCapture();
+          if (pageControlEnabled.value && pageNetworkEnabled.value) void ensureNetworkCapture();
         }, 800);
       }
     });
@@ -481,11 +603,19 @@ function connectNetworkInspector() {
   }
 }
 
-/** 网络观测随当前对话来源自动启动；同一标签页已有会话时复用，不重复 attach。 */
+function networkPreferenceMatches(snapshot: NetworkCaptureSnapshot): boolean {
+  if (pageNetworkMode.value === 'auto') return snapshot.mode !== null;
+  if (pageNetworkMode.value === 'cdp') return snapshot.mode === 'chromium-cdp';
+  return snapshot.mode === 'chromium-webRequest' || snapshot.mode === 'firefox-webRequest';
+}
+
+/** 网络捕获只在用户从 Page Control 手动打开后启动。 */
 async function ensureNetworkCapture() {
+  if (!pageControlEnabled.value || !pageNetworkEnabled.value) return;
   const tabId = getCurrentSourceTabId();
   if (tabId == null) return;
-  if (networkSnapshot.value.active && networkSnapshot.value.tabId === tabId && networkSnapshot.value.includeBodies) return;
+  if (networkSnapshot.value.active && networkSnapshot.value.tabId === tabId
+    && networkSnapshot.value.includeBodies && networkPreferenceMatches(networkSnapshot.value)) return;
   if (networkCaptureStartPromise && networkCaptureStartTabId === tabId) return networkCaptureStartPromise;
 
   networkError.value = '';
@@ -496,12 +626,14 @@ async function ensureNetworkCapture() {
         action: 'networkCaptureStart',
         sourceTabId: tabId,
         includeBodies: true,
+        preferredMode: pageNetworkMode.value,
       }) as NetworkCaptureCommandResponse;
       if (!response.success) throw new Error(response.error);
       networkSnapshot.value = response.snapshot;
       selectedNetworkId.value = response.snapshot.requests[0]?.id || '';
     } catch (error) {
       networkError.value = error instanceof Error ? error.message : String(error);
+      pageNetworkEnabled.value = false;
     }
   })();
   networkCaptureStartPromise = task;
