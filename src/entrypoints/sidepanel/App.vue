@@ -479,6 +479,8 @@ const cookiePermissionState = ref<'checking' | 'granted' | 'missing' | 'unsuppor
 const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
 const networkError = ref('');
 const selectedNetworkId = ref('');
+let pageControlEpoch = 0;
+let pageDomEpoch = 0;
 let networkPort: browser.Runtime.Port | null = null;
 let networkInspectorEnabled = false;
 let networkCaptureStartPromise: Promise<void> | null = null;
@@ -856,8 +858,12 @@ async function onPageControlChange() {
     await refreshPermissionStatus();
     return;
   }
+  pageControlEpoch += 1;
+  pageDomEpoch += 1;
+  if (pendingAgentTool.value?.request.tool.startsWith('page.')) rejectAgentTool();
   pageDomEnabled.value = false;
   pageNetworkEnabled.value = false;
+  clearCookieSnapshot();
   clearPageSnapshots();
   await stopNetworkCapture(true);
   await disableCookieAccess();
@@ -866,6 +872,8 @@ async function onPageControlChange() {
 async function onPageDomControlChange() {
   pageDomError.value = '';
   if (!pageDomEnabled.value) {
+    pageDomEpoch += 1;
+    if (pendingAgentTool.value?.request.tool.startsWith('page.')) rejectAgentTool();
     clearPageSnapshots();
     return;
   }
@@ -928,6 +936,7 @@ async function onPageNetworkModeChange() {
 }
 
 async function readSiteCookies() {
+  const requestEpoch = pageControlEpoch;
   const pageUrl = pageContext.value?.url || '';
   const tabId = getCurrentSourceTabId();
   if (!pageControlEnabled.value || !pageUrl || tabId == null) return;
@@ -949,6 +958,14 @@ async function readSiteCookies() {
   try {
     const granted = await browser.permissions.request({ permissions: ['cookies'] });
     if (!granted) throw new Error('未授予 Cookie 访问权限。');
+    if (requestEpoch !== pageControlEpoch || !pageControlEnabled.value) {
+      if (!pageControlEnabled.value) {
+        await browser.permissions.remove({ permissions: ['cookies'] }).catch(() => false);
+        cookiePermissionGranted.value = false;
+        cookiePermissionState.value = 'missing';
+      }
+      return;
+    }
     cookiePermissionGranted.value = true;
     cookiePermissionState.value = 'granted';
 
@@ -963,6 +980,7 @@ async function readSiteCookies() {
     const cookieApi = (browser as any).cookies;
     if (typeof cookieApi?.getAll !== 'function') throw new Error('当前浏览器未提供 Cookies API。');
     const result = await cookieApi.getAll({ url: pageUrl }) as PageCookieRecord[];
+    if (requestEpoch !== pageControlEpoch || !pageControlEnabled.value) return;
     cookieRecords.value = result.map((cookie) => ({
       name: cookie.name,
       value: cookie.value,
@@ -995,6 +1013,7 @@ async function disableCookieAccess() {
 }
 
 async function capturePageDom() {
+  const requestEpoch = pageDomEpoch;
   const pageUrl = pageContext.value?.url || '';
   const tabId = getCurrentSourceTabId();
   if (!pageControlEnabled.value || !pageDomEnabled.value || !pageUrl || tabId == null) return;
@@ -1026,6 +1045,7 @@ async function capturePageDom() {
     });
     const snapshot = results[0]?.result as PageDomSnapshot | undefined;
     if (!snapshot) throw new Error('浏览器没有返回 DOM 快照。');
+    if (requestEpoch !== pageDomEpoch || !pageControlEnabled.value || !pageDomEnabled.value) return;
     pageDomSnapshot.value = snapshot;
   } catch (error) {
     pageDomError.value = error instanceof Error ? error.message : String(error);
@@ -1060,6 +1080,8 @@ function reloadContext() {
 }
 
 async function loadContext(preferredTabId?: number, restoreHistory = true) {
+  pageControlEpoch += 1;
+  pageDomEpoch += 1;
   resolvedSourceTabId.value = preferredTabId ?? getSourceTabId();
   if (networkSnapshot.value.active && networkSnapshot.value.tabId !== resolvedSourceTabId.value) {
     await stopNetworkCapture(false);
@@ -1630,6 +1652,7 @@ async function refreshPermissionStatus() {
 
 
 async function capturePageStorage() {
+  const requestEpoch = pageDomEpoch;
   const pageUrl = pageContext.value?.url || '';
   const tabId = getCurrentSourceTabId();
   if (!pageControlEnabled.value || !pageDomEnabled.value || !pageUrl || tabId == null) return;
@@ -1684,6 +1707,7 @@ async function capturePageStorage() {
     const result = results[0]?.result as (PageStorageSnapshot & { error?: string }) | undefined;
     if (!result) throw new Error('浏览器没有返回页面存储数据。');
     if (result.error) throw new Error(result.error);
+    if (requestEpoch !== pageDomEpoch || !pageControlEnabled.value || !pageDomEnabled.value) return;
     pageStorageSnapshot.value = {
       local: result.local,
       session: result.session,
@@ -1716,6 +1740,8 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   networkInspectorEnabled = false;
+  pageControlEpoch += 1;
+  pageDomEpoch += 1;
   clearCookieSnapshot();
   clearPageSnapshots();
   stopAgentToolHeartbeat();
