@@ -100,7 +100,7 @@
               <input v-model="pageNetworkEnabled" type="checkbox" @change="onPageNetworkChange" />
               网络请求捕获
             </label>
-            <select v-model="pageNetworkMode" :disabled="!pageNetworkEnabled" @change="onPageNetworkModeChange">
+            <select v-model="pageNetworkMode" :disabled="!pageControlEnabled" @change="onPageNetworkModeChange">
               <option value="auto">自动选择</option>
               <option v-if="!isFirefox" value="cdp">CDP / Debugger</option>
               <option value="webRequest">webRequest</option>
@@ -865,7 +865,7 @@ async function onPageControlChange() {
 async function onPageDomControlChange() {
   pageDomError.value = '';
   if (!pageDomEnabled.value) {
-    pageDomSnapshot.value = null;
+    clearPageSnapshots();
     return;
   }
   if (!pageControlEnabled.value) {
