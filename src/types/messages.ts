@@ -370,6 +370,8 @@ export interface PageContext {
 export interface GetPageContextSuccessResponse {
   success: true;
   context: PageContext;
+  /** The page selected by background, including Firefox's window-level sidebar fallback. */
+  tabId?: number;
 }
 
 export interface GetPageContextErrorResponse {

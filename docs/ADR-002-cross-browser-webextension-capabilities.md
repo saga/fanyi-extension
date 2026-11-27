@@ -28,3 +28,14 @@ Use a capability adapter and browser-specific implementations. Detect actual run
 6. Contextual Identities is an optional Firefox-only enhancement. Continue normally when absent or disabled; never emulate containers by copying cookies.
 7. Mobile support means capability detection and graceful fallback, not pretending desktop-only browser APIs exist.
 8. Network capture is explicit, per-tab, bounded, and redacts credential headers and sensitive URL parameters.
+
+
+## Agent tool integration
+
+The webpage chat uses a narrow, structured tool protocol. Model output can request only a declared tool and JSON arguments; the extension validates each request and presents a confirmation card before execution.
+
+- Page tools are fixed DOM operations (inspect visible text, find/highlight text, scroll, click a button/link). They use the isolated world and never evaluate model-authored JavaScript. Page inspection does not read input values.
+- Every tool call requires an explicit user approval. The source tab ID is selected by the extension, not by the model. High-impact actions such as payment, deletion, sending or authorization are not exposed as generic click operations.
+- Firefox container listing requests the optional `contextualIdentities` permission. Opening a tab in a container also requests `cookies`, because a container tab can read and modify that container's cookies. Both permissions remain optional and are requested only from the approval click.
+- Passkey create/get runs from the extension document so the browser can retain user activation. The relying party's server-generated options must include a valid RP ID and challenge; the model is instructed never to invent these values. Credential response JSON is displayed locally for the user and is not fed back into model context. The relying-party server remains responsible for verifying the challenge, extension origin, RP ID, signature and attestation/assertion.
+- Tool output is untrusted data. It is added to the next model turn as data, never as system instructions. A single chat turn is limited to three tool calls.

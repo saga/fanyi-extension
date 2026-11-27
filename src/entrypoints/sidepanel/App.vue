@@ -155,6 +155,30 @@
       >
         <div class="bubble">{{ m.content || '…' }}</div>
       </div>
+
+      <section v-if="pendingAgentTool" class="agent-tool-confirm" aria-live="polite">
+        <strong>Agent 请求执行浏览器操作</strong>
+        <div class="agent-tool-name">{{ agentToolTitle(pendingAgentTool.request) }}</div>
+        <p>{{ pendingAgentTool.request.reason }}</p>
+        <p class="agent-tool-target">{{ agentToolTarget(pendingAgentTool.request) }}</p>
+        <p class="agent-tool-warning">只有在确认目标和影响后才批准。工具操作会在当前对话来源页面或扩展页面执行。</p>
+        <div class="agent-tool-actions">
+          <button :disabled="agentToolExecuting" @click="approveAgentTool">批准并执行</button>
+          <button :disabled="agentToolExecuting" @click="rejectAgentTool">拒绝</button>
+        </div>
+      </section>
+
+      <section v-if="agentToolError" class="agent-tool-error" role="alert">{{ agentToolError }}</section>
+
+      <section v-if="agentCredentialArtifact" class="agent-credential-artifact">
+        <strong>{{ agentCredentialArtifact.title }}</strong>
+        <p>响应只保存在扩展界面，没有发送给模型。服务端仍须验证 challenge、origin、RP ID 和签名。</p>
+        <details>
+          <summary>查看 WebAuthn 响应 JSON</summary>
+          <pre>{{ agentCredentialArtifact.json }}</pre>
+        </details>
+        <button @click="copyAgentCredentialArtifact">{{ agentCredentialCopied ? '已复制' : '复制响应 JSON' }}</button>
+      </section>
     </main>
 
     <!-- 输入区 -->
@@ -190,6 +214,8 @@ import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse, NetworkCaptureCommandResponse } from '@/types/messages';
 import type { NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
 import type { ChatUsage } from '@/entrypoints/service/chat';
+import type { AgentToolRequest } from '@/entrypoints/utils/agentToolProtocol';
+import { executeAgentToolInExtension, type AgentToolArtifact } from '@/entrypoints/utils/agentToolExecution';
 import { getConfig, setConfig } from '@/entrypoints/utils/config';
 import { createChatHistoryKey as historyKey } from './chatHistory';
 import { CHAT_API_DEFAULTS, validateChatApiSettings } from '@/entrypoints/service/chatApi';
@@ -200,6 +226,7 @@ interface ChatTurn {
 }
 
 const pageContext = ref<PageContext | null>(null);
+const resolvedSourceTabId = ref<number | undefined>(undefined);
 const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
 const networkIncludeBodies = ref(false);
 const networkError = ref('');
@@ -233,6 +260,11 @@ const remoteServiceToken = ref('');
 const availableModels = ref<Array<{ id: string }>>([]);
 const availableSkills = ref<Array<{ id: string; name: string; description: string }>>([]);
 const chatOptionsError = ref('');
+const pendingAgentTool = ref<{ requestId: string; request: AgentToolRequest } | null>(null);
+const agentToolError = ref('');
+const agentToolExecuting = ref(false);
+const agentCredentialArtifact = ref<AgentToolArtifact | null>(null);
+const agentCredentialCopied = ref(false);
 
 
 const isMobile = computed(() => window.matchMedia?.('(max-width: 640px)').matches ?? false);
@@ -417,7 +449,7 @@ function connectNetworkInspector() {
 async function startNetworkCapture() {
   networkError.value = '';
   try {
-    const response = await browser.runtime.sendMessage({ action: 'networkCaptureStart', sourceTabId: getSourceTabId(), includeBodies: networkIncludeBodies.value }) as NetworkCaptureCommandResponse;
+    const response = await browser.runtime.sendMessage({ action: 'networkCaptureStart', sourceTabId: getCurrentSourceTabId(), includeBodies: networkIncludeBodies.value }) as NetworkCaptureCommandResponse;
     if (!response.success) throw new Error(response.error);
     networkSnapshot.value = response.snapshot;
     selectedNetworkId.value = response.snapshot.requests[0]?.id || '';
@@ -438,11 +470,17 @@ function getSourceTabId(): number | undefined {
   const raw = params.get('sourceTabId');
   if (!raw) return undefined;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : undefined;
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** Firefox desktop sidebar is window-scoped and has no sourceTabId URL; use the tab selected by background. */
+function getCurrentSourceTabId(): number | undefined {
+  return getSourceTabId() ?? resolvedSourceTabId.value;
 }
 
 async function loadContext() {
   status.value = 'loading';
+  resolvedSourceTabId.value = getSourceTabId();
   errorMsg.value = '';
   pageContext.value = null;
   manualMode.value = false;
@@ -454,6 +492,7 @@ async function loadContext() {
     })) as GetPageContextResponse;
     if (resp.success) {
       pageContext.value = resp.context;
+      resolvedSourceTabId.value = resp.tabId ?? getSourceTabId();
       status.value = 'ready';
       void saveHistory();
     } else {
@@ -576,6 +615,10 @@ async function clearChat() {
   messages.value = [];
   input.value = '';
   lastUsage.value = null;
+  pendingAgentTool.value = null;
+  agentToolError.value = '';
+  agentCredentialArtifact.value = null;
+  agentCredentialCopied.value = false;
   void saveHistory();
 
   // 不支持侧栏的环境（Firefox Android 等）：聊天是独立标签页，× 关掉它
@@ -656,6 +699,8 @@ async function send() {
     if (currentPort.value !== port) return;
     currentPort.value = null;
     if (streaming.value) {
+      pendingAgentTool.value = null;
+      agentToolExecuting.value = false;
       assistantTurn.content = assistantTurn.content || '⚠️ 对话连接意外中断，请重试。';
       streaming.value = false;
       void saveHistory();
@@ -667,8 +712,14 @@ async function send() {
       text?: string;
       message?: string;
       usage?: ChatUsage;
+      requestId?: string;
+      request?: AgentToolRequest;
     };
-    if (m.type === 'partial' && typeof m.text === 'string') {
+    if (m.type === 'tool_request' && typeof m.requestId === 'string' && m.request) {
+      pendingAgentTool.value = { requestId: m.requestId, request: m.request };
+      assistantTurn.content = '等待确认浏览器操作：' + agentToolTitle(m.request);
+      scrollToBottom();
+    } else if (m.type === 'partial' && typeof m.text === 'string') {
       assistantTurn.content = m.text;
       scrollToBottom();
     } else if (m.type === 'usage' && m.usage) {
@@ -676,12 +727,14 @@ async function send() {
       lastUsage.value = m.usage;
     } else if (m.type === 'done') {
       if (m.usage) lastUsage.value = m.usage;
+      pendingAgentTool.value = null;
       streaming.value = false;
       disconnectPort();
       void saveHistory();
       scrollToBottom();
     } else if (m.type === 'error') {
       assistantTurn.content = '⚠️ ' + (m.message || '对话出错');
+      pendingAgentTool.value = null;
       streaming.value = false;
       disconnectPort();
       void saveHistory();
@@ -702,6 +755,113 @@ async function send() {
   });
 }
 
+function agentToolTitle(request: AgentToolRequest): string {
+  const labels: Record<AgentToolRequest['tool'], string> = {
+    'page.inspect': '读取页面可见内容',
+    'page.find': '查找页面文字',
+    'page.highlight': '定位并选中文字',
+    'page.scroll': '滚动到页面元素',
+    'page.click': '点击页面按钮或链接',
+    'browser.containers.list': '读取 Firefox 容器列表',
+    'browser.containers.open': '在 Firefox 容器中打开标签页',
+    'webauthn.capability': '检查 Passkey 支持情况',
+    'webauthn.create': '创建 Passkey',
+    'webauthn.get': '使用 Passkey 认证',
+  };
+  return labels[request.tool];
+}
+
+function agentToolTarget(request: AgentToolRequest): string {
+  const args = request.arguments;
+  switch (request.tool) {
+    case 'page.inspect': return args.selector ? `CSS selector：${String(args.selector)}` : '当前来源页面的可见正文';
+    case 'page.find':
+    case 'page.highlight': return `文字：${String(args.text)}`;
+    case 'page.scroll':
+    case 'page.click': return `CSS selector：${String(args.selector)}`;
+    case 'browser.containers.list': return '读取容器名称、颜色和图标，不读取 Cookie 内容';
+    case 'browser.containers.open': return `容器：${String(args.identityName)}；URL：${String(args.url)}`;
+    case 'webauthn.capability': return '检查当前浏览器扩展页面的 WebAuthn API 和版本支持';
+    case 'webauthn.create': return `RP ID：${String((args.options as any)?.rp?.id || '')}；使用已提供的服务端注册 challenge`;
+    case 'webauthn.get': return `RP ID：${String((args.options as any)?.rpId || '')}；使用已提供的服务端认证 challenge`;
+  }
+  return '';
+}
+
+async function approveAgentTool() {
+  const pending = pendingAgentTool.value;
+  const port = currentPort.value;
+  if (!pending || !port || agentToolExecuting.value) return;
+  agentToolExecuting.value = true;
+  agentToolError.value = '';
+  try {
+    // This is called directly from the user's click. WebAuthn and optional
+    // permission requests need the transient user-activation context.
+    const outcome = await executeAgentToolInExtension(pending.request, getCurrentSourceTabId(), browser);
+    if (outcome.artifact) {
+      agentCredentialArtifact.value = outcome.artifact;
+      agentCredentialCopied.value = false;
+    }
+    if (currentPort.value === port) {
+      port.postMessage({
+        type: 'tool_result',
+        requestId: pending.requestId,
+        approved: true,
+        summary: outcome.summary,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    agentToolError.value = message;
+    if (currentPort.value === port) {
+      port.postMessage({
+        type: 'tool_result',
+        requestId: pending.requestId,
+        approved: true,
+        summary: '工具已获用户批准，但执行失败：' + message,
+      });
+    }
+  } finally {
+    pendingAgentTool.value = null;
+    agentToolExecuting.value = false;
+  }
+}
+
+function rejectAgentTool() {
+  const pending = pendingAgentTool.value;
+  const port = currentPort.value;
+  if (!pending || !port || agentToolExecuting.value) return;
+  pendingAgentTool.value = null;
+  port.postMessage({
+    type: 'tool_result',
+    requestId: pending.requestId,
+    approved: false,
+    summary: '用户拒绝执行该操作。不要再次请求相同操作。',
+  });
+}
+
+async function copyAgentCredentialArtifact() {
+  if (!agentCredentialArtifact.value) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(agentCredentialArtifact.value.json);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = agentCredentialArtifact.value.json;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('当前浏览器不支持复制，请展开后手动复制 JSON');
+    }
+    agentCredentialCopied.value = true;
+  } catch (error) {
+    agentToolError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function refreshPermissionStatus() {
   pagePermissionState.value = 'checking';
   debuggerPermissionState.value = 'checking';
@@ -720,7 +880,7 @@ async function refreshPermissionStatus() {
       ? 'granted'
       : 'missing';
 
-    const tabId = getSourceTabId();
+    const tabId = getCurrentSourceTabId();
     const tab = tabId == null ? null : await browser.tabs.get(tabId).catch(() => null);
     const rawUrl = tab?.url || pageContext.value?.url || '';
     if (!rawUrl) return;
@@ -1270,4 +1430,18 @@ onUnmounted(() => {
 .network-list p, .network-error { padding: 6px; font-size: 11px; }
 .network-error { color: #cf1322; }
 .network-inspector pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #fafafa; padding: 8px; }
+.agent-tool-confirm, .agent-credential-artifact { margin: 8px 0; padding: 12px; border: 1px solid #91caff; border-radius: 10px; background: #f0f7ff; color: #1f1f1f; }
+.agent-tool-confirm strong, .agent-credential-artifact strong { display: block; font-size: 13px; }
+.agent-tool-name { margin-top: 6px; font-weight: 600; }
+.agent-tool-confirm p, .agent-credential-artifact p { margin: 6px 0; font-size: 12px; line-height: 1.5; }
+.agent-tool-target { overflow-wrap: anywhere; color: #444; }
+.agent-tool-warning { color: #ad6800; }
+.agent-tool-actions { display: flex; gap: 8px; margin-top: 10px; }
+.agent-tool-actions button, .agent-credential-artifact button { border: 1px solid #1677ff; border-radius: 6px; padding: 6px 12px; background: #1677ff; color: #fff; cursor: pointer; }
+.agent-tool-actions button:last-child { background: #fff; color: #595959; border-color: #d9d9d9; }
+.agent-tool-actions button:disabled { opacity: .55; cursor: default; }
+.agent-tool-error { margin: 8px 0; padding: 8px 10px; border: 1px solid #ffccc7; border-radius: 8px; color: #cf1322; background: #fff2f0; font-size: 12px; }
+.agent-credential-artifact details { margin: 8px 0; }
+.agent-credential-artifact pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #fff; border: 1px solid #e8e8e8; padding: 8px; }
+
 </style>

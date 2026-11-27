@@ -49,6 +49,7 @@ import { openSidePanel } from './utils/sidePanel';
 import { parseHtmlViaOffscreen, getPageHtmlViaScripting } from './utils/offscreen';
 import { getPageHtmlViaDebugger } from './utils/debuggerPageReader';
 import { createNetworkCaptureController } from './utils/networkCapture';
+import { buildAgentToolInstructions, parseAgentToolRequest } from './utils/agentToolProtocol';
 
 import { logger } from '../utils/logger';
 export default defineBackground({
@@ -1237,11 +1238,11 @@ export default defineBackground({
         if (!ctx || !ctx.text) {
           const offscreenCtx = await getPageContextViaOffscreen(tabId);
           if (offscreenCtx?.text) {
-            sendResponse({ success: true, context: offscreenCtx });
+            sendResponse({ success: true, context: offscreenCtx, tabId });
             return;
           }
         } else {
-          sendResponse({ success: true, context: ctx });
+          sendResponse({ success: true, context: ctx, tabId });
           return;
         }
 
@@ -1330,106 +1331,195 @@ export default defineBackground({
       if (port.name !== 'chat') return;
 
       const controller = new AbortController();
-      port.onDisconnect.addListener(() => controller.abort());
+      const pendingToolResults = new Map<string, {
+        resolve: (value: { approved: boolean; summary: string }) => void;
+        reject: (reason: Error) => void;
+      }>();
+      port.onDisconnect.addListener(() => {
+        controller.abort();
+        for (const pending of pendingToolResults.values()) pending.reject(new Error('聊天连接已关闭'));
+        pendingToolResults.clear();
+      });
 
-      port.onMessage.addListener(async (msg: unknown) => {
-        const m = msg as {
-          type?: string; context?: PageContext; history?: ChatMessage[]; jsonMode?: boolean;
+      const waitForToolResult = (requestId: string): Promise<{ approved: boolean; summary: string }> =>
+        new Promise((resolve, reject) => {
+          const onAbort = () => {
+            pendingToolResults.delete(requestId);
+            reject(new Error('工具确认已取消'));
+          };
+          controller.signal.addEventListener('abort', onAbort, { once: true });
+          pendingToolResults.set(requestId, {
+            resolve: (value) => {
+              controller.signal.removeEventListener('abort', onAbort);
+              pendingToolResults.delete(requestId);
+              resolve(value);
+            },
+            reject: (error) => {
+              controller.signal.removeEventListener('abort', onAbort);
+              pendingToolResults.delete(requestId);
+              reject(error);
+            },
+          });
+        });
+
+      port.onMessage.addListener((msg: unknown) => {
+        const incoming = msg as Record<string, unknown>;
+        if (incoming.type === 'tool_result' && typeof incoming.requestId === 'string') {
+          const pending = pendingToolResults.get(incoming.requestId);
+          if (pending) {
+            pending.resolve({
+              approved: incoming.approved === true,
+              summary: typeof incoming.summary === 'string' ? incoming.summary.slice(0, 8000) : '',
+            });
+          }
+          return;
+        }
+        if (incoming.type !== 'chat') return;
+
+        const m = incoming as {
+          context?: PageContext; history?: ChatMessage[]; jsonMode?: boolean;
           backend?: 'remote' | 'workbuddy' | 'opencode' | 'api'; model?: string;
           thinkingMode?: 'disabled' | 'adaptive' | 'enabled';
           effort?: 'low' | 'medium' | 'high' | 'xhigh'; skillIds?: string[];
           remoteServiceToken?: string;
         };
-        if (m.type !== 'chat') return;
 
-        try {
-          const config = await getConfig();
-          const backend = m.backend || config.chatBackend || 'remote';
-          const system = buildChatSystem(m.context ?? null, m.jsonMode);
-          const llmMessages: ChatMessage[] = [
-            { role: 'system', content: system },
-            ...(m.history ?? []),
-          ];
-          let response: Response;
-          if (backend === 'api') {
-            const apiSettings = {
-              provider: config.chatProvider || 'deepseek',
-              baseUrl: config.chatApiBaseUrl || '',
-              apiKey: config.chatApiKey || '',
-              model: m.model || config.chatModel || '',
-            } as const;
-            const issues = validateChatApiSettings(apiSettings);
-            if (issues.length) throw new Error('网页对话 API 配置不完整：' + issues.join('；'));
-            let finalText = '';
-            for await (const partial of chatStream('', llmMessages, {
-              jsonMode: m.jsonMode === true,
-              signal: controller.signal,
-              api: apiSettings,
-              onUsage: (usage) => port.postMessage({ type: 'usage', usage }),
-            })) {
-              finalText = partial;
-              port.postMessage({ type: 'partial', text: partial });
+        void (async () => {
+          try {
+            const config = await getConfig();
+            const backend = m.backend || config.chatBackend || 'remote';
+            const system = buildChatSystem(m.context ?? null, m.jsonMode) + '\n\n' + buildAgentToolInstructions();
+            const llmMessages: ChatMessage[] = [
+              { role: 'system', content: system },
+              ...(m.history ?? []),
+            ];
+
+            const complete = async (): Promise<{ content: string; provider: string; model: string; usage?: unknown; streamed?: boolean }> => {
+              if (backend === 'api') {
+                const apiSettings = {
+                  provider: config.chatProvider || 'deepseek',
+                  baseUrl: config.chatApiBaseUrl || '',
+                  apiKey: config.chatApiKey || '',
+                  model: m.model || config.chatModel || '',
+                } as const;
+                const issues = validateChatApiSettings(apiSettings);
+                if (issues.length) throw new Error('网页对话 API 配置不完整：' + issues.join('；'));
+                let finalText = '';
+                let streamed = false;
+                for await (const partial of chatStream('', llmMessages, {
+                  jsonMode: m.jsonMode === true,
+                  signal: controller.signal,
+                  api: apiSettings,
+                  onUsage: (usage) => port.postMessage({ type: 'usage', usage }),
+                })) {
+                  finalText = partial;
+                  // JSON 和工具请求先缓冲，避免把待确认的调用参数展示成普通回答。
+                  if (!m.jsonMode && !partial.trimStart().startsWith('{')) {
+                    port.postMessage({ type: 'partial', text: partial });
+                    streamed = true;
+                  }
+                }
+                if (!finalText.trim()) throw new Error('模型没有返回内容，请检查模型 ID 或 API 配置');
+                return { content: finalText, provider: apiSettings.provider, model: apiSettings.model, streamed };
+              }
+
+              let response: Response;
+              if (backend === 'remote') {
+                const token = (m.remoteServiceToken || config.remoteServiceToken || '').trim();
+                if (!token) throw new Error('请先配置 Vocal Saga 远端服务 Token');
+                const base = new URL(config.serverUrl || 'https://s.sunxiunan.com/fanyi/page');
+                const endpoint = new URL('/api/v1/chat/completions', base).toString();
+                response = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                  signal: controller.signal,
+                  body: JSON.stringify({
+                    model: m.model || config.chatModel || 'deepseek-v4-flash',
+                    messages: llmMessages,
+                    stream: false,
+                    ...(m.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+                    thinking: { type: (m.thinkingMode || config.chatThinkingMode || 'adaptive') === 'disabled' ? 'disabled' : 'enabled' },
+                    reasoning_effort: m.effort || config.chatEffort || 'medium',
+                  }),
+                });
+              } else {
+                const endpoint = new URL('/api/agent/chat', getLocalAgentBaseUrl(config)).toString();
+                response = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: getLocalAgentHeaders(config),
+                  signal: controller.signal,
+                  body: JSON.stringify({
+                    provider: backend,
+                    model: m.model || config.chatModel || '',
+                    messages: llmMessages,
+                    thinkingMode: m.thinkingMode || config.chatThinkingMode || 'adaptive',
+                    effort: m.effort || config.chatEffort || 'medium',
+                    skillIds: m.skillIds || config.chatSkillIds || [],
+                    jsonMode: m.jsonMode === true,
+                  }),
+                });
+              }
+
+              const data = await response.json().catch(() => ({})) as {
+                choices?: Array<{ message?: { content?: unknown } }>;
+                error?: { message?: string } | string;
+                message?: string;
+                usage?: unknown;
+                model?: string;
+              };
+              if (!response.ok) {
+                const detail = typeof data.error === 'string' ? data.error : data.error?.message || data.message;
+                throw new Error(detail || 'Agent 服务返回 HTTP ' + response.status);
+              }
+              const content = data.choices?.[0]?.message?.content;
+              if (typeof content !== 'string' || !content.trim()) throw new Error('Agent 服务未返回对话内容');
+              return { content, provider: backend, model: data.model || m.model || '', usage: data.usage };
+            };
+
+            const maxToolCalls = 3;
+            for (let toolIndex = 0; toolIndex <= maxToolCalls; toolIndex++) {
+              if (controller.signal.aborted) return;
+              const completion = await complete();
+              const toolRequest = parseAgentToolRequest(completion.content);
+              if (!toolRequest) {
+                if (!completion.streamed) port.postMessage({ type: 'partial', text: completion.content });
+                port.postMessage({
+                  type: 'done',
+                  text: completion.content,
+                  usage: completion.usage,
+                  provider: completion.provider,
+                  model: completion.model,
+                });
+                return;
+              }
+
+              if (toolIndex >= maxToolCalls) {
+                const message = '本轮工具调用已达到 3 次上限。可以根据已有结果继续回答，或请用户拆分任务。';
+                port.postMessage({ type: 'partial', text: message });
+                port.postMessage({ type: 'done', text: message, provider: completion.provider, model: completion.model });
+                return;
+              }
+
+              const requestId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+              port.postMessage({ type: 'tool_request', requestId, request: toolRequest });
+              const result = await waitForToolResult(requestId);
+              const toolResult = JSON.stringify({
+                type: 'untrusted_extension_tool_result',
+                tool: toolRequest.tool,
+                approved: result.approved,
+                result: result.summary,
+              }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+              llmMessages.push({
+                role: 'user',
+                content: toolResult,
+              });
             }
-            if (!finalText.trim()) throw new Error('模型没有返回内容，请检查模型 ID 和 API 配置');
-            port.postMessage({ type: 'done', text: finalText, provider: apiSettings.provider, model: apiSettings.model });
-            return;
+          } catch (error) {
+            if (controller.signal.aborted) return;
+            logger.error('[Background] chat request failed:', error);
+            port.postMessage({ type: 'error', message: error instanceof Error ? error.message : '对话失败' });
           }
-          if (backend === 'remote') {
-            const token = (m.remoteServiceToken || config.remoteServiceToken || '').trim();
-            if (!token) throw new Error('请先配置 Vocal Saga 远端服务 Token');
-            const base = new URL(config.serverUrl || 'https://s.sunxiunan.com/fanyi/page');
-            const endpoint = new URL('/api/v1/chat/completions', base).toString();
-            response = await fetch(endpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-              signal: controller.signal,
-              body: JSON.stringify({
-                model: m.model || config.chatModel || 'deepseek-v4-flash',
-                messages: llmMessages,
-                stream: false,
-                ...(m.jsonMode ? { response_format: { type: 'json_object' } } : {}),
-                thinking: { type: (m.thinkingMode || config.chatThinkingMode || 'adaptive') === 'disabled' ? 'disabled' : 'enabled' },
-                reasoning_effort: m.effort || config.chatEffort || 'medium',
-              }),
-            });
-          } else {
-            const endpoint = new URL('/api/agent/chat', getLocalAgentBaseUrl(config)).toString();
-            response = await fetch(endpoint, {
-              method: 'POST',
-              headers: getLocalAgentHeaders(config),
-              signal: controller.signal,
-              body: JSON.stringify({
-                provider: backend,
-                model: m.model || config.chatModel || '',
-                messages: llmMessages,
-                thinkingMode: m.thinkingMode || config.chatThinkingMode || 'adaptive',
-                effort: m.effort || config.chatEffort || 'medium',
-                skillIds: m.skillIds || config.chatSkillIds || [],
-                jsonMode: m.jsonMode === true,
-              }),
-            });
-          }
-
-          const data = await response.json().catch(() => ({})) as {
-            choices?: Array<{ message?: { content?: unknown } }>;
-            error?: { message?: string } | string;
-            message?: string;
-            usage?: unknown;
-            model?: string;
-          };
-          if (!response.ok) {
-            const detail = typeof data.error === 'string' ? data.error : data.error?.message || data.message;
-            throw new Error(detail || 'Agent 服务返回 HTTP ' + response.status);
-          }
-          const content = data.choices?.[0]?.message?.content;
-          if (typeof content !== 'string' || !content.trim()) throw new Error('Agent 服务未返回对话内容');
-          port.postMessage({ type: 'partial', text: content });
-          port.postMessage({ type: 'done', text: content, usage: data.usage ?? null, provider: backend, model: data.model });
-        } catch (error) {
-          if (controller.signal.aborted) return;
-          logger.error('[Background] chat request failed:', error);
-          port.postMessage({ type: 'error', message: error instanceof Error ? error.message : '对话失败' });
-        }
+        })();
       });
     });
 
