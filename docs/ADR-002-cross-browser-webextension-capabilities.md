@@ -57,3 +57,16 @@ The webpage chat uses a narrow, structured tool protocol. Model output can reque
 - Tool-request JSON remains buffered in the streaming API backend until the final response is parsed, including JSON mode; structured call arguments are not briefly rendered as ordinary chat text.
 
 - The privileged message actions `getPageContext` and `networkCaptureStart/Stop/Clear` are also restricted to the extension's own sidepanel sender URL. Content scripts retain the existing translation, credential-free stylesheet fetch and proxy paths, but cannot request Agent page context or start/stop/clear the global network capture session.
+
+## Page Control
+
+Page Control is a user-operated capability switch for the current conversation source tab. It is separate from ordinary page translation and page-context extraction.
+
+- The master switch starts off each time the side panel opens. Page DOM tools are sent to the Agent only when both the master switch and the DOM-control switch are on. The background rejects model-generated `page.*` tool requests when that flag is absent, and the side panel checks again immediately before approval/execution.
+- Page DOM access remains a fixed set of validated operations. A local DOM snapshot is an explicit user action, bounded to 300 KB, shown only in the side panel, and discarded when the source tab changes or the panel closes. Do not forward it to chat history or the model.
+- Network capture is off until explicitly enabled. The user can choose automatic transport, CDP, or webRequest. Automatic mode prefers CDP on Chromium and falls back to webRequest; Firefox uses webRequest. An explicitly selected CDP session does not silently downgrade if DevTools takes it over. All capture remains scoped to one source tab, bounded, and redacted.
+- `webRequest`, `webRequestBlocking` (Firefox response stream support), and `cookies` are optional permissions requested only from the corresponding Page Control action. Disable removes the optional permission where the browser allows it, stops listeners/streams, and clears cached records.
+- Chrome's `debugger` permission is not an optional runtime permission. It remains a manifest permission; Page Control only attaches/detaches CDP for the selected tab. The UI must state this distinction rather than promising a second runtime permission prompt.
+- Cookie inspection is a separate explicit action. It requests the optional `cookies` permission from the user click and queries cookies matching the current page URL only. Values are masked by default and may be revealed one at a time. Cookie records are never written to chat history or sent to the model, and are cleared on source change or panel close.
+- These controls expose only browser APIs that the platform supports. They do not promise literal capture of all browser activity: protected/internal pages, browser-owned traffic, service-worker internals, cross-browser response-body capture, and some socket/stream data may remain unavailable. Do not bypass those limits with arbitrary page scripts or unbounded evaluators.
+

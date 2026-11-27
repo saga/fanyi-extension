@@ -74,6 +74,13 @@ export default defineBackground({
 
     const networkCapture = createNetworkCaptureController(browser, (globalThis as any).chrome);
     const networkInspectorPorts = new Set<browser.Runtime.Port>();
+    // Serialize start/stop/clear so a rapid panel close/reopen cannot stop a newer session.
+    let networkCaptureQueue: Promise<void> = Promise.resolve();
+    function enqueueNetworkCapture<T>(operation: () => Promise<T>): Promise<T> {
+      const result = networkCaptureQueue.then(operation, operation);
+      networkCaptureQueue = result.then(() => undefined, () => undefined);
+      return result;
+    }
     networkCapture.subscribe((snapshot) => {
       for (const port of networkInspectorPorts) {
         try { port.postMessage({ type: 'snapshot', snapshot }); }
@@ -416,19 +423,26 @@ export default defineBackground({
             if (tabId == null) sendResponse({ success: false, error: '找不到可捕获网络请求的网页标签页' });
             else {
               try {
-                const current = networkCapture.snapshot();
-                const snapshot = current.active && current.tabId === tabId && current.includeBodies === (message.includeBodies === true)
-                  ? current
-                  : await networkCapture.start(tabId, message.includeBodies === true);
+                const snapshot = await enqueueNetworkCapture(async () => {
+                  const current = networkCapture.snapshot();
+                  const desired = message.preferredMode || 'auto';
+                  const transportMatches = desired === 'auto'
+                    || (desired === 'cdp' && current.mode === 'chromium-cdp')
+                    || (desired === 'webRequest' && current.mode !== null && current.mode.endsWith('webRequest'));
+                  return current.active && current.tabId === tabId
+                    && current.includeBodies === (message.includeBodies === true) && transportMatches
+                    ? current
+                    : networkCapture.start(tabId, message.includeBodies === true, desired);
+                });
                 sendResponse({ success: true, snapshot });
               } catch (error) {
                 sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
               }
             }
           } else if (message.action === 'networkCaptureStop') {
-            sendResponse({ success: true, snapshot: await networkCapture.stop() });
+            sendResponse({ success: true, snapshot: await enqueueNetworkCapture(() => networkCapture.stop()) });
           } else if (message.action === 'networkCaptureClear') {
-            sendResponse({ success: true, snapshot: networkCapture.clear() });
+            sendResponse({ success: true, snapshot: await enqueueNetworkCapture(async () => networkCapture.clear()) });
           } else if (message.action === 'translateEmbeddedFrames') {
             const tabId = message.tabId ?? sender.tab?.id;
             if (!tabId) {
@@ -1380,7 +1394,10 @@ export default defineBackground({
           networkInspectorPorts.delete(port);
           // 网络观测与侧栏生命周期绑定；最后一个面板关闭时释放 CDP/debugger。
           if (networkInspectorPorts.size === 0) {
-            void networkCapture.stop().catch((error) => logger.debug('[Background] network capture cleanup failed:', error));
+            void enqueueNetworkCapture(async () => {
+              await networkCapture.stop();
+              return networkCapture.clear();
+            }).catch((error) => logger.debug('[Background] network capture cleanup failed:', error));
           }
         });
         return;
@@ -1444,13 +1461,17 @@ export default defineBackground({
           thinkingMode?: 'disabled' | 'adaptive' | 'enabled';
           effort?: 'low' | 'medium' | 'high' | 'xhigh'; skillIds?: string[];
           remoteServiceToken?: string;
+          pageControlEnabled?: boolean;
         };
 
         void (async () => {
           try {
             const config = await getConfig();
             const backend = m.backend || config.chatBackend || 'remote';
-            const system = buildChatSystem(m.context ?? null, m.jsonMode) + '\n\n' + buildAgentToolInstructions();
+            const pageToolInstruction = m.pageControlEnabled
+              ? buildAgentToolInstructions()
+              : buildAgentToolInstructions() + '\n\nPage Control 当前处于关闭状态：不要请求任何 page.* 工具，也不要尝试绕过此限制读取、操作或修改网页。用户可以在侧栏 Page Control 菜单中明确启用网页 DOM 能力后再使用。';
+            const system = buildChatSystem(m.context ?? null, m.jsonMode) + '\n\n' + pageToolInstruction;
             const llmMessages: ChatMessage[] = [
               { role: 'system', content: system },
               ...(m.history ?? []),
@@ -1544,6 +1565,18 @@ export default defineBackground({
               if (controller.signal.aborted) return;
               const completion = await complete();
               const toolRequest = parseAgentToolRequest(completion.content);
+              if (toolRequest?.tool.startsWith('page.') && m.pageControlEnabled !== true) {
+                const message = '当前 Page Control 的网页 DOM 读取与操作能力已关闭。请先在侧栏 Page Control 菜单中启用，再提出页面操作请求。';
+                port.postMessage({ type: 'partial', text: message });
+                port.postMessage({
+                  type: 'done',
+                  text: message,
+                  usage: completion.usage,
+                  provider: completion.provider,
+                  model: completion.model,
+                });
+                return;
+              }
               if (!toolRequest) {
                 if (!completion.streamed) port.postMessage({ type: 'partial', text: completion.content });
                 port.postMessage({

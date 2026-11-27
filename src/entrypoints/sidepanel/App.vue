@@ -76,19 +76,189 @@
       </section>
     </details>
 
+    <details class="page-control-panel">
+      <summary>Page Control <span class="settings-summary">{{ pageControlEnabled ? '已启用' : '已关闭' }} · {{ pageControlSourceLabel }}</span></summary>
+      <section class="page-control-content">
+        <label class="page-control-master">
+          <input v-model="pageControlEnabled" type="checkbox" @change="onPageControlChange" />
+          启用当前网页的 Page Control
+        </label>
+        <p class="page-control-warning">只作用于当前对话来源标签页。网页操作仍采用固定工具和逐次确认，不开放任意 JavaScript / eval。</p>
+
+        <template v-if="pageControlEnabled">
+          <div class="page-control-row">
+            <label>
+              <input v-model="pageDomEnabled" type="checkbox" @change="onPageDomControlChange" />
+              网页 DOM 读取与操作
+            </label>
+            <span>{{ pageDomEnabled ? '已允许' : '关闭' }}</span>
+          </div>
+          <p class="page-control-help">开启后，Agent 可以按需读取可见内容、查找/高亮文字、滚动和点击页面控件。点击、提交等动作仍需单独批准；不支持任意脚本执行。</p>
+
+          <div class="page-control-row">
+            <label>
+              <input v-model="pageNetworkEnabled" type="checkbox" @change="onPageNetworkChange" />
+              网络请求捕获
+            </label>
+            <select v-model="pageNetworkMode" :disabled="!pageControlEnabled" @change="onPageNetworkModeChange">
+              <option value="auto">自动选择</option>
+              <option v-if="!isFirefox" value="cdp">CDP / Debugger</option>
+              <option value="webRequest">webRequest</option>
+            </select>
+          </div>
+          <p class="page-control-help">自动模式在 Chromium 优先使用 CDP，失败后降级；Firefox 使用 webRequest。CDP 可读取受支持的文本响应体、WebSocket 帧和 EventSource 消息；Chrome MV3 webRequest 通道主要提供请求元数据和请求体，不提供通用响应体或 WebSocket 帧读取。</p>
+          <div class="page-control-permissions">
+            <span>当前站点：{{ pagePermissionLabel }}</span>
+            <span>Debugger：{{ debuggerPermissionLabel }}</span>
+            <span>webRequest：{{ webRequestPermissionLabel }}</span>
+            <span>Cookie：{{ cookiePermissionLabel }}</span>
+          </div>
+          <p v-if="!isFirefox" class="page-control-help">Chrome 的 debugger 是安装期声明权限，不能通过 runtime optional permission 单独弹窗申请；实际 CDP attach/detach 由上面的网络开关控制。</p>
+
+          <div class="page-control-section">
+            <strong>当前站点 Cookie（只读）</strong>
+            <div class="page-control-actions">
+              <button :disabled="!pageContext || cookieLoading" @click="readSiteCookies">{{ cookieLoading ? '读取中…' : cookiePermissionGranted ? '重新读取当前站点 Cookie' : '授权并读取当前站点 Cookie' }}</button>
+              <button :disabled="!cookiePermissionGranted" @click="disableCookieAccess">关闭 Cookie 访问</button>
+            </div>
+            <p class="page-control-help">仅查询当前页面 URL 匹配的 Cookie，包括 HttpOnly Cookie。值默认隐藏，按需逐条显示；数据只在侧栏内存中展示，不写入聊天历史，也不会发送给模型。</p>
+            <p v-if="cookieError" class="network-error">{{ cookieError }}</p>
+            <div v-if="cookieRecords.length" class="cookie-list">
+              <div v-for="cookie in cookieRecords" :key="cookieKey(cookie)" class="cookie-row">
+                <div class="cookie-meta">
+                  <strong>{{ cookie.name }}</strong>
+                  <span>{{ cookie.domain }}{{ cookie.path }}</span>
+                  <span>{{ [cookie.httpOnly ? 'HttpOnly' : '', cookie.secure ? 'Secure' : '', cookie.sameSite].filter(Boolean).join(' · ') }}</span>
+                </div>
+                <code>{{ revealedCookieKeys.has(cookieKey(cookie)) ? cookie.value : '••••••••' }}</code>
+                <button @click="toggleCookieReveal(cookie)">{{ revealedCookieKeys.has(cookieKey(cookie)) ? '隐藏' : '显示' }}</button>
+              </div>
+            </div>
+            <p v-else-if="cookiePermissionGranted && !cookieLoading" class="page-control-help">当前页面 URL 没有可读取的 Cookie，或浏览器未返回匹配项。</p>
+          </div>
+
+          <div class="page-control-section">
+            <strong>完整 DOM 快照</strong>
+            <button :disabled="!pageDomEnabled || !pageContext || pageDomLoading" @click="capturePageDom">
+              {{ pageDomLoading ? '读取中…' : '读取当前页面 DOM' }}
+            </button>
+            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；快照可能包含页面中的个人信息，只在侧栏内存中显示，不进入聊天上下文。</p>
+            <p v-if="pageDomError" class="network-error">{{ pageDomError }}</p>
+            <details v-if="pageDomSnapshot" class="page-dom-preview">
+              <summary>查看 DOM（原始 {{ pageDomSnapshot.originalLength }} 字节{{ pageDomSnapshot.truncated ? '，已截断至 300 KB' : '' }}）</summary>
+              <pre>{{ pageDomSnapshot.html }}</pre>
+            </details>
+          </div>
+
+          <div class="page-control-section">
+            <strong>页面存储</strong>
+            <button :disabled="!pageDomEnabled || !pageContext || pageStorageLoading" @click="capturePageStorage">{{ pageStorageLoading ? '读取中…' : '读取 localStorage / sessionStorage' }}</button>
+            <p class="page-control-help">只读取当前页面 Origin 的 localStorage 和当前顶层标签页 sessionStorage。值默认遮蔽，只在侧栏内存中展示；不会保存到历史或发送给模型。</p>
+            <p v-if="pageStorageError" class="network-error">{{ pageStorageError }}</p>
+            <div v-if="pageStorageSnapshot" class="storage-preview">
+              <details>
+                <summary>localStorage（{{ pageStorageSnapshot.local.length }} 项）</summary>
+                <div v-for="entry in pageStorageSnapshot.local" :key="'local:' + entry.key" class="storage-row">
+                  <strong>{{ entry.key }}</strong>
+                  <code>{{ revealedStorageKeys.has('local:' + entry.key) ? entry.value : '••••••••' }}</code>
+                  <button @click="toggleStorageReveal('local:' + entry.key)">{{ revealedStorageKeys.has('local:' + entry.key) ? '隐藏' : '显示' }}</button>
+                </div>
+              </details>
+              <details>
+                <summary>sessionStorage（{{ pageStorageSnapshot.session.length }} 项）</summary>
+                <div v-for="entry in pageStorageSnapshot.session" :key="'session:' + entry.key" class="storage-row">
+                  <strong>{{ entry.key }}</strong>
+                  <code>{{ revealedStorageKeys.has('session:' + entry.key) ? entry.value : '••••••••' }}</code>
+                  <button @click="toggleStorageReveal('session:' + entry.key)">{{ revealedStorageKeys.has('session:' + entry.key) ? '隐藏' : '显示' }}</button>
+                </div>
+              </details>
+              <p v-if="pageStorageSnapshot.truncated" class="page-control-help">数据已达到 100 KB 上限并截断。</p>
+            </div>
+          </div>
+        </template>
+      </section>
+    </details>
+
+    <details class="page-control-panel">
+      <summary>Page Control <span class="settings-summary">{{ pageControlEnabled ? '已启用' : '已关闭' }} · {{ pageControlSourceLabel }}</span></summary>
+      <section class="page-control-content">
+        <label class="page-control-master">
+          <input v-model="pageControlEnabled" type="checkbox" @change="onPageControlChange" />
+          启用当前网页的 Page Control
+        </label>
+        <p class="page-control-warning">只作用于当前对话来源标签页。网页操作采用固定工具和逐次确认，不开放任意 JavaScript / eval。</p>
+        <p class="page-control-help">此开关控制额外的 Agent 网页操作与数据检查，不撤销翻译功能依赖的基础站点访问权限。扩展可访问哪些网站，仍由浏览器扩展设置中的“站点访问权限”控制。</p>
+
+        <template v-if="pageControlEnabled">
+          <div class="page-control-row">
+            <label><input v-model="pageDomEnabled" type="checkbox" @change="onPageDomControlChange" /> 网页 DOM 读取与操作</label>
+            <span>{{ pageDomEnabled ? '已允许' : '关闭' }}</span>
+          </div>
+          <p class="page-control-help">开启后，Agent 可以读取可见内容、查找/高亮文字、滚动和点击页面控件。点击等动作仍需单独批准；不支持任意脚本执行。若当前站点访问权限被浏览器设置为“仅点击时”，请在扩展的站点访问设置中允许此站点。</p>
+
+          <div class="page-control-row">
+            <label><input v-model="pageNetworkEnabled" type="checkbox" @change="onPageNetworkChange" /> 网络请求捕获</label>
+            <select v-model="pageNetworkMode" :disabled="!pageNetworkEnabled || isFirefox" @change="onPageNetworkModeChange">
+              <option value="auto">自动选择</option>
+              <option value="cdp">CDP / Debugger</option>
+              <option value="webRequest">webRequest</option>
+            </select>
+          </div>
+          <p class="page-control-help">自动模式在 Chromium 优先使用 CDP，失败后降级；Firefox 使用 webRequest。CDP 可读取受支持的文本响应体；Chrome MV3 webRequest 备用通道主要提供请求元数据和请求体，不提供通用响应体读取。</p>
+          <div class="page-control-permissions">
+            <span>Debugger：{{ debuggerPermissionLabel }}</span>
+            <span>webRequest：{{ webRequestPermissionLabel }}</span>
+            <span>Cookie：{{ cookiePermissionLabel }}</span>
+          </div>
+          <p v-if="!isFirefox" class="page-control-help">Chrome 的 debugger 是安装期声明权限，不能通过 runtime optional permission 单独弹窗申请；实际 CDP attach/detach 由网络开关控制。</p>
+
+          <div class="page-control-section">
+            <strong>当前站点 Cookie</strong>
+            <div class="page-control-actions">
+              <button :disabled="!pageContext || cookieLoading" @click="readSiteCookies">{{ cookieLoading ? '读取中…' : cookiePermissionGranted ? '重新读取当前站点 Cookie' : '授权并读取当前站点 Cookie' }}</button>
+              <button :disabled="!cookiePermissionGranted" @click="disableCookieAccess">关闭 Cookie 访问</button>
+            </div>
+            <p class="page-control-help">仅查询当前页面 URL 匹配的 Cookie，包括 HttpOnly Cookie。值默认隐藏，按需逐条显示；数据只在侧栏内存中展示，不写入聊天历史，也不会发送给模型。</p>
+            <p v-if="cookieError" class="network-error">{{ cookieError }}</p>
+            <div v-if="cookieRecords.length" class="cookie-list">
+              <div v-for="cookie in cookieRecords" :key="cookieKey(cookie)" class="cookie-row">
+                <div class="cookie-meta">
+                  <strong>{{ cookie.name }}</strong>
+                  <span>{{ cookie.domain }}{{ cookie.path }}</span>
+                  <span>{{ [cookie.httpOnly ? 'HttpOnly' : '', cookie.secure ? 'Secure' : '', cookie.sameSite].filter(Boolean).join(' · ') }}</span>
+                </div>
+                <code>{{ revealedCookieKeys.has(cookieKey(cookie)) ? cookie.value : '••••••••' }}</code>
+                <button @click="toggleCookieReveal(cookie)">{{ revealedCookieKeys.has(cookieKey(cookie)) ? '隐藏' : '显示' }}</button>
+              </div>
+            </div>
+            <p v-else-if="cookiePermissionGranted && !cookieLoading" class="page-control-help">当前页面 URL 没有可读取的 Cookie，或浏览器未返回匹配项。</p>
+          </div>
+
+          <div class="page-control-section">
+            <strong>完整 DOM 快照</strong>
+            <button :disabled="!pageDomEnabled || !pageContext || pageDomLoading" @click="capturePageDom">{{ pageDomLoading ? '读取中…' : '读取当前页面 DOM' }}</button>
+            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；内容可能包含个人信息，只在侧栏内存中显示，不进入聊天上下文。</p>
+            <p v-if="pageDomError" class="network-error">{{ pageDomError }}</p>
+            <details v-if="pageDomSnapshot" class="page-dom-preview">
+              <summary>查看 DOM（原始 {{ pageDomSnapshot.originalLength }} 字节{{ pageDomSnapshot.truncated ? '，已截断至 300 KB' : '' }}）</summary>
+              <pre>{{ pageDomSnapshot.html }}</pre>
+            </details>
+          </div>
+        </template>
+      </section>
+    </details>
+
     <details class="network-panel">
-      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? networkModeLabel + ' 自动采集中' : networkError ? '自动采集不可用' : '自动检测中' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
+      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? networkModeLabel + ' 采集中' : networkError ? '采集不可用' : '手动关闭' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
       <section class="network-inspector">
-        <div class="network-toolbar">
-          <button @click="clearNetworkCapture">清空</button>
-        </div>
-        <p class="network-help">面板打开后自动捕获当前对话来源标签页的网络请求，并根据浏览器能力选择 CDP/Debugger 或 webRequest。请求正文自动采集，仅保留受限长度的文本/JSON并脱敏；关闭面板后自动释放控制会话。</p>
+        <div class="network-toolbar"><button @click="clearNetworkCapture">清空</button></div>
+        <p class="network-help">只在 Page Control 启用并打开“网络请求捕获”后开始。范围限定当前来源标签页；最多保留 150 条请求，每个正文最多 32 KB，并对凭证字段脱敏。浏览器内部/受保护请求仍可能不可见。</p>
         <p v-if="networkError" class="network-error">{{ networkError }}</p>
         <div class="network-list">
           <button v-for="item in networkSnapshot.requests" :key="item.id" @click="selectedNetworkId = item.id" :class="{ selected: selectedNetworkId === item.id }">
             <b>{{ item.method }}</b><span>{{ item.status || item.error || '…' }}</span><span>{{ networkLabel(item.url) }}</span>
           </button>
-          <p v-if="!networkSnapshot.requests.length">尚未检测到请求。页面上下文就绪后会自动开始采集。</p>
+          <p v-if="!networkSnapshot.requests.length">没有缓存的网络请求。</p>
         </div>
         <pre v-if="selectedNetworkRequest">{{ JSON.stringify(selectedNetworkRequest, null, 2) }}</pre>
       </section>
@@ -211,7 +381,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import browser from 'webextension-polyfill';
 import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse, NetworkCaptureCommandResponse } from '@/types/messages';
-import type { NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
+import type { NetworkCapturePreference, NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
 import { shouldUseJsonMode, type ChatUsage } from '@/entrypoints/service/chat';
 import type { AgentToolRequest } from '@/entrypoints/utils/agentToolProtocol';
 import { executeAgentToolInExtension, previewAgentPageClick, type AgentToolArtifact } from '@/entrypoints/utils/agentToolExecution';
@@ -225,6 +395,59 @@ interface ChatTurn {
   content: string;
 }
 
+interface PageCookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite?: string;
+  session: boolean;
+  expirationDate?: number;
+  storeId?: string;
+}
+
+interface PageDomSnapshot {
+  title: string;
+  url: string;
+  html: string;
+  originalLength: number;
+  truncated: boolean;
+}
+
+interface PageStorageEntry {
+  key: string;
+  value: string;
+}
+
+interface PageStorageSnapshot {
+  local: PageStorageEntry[];
+  session: PageStorageEntry[];
+  truncated: boolean;
+}
+
+interface PageCookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite?: string;
+  session: boolean;
+  expirationDate?: number;
+  storeId?: string;
+}
+
+interface PageDomSnapshot {
+  title: string;
+  url: string;
+  html: string;
+  originalLength: number;
+  truncated: boolean;
+}
+
 interface PendingAgentTool {
   requestId: string;
   request: AgentToolRequest;
@@ -235,9 +458,29 @@ interface PendingAgentTool {
 
 const pageContext = ref<PageContext | null>(null);
 const resolvedSourceTabId = ref<number | undefined>(undefined);
+const pageControlEnabled = ref(false);
+const pageDomEnabled = ref(false);
+const pageNetworkEnabled = ref(false);
+const pageNetworkMode = ref<NetworkCapturePreference>('auto');
+const cookiePermissionGranted = ref(false);
+const cookieLoading = ref(false);
+const cookieError = ref('');
+const cookieRecords = ref<PageCookieRecord[]>([]);
+const revealedCookieKeys = ref<Set<string>>(new Set());
+const pageDomLoading = ref(false);
+const pageDomError = ref('');
+const pageDomSnapshot = ref<PageDomSnapshot | null>(null);
+const pageStorageLoading = ref(false);
+const pageStorageError = ref('');
+const pageStorageSnapshot = ref<PageStorageSnapshot | null>(null);
+const revealedStorageKeys = ref<Set<string>>(new Set());
+const webRequestPermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
+const cookiePermissionState = ref<'checking' | 'granted' | 'missing' | 'unsupported'>('checking');
 const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
 const networkError = ref('');
 const selectedNetworkId = ref('');
+let pageControlEpoch = 0;
+let pageDomEpoch = 0;
 let networkPort: browser.Runtime.Port | null = null;
 let networkInspectorEnabled = false;
 let networkCaptureStartPromise: Promise<void> | null = null;
@@ -284,6 +527,17 @@ const agentCredentialCopied = ref(false);
 
 
 const isMobile = computed(() => window.matchMedia?.('(max-width: 640px)').matches ?? false);
+const isFirefox = computed(() => typeof (browser.runtime as any).getBrowserInfo === 'function');
+const pageControlSourceLabel = computed(() => {
+  try { return pageContext.value?.url ? new URL(pageContext.value.url).host : '无来源页面'; }
+  catch { return '无来源页面'; }
+});
+const webRequestPermissionLabel = computed(() => ({
+  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
+}[webRequestPermissionState.value]));
+const cookiePermissionLabel = computed(() => ({
+  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
+}[cookiePermissionState.value]));
 const backendSummary = computed(() => chatBackend.value === 'api'
   ? `${chatProvider.value} · ${chatModel.value || '未选择模型'}`
   : chatBackend.value === 'remote' ? 'Vocal Saga' : chatBackend.value === 'workbuddy' ? 'Workbuddy' : chatBackend.value === 'opencode' ? 'OpenCode' : '模型 API');
@@ -301,7 +555,7 @@ const chatConfigIssues = computed(() => {
 });
 const pagePermissionLabel = computed(() => ({
   checking: '检查中',
-  granted: '所有网站',
+  granted: '当前站点已授权',
   missing: '未获得全站访问权限',
   unknown: '浏览器受限页面 / 未知',
 }[pagePermissionState.value]));
@@ -467,12 +721,12 @@ function connectNetworkInspector() {
     port.onDisconnect.addListener(() => {
       if (networkPort !== port) return;
       networkPort = null;
-      // Service worker 重启或短暂断连后自动重连，并恢复当前标签页的网络观测。
+      // Service worker 重启或短暂断连后自动重连；只有用户仍开启网络捕获时才恢复。
       if (networkInspectorEnabled) {
         window.setTimeout(() => {
           if (!networkInspectorEnabled || networkPort) return;
           connectNetworkInspector();
-          void ensureNetworkCapture();
+          if (pageControlEnabled.value && pageNetworkEnabled.value) void ensureNetworkCapture();
         }, 800);
       }
     });
@@ -481,11 +735,18 @@ function connectNetworkInspector() {
   }
 }
 
-/** 网络观测随当前对话来源自动启动；同一标签页已有会话时复用，不重复 attach。 */
+/** 网络捕获只在用户从 Page Control 手动打开后启动。 */
 async function ensureNetworkCapture() {
+  if (!pageControlEnabled.value || !pageNetworkEnabled.value) return;
   const tabId = getCurrentSourceTabId();
   if (tabId == null) return;
-  if (networkSnapshot.value.active && networkSnapshot.value.tabId === tabId && networkSnapshot.value.includeBodies) return;
+  const modeMatches = pageNetworkMode.value === 'auto'
+    ? networkSnapshot.value.mode !== null
+    : pageNetworkMode.value === 'cdp'
+      ? networkSnapshot.value.mode === 'chromium-cdp'
+      : networkSnapshot.value.mode === 'chromium-webRequest' || networkSnapshot.value.mode === 'firefox-webRequest';
+  if (networkSnapshot.value.active && networkSnapshot.value.tabId === tabId
+    && networkSnapshot.value.includeBodies && modeMatches) return;
   if (networkCaptureStartPromise && networkCaptureStartTabId === tabId) return networkCaptureStartPromise;
 
   networkError.value = '';
@@ -496,12 +757,14 @@ async function ensureNetworkCapture() {
         action: 'networkCaptureStart',
         sourceTabId: tabId,
         includeBodies: true,
+        preferredMode: pageNetworkMode.value,
       }) as NetworkCaptureCommandResponse;
       if (!response.success) throw new Error(response.error);
       networkSnapshot.value = response.snapshot;
       selectedNetworkId.value = response.snapshot.requests[0]?.id || '';
     } catch (error) {
       networkError.value = error instanceof Error ? error.message : String(error);
+      pageNetworkEnabled.value = false;
     }
   })();
   networkCaptureStartPromise = task;
@@ -523,6 +786,271 @@ async function clearNetworkCapture() {
     selectedNetworkId.value = '';
   } catch (error) {
     networkError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function normalizePageUrl(value: string): string {
+  const url = new URL(value);
+  url.hash = '';
+  return url.href;
+}
+
+function cookieKey(cookie: PageCookieRecord): string {
+  return [cookie.storeId || '', cookie.domain, cookie.path, cookie.name].join('|');
+}
+
+function toggleCookieReveal(cookie: PageCookieRecord) {
+  const key = cookieKey(cookie);
+  const next = new Set(revealedCookieKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  revealedCookieKeys.value = next;
+}
+
+function clearCookieSnapshot() {
+  cookieRecords.value = [];
+  revealedCookieKeys.value = new Set();
+  cookieError.value = '';
+}
+
+function clearPageSnapshots() {
+  pageDomSnapshot.value = null;
+  pageStorageSnapshot.value = null;
+  revealedStorageKeys.value = new Set();
+  pageDomError.value = '';
+  pageStorageError.value = '';
+}
+
+function toggleStorageReveal(key: string) {
+  const next = new Set(revealedStorageKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  revealedStorageKeys.value = next;
+}
+
+async function stopNetworkCapture(revokePermission = true) {
+  try {
+    const stopped = await browser.runtime.sendMessage({ action: 'networkCaptureStop' }) as NetworkCaptureCommandResponse;
+    if (!stopped.success) throw new Error(stopped.error);
+    const cleared = await browser.runtime.sendMessage({ action: 'networkCaptureClear' }) as NetworkCaptureCommandResponse;
+    if (!cleared.success) throw new Error(cleared.error);
+    networkSnapshot.value = cleared.snapshot;
+    selectedNetworkId.value = '';
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+  }
+  if (revokePermission) {
+    try {
+      if (isFirefox.value) {
+        await browser.permissions.remove({ permissions: ['webRequest', 'webRequestBlocking'] });
+      } else {
+        await browser.permissions.remove({ permissions: ['webRequest'] });
+      }
+      webRequestPermissionState.value = 'missing';
+    } catch {
+      /* A browser may refuse to remove a permission declared by another feature. */
+    }
+  }
+}
+
+async function onPageControlChange() {
+  if (pageControlEnabled.value) {
+    await refreshPermissionStatus();
+    return;
+  }
+  pageControlEpoch += 1;
+  pageDomEpoch += 1;
+  if (pendingAgentTool.value?.request.tool.startsWith('page.')) rejectAgentTool();
+  pageDomEnabled.value = false;
+  pageNetworkEnabled.value = false;
+  clearCookieSnapshot();
+  clearPageSnapshots();
+  await stopNetworkCapture(true);
+  await disableCookieAccess();
+}
+
+async function onPageDomControlChange() {
+  pageDomError.value = '';
+  if (!pageDomEnabled.value) {
+    pageDomEpoch += 1;
+    if (pendingAgentTool.value?.request.tool.startsWith('page.')) rejectAgentTool();
+    clearPageSnapshots();
+    return;
+  }
+  if (!pageControlEnabled.value) {
+    pageDomEnabled.value = false;
+    pageDomError.value = '请先启用 Page Control。';
+  }
+}
+
+async function requestNetworkPermissions(): Promise<boolean> {
+  if (pageNetworkMode.value === 'cdp') return debuggerPermissionState.value === 'granted';
+  try {
+    // Must be called directly from the user's Page Control interaction.
+    const granted = isFirefox.value
+      ? await browser.permissions.request({ permissions: ['webRequest', 'webRequestBlocking'] })
+      : await browser.permissions.request({ permissions: ['webRequest'] });
+    webRequestPermissionState.value = granted ? 'granted' : 'missing';
+    return granted;
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+    webRequestPermissionState.value = 'missing';
+    return false;
+  }
+}
+
+async function onPageNetworkChange() {
+  if (!pageControlEnabled.value) {
+    pageNetworkEnabled.value = false;
+    return;
+  }
+  if (!pageNetworkEnabled.value) {
+    await stopNetworkCapture(true);
+    return;
+  }
+  const granted = await requestNetworkPermissions();
+  if (!granted) {
+    if (!isFirefox.value && pageNetworkMode.value === 'auto' && debuggerPermissionState.value === 'granted') {
+      // webRequest is optional; continue with CDP only if its install-time permission exists.
+      pageNetworkMode.value = 'cdp';
+      await ensureNetworkCapture();
+    } else {
+      pageNetworkEnabled.value = false;
+      networkError.value = '未授予网络捕获所需权限，已保持关闭。';
+    }
+    return;
+  }
+  await ensureNetworkCapture();
+}
+
+async function onPageNetworkModeChange() {
+  if (!pageNetworkEnabled.value || !pageControlEnabled.value) return;
+  const granted = await requestNetworkPermissions();
+  if (!granted) {
+    pageNetworkEnabled.value = false;
+    await stopNetworkCapture(true);
+    networkError.value = '所选网络通道的权限未获批准。';
+    return;
+  }
+  await ensureNetworkCapture();
+}
+
+async function readSiteCookies() {
+  const requestEpoch = pageControlEpoch;
+  const pageUrl = pageContext.value?.url || '';
+  const tabId = getCurrentSourceTabId();
+  if (!pageControlEnabled.value || !pageUrl || tabId == null) return;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(pageUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Cookie API 仅支持 HTTP(S) 网页。');
+    }
+  } catch (error) {
+    cookieError.value = error instanceof Error ? error.message : String(error);
+    return;
+  }
+
+  cookieLoading.value = true;
+  cookieError.value = '';
+  // This must be the first asynchronous browser API call from the click handler.
+  try {
+    const granted = await browser.permissions.request({ permissions: ['cookies'] });
+    if (!granted) throw new Error('未授予 Cookie 访问权限。');
+    if (requestEpoch !== pageControlEpoch || !pageControlEnabled.value) {
+      if (!pageControlEnabled.value) {
+        await browser.permissions.remove({ permissions: ['cookies'] }).catch(() => false);
+        cookiePermissionGranted.value = false;
+        cookiePermissionState.value = 'missing';
+      }
+      return;
+    }
+    cookiePermissionGranted.value = true;
+    cookiePermissionState.value = 'granted';
+
+    const tab = await browser.tabs.get(tabId);
+    if (!tab.url || normalizePageUrl(tab.url) !== normalizePageUrl(pageUrl)) {
+      throw new Error('来源标签页已导航到其他地址，请重新加载网页上下文后再读取 Cookie。');
+    }
+    const hostGranted = await browser.permissions.contains({ origins: [parsed.origin + '/*'] });
+    if (!hostGranted) {
+      throw new Error('当前站点的访问权限未授予。请在浏览器扩展设置中允许访问此站点。');
+    }
+    const cookieApi = (browser as any).cookies;
+    if (typeof cookieApi?.getAll !== 'function') throw new Error('当前浏览器未提供 Cookies API。');
+    const result = await cookieApi.getAll({ url: pageUrl }) as PageCookieRecord[];
+    if (requestEpoch !== pageControlEpoch || !pageControlEnabled.value) return;
+    cookieRecords.value = result.map((cookie) => ({
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      sameSite: cookie.sameSite,
+      session: cookie.session,
+      expirationDate: cookie.expirationDate,
+      storeId: cookie.storeId,
+    }));
+    revealedCookieKeys.value = new Set();
+  } catch (error) {
+    cookieError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    cookieLoading.value = false;
+  }
+}
+
+async function disableCookieAccess() {
+  clearCookieSnapshot();
+  cookiePermissionGranted.value = false;
+  try {
+    await browser.permissions.remove({ permissions: ['cookies'] });
+    cookiePermissionState.value = 'missing';
+  } catch (error) {
+    cookieError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function capturePageDom() {
+  const requestEpoch = pageDomEpoch;
+  const pageUrl = pageContext.value?.url || '';
+  const tabId = getCurrentSourceTabId();
+  if (!pageControlEnabled.value || !pageDomEnabled.value || !pageUrl || tabId == null) return;
+
+  pageDomLoading.value = true;
+  pageDomError.value = '';
+  pageDomSnapshot.value = null;
+  try {
+    const tab = await browser.tabs.get(tabId);
+    if (!tab.url || normalizePageUrl(tab.url) !== normalizePageUrl(pageUrl)) {
+      throw new Error('来源标签页已导航，请先重新加载页面上下文。');
+    }
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const html = document.documentElement?.outerHTML || '';
+        const limit = 300 * 1024;
+        const bytes = new TextEncoder().encode(html);
+        return {
+          title: document.title,
+          url: location.href,
+          html: bytes.byteLength > limit
+            ? new TextDecoder().decode(bytes.subarray(0, limit))
+            : html,
+          originalLength: bytes.byteLength,
+          truncated: bytes.byteLength > limit,
+        };
+      },
+    });
+    const snapshot = results[0]?.result as PageDomSnapshot | undefined;
+    if (!snapshot) throw new Error('浏览器没有返回 DOM 快照。');
+    if (requestEpoch !== pageDomEpoch || !pageControlEnabled.value || !pageDomEnabled.value) return;
+    pageDomSnapshot.value = snapshot;
+  } catch (error) {
+    pageDomError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    pageDomLoading.value = false;
   }
 }
 function networkLabel(url: string): string {
@@ -552,7 +1080,14 @@ function reloadContext() {
 }
 
 async function loadContext(preferredTabId?: number, restoreHistory = true) {
+  pageControlEpoch += 1;
+  pageDomEpoch += 1;
   resolvedSourceTabId.value = preferredTabId ?? getSourceTabId();
+  if (networkSnapshot.value.active && networkSnapshot.value.tabId !== resolvedSourceTabId.value) {
+    await stopNetworkCapture(false);
+  }
+  clearCookieSnapshot();
+  clearPageSnapshots();
   status.value = 'loading';
   errorMsg.value = '';
   pageContext.value = null;
@@ -566,6 +1101,9 @@ async function loadContext(preferredTabId?: number, restoreHistory = true) {
     if (resp.success) {
       pageContext.value = resp.context;
       resolvedSourceTabId.value = resp.tabId ?? getSourceTabId();
+      clearCookieSnapshot();
+      clearPageSnapshots();
+      void refreshPermissionStatus();
       void ensureNetworkCapture();
       // Firefox's desktop sidebar has no sourceTabId query parameter. Once
       // background resolves the active page, try restoring that tab's history.
@@ -668,6 +1206,7 @@ async function initChat() {
   const restored = await loadHistory();
   if (restored && pageContext.value) {
     status.value = 'ready';
+    void refreshPermissionStatus();
     void ensureNetworkCapture();
   } else {
     await loadContext();
@@ -821,6 +1360,20 @@ async function send() {
       request?: AgentToolRequest;
     };
     if (m.type === 'tool_request' && typeof m.requestId === 'string' && m.request) {
+      if (m.request.tool.startsWith('page.')
+        && (!pageControlEnabled.value || !pageDomEnabled.value)) {
+        assistantTurn.content = 'Page Control 的网页读取与操作已关闭，本次页面工具请求已拒绝。';
+        if (currentPort.value === port) {
+          port.postMessage({
+            type: 'tool_result',
+            requestId: m.requestId,
+            approved: false,
+            summary: 'Page Control 当前关闭。不要重试 page.* 工具，继续使用已有页面上下文回答。',
+          });
+        }
+        scrollToBottom();
+        return;
+      }
       const pending: PendingAgentTool = {
         requestId: m.requestId,
         request: m.request,
@@ -866,6 +1419,7 @@ async function send() {
     effort: chatEffort.value,
     skillIds: chatSkillIds.value,
     remoteServiceToken: remoteServiceToken.value.trim(),
+    pageControlEnabled: pageControlEnabled.value && pageDomEnabled.value,
   });
 }
 
@@ -966,6 +1520,18 @@ async function approveAgentTool() {
   const pending = pendingAgentTool.value;
   const port = currentPort.value;
   if (!pending || !port || agentToolExecuting.value) return;
+  if (pending.request.tool.startsWith('page.')
+    && (!pageControlEnabled.value || !pageDomEnabled.value)) {
+    stopAgentToolHeartbeat();
+    pendingAgentTool.value = null;
+    port.postMessage({
+      type: 'tool_result',
+      requestId: pending.requestId,
+      approved: false,
+      summary: 'Page Control 的网页 DOM 读取/操作能力当前处于关闭状态。请先在 Page Control 中启用后再请求页面工具。',
+    });
+    return;
+  }
   agentToolExecuting.value = true;
   agentToolError.value = '';
   try {
@@ -1060,20 +1626,17 @@ async function copyAgentCredentialArtifact() {
 async function refreshPermissionStatus() {
   pagePermissionState.value = 'checking';
   debuggerPermissionState.value = 'checking';
+  webRequestPermissionState.value = 'checking';
+  cookiePermissionState.value = 'checking';
   try {
-    const firefox = /Firefox\//i.test(navigator.userAgent);
-    if (firefox) {
-      debuggerPermissionState.value = 'unsupported';
-    } else {
-      debuggerPermissionState.value = await browser.permissions.contains({ permissions: ['debugger'] })
-        ? 'granted'
-        : 'missing';
-    }
-
-    // 全站权限在 Manifest 中统一声明，安装/升级时由浏览器一次性授予。
-    pagePermissionState.value = await browser.permissions.contains({ origins: ['<all_urls>'] })
-      ? 'granted'
-      : 'missing';
+    debuggerPermissionState.value = isFirefox.value
+      ? 'unsupported'
+      : await browser.permissions.contains({ permissions: ['debugger'] }) ? 'granted' : 'missing';
+    webRequestPermissionState.value = await browser.permissions.contains({ permissions: ['webRequest'] })
+      ? 'granted' : 'missing';
+    cookiePermissionState.value = await browser.permissions.contains({ permissions: ['cookies'] })
+      ? 'granted' : 'missing';
+    cookiePermissionGranted.value = cookiePermissionState.value === 'granted';
 
     const tabId = getCurrentSourceTabId();
     const tab = tabId == null ? null : await browser.tabs.get(tabId).catch(() => null);
@@ -1084,13 +1647,91 @@ async function refreshPermissionStatus() {
     if (pageUrl.protocol === 'file:') {
       pagePermissionState.value = 'unknown';
       chatOptionsError.value = '读取本地文件还需要在扩展详情页开启“允许访问文件网址”。';
-    } else if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') {
+    } else if (pageUrl.protocol === 'http:' || pageUrl.protocol === 'https:') {
+      pagePermissionState.value = await browser.permissions.contains({
+        origins: [pageUrl.origin + '/*'],
+        permissions: ['scripting'],
+      }) ? 'granted' : 'missing';
+    } else {
       pagePermissionState.value = 'unknown';
       chatOptionsError.value = '当前是浏览器内部或扩展页面，浏览器可能禁止扩展读取其内容。';
     }
   } catch {
     pagePermissionState.value = 'unknown';
     if (debuggerPermissionState.value === 'checking') debuggerPermissionState.value = 'unknown';
+    if (webRequestPermissionState.value === 'checking') webRequestPermissionState.value = 'unsupported';
+    if (cookiePermissionState.value === 'checking') cookiePermissionState.value = 'unsupported';
+  }
+}
+
+
+async function capturePageStorage() {
+  const requestEpoch = pageDomEpoch;
+  const pageUrl = pageContext.value?.url || '';
+  const tabId = getCurrentSourceTabId();
+  if (!pageControlEnabled.value || !pageDomEnabled.value || !pageUrl || tabId == null) return;
+
+  pageStorageLoading.value = true;
+  pageStorageError.value = '';
+  pageStorageSnapshot.value = null;
+  try {
+    const expectedUrl = normalizePageUrl(pageUrl);
+    const tab = await browser.tabs.get(tabId);
+    if (!tab.url || normalizePageUrl(tab.url) !== expectedUrl) {
+      throw new Error('来源标签页已导航，请先重新加载页面上下文。');
+    }
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const limit = 100 * 1024;
+        let used = 0;
+        let truncated = false;
+        const readStorage = (storage: Storage): Array<{ key: string; value: string }> => {
+          const items: Array<{ key: string; value: string }> = [];
+          for (let index = 0; index < storage.length; index++) {
+            const key = storage.key(index);
+            if (key === null) continue;
+            const value = storage.getItem(key) ?? '';
+            const bytes = new TextEncoder().encode(key + value).byteLength;
+            if (used + bytes > limit) {
+              truncated = true;
+              break;
+            }
+            used += bytes;
+            items.push({ key, value });
+          }
+          return items;
+        };
+        try {
+          return {
+            local: readStorage(window.localStorage),
+            session: readStorage(window.sessionStorage),
+            truncated,
+          };
+        } catch (error) {
+          return {
+            local: [],
+            session: [],
+            truncated: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    });
+    const result = results[0]?.result as (PageStorageSnapshot & { error?: string }) | undefined;
+    if (!result) throw new Error('浏览器没有返回页面存储数据。');
+    if (result.error) throw new Error(result.error);
+    if (requestEpoch !== pageDomEpoch || !pageControlEnabled.value || !pageDomEnabled.value) return;
+    pageStorageSnapshot.value = {
+      local: result.local,
+      session: result.session,
+      truncated: result.truncated,
+    };
+    revealedStorageKeys.value = new Set();
+  } catch (error) {
+    pageStorageError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    pageStorageLoading.value = false;
   }
 }
 
@@ -1110,10 +1751,13 @@ onMounted(async () => {
   void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });
   void refreshPermissionStatus();
   await initChat();
-  void ensureNetworkCapture();
 });
 onUnmounted(() => {
   networkInspectorEnabled = false;
+  pageControlEpoch += 1;
+  pageDomEpoch += 1;
+  clearCookieSnapshot();
+  clearPageSnapshots();
   stopAgentToolHeartbeat();
   try { networkPort?.disconnect(); } catch { /* already disconnected */ }
   networkPort = null;
@@ -1583,6 +2227,40 @@ onUnmounted(() => {
   background: #91caff;
   cursor: default;
 }
+.page-control-panel { border-bottom: 1px solid #ececec; max-height: min(55dvh, 520px); overflow: auto; }
+.page-control-panel > summary { padding: 9px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.page-control-content { padding: 0 12px 12px; }
+.page-control-master, .page-control-row { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 12px; color: #262626; }
+.page-control-master { font-weight: 600; border-bottom: 1px solid #f0f0f0; }
+.page-control-row { justify-content: space-between; flex-wrap: wrap; }
+.page-control-row label { display: inline-flex; align-items: center; gap: 7px; }
+.page-control-row select { min-width: 130px; max-width: 48%; padding: 5px 7px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; }
+.page-control-row span { color: #8c8c8c; font-size: 11px; }
+.page-control-warning { margin: 7px 0; color: #ad6800; font-size: 11px; }
+.page-control-help { margin: 5px 0 8px; color: #8c8c8c; font-size: 11px; line-height: 1.5; }
+.page-control-permissions { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 5px 0 8px; color: #595959; font-size: 11px; }
+.page-control-section { margin-top: 10px; padding-top: 9px; border-top: 1px solid #f0f0f0; }
+.page-control-section > strong { display: block; margin-bottom: 7px; font-size: 12px; }
+.page-control-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.page-control-actions button, .page-control-section > button { padding: 5px 9px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; color: #262626; font-size: 11px; }
+.page-control-actions button:disabled, .page-control-section > button:disabled { opacity: .5; }
+.cookie-list { max-height: 180px; overflow: auto; border: 1px solid #eee; border-radius: 6px; }
+.cookie-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 7px; border-bottom: 1px solid #f3f3f3; }
+.cookie-meta { min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.cookie-meta strong { font-size: 11px; }
+.cookie-meta span { color: #999; font-size: 10px; }
+.cookie-row code { overflow-wrap: anywhere; color: #595959; font-size: 10px; }
+.cookie-row button { padding: 4px 6px; border: 1px solid #d9d9d9; border-radius: 5px; background: #fff; font-size: 10px; }
+.page-dom-preview { margin-top: 7px; }
+.page-dom-preview > summary { cursor: pointer; font-size: 11px; color: #595959; }
+.page-dom-preview pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #fafafa; border: 1px solid #eee; padding: 8px; }
+.storage-preview { margin-top: 7px; }
+.storage-preview details { margin-top: 6px; border: 1px solid #eee; border-radius: 6px; }
+.storage-preview summary { padding: 6px 8px; cursor: pointer; font-size: 11px; }
+.storage-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 6px 8px; border-top: 1px solid #f3f3f3; }
+.storage-row strong { min-width: 0; overflow-wrap: anywhere; font-size: 10px; }
+.storage-row code { min-width: 0; overflow-wrap: anywhere; color: #595959; font-size: 10px; }
+.storage-row button { padding: 3px 6px; border: 1px solid #d9d9d9; border-radius: 5px; background: #fff; font-size: 10px; }
 .network-panel { border-bottom: 1px solid #ececec; max-height: min(45dvh, 420px); overflow: auto; }
 .network-panel > summary { padding: 9px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .network-inspector { padding: 0 10px 10px; }

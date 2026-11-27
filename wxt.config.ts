@@ -36,12 +36,16 @@ export default defineConfig({
         'tabs',
         'activeTab',
         'scripting',
-        'webRequest',
-        'webRequestBlocking',
         '<all_urls>',
       ];
       // Optional Firefox desktop Containers support; Android may not expose this API.
-      manifest.optional_permissions = ['contextualIdentities', 'cookies'];
+      // Page Control 按需申请网络监听 / 响应流读取 / Cookie 访问权限。
+      manifest.optional_permissions = [
+        'contextualIdentities',
+        'cookies',
+        'webRequest',
+        'webRequestBlocking',
+      ];
       manifest.browser_specific_settings = {
         gecko: {
           id: '{ad94258c-d45d-4b70-93a9-ff88cf914b92}',
@@ -59,13 +63,13 @@ export default defineConfig({
         'storage',
         'contextMenus',
         'debugger',
-        // CDP 不可用或 DevTools 接管时，自动降级为只读请求元数据采集。
-        'webRequest',
         'tabs',
         'activeTab',
         'scripting',
         'offscreen',
       ];
+      // 网络监听与 Cookie API 由 Page Control 在用户启用时申请。
+      manifest.optional_permissions = ['cookies', 'webRequest'];
       manifest.host_permissions = ['<all_urls>'];
       manifest.commands = {
         'translate-page': {

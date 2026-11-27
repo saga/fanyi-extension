@@ -113,15 +113,35 @@ describe('NetworkCaptureController', () => {
       requestId: 'cdp-1', response: { status: 200, statusText: 'OK', mimeType: 'application/json', headers: { 'set-cookie': 'secret' } },
     });
     emit('Network.loadingFinished', { requestId: 'cdp-1', encodedDataLength: 14 });
+    emit('Network.webSocketCreated', { requestId: 'ws-1', url: 'wss://example.test/socket' });
+    emit('Network.webSocketFrameSent', {
+      requestId: 'ws-1', response: { opcode: 1, payloadData: 'token=ws-secret' },
+    });
+    emit('Network.webSocketFrameReceived', {
+      requestId: 'ws-1', response: { opcode: 1, payloadData: '{"api_key":"response-secret"}' },
+    });
+    emit('Network.eventSourceMessageReceived', {
+      requestId: 'es-1', eventName: 'update', eventId: '12', data: 'access_token=event-secret',
+    });
     await Promise.resolve();
 
-    const record = controller.snapshot().requests[0];
+    const record = controller.snapshot().requests.find((item) => item.id === 'cdp-1');
     expect(record).toBeDefined();
     if (!record) throw new Error('Expected captured Chromium request');
     expect(record.url).toContain('token=%5BREDACTED%5D');
     expect(record.status).toBe(200);
     expect(record.responseHeaders?.['set-cookie']).toBe('[REDACTED]');
     expect(record.responseBody).toBe('{"ok":true}');
+
+    const websocket = controller.snapshot().requests.find((item) => item.id === 'ws-1');
+    expect(websocket?.webSocketFrames).toHaveLength(2);
+    expect(websocket?.webSocketFrames?.[0]?.payload).toContain('[REDACTED]');
+    expect(websocket?.webSocketFrames?.[0]?.payload).not.toContain('ws-secret');
+    expect(websocket?.webSocketFrames?.[1]?.payload).not.toContain('response-secret');
+
+    const eventSource = controller.snapshot().requests.find((item) => item.id === 'es-1');
+    expect(eventSource?.eventSourceMessages?.[0]?.eventName).toBe('update');
+    expect(eventSource?.eventSourceMessages?.[0]?.data).not.toContain('event-secret');
 
     await controller.stop();
     expect(debuggerApi.detach).toHaveBeenCalledWith({ tabId: 9 });
@@ -179,6 +199,60 @@ describe('NetworkCaptureController', () => {
 
     await controller.stop();
     expect(controller.snapshot().active).toBe(false);
+  });
+
+  it('uses only webRequest when the user explicitly selects that channel', async () => {
+    const onBeforeRequest = event();
+    const onBeforeSendHeaders = event();
+    const onHeadersReceived = event();
+    const onCompleted = event();
+    const onErrorOccurred = event();
+    const webRequest = {
+      onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
+    };
+    const debuggerApi = {
+      onEvent: { addListener: vi.fn(), removeListener: vi.fn() },
+      onDetach: { addListener: vi.fn(), removeListener: vi.fn() },
+      attach: vi.fn(),
+      sendCommand: vi.fn(),
+      detach: vi.fn(),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const snapshot = await controller.start(65, true, 'webRequest');
+    expect(snapshot.mode).toBe('chromium-webRequest');
+    expect(debuggerApi.attach).not.toHaveBeenCalled();
+    expect(onBeforeRequest.addListener).toHaveBeenCalled();
+
+    await controller.stop();
+  });
+
+  it('does not silently switch from explicitly selected CDP to webRequest after detach', async () => {
+    const onBeforeRequest = event();
+    const webRequest = {
+      onBeforeRequest,
+      onBeforeSendHeaders: event(),
+      onHeadersReceived: event(),
+      onCompleted: event(),
+      onErrorOccurred: event(),
+    };
+    const onEvent = event();
+    const onDetach = event();
+    const debuggerApi = {
+      onEvent, onDetach,
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue({}),
+      detach: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const snapshot = await controller.start(67, true, 'cdp');
+    expect(snapshot.mode).toBe('chromium-cdp');
+    onDetach.fire({ tabId: 67 }, 'canceled_by_user');
+
+    expect(controller.snapshot().active).toBe(false);
+    expect(controller.snapshot().mode).toBeNull();
+    expect(onBeforeRequest.addListener).not.toHaveBeenCalled();
   });
 
   it('automatically falls back when CDP is detached by DevTools', async () => {
@@ -253,7 +327,7 @@ describe('NetworkCaptureController', () => {
     const controller = createNetworkCaptureController({ webRequest });
     await controller.start(55, true);
 
-    const raw = new TextEncoder().encode('api_key=raw-secret&password=another-secret').buffer;
+    const raw = new TextEncoder().encode('api_key=raw-secret&password=another-secret&client_secret=third-secret&session_id=fourth-secret').buffer;
     events[0]!.fire({
       requestId: 'raw-body', tabId: 55, url: 'https://example.test/form',
       method: 'POST', type: 'xmlhttprequest', timeStamp: 1,
@@ -263,6 +337,8 @@ describe('NetworkCaptureController', () => {
     expect(rawRecord?.requestBody).toContain('[REDACTED]');
     expect(rawRecord?.requestBody).not.toContain('raw-secret');
     expect(rawRecord?.requestBody).not.toContain('another-secret');
+    expect(rawRecord?.requestBody).not.toContain('third-secret');
+    expect(rawRecord?.requestBody).not.toContain('fourth-secret');
 
     const largeRaw = new TextEncoder().encode(JSON.stringify({ note: 'x'.repeat(40 * 1024) })).buffer;
     events[0]!.fire({
