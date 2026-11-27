@@ -715,19 +715,18 @@ function connectNetworkInspector() {
   }
 }
 
-function networkPreferenceMatches(snapshot: NetworkCaptureSnapshot): boolean {
-  if (pageNetworkMode.value === 'auto') return snapshot.mode !== null;
-  if (pageNetworkMode.value === 'cdp') return snapshot.mode === 'chromium-cdp';
-  return snapshot.mode === 'chromium-webRequest' || snapshot.mode === 'firefox-webRequest';
-}
-
 /** 网络捕获只在用户从 Page Control 手动打开后启动。 */
 async function ensureNetworkCapture() {
   if (!pageControlEnabled.value || !pageNetworkEnabled.value) return;
   const tabId = getCurrentSourceTabId();
   if (tabId == null) return;
+  const modeMatches = pageNetworkMode.value === 'auto'
+    ? networkSnapshot.value.mode !== null
+    : pageNetworkMode.value === 'cdp'
+      ? networkSnapshot.value.mode === 'chromium-cdp'
+      : networkSnapshot.value.mode === 'chromium-webRequest' || networkSnapshot.value.mode === 'firefox-webRequest';
   if (networkSnapshot.value.active && networkSnapshot.value.tabId === tabId
-    && networkSnapshot.value.includeBodies && networkPreferenceMatches(networkSnapshot.value)) return;
+    && networkSnapshot.value.includeBodies && modeMatches) return;
   if (networkCaptureStartPromise && networkCaptureStartTabId === tabId) return networkCaptureStartPromise;
 
   networkError.value = '';
