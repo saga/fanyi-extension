@@ -61,6 +61,12 @@ export default defineBackground({
     logger.debug('Background script loaded');
 
     const sidepanelUrl = browser.runtime.getURL('sidepanel.html');
+    const sidepanelOnlyMessageActions = new Set([
+      'getPageContext',
+      'networkCaptureStart',
+      'networkCaptureStop',
+      'networkCaptureClear',
+    ]);
     function isSidepanelPort(port: browser.Runtime.Port): boolean {
       return isSidepanelPortUrl(port.sender?.url, sidepanelUrl);
     }
@@ -387,6 +393,11 @@ export default defineBackground({
       // Handle messages asynchronously, ensuring config is loaded first
       (async () => {
         try {
+          if (sidepanelOnlyMessageActions.has(message.action)
+            && !isSidepanelPortUrl(sender.url, sidepanelUrl)) {
+            sendResponse({ success: false, error: '该操作仅允许扩展网页对话面板调用' });
+            return;
+          }
           if (message.action === 'translateChunk') {
             await handleTranslateChunk(message, sendResponse as (r: TranslateChunkResponse) => void);
           } else if (message.action === 'translateChunkStream') {
