@@ -25,8 +25,7 @@ export interface ChatUsage {
 
 /** chatStream / chat 的可选参数。 */
 export interface ChatOptions {
-  /** 原生 JSON 模式：附加 response_format=json_object（DeepSeek 要求 prompt 含 'json' 字样）。
-   *  聊天默认关闭以保持对话自然；结构化抽取场景由调用方开启。 */
+  /** 原生 JSON 模式：由聊天入口根据用户当前问题中的结构化输出意图自动判断。 */
   jsonMode?: boolean;
   /** 取消信号：用户关闭侧栏 / 导航时中断在途请求。 */
   signal?: AbortSignal;
@@ -74,6 +73,17 @@ function normalizeUsage(u: SSEUsage): ChatUsage {
     cacheHitTokens: cacheHit,
     cacheMissTokens: cacheMiss,
   };
+}
+
+/**
+ * 根据当前问题判断是否需要原生 JSON 输出。
+ * 普通解释、总结和问答保持自然语言；明确要求返回 JSON/结构化对象时自动启用。
+ */
+export function shouldUseJsonMode(question: string): boolean {
+  const value = question.trim();
+  if (!value) return false;
+  if (/(?:不要|不需要|无需|别|禁止|without|do not|don't|not).{0,12}(?:json|结构化)/i.test(value)) return false;
+  return /(?:用|以|按|输出|返回|生成|提供|给出|整理成|转换成|转换为|转成|format(?:\s+as)?|return(?:\s+as)?|respond(?:\s+in)?|output(?:\s+as)?|serialize|convert(?:\s+to)?).{0,20}(?:json|结构化(?:数据|结果|输出)?|machine[- ]readable)|(?:json|结构化(?:数据|结果|输出)?|machine[- ]readable).{0,16}(?:格式|对象|数组|输出|返回|format|object|array)/i.test(value);
 }
 
 /**
