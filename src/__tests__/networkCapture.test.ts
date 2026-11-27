@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createNetworkCaptureController } from '../entrypoints/utils/networkCapture';
 
 function event() {
-  let listener: ((details: any) => unknown) | undefined;
+  let listener: ((...args: any[]) => unknown) | undefined;
   return {
-    addListener: vi.fn((next: (details: any) => unknown) => { listener = next; }),
+    addListener: vi.fn((next: (...args: any[]) => unknown) => { listener = next; }),
     removeListener: vi.fn(),
     fire(...args: any[]) { return listener?.(...args); },
   };
