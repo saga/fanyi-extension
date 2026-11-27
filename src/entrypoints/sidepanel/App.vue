@@ -116,7 +116,7 @@
           <p v-if="!isFirefox" class="page-control-help">Chrome 的 debugger 是安装期声明权限，不能通过 runtime optional permission 单独弹窗申请；实际 CDP attach/detach 由上面的网络开关控制。</p>
 
           <div class="page-control-section">
-            <strong>当前站点 Cookie</strong>
+            <strong>当前站点 Cookie（只读）</strong>
             <div class="page-control-actions">
               <button :disabled="!pageContext || cookieLoading" @click="readSiteCookies">{{ cookieLoading ? '读取中…' : cookiePermissionGranted ? '重新读取当前站点 Cookie' : '授权并读取当前站点 Cookie' }}</button>
               <button :disabled="!cookiePermissionGranted" @click="disableCookieAccess">关闭 Cookie 访问</button>
@@ -187,6 +187,7 @@
           启用当前网页的 Page Control
         </label>
         <p class="page-control-warning">只作用于当前对话来源标签页。网页操作采用固定工具和逐次确认，不开放任意 JavaScript / eval。</p>
+        <p class="page-control-help">此开关控制额外的 Agent 网页操作与数据检查，不撤销翻译功能依赖的基础站点访问权限。扩展可访问哪些网站，仍由浏览器扩展设置中的“站点访问权限”控制。</p>
 
         <template v-if="pageControlEnabled">
           <div class="page-control-row">
@@ -251,7 +252,7 @@
       <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? networkModeLabel + ' 采集中' : networkError ? '采集不可用' : '手动关闭' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
       <section class="network-inspector">
         <div class="network-toolbar"><button @click="clearNetworkCapture">清空</button></div>
-        <p class="network-help">只在 Page Control 启用并打开“网络请求捕获”后开始。范围限定当前来源标签页；最多保留 150 条请求，每个正文最多 32 KB，并对凭证字段脱敏。</p>
+        <p class="network-help">只在 Page Control 启用并打开“网络请求捕获”后开始。范围限定当前来源标签页；最多保留 150 条请求，每个正文最多 32 KB，并对凭证字段脱敏。浏览器内部/受保护请求仍可能不可见。</p>
         <p v-if="networkError" class="network-error">{{ networkError }}</p>
         <div class="network-list">
           <button v-for="item in networkSnapshot.requests" :key="item.id" @click="selectedNetworkId = item.id" :class="{ selected: selectedNetworkId === item.id }">
