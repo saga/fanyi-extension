@@ -1061,7 +1061,7 @@ function reloadContext() {
 async function loadContext(preferredTabId?: number, restoreHistory = true) {
   resolvedSourceTabId.value = preferredTabId ?? getSourceTabId();
   if (networkSnapshot.value.active && networkSnapshot.value.tabId !== resolvedSourceTabId.value) {
-    void stopNetworkCapture(false);
+    await stopNetworkCapture(false);
   }
   clearCookieSnapshot();
   clearPageSnapshots();
