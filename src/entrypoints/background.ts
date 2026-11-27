@@ -39,6 +39,7 @@ import type {
   OpenPdfReaderResponse,
   FetchPdfBinaryMessage,
   FetchPdfBinaryResponse,
+  TranslateEmbeddedFramesResponse,
   PageContext,
 } from '../types/messages';
 import { isPdfUrl } from './utils/pdfSource';
@@ -428,6 +429,25 @@ export default defineBackground({
             sendResponse({ success: true, snapshot: await networkCapture.stop() });
           } else if (message.action === 'networkCaptureClear') {
             sendResponse({ success: true, snapshot: networkCapture.clear() });
+          } else if (message.action === 'translateEmbeddedFrames') {
+            const tabId = message.tabId ?? sender.tab?.id;
+            if (!tabId) {
+              sendResponse({ success: false, error: '找不到目标标签页' });
+            } else {
+              try {
+                // Omitting frameId broadcasts to every frame; top frame ignores the
+                // flag, child frames translate their own document.
+                await browser.tabs.sendMessage(tabId, {
+                  action: 'translatePage',
+                  frameFallback: true,
+                });
+                sendResponse({ success: true });
+              } catch (error) {
+                const msg = error instanceof Error ? error.message : 'relay failed';
+                logger.warn('[Background] translateEmbeddedFrames failed:', msg);
+                sendResponse({ success: false, error: msg });
+              }
+            }
           } else if (message.action === 'relayToContent') {
             await handleRelayToContent(message, sendResponse as (r: RelayToContentResponse) => void);
           } else if (message.action === 'fetchRemoteCss') {

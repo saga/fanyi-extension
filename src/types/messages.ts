@@ -228,7 +228,8 @@ export type BackgroundMessage =
   | FetchRemoteCssMessage
   | ProxyServerFetchMessage
   | OpenPdfReaderMessage
-  | FetchPdfBinaryMessage;
+  | FetchPdfBinaryMessage
+  | TranslateEmbeddedFramesMessage;
 
 // ============================================================
 // Content-script-bound messages (background → content script)
@@ -236,6 +237,12 @@ export type BackgroundMessage =
 
 export interface TranslatePageMessage {
   action: 'translatePage';
+  /**
+   * Set by background when the top frame had no translatable content and the
+   * real article lives in a child iframe. Top frame ignores these messages;
+   * child frames only translate when this flag is present.
+   */
+  frameFallback?: boolean;
 }
 
 export interface RestoreOriginalMessage {
@@ -254,6 +261,19 @@ export interface TranslationStreamUpdateMessage {
 export interface ExtractChatContextMessage {
   action: 'extractChatContext';
 }
+
+/**
+ * Top frame found no translatable blocks but hosts a content iframe.
+ * Background relays `translatePage { frameFallback: true }` to all frames.
+ */
+export interface TranslateEmbeddedFramesMessage {
+  action: 'translateEmbeddedFrames';
+  tabId?: number;
+}
+
+export type TranslateEmbeddedFramesResponse =
+  | { success: true }
+  | { success: false; error: string };
 
 /** Ask the content script to mine its DOM for a PDF source (wrapper pages). */
 export interface FindPdfSourceMessage {
@@ -415,7 +435,8 @@ export type BackgroundResponse =
   | FetchRemoteCssResponse
   | ProxyServerFetchResponse
   | OpenPdfReaderResponse
-  | FetchPdfBinaryResponse;
+  | FetchPdfBinaryResponse
+  | TranslateEmbeddedFramesResponse;
 
 // ============================================================
 // Listener 签名（替换 onMessage.addListener 的 `any` 入参）

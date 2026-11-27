@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
 import { prepareDocument, createOverlayHider, type OverlayHider } from '../utils/contentHelper';
 import { findPdfSource } from '../utils/pdfSource';
+import { hasContentIframe } from '../utils/embeddedFrame';
 import { getDomainParkingPageMessage } from '../utils/domainParkingGuard';
 import { buildNodeMap } from '../utils/blockExtractor';
 import { buildChunks } from '../utils/chunkBuilder';
@@ -105,6 +106,7 @@ export interface TranslationController {
 export function createTranslationController(
   isMobile: boolean,
   state: TranslationState,
+  isEmbeddedFrame = false,
 ): TranslationController {
   let isTranslating = false;
   let isTranslatedState = false;
@@ -116,7 +118,7 @@ export function createTranslationController(
     overlayHider?.stop();
     overlayHider = null;
   };
-  const ctx = { isMobile };
+  const ctx = { isMobile, isEmbeddedFrame };
 
   return {
     async start() {
@@ -203,11 +205,33 @@ export function createTranslationController(
         cleanupTempAttrs();
         // 空页面常见于「HTML 外壳 + PDF iframe」。挖掘 iframe/embed 找到 PDF 后
         // 直接切到扩展的 PDF 阅读器；找不到时仍按原逻辑报错。
-        if (await tryOpenPdfReaderForEmptyPage(error)) {
+        if (!ctx.isEmbeddedFrame && await tryOpenPdfReaderForEmptyPage(error)) {
           showStatus('已找到 PDF，正在打开阅读器…', 'success');
           return;
         }
-        showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
+        // 另一类空页面是「HTML 外壳 + 正文 iframe」（Hugging Face Spaces 等），
+        // 顶层只有导航文字，正文全在跨域子 frame。让 background 把翻译消息
+        // 广播给所有 frame；子 frame 的 content script 完成真正的翻译。
+        if (!ctx.isEmbeddedFrame && hasContentIframe(document)) {
+          try {
+            const response = (await browser.runtime.sendMessage({
+              action: 'translateEmbeddedFrames',
+            })) as { success: boolean } | undefined;
+            if (response?.success) {
+              showStatus('正在翻译嵌入内容…', 'loading');
+              setTimeout(hideStatus, 5000);
+              return;
+            }
+          } catch (err) {
+            logger.warn('[ContentScript] Embedded frame translation relay failed:', err);
+          }
+        }
+        if (ctx.isEmbeddedFrame) {
+          // 空的子 frame（统计、支付等 1px iframe）不向用户报错。
+          hideStatus();
+        } else {
+          showStatus(error instanceof Error ? error.message : '翻译失败', 'error');
+        }
       } finally {
         isTranslating = false;
       }

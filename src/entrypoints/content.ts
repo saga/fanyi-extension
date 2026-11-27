@@ -45,6 +45,8 @@ import { logger } from '../utils/logger';
  */
 const isAndroid = /Android/i.test(navigator.userAgent);
 const isMobile = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+/** Cross-origin iframes get the same content script, but stay dormant unless explicitly targeted. */
+const isEmbeddedFrame = window.top !== window;
 
 // ============================================================
 // 入口
@@ -54,6 +56,10 @@ export default defineContentScript({
   // *://*/* 覆盖 http/https；file:///* 让本地 HTML 也能翻译/对话
   // （需用户在 chrome://extensions 开启"允许访问文件网址"）。
   matches: ['*://*/*', 'file:///*'],
+  // 正文可能整个住在跨域 iframe 里（Hugging Face Spaces / 嵌入文章）。
+  // 子 frame 默认闲置，只有顶层翻译失败后 background 发来的 frameFallback
+  // 消息才会触发翻译，避免把广告 iframe 也翻了。
+  allFrames: true,
   main() {
     logger.debug('[ContentScript] Initializing on:', window.location.href, 'isMobile:', isMobile);
 
@@ -78,7 +84,7 @@ export default defineContentScript({
     // === 移动端入口 ===
     // 悬浮按钮是稳定入口（单击翻译/恢复，长按配置）；三击手势是快捷方式。
     // 桌面端走 popup / 快捷键 / 右键菜单。
-    if (isMobile) {
+    if (isMobile && !isEmbeddedFrame) {
       setupTouchEvents(() => handleAction('translate'));
       setupMobileControls({
         onTranslate: () => handleAction('translate'),
@@ -96,6 +102,7 @@ export default defineContentScript({
 
     // YouTube SPA 导航：切视频时停止旧翻译（字幕 + 整页），需要用户重新点击翻译按钮
     document.addEventListener('yt-navigate-finish', () => {
+      if (isEmbeddedFrame) return;
       const newVideoId = extractVideoId();
       if (!isYouTubeWatchPage() || !newVideoId) {
         // 离开 watch 页：清理字幕翻译与整页翻译状态
@@ -125,6 +132,7 @@ export default defineContentScript({
     // 改用 popstate + 轮询 location.pathname + location.search（忽略 hash，避免目录锚点误判）。
     let lastPageKey = window.location.pathname + window.location.search;
     function onSpaNavigation(): void {
+      if (isEmbeddedFrame) return;
       const currentPageKey = window.location.pathname + window.location.search;
       if (currentPageKey === lastPageKey) return;
       lastPageKey = currentPageKey;
@@ -140,26 +148,39 @@ export default defineContentScript({
     setInterval(onSpaNavigation, 500);
 
     // === 消息路由：来自 background、popup、keyboard shortcut ===
+    // tabs.sendMessage 会广播给标签页所有 frame。子 frame 只在顶层翻译失败后
+    // 才被 background 用 frameFallback 消息唤醒。
+    let frameFallbackUsed = false;
     browser.runtime.onMessage.addListener(((message: ContentMessage) => {
       switch (message.action) {
         case 'translatePage':
+          if (message.frameFallback === true) {
+            if (!isEmbeddedFrame) return undefined;
+            frameFallbackUsed = true;
+          } else if (isEmbeddedFrame) {
+            return undefined;
+          }
           void handleAction('translate');
           return undefined;
         case 'restoreOriginal':
+          if (isEmbeddedFrame && !frameFallbackUsed) return undefined;
           handleAction('restore');
           return undefined;
         case 'toggleTranslation':
+          if (isEmbeddedFrame && !frameFallbackUsed) return undefined;
           handleAction('toggle');
           return undefined;
         case 'translationStreamUpdate':
           // 预留：流式翻译当前未启用，保留接口以便后续接入
           return undefined;
         case 'extractChatContext':
+          if (isEmbeddedFrame) return undefined;
           // 返回当前页面的可翻译正文，作为对话上下文。
           // 侧栏（side panel）通过该消息向 background 取页面正文。
           // 返回 Promise 让 background 的 sendMessage 收到响应。
           return handleExtractChatContext();
         case 'findPdfSource': {
+          if (isEmbeddedFrame) return undefined;
           // 外壳页（如 stamp.jsp → iframe PDF）本身没有正文。popup 在启动翻译前
           // 询问内容脚本，挖掘 iframe/embed 找到真正的 PDF 地址。
           const source = findPdfSource(document, window.location.href);
@@ -205,7 +226,7 @@ export default defineContentScript({
     /** 懒加载控制器。 */
     async function ensureController(): Promise<TranslationController> {
       if (translation) return translation;
-      translation = createTranslationController(isMobile, state);
+      translation = createTranslationController(isMobile, state, isEmbeddedFrame);
       return translation;
     }
 
