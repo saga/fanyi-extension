@@ -1375,9 +1375,8 @@ export default defineBackground({
           // 网络观测与侧栏生命周期绑定；最后一个面板关闭时释放 CDP/debugger。
           if (networkInspectorPorts.size === 0) {
             void enqueueNetworkCapture(async () => {
-              if (networkInspectorPorts.size > 0) return networkCapture.snapshot();
               await networkCapture.stop();
-              return networkInspectorPorts.size === 0 ? networkCapture.clear() : networkCapture.snapshot();
+              return networkCapture.clear();
             }).catch((error) => logger.debug('[Background] network capture cleanup failed:', error));
           }
         });
