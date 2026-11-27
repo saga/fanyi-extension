@@ -23,6 +23,18 @@ export interface NetworkRequestRecord {
   responseHeaders?: Record<string, string>;
   requestBody?: string;
   responseBody?: string;
+  webSocketFrames?: Array<{
+    direction: 'sent' | 'received';
+    opcode: number;
+    payload: string;
+    timestamp: number;
+  }>;
+  eventSourceMessages?: Array<{
+    eventName: string;
+    eventId: string;
+    data: string;
+    timestamp: number;
+  }>;
   bodyTruncated?: boolean;
 }
 
@@ -379,6 +391,45 @@ export class NetworkCaptureController {
           requestHeaders: sanitizeHeaders(request.headers),
           ...(includeBodies && request.postData ? { requestBody: sanitizeBody(request.postData) } : {}),
         };
+        this.upsert(record);
+      } else if (method === 'Network.webSocketCreated') {
+        const existing = this.requestById.get(id);
+        this.upsert(existing || {
+          id,
+          url: sanitizeUrl(String(params.url || '')),
+          method: 'WEBSOCKET',
+          resourceType: 'WebSocket',
+          startedAt: Date.now(),
+        });
+      } else if (method === 'Network.webSocketFrameSent' || method === 'Network.webSocketFrameReceived') {
+        if (!includeBodies) return;
+        const response = params.response || {};
+        const record = this.requestById.get(id) || {
+          id, url: '', method: 'WEBSOCKET', resourceType: 'WebSocket', startedAt: Date.now(),
+        };
+        const frames = record.webSocketFrames || [];
+        const payload = sanitizeBody(String(response.payloadData || '')) || '';
+        frames.push({
+          direction: method === 'Network.webSocketFrameSent' ? 'sent' : 'received',
+          opcode: Number(response.opcode || 0),
+          payload: limitBodyBytes(payload).slice(0, 4096),
+          timestamp: Date.now(),
+        });
+        record.webSocketFrames = frames.slice(-20);
+        this.upsert(record);
+      } else if (method === 'Network.eventSourceMessageReceived') {
+        if (!includeBodies) return;
+        const record = this.requestById.get(id) || {
+          id, url: '', method: 'EVENTSOURCE', resourceType: 'EventSource', startedAt: Date.now(),
+        };
+        const messages = record.eventSourceMessages || [];
+        messages.push({
+          eventName: String(params.eventName || ''),
+          eventId: String(params.eventId || ''),
+          data: (sanitizeBody(String(params.data || '')) || '').slice(0, 4096),
+          timestamp: Date.now(),
+        });
+        record.eventSourceMessages = messages.slice(-20);
         this.upsert(record);
       } else if (method === 'Network.responseReceived') {
         const record = this.requestById.get(id);
