@@ -6,6 +6,7 @@
  * webRequest metadata when CDP cannot attach. The side panel starts it automatically.
  */
 export type NetworkCaptureMode = 'firefox-webRequest' | 'chromium-cdp' | 'chromium-webRequest';
+export type NetworkCapturePreference = 'auto' | 'cdp' | 'webRequest';
 
 export interface NetworkRequestRecord {
   id: string;
@@ -184,7 +185,11 @@ export class NetworkCaptureController {
     this.emit();
   }
 
-  async start(tabId: number, includeBodies = false): Promise<NetworkCaptureSnapshot> {
+  async start(
+    tabId: number,
+    includeBodies = false,
+    preference: NetworkCapturePreference = 'auto',
+  ): Promise<NetworkCaptureSnapshot> {
     if (!Number.isInteger(tabId) || tabId < 0) throw new Error('无效的标签页 ID');
     await this.stop();
 
@@ -200,23 +205,36 @@ export class NetworkCaptureController {
     const canUseDebugger = typeof chromeDebugger?.attach === 'function'
       && typeof chromeDebugger?.sendCommand === 'function';
     const canUseWebRequest = typeof webRequest?.onBeforeRequest?.addListener === 'function';
+    const isFirefox = typeof this.browserApi?.runtime?.getBrowserInfo === 'function';
+    const webRequestMode: NetworkCaptureMode = isFirefox ? 'firefox-webRequest' : 'chromium-webRequest';
 
-    // Chromium 优先使用 CDP（包含响应正文）；attach 失败或 DevTools 接管时自动降级。
+    if (preference === 'cdp') {
+      if (!canUseDebugger) throw new Error('当前浏览器不提供 CDP Debugger；请改用 webRequest');
+      await this.startChromium(chromeDebugger, tabId, includeBodies);
+      return this.snapshot();
+    }
+
+    if (preference === 'webRequest') {
+      if (!canUseWebRequest) throw new Error('webRequest 权限尚未授予或当前浏览器不支持');
+      this.startWebRequest(webRequest, tabId, includeBodies, webRequestMode);
+      return this.snapshot();
+    }
+
+    // 自动模式：Chromium 优先 CDP（可读取文本响应正文），失败或被 DevTools 占用时降级；
+    // Firefox 没有 chrome.debugger，使用 webRequest。
     if (canUseDebugger) {
       try {
         await this.startChromium(chromeDebugger, tabId, includeBodies);
         return this.snapshot();
       } catch (error) {
         if (!canUseWebRequest) throw error;
-        this.startWebRequest(webRequest, tabId, includeBodies, 'chromium-webRequest');
+        this.startWebRequest(webRequest, tabId, includeBodies, webRequestMode);
         return this.snapshot();
       }
     }
 
     if (canUseWebRequest) {
-      const isFirefox = typeof this.browserApi?.runtime?.getBrowserInfo === 'function';
-      const mode: NetworkCaptureMode = isFirefox ? 'firefox-webRequest' : 'chromium-webRequest';
-      this.startWebRequest(webRequest, tabId, includeBodies, mode);
+      this.startWebRequest(webRequest, tabId, includeBodies, webRequestMode);
       return this.snapshot();
     }
 
