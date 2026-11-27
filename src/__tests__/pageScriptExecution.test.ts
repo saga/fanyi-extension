@@ -6,8 +6,10 @@ describe('allow-listed page actions', () => {
     const executeScript = vi.fn().mockResolvedValue([{ frameId: 0, result: { ok: true, message: 'ok' } }]);
     const result = await executePageAction(23, { type: 'inspect' }, { scripting: { executeScript } }, {});
     expect(executeScript).toHaveBeenCalledWith(expect.objectContaining({
-      target: { tabId: 23 }, world: 'ISOLATED', args: [{ type: 'inspect' }],
+      target: { tabId: 23 }, args: [{ type: 'inspect' }],
     }));
+    // The default execution world is isolated; omit the world option for Firefox 109-127 compatibility.
+    expect(executeScript.mock.calls[0]?.[0]).not.toHaveProperty('world');
     expect(result.result?.ok).toBe(true);
   });
 
