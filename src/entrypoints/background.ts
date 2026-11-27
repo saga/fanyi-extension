@@ -73,6 +73,13 @@ export default defineBackground({
 
     const networkCapture = createNetworkCaptureController(browser, (globalThis as any).chrome);
     const networkInspectorPorts = new Set<browser.Runtime.Port>();
+    // Serialize start/stop/clear so a rapid panel close/reopen cannot stop a newer session.
+    let networkCaptureQueue: Promise<void> = Promise.resolve();
+    function enqueueNetworkCapture<T>(operation: () => Promise<T>): Promise<T> {
+      const result = networkCaptureQueue.then(operation, operation);
+      networkCaptureQueue = result.then(() => undefined, () => undefined);
+      return result;
+    }
     networkCapture.subscribe((snapshot) => {
       for (const port of networkInspectorPorts) {
         try { port.postMessage({ type: 'snapshot', snapshot }); }
@@ -415,24 +422,26 @@ export default defineBackground({
             if (tabId == null) sendResponse({ success: false, error: '找不到可捕获网络请求的网页标签页' });
             else {
               try {
-                const current = networkCapture.snapshot();
-                const desired = message.preferredMode || 'auto';
-                const transportMatches = desired === 'auto'
-                  || (desired === 'cdp' && current.mode === 'chromium-cdp')
-                  || (desired === 'webRequest' && current.mode !== null && current.mode.endsWith('webRequest'));
-                const snapshot = current.active && current.tabId === tabId
-                  && current.includeBodies === (message.includeBodies === true) && transportMatches
-                  ? current
-                  : await networkCapture.start(tabId, message.includeBodies === true, desired);
+                const snapshot = await enqueueNetworkCapture(async () => {
+                  const current = networkCapture.snapshot();
+                  const desired = message.preferredMode || 'auto';
+                  const transportMatches = desired === 'auto'
+                    || (desired === 'cdp' && current.mode === 'chromium-cdp')
+                    || (desired === 'webRequest' && current.mode !== null && current.mode.endsWith('webRequest'));
+                  return current.active && current.tabId === tabId
+                    && current.includeBodies === (message.includeBodies === true) && transportMatches
+                    ? current
+                    : networkCapture.start(tabId, message.includeBodies === true, desired);
+                });
                 sendResponse({ success: true, snapshot });
               } catch (error) {
                 sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
               }
             }
           } else if (message.action === 'networkCaptureStop') {
-            sendResponse({ success: true, snapshot: await networkCapture.stop() });
+            sendResponse({ success: true, snapshot: await enqueueNetworkCapture(() => networkCapture.stop()) });
           } else if (message.action === 'networkCaptureClear') {
-            sendResponse({ success: true, snapshot: networkCapture.clear() });
+            sendResponse({ success: true, snapshot: await enqueueNetworkCapture(async () => networkCapture.clear()) });
           } else if (message.action === 'relayToContent') {
             await handleRelayToContent(message, sendResponse as (r: RelayToContentResponse) => void);
           } else if (message.action === 'fetchRemoteCss') {
@@ -1365,9 +1374,11 @@ export default defineBackground({
           networkInspectorPorts.delete(port);
           // 网络观测与侧栏生命周期绑定；最后一个面板关闭时释放 CDP/debugger。
           if (networkInspectorPorts.size === 0) {
-            void networkCapture.stop()
-              .then(() => networkCapture.clear())
-              .catch((error) => logger.debug('[Background] network capture cleanup failed:', error));
+            void enqueueNetworkCapture(async () => {
+              if (networkInspectorPorts.size > 0) return networkCapture.snapshot();
+              await networkCapture.stop();
+              return networkInspectorPorts.size === 0 ? networkCapture.clear() : networkCapture.snapshot();
+            }).catch((error) => logger.debug('[Background] network capture cleanup failed:', error));
           }
         });
         return;
