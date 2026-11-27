@@ -507,17 +507,6 @@ const webRequestPermissionLabel = computed(() => ({
 const cookiePermissionLabel = computed(() => ({
   checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
 }[cookiePermissionState.value]));
-const isFirefox = computed(() => typeof (browser.runtime as any).getBrowserInfo === 'function');
-const pageControlSourceLabel = computed(() => {
-  try { return pageContext.value?.url ? new URL(pageContext.value.url).host : '无来源页面'; }
-  catch { return '无来源页面'; }
-});
-const webRequestPermissionLabel = computed(() => ({
-  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
-}[webRequestPermissionState.value]));
-const cookiePermissionLabel = computed(() => ({
-  checking: '检查中', granted: '已授权', missing: '未授权', unsupported: '不支持',
-}[cookiePermissionState.value]));
 const backendSummary = computed(() => chatBackend.value === 'api'
   ? `${chatProvider.value} · ${chatModel.value || '未选择模型'}`
   : chatBackend.value === 'remote' ? 'Vocal Saga' : chatBackend.value === 'workbuddy' ? 'Workbuddy' : chatBackend.value === 'opencode' ? 'OpenCode' : '模型 API');
@@ -768,6 +757,229 @@ async function clearNetworkCapture() {
     networkError.value = error instanceof Error ? error.message : String(error);
   }
 }
+
+function normalizePageUrl(value: string): string {
+  const url = new URL(value);
+  url.hash = '';
+  return url.href;
+}
+
+function cookieKey(cookie: PageCookieRecord): string {
+  return [cookie.storeId || '', cookie.domain, cookie.path, cookie.name].join('|');
+}
+
+function toggleCookieReveal(cookie: PageCookieRecord) {
+  const key = cookieKey(cookie);
+  const next = new Set(revealedCookieKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  revealedCookieKeys.value = next;
+}
+
+function clearCookieSnapshot() {
+  cookieRecords.value = [];
+  revealedCookieKeys.value = new Set();
+  cookieError.value = '';
+}
+
+async function stopNetworkCapture(revokePermission = true) {
+  try {
+    const stopped = await browser.runtime.sendMessage({ action: 'networkCaptureStop' }) as NetworkCaptureCommandResponse;
+    if (!stopped.success) throw new Error(stopped.error);
+    const cleared = await browser.runtime.sendMessage({ action: 'networkCaptureClear' }) as NetworkCaptureCommandResponse;
+    if (!cleared.success) throw new Error(cleared.error);
+    networkSnapshot.value = cleared.snapshot;
+    selectedNetworkId.value = '';
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+  }
+  if (revokePermission) {
+    const permissions = isFirefox.value ? ['webRequest', 'webRequestBlocking'] : ['webRequest'];
+    try {
+      await browser.permissions.remove({ permissions });
+      webRequestPermissionState.value = 'missing';
+    } catch {
+      /* A browser may refuse to remove a permission declared by another feature. */
+    }
+  }
+}
+
+async function onPageControlChange() {
+  if (pageControlEnabled.value) {
+    await refreshPermissionStatus();
+    return;
+  }
+  pageDomEnabled.value = false;
+  pageNetworkEnabled.value = false;
+  pageDomSnapshot.value = null;
+  await stopNetworkCapture(true);
+  await disableCookieAccess();
+}
+
+async function onPageDomControlChange() {
+  pageDomError.value = '';
+  if (!pageDomEnabled.value) {
+    pageDomSnapshot.value = null;
+    return;
+  }
+  if (!pageControlEnabled.value || pagePermissionState.value !== 'granted') {
+    pageDomEnabled.value = false;
+    pageDomError.value = '当前来源站点没有 scripting / host 权限，请在浏览器扩展的站点访问设置中授予访问权限。';
+  }
+}
+
+async function requestNetworkPermissions(): Promise<boolean> {
+  if (pageNetworkMode.value === 'cdp') return debuggerPermissionState.value === 'granted';
+  const permissions = isFirefox.value ? ['webRequest', 'webRequestBlocking'] : ['webRequest'];
+  try {
+    // Must be called directly from the user's Page Control interaction.
+    const granted = await browser.permissions.request({ permissions });
+    webRequestPermissionState.value = granted ? 'granted' : 'missing';
+    return granted;
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+    webRequestPermissionState.value = 'missing';
+    return false;
+  }
+}
+
+async function onPageNetworkChange() {
+  if (!pageControlEnabled.value) {
+    pageNetworkEnabled.value = false;
+    return;
+  }
+  if (!pageNetworkEnabled.value) {
+    await stopNetworkCapture(true);
+    return;
+  }
+  const granted = await requestNetworkPermissions();
+  if (!granted) {
+    if (!isFirefox.value && pageNetworkMode.value === 'auto' && debuggerPermissionState.value === 'granted') {
+      await ensureNetworkCapture();
+    } else {
+      pageNetworkEnabled.value = false;
+      networkError.value = '未授予网络捕获所需权限，已保持关闭。';
+    }
+    return;
+  }
+  await ensureNetworkCapture();
+}
+
+async function onPageNetworkModeChange() {
+  if (!pageNetworkEnabled.value || !pageControlEnabled.value) return;
+  const granted = await requestNetworkPermissions();
+  if (!granted) {
+    pageNetworkEnabled.value = false;
+    await stopNetworkCapture(true);
+    networkError.value = '所选网络通道的权限未获批准。';
+    return;
+  }
+  await ensureNetworkCapture();
+}
+
+async function readSiteCookies() {
+  const pageUrl = pageContext.value?.url || '';
+  const tabId = getCurrentSourceTabId();
+  if (!pageControlEnabled.value || !pageUrl || tabId == null) return;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(pageUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Cookie API 仅支持 HTTP(S) 网页。');
+    }
+  } catch (error) {
+    cookieError.value = error instanceof Error ? error.message : String(error);
+    return;
+  }
+
+  cookieLoading.value = true;
+  cookieError.value = '';
+  // This must be the first asynchronous browser API call from the click handler.
+  try {
+    const granted = await browser.permissions.request({ permissions: ['cookies'] });
+    if (!granted) throw new Error('未授予 Cookie 访问权限。');
+    cookiePermissionGranted.value = true;
+    cookiePermissionState.value = 'granted';
+
+    const tab = await browser.tabs.get(tabId);
+    if (!tab.url || normalizePageUrl(tab.url) !== normalizePageUrl(pageUrl)) {
+      throw new Error('来源标签页已导航到其他地址，请重新加载网页上下文后再读取 Cookie。');
+    }
+    const hostGranted = await browser.permissions.contains({ origins: [parsed.origin + '/*'] });
+    if (!hostGranted) {
+      throw new Error('当前站点的访问权限未授予。请在浏览器扩展设置中允许访问此站点。');
+    }
+    const cookieApi = (browser as any).cookies;
+    if (typeof cookieApi?.getAll !== 'function') throw new Error('当前浏览器未提供 Cookies API。');
+    const result = await cookieApi.getAll({ url: pageUrl }) as PageCookieRecord[];
+    cookieRecords.value = result.map((cookie) => ({
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      sameSite: cookie.sameSite,
+      session: cookie.session,
+      expirationDate: cookie.expirationDate,
+      storeId: cookie.storeId,
+    }));
+    revealedCookieKeys.value = new Set();
+  } catch (error) {
+    cookieError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    cookieLoading.value = false;
+  }
+}
+
+async function disableCookieAccess() {
+  clearCookieSnapshot();
+  cookiePermissionGranted.value = false;
+  try {
+    await browser.permissions.remove({ permissions: ['cookies'] });
+    cookiePermissionState.value = 'missing';
+  } catch (error) {
+    cookieError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function capturePageDom() {
+  const pageUrl = pageContext.value?.url || '';
+  const tabId = getCurrentSourceTabId();
+  if (!pageControlEnabled.value || !pageDomEnabled.value || !pageUrl || tabId == null) return;
+
+  pageDomLoading.value = true;
+  pageDomError.value = '';
+  pageDomSnapshot.value = null;
+  try {
+    const tab = await browser.tabs.get(tabId);
+    if (!tab.url || normalizePageUrl(tab.url) !== normalizePageUrl(pageUrl)) {
+      throw new Error('来源标签页已导航，请先重新加载页面上下文。');
+    }
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const html = document.documentElement?.outerHTML || '';
+        const limit = 300 * 1024;
+        return {
+          title: document.title,
+          url: location.href,
+          html: html.slice(0, limit),
+          originalLength: html.length,
+          truncated: html.length > limit,
+        };
+      },
+    });
+    const snapshot = results[0]?.result as PageDomSnapshot | undefined;
+    if (!snapshot) throw new Error('浏览器没有返回 DOM 快照。');
+    pageDomSnapshot.value = snapshot;
+  } catch (error) {
+    pageDomError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    pageDomLoading.value = false;
+  }
+}
 function networkLabel(url: string): string {
   try {
     const parsed = new URL(url);
@@ -809,6 +1021,9 @@ async function loadContext(preferredTabId?: number, restoreHistory = true) {
     if (resp.success) {
       pageContext.value = resp.context;
       resolvedSourceTabId.value = resp.tabId ?? getSourceTabId();
+      clearCookieSnapshot();
+      pageDomSnapshot.value = null;
+      void refreshPermissionStatus();
       void ensureNetworkCapture();
       // Firefox's desktop sidebar has no sourceTabId query parameter. Once
       // background resolves the active page, try restoring that tab's history.
@@ -911,6 +1126,7 @@ async function initChat() {
   const restored = await loadHistory();
   if (restored && pageContext.value) {
     status.value = 'ready';
+    void refreshPermissionStatus();
     void ensureNetworkCapture();
   } else {
     await loadContext();
@@ -1109,6 +1325,7 @@ async function send() {
     effort: chatEffort.value,
     skillIds: chatSkillIds.value,
     remoteServiceToken: remoteServiceToken.value.trim(),
+    pageControlEnabled: pageControlEnabled.value && pageDomEnabled.value,
   });
 }
 
@@ -1209,6 +1426,18 @@ async function approveAgentTool() {
   const pending = pendingAgentTool.value;
   const port = currentPort.value;
   if (!pending || !port || agentToolExecuting.value) return;
+  if (pending.request.tool.startsWith('page.')
+    && (!pageControlEnabled.value || !pageDomEnabled.value)) {
+    stopAgentToolHeartbeat();
+    pendingAgentTool.value = null;
+    port.postMessage({
+      type: 'tool_result',
+      requestId: pending.requestId,
+      approved: false,
+      summary: 'Page Control 的网页 DOM 读取/操作能力当前处于关闭状态。请先在 Page Control 中启用后再请求页面工具。',
+    });
+    return;
+  }
   agentToolExecuting.value = true;
   agentToolError.value = '';
   try {
@@ -1303,20 +1532,17 @@ async function copyAgentCredentialArtifact() {
 async function refreshPermissionStatus() {
   pagePermissionState.value = 'checking';
   debuggerPermissionState.value = 'checking';
+  webRequestPermissionState.value = 'checking';
+  cookiePermissionState.value = 'checking';
   try {
-    const firefox = /Firefox\//i.test(navigator.userAgent);
-    if (firefox) {
-      debuggerPermissionState.value = 'unsupported';
-    } else {
-      debuggerPermissionState.value = await browser.permissions.contains({ permissions: ['debugger'] })
-        ? 'granted'
-        : 'missing';
-    }
-
-    // 全站权限在 Manifest 中统一声明，安装/升级时由浏览器一次性授予。
-    pagePermissionState.value = await browser.permissions.contains({ origins: ['<all_urls>'] })
-      ? 'granted'
-      : 'missing';
+    debuggerPermissionState.value = isFirefox.value
+      ? 'unsupported'
+      : await browser.permissions.contains({ permissions: ['debugger'] }) ? 'granted' : 'missing';
+    webRequestPermissionState.value = await browser.permissions.contains({ permissions: ['webRequest'] })
+      ? 'granted' : 'missing';
+    cookiePermissionState.value = await browser.permissions.contains({ permissions: ['cookies'] })
+      ? 'granted' : 'missing';
+    cookiePermissionGranted.value = cookiePermissionState.value === 'granted';
 
     const tabId = getCurrentSourceTabId();
     const tab = tabId == null ? null : await browser.tabs.get(tabId).catch(() => null);
@@ -1327,13 +1553,20 @@ async function refreshPermissionStatus() {
     if (pageUrl.protocol === 'file:') {
       pagePermissionState.value = 'unknown';
       chatOptionsError.value = '读取本地文件还需要在扩展详情页开启“允许访问文件网址”。';
-    } else if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') {
+    } else if (pageUrl.protocol === 'http:' || pageUrl.protocol === 'https:') {
+      pagePermissionState.value = await browser.permissions.contains({
+        origins: [pageUrl.origin + '/*'],
+        permissions: ['scripting'],
+      }) ? 'granted' : 'missing';
+    } else {
       pagePermissionState.value = 'unknown';
       chatOptionsError.value = '当前是浏览器内部或扩展页面，浏览器可能禁止扩展读取其内容。';
     }
   } catch {
     pagePermissionState.value = 'unknown';
     if (debuggerPermissionState.value === 'checking') debuggerPermissionState.value = 'unknown';
+    if (webRequestPermissionState.value === 'checking') webRequestPermissionState.value = 'unsupported';
+    if (cookiePermissionState.value === 'checking') cookiePermissionState.value = 'unsupported';
   }
 }
 
@@ -1357,6 +1590,8 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   networkInspectorEnabled = false;
+  clearCookieSnapshot();
+  pageDomSnapshot.value = null;
   stopAgentToolHeartbeat();
   try { networkPort?.disconnect(); } catch { /* already disconnected */ }
   networkPort = null;
