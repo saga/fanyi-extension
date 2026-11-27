@@ -113,6 +113,16 @@ describe('NetworkCaptureController', () => {
       requestId: 'cdp-1', response: { status: 200, statusText: 'OK', mimeType: 'application/json', headers: { 'set-cookie': 'secret' } },
     });
     emit('Network.loadingFinished', { requestId: 'cdp-1', encodedDataLength: 14 });
+    emit('Network.webSocketCreated', { requestId: 'ws-1', url: 'wss://example.test/socket' });
+    emit('Network.webSocketFrameSent', {
+      requestId: 'ws-1', response: { opcode: 1, payloadData: 'token=ws-secret' },
+    });
+    emit('Network.webSocketFrameReceived', {
+      requestId: 'ws-1', response: { opcode: 1, payloadData: '{"api_key":"response-secret"}' },
+    });
+    emit('Network.eventSourceMessageReceived', {
+      requestId: 'es-1', eventName: 'update', eventId: '12', data: 'access_token=event-secret',
+    });
     await Promise.resolve();
 
     const record = controller.snapshot().requests[0];
@@ -122,6 +132,16 @@ describe('NetworkCaptureController', () => {
     expect(record.status).toBe(200);
     expect(record.responseHeaders?.['set-cookie']).toBe('[REDACTED]');
     expect(record.responseBody).toBe('{"ok":true}');
+
+    const websocket = controller.snapshot().requests.find((item) => item.id === 'ws-1');
+    expect(websocket?.webSocketFrames).toHaveLength(2);
+    expect(websocket?.webSocketFrames?.[0]?.payload).toContain('[REDACTED]');
+    expect(websocket?.webSocketFrames?.[0]?.payload).not.toContain('ws-secret');
+    expect(websocket?.webSocketFrames?.[1]?.payload).not.toContain('response-secret');
+
+    const eventSource = controller.snapshot().requests.find((item) => item.id === 'es-1');
+    expect(eventSource?.eventSourceMessages?.[0]?.eventName).toBe('update');
+    expect(eventSource?.eventSourceMessages?.[0]?.data).not.toContain('event-secret');
 
     await controller.stop();
     expect(debuggerApi.detach).toHaveBeenCalledWith({ tabId: 9 });
