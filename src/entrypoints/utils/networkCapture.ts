@@ -85,13 +85,17 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
   return value;
 }
 
-function limitBodyBytes(value: string): string {
+function limitTextBytes(value: string, maxBytes: number): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(value);
-  if (bytes.byteLength <= MAX_BODY_BYTES) return value;
+  if (bytes.byteLength <= maxBytes) return value;
   const suffix = '\n[TRUNCATED]';
   const suffixBytes = encoder.encode(suffix).byteLength;
-  return new TextDecoder().decode(bytes.subarray(0, MAX_BODY_BYTES - suffixBytes)) + suffix;
+  return new TextDecoder().decode(bytes.subarray(0, Math.max(0, maxBytes - suffixBytes))) + suffix;
+}
+
+function limitBodyBytes(value: string): string {
+  return limitTextBytes(value, MAX_BODY_BYTES);
 }
 
 function sanitizeBody(value: unknown): string | undefined {
@@ -404,7 +408,7 @@ export class NetworkCaptureController {
       } else if (method === 'Network.webSocketFrameSent' || method === 'Network.webSocketFrameReceived') {
         if (!includeBodies) return;
         const response = params.response || {};
-        const record = this.requestById.get(id) || {
+        const record: NetworkRequestRecord = this.requestById.get(id) || {
           id, url: '', method: 'WEBSOCKET', resourceType: 'WebSocket', startedAt: Date.now(),
         };
         const frames = record.webSocketFrames || [];
@@ -412,21 +416,21 @@ export class NetworkCaptureController {
         frames.push({
           direction: method === 'Network.webSocketFrameSent' ? 'sent' : 'received',
           opcode: Number(response.opcode || 0),
-          payload: limitBodyBytes(payload).slice(0, 4096),
+          payload: limitTextBytes(payload, 1024),
           timestamp: Date.now(),
         });
         record.webSocketFrames = frames.slice(-20);
         this.upsert(record);
       } else if (method === 'Network.eventSourceMessageReceived') {
         if (!includeBodies) return;
-        const record = this.requestById.get(id) || {
+        const record: NetworkRequestRecord = this.requestById.get(id) || {
           id, url: '', method: 'EVENTSOURCE', resourceType: 'EventSource', startedAt: Date.now(),
         };
         const messages = record.eventSourceMessages || [];
         messages.push({
           eventName: String(params.eventName || ''),
           eventId: String(params.eventId || ''),
-          data: (sanitizeBody(String(params.data || '')) || '').slice(0, 4096),
+          data: limitTextBytes(sanitizeBody(String(params.data || '')) || '', 1024),
           timestamp: Date.now(),
         });
         record.eventSourceMessages = messages.slice(-20);
