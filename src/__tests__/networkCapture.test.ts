@@ -126,7 +126,7 @@ describe('NetworkCaptureController', () => {
     expect(eventListeners.size).toBe(0);
   });
 
-  it('keeps capture opt-in and preserves records after stopping', async () => {
+  it('keeps the controller scoped to the requested tab and preserves state after stopping', async () => {
     const events = [event(), event(), event(), event(), event()];
     const webRequest = {
       onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
@@ -185,7 +185,12 @@ describe('NetworkCaptureController', () => {
       onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
       onCompleted: events[3], onErrorOccurred: events[4],
     });
-    const controller = createNetworkCaptureController({ webRequest: createWebRequest(eventsA) });
+    let currentWebRequest = createWebRequest(eventsA);
+    const browserApi = {
+      get webRequest() { return currentWebRequest; },
+    };
+    const controller = createNetworkCaptureController(browserApi);
+
     await controller.start(41, false);
     eventsA[0]!.fire({
       requestId: 'tab-41', tabId: 41, url: 'https://first.test/api',
@@ -193,10 +198,11 @@ describe('NetworkCaptureController', () => {
     });
     expect(controller.snapshot().requests).toHaveLength(1);
 
-    // Replace the provider's webRequest object to simulate a new source context.
-    const nextController = createNetworkCaptureController({ webRequest: createWebRequest(eventsB) });
-    await nextController.start(42, false);
-    expect(nextController.snapshot().requests).toHaveLength(0);
+    currentWebRequest = createWebRequest(eventsB);
+    const switched = await controller.start(42, false);
+    expect(switched.tabId).toBe(42);
+    expect(switched.requests).toHaveLength(0);
+    expect(eventsA[0]!.removeListener).toHaveBeenCalledTimes(1);
   });
 
 });
