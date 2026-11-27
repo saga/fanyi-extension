@@ -416,9 +416,14 @@ export default defineBackground({
             else {
               try {
                 const current = networkCapture.snapshot();
-                const snapshot = current.active && current.tabId === tabId && current.includeBodies === (message.includeBodies === true)
+                const desired = message.preferredMode || 'auto';
+                const transportMatches = desired === 'auto'
+                  || (desired === 'cdp' && current.mode === 'chromium-cdp')
+                  || (desired === 'webRequest' && current.mode !== null && current.mode.endsWith('webRequest'));
+                const snapshot = current.active && current.tabId === tabId
+                  && current.includeBodies === (message.includeBodies === true) && transportMatches
                   ? current
-                  : await networkCapture.start(tabId, message.includeBodies === true);
+                  : await networkCapture.start(tabId, message.includeBodies === true, desired);
                 sendResponse({ success: true, snapshot });
               } catch (error) {
                 sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
