@@ -150,6 +150,7 @@ export class NetworkCaptureController {
   private debuggerEventListener?: (...args: any[]) => void;
   private debuggerDetachListener?: (...args: any[]) => void;
   private stopping = false;
+  private capturePreference: NetworkCapturePreference = 'auto';
   private lastCaptureTabId: number | null = null;
   private sequence = 0;
 
@@ -192,6 +193,7 @@ export class NetworkCaptureController {
   ): Promise<NetworkCaptureSnapshot> {
     if (!Number.isInteger(tabId) || tabId < 0) throw new Error('无效的标签页 ID');
     await this.stop();
+    this.capturePreference = preference;
 
     // 不同来源标签页之间不复用旧请求，避免侧栏切换后把上一页的数据混在一起。
     if (this.lastCaptureTabId !== null && this.lastCaptureTabId !== tabId) {
@@ -428,7 +430,8 @@ export class NetworkCaptureController {
       // DevTools 接管同一标签页时 Chrome 会断开扩展的 CDP 会话；
       // 若标签页仍存在且 webRequest 可用，自动切换到只读元数据采集。
       const webRequest = this.browserApi?.webRequest;
-      if (reason !== 'target_closed' && typeof webRequest?.onBeforeRequest?.addListener === 'function') {
+      if (this.capturePreference === 'auto' && reason !== 'target_closed'
+        && typeof webRequest?.onBeforeRequest?.addListener === 'function') {
         try {
           this.startWebRequest(webRequest, tabId, this.state.includeBodies, 'chromium-webRequest');
           return;
@@ -494,6 +497,7 @@ export class NetworkCaptureController {
     this.state.startedAt = null;
     this.state.includeBodies = false;
     this.state.mode = null;
+    this.capturePreference = 'auto';
     this.stopping = false;
     this.emit();
     return this.snapshot();
