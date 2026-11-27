@@ -29,7 +29,10 @@ describe('NetworkCaptureController', () => {
       onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
       filterResponseData: vi.fn(() => filter),
     };
-    const controller = createNetworkCaptureController({ webRequest });
+    const controller = createNetworkCaptureController({
+      webRequest,
+      runtime: { getBrowserInfo: vi.fn() },
+    });
 
     const started = await controller.start(23, true);
     expect(started.mode).toBe('firefox-webRequest');
