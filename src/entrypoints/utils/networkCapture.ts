@@ -198,7 +198,8 @@ export class NetworkCaptureController {
     }
 
     if (canUseWebRequest) {
-      const mode: NetworkCaptureMode = canUseDebugger || chromeDebugger ? 'chromium-webRequest' : 'firefox-webRequest';
+      const isFirefox = typeof this.browserApi?.runtime?.getBrowserInfo === 'function';
+      const mode: NetworkCaptureMode = isFirefox ? 'firefox-webRequest' : 'chromium-webRequest';
       this.startWebRequest(webRequest, tabId, includeBodies, mode);
       return this.snapshot();
     }
