@@ -181,6 +181,60 @@ describe('NetworkCaptureController', () => {
     expect(controller.snapshot().active).toBe(false);
   });
 
+  it('uses only webRequest when the user explicitly selects that channel', async () => {
+    const onBeforeRequest = event();
+    const onBeforeSendHeaders = event();
+    const onHeadersReceived = event();
+    const onCompleted = event();
+    const onErrorOccurred = event();
+    const webRequest = {
+      onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
+    };
+    const debuggerApi = {
+      onEvent: { addListener: vi.fn(), removeListener: vi.fn() },
+      onDetach: { addListener: vi.fn(), removeListener: vi.fn() },
+      attach: vi.fn(),
+      sendCommand: vi.fn(),
+      detach: vi.fn(),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const snapshot = await controller.start(65, true, 'webRequest');
+    expect(snapshot.mode).toBe('chromium-webRequest');
+    expect(debuggerApi.attach).not.toHaveBeenCalled();
+    expect(onBeforeRequest.addListener).toHaveBeenCalled();
+
+    await controller.stop();
+  });
+
+  it('does not silently switch from explicitly selected CDP to webRequest after detach', async () => {
+    const onBeforeRequest = event();
+    const webRequest = {
+      onBeforeRequest,
+      onBeforeSendHeaders: event(),
+      onHeadersReceived: event(),
+      onCompleted: event(),
+      onErrorOccurred: event(),
+    };
+    const onEvent = event();
+    const onDetach = event();
+    const debuggerApi = {
+      onEvent, onDetach,
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue({}),
+      detach: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const snapshot = await controller.start(67, true, 'cdp');
+    expect(snapshot.mode).toBe('chromium-cdp');
+    onDetach.fire({ tabId: 67 }, 'canceled_by_user');
+
+    expect(controller.snapshot().active).toBe(false);
+    expect(controller.snapshot().mode).toBeNull();
+    expect(onBeforeRequest.addListener).not.toHaveBeenCalled();
+  });
+
   it('automatically falls back when CDP is detached by DevTools', async () => {
     const onBeforeRequest = event();
     const onBeforeSendHeaders = event();
