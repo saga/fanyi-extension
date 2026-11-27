@@ -209,10 +209,10 @@
           <div class="page-control-section">
             <strong>完整 DOM 快照</strong>
             <button :disabled="!pageDomEnabled || !pageContext || pageDomLoading" @click="capturePageDom">{{ pageDomLoading ? '读取中…' : '读取当前页面 DOM' }}</button>
-            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；快照只在侧栏内存中显示，不进入聊天上下文。</p>
+            <p class="page-control-help">读取当前页面 documentElement.outerHTML，最多保留 300 KB；内容可能包含个人信息，只在侧栏内存中显示，不进入聊天上下文。</p>
             <p v-if="pageDomError" class="network-error">{{ pageDomError }}</p>
             <details v-if="pageDomSnapshot" class="page-dom-preview">
-              <summary>查看 DOM（{{ pageDomSnapshot.html.length }} 字符{{ pageDomSnapshot.truncated ? '，已截断' : '' }}）</summary>
+              <summary>查看 DOM（原始 {{ pageDomSnapshot.originalLength }} 字节{{ pageDomSnapshot.truncated ? '，已截断至 300 KB' : '' }}）</summary>
               <pre>{{ pageDomSnapshot.html }}</pre>
             </details>
           </div>
@@ -999,6 +999,11 @@ function reloadContext() {
 
 async function loadContext(preferredTabId?: number, restoreHistory = true) {
   resolvedSourceTabId.value = preferredTabId ?? getSourceTabId();
+  if (networkSnapshot.value.active && networkSnapshot.value.tabId !== resolvedSourceTabId.value) {
+    void stopNetworkCapture(false);
+  }
+  clearCookieSnapshot();
+  pageDomSnapshot.value = null;
   status.value = 'loading';
   errorMsg.value = '';
   pageContext.value = null;
