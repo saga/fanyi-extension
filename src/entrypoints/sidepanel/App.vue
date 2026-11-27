@@ -108,6 +108,7 @@
           </div>
           <p class="page-control-help">自动模式在 Chromium 优先使用 CDP，失败后降级；Firefox 使用 webRequest。CDP 可读取受支持的文本响应体；Chrome MV3 webRequest 备用通道主要提供请求元数据和请求体，不提供通用响应体读取。</p>
           <div class="page-control-permissions">
+            <span>当前站点：{{ pagePermissionLabel }}</span>
             <span>Debugger：{{ debuggerPermissionLabel }}</span>
             <span>webRequest：{{ webRequestPermissionLabel }}</span>
             <span>Cookie：{{ cookiePermissionLabel }}</span>
@@ -192,7 +193,7 @@
             <label><input v-model="pageDomEnabled" type="checkbox" @change="onPageDomControlChange" /> 网页 DOM 读取与操作</label>
             <span>{{ pageDomEnabled ? '已允许' : '关闭' }}</span>
           </div>
-          <p class="page-control-help">开启后，Agent 可以读取可见内容、查找/高亮文字、滚动和点击页面控件。点击等动作仍需单独批准；不支持任意脚本执行。</p>
+          <p class="page-control-help">开启后，Agent 可以读取可见内容、查找/高亮文字、滚动和点击页面控件。点击等动作仍需单独批准；不支持任意脚本执行。若当前站点访问权限被浏览器设置为“仅点击时”，请在扩展的站点访问设置中允许此站点。</p>
 
           <div class="page-control-row">
             <label><input v-model="pageNetworkEnabled" type="checkbox" @change="onPageNetworkChange" /> 网络请求捕获</label>
@@ -864,9 +865,9 @@ async function onPageDomControlChange() {
     pageDomSnapshot.value = null;
     return;
   }
-  if (!pageControlEnabled.value || pagePermissionState.value !== 'granted') {
+  if (!pageControlEnabled.value) {
     pageDomEnabled.value = false;
-    pageDomError.value = '当前来源站点没有 scripting / host 权限，请在浏览器扩展的站点访问设置中授予访问权限。';
+    pageDomError.value = '请先启用 Page Control。';
   }
 }
 
@@ -2208,6 +2209,13 @@ onUnmounted(() => {
 .page-dom-preview { margin-top: 7px; }
 .page-dom-preview > summary { cursor: pointer; font-size: 11px; color: #595959; }
 .page-dom-preview pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #fafafa; border: 1px solid #eee; padding: 8px; }
+.storage-preview { margin-top: 7px; }
+.storage-preview details { margin-top: 6px; border: 1px solid #eee; border-radius: 6px; }
+.storage-preview summary { padding: 6px 8px; cursor: pointer; font-size: 11px; }
+.storage-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 6px 8px; border-top: 1px solid #f3f3f3; }
+.storage-row strong { min-width: 0; overflow-wrap: anywhere; font-size: 10px; }
+.storage-row code { min-width: 0; overflow-wrap: anywhere; color: #595959; font-size: 10px; }
+.storage-row button { padding: 3px 6px; border: 1px solid #d9d9d9; border-radius: 5px; background: #fff; font-size: 10px; }
 .network-panel { border-bottom: 1px solid #ececec; max-height: min(45dvh, 420px); overflow: auto; }
 .network-panel > summary { padding: 9px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .network-inspector { padding: 0 10px 10px; }
