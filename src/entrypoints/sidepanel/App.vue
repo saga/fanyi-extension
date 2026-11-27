@@ -1236,14 +1236,7 @@ onUnmounted(() => {
     max-width: 50vw;
   }
 
-  /* 移动端输入区：压缩两侧固定控件的占位，让"输入框 + 发送"尽量保持同一行；
-     发送按钮独占一行时靠 wrap 兜底，不会溢出视口。 */
-  .json-toggle {
-    min-width: 40px;
-    min-height: 44px;
-    padding: 0 6px;
-    font-size: 11px;
-  }
+  /* 移动端输入区保持输入框与发送按钮可见，不会溢出视口。 */
   .send-btn {
     min-width: 48px;
     min-height: 44px;
@@ -1538,39 +1531,13 @@ onUnmounted(() => {
 .composer {
   display: flex;
   align-items: flex-end;
-  /* 允许换行：窄屏（Firefox Android 聊天以标签页打开）下 JSON / 输入框 / 发送
-     三个控件挤在一行会超出视口，导致发送按钮跑到屏幕外。wrap 保证控件不越界。 */
+  /* 窄屏下允许输入框与发送按钮换行，避免发送按钮跑到视口外。 */
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px max(8px, env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #ececec;
   flex-shrink: 0;
-}
-
-.json-toggle {
-  flex-shrink: 0;
-  min-width: 44px;
-  min-height: 42px;
-  padding: 0 8px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid #d9d9d9;
-  border-radius: 12px;
-  background: #fff;
-  color: #888;
-  cursor: pointer;
-}
-
-.json-toggle.active {
-  border-color: #1677ff;
-  background: #1677ff;
-  color: #fff;
-}
-
-.json-toggle:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .input {
