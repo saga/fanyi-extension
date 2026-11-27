@@ -208,4 +208,38 @@ describe('NetworkCaptureController', () => {
     expect(eventsA[0]!.removeListener).toHaveBeenCalledTimes(1);
   });
 
+  it('redacts secrets embedded in raw body strings and caps JSON bodies', async () => {
+    const events = [event(), event(), event(), event(), event()];
+    const webRequest = {
+      onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
+      onCompleted: events[3], onErrorOccurred: events[4],
+    };
+    const controller = createNetworkCaptureController({ webRequest });
+    await controller.start(55, true);
+
+    const raw = new TextEncoder().encode('api_key=raw-secret&password=another-secret').buffer;
+    events[0]!.fire({
+      requestId: 'raw-body', tabId: 55, url: 'https://example.test/form',
+      method: 'POST', type: 'xmlhttprequest', timeStamp: 1,
+      requestBody: { raw: [{ bytes: raw }] },
+    });
+    const rawRecord = controller.snapshot().requests.find((item) => item.id === 'raw-body');
+    expect(rawRecord?.requestBody).toContain('[REDACTED]');
+    expect(rawRecord?.requestBody).not.toContain('raw-secret');
+    expect(rawRecord?.requestBody).not.toContain('another-secret');
+
+    const largeRaw = new TextEncoder().encode(JSON.stringify({ note: 'x'.repeat(40 * 1024) })).buffer;
+    events[0]!.fire({
+      requestId: 'large-body', tabId: 55, url: 'https://example.test/large',
+      method: 'POST', type: 'xmlhttprequest', timeStamp: 2,
+      requestBody: { raw: [{ bytes: largeRaw }] },
+    });
+    const largeRecord = controller.snapshot().requests.find((item) => item.id === 'large-body');
+    expect(largeRecord?.requestBody).toContain('[TRUNCATED]');
+    expect(new TextEncoder().encode(largeRecord?.requestBody || '').byteLength).toBeLessThanOrEqual(32 * 1024);
+
+    await controller.stop();
+  });
+
+
 });
