@@ -414,8 +414,15 @@ export default defineBackground({
             const tabId = await getActiveContentTabId(message.sourceTabId);
             if (tabId == null) sendResponse({ success: false, error: '找不到可捕获网络请求的网页标签页' });
             else {
-              try { sendResponse({ success: true, snapshot: await networkCapture.start(tabId, message.includeBodies === true) }); }
-              catch (error) { sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }); }
+              try {
+                const current = networkCapture.snapshot();
+                const snapshot = current.active && current.tabId === tabId && current.includeBodies === (message.includeBodies === true)
+                  ? current
+                  : await networkCapture.start(tabId, message.includeBodies === true);
+                sendResponse({ success: true, snapshot });
+              } catch (error) {
+                sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
+              }
             }
           } else if (message.action === 'networkCaptureStop') {
             sendResponse({ success: true, snapshot: await networkCapture.stop() });
@@ -1349,7 +1356,13 @@ export default defineBackground({
         }
         networkInspectorPorts.add(port);
         port.postMessage({ type: 'snapshot', snapshot: networkCapture.snapshot() });
-        port.onDisconnect.addListener(() => networkInspectorPorts.delete(port));
+        port.onDisconnect.addListener(() => {
+          networkInspectorPorts.delete(port);
+          // 网络观测与侧栏生命周期绑定；最后一个面板关闭时释放 CDP/debugger。
+          if (networkInspectorPorts.size === 0) {
+            void networkCapture.stop().catch((error) => logger.debug('[Background] network capture cleanup failed:', error));
+          }
+        });
         return;
       }
       if (port.name !== 'chat') return;
