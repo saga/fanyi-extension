@@ -2,8 +2,8 @@
  * Per-tab Network Inspector.
  *
  * Firefox (including Android) uses the background webRequest API. Chromium uses
- * the DevTools Protocol Network domain through chrome.debugger. The inspector
- * is opt-in, scoped to one tab, bounded in memory, and redacts credentials.
+ * the DevTools Protocol Network domain through chrome.debugger and falls back to
+ * webRequest metadata when CDP cannot attach. The side panel starts it automatically.
  */
 export type NetworkCaptureMode = 'firefox-webRequest' | 'chromium-cdp' | 'chromium-webRequest';
 
@@ -198,7 +198,7 @@ export class NetworkCaptureController {
     }
 
     if (canUseWebRequest) {
-      const mode: NetworkCaptureMode = chromeDebugger ? 'chromium-webRequest' : 'firefox-webRequest';
+      const mode: NetworkCaptureMode = canUseDebugger || chromeDebugger ? 'chromium-webRequest' : 'firefox-webRequest';
       this.startWebRequest(webRequest, tabId, includeBodies, mode);
       return this.snapshot();
     }
