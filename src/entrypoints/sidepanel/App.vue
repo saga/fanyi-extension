@@ -7,7 +7,7 @@
         <div class="src-url" v-if="pageContext">{{ shortUrl(pageContext.url) }}</div>
       </div>
       <button class="close-btn" :disabled="status === 'loading'" @click="clearChat" title="清空对话">×</button>
-      <button class="reload-btn" :disabled="status === 'loading'" @click="loadContext">
+      <button class="reload-btn" :disabled="status === 'loading'" @click="reloadContext">
         {{ status === 'loading' ? '加载中…' : '重新加载' }}
       </button>
     </header>
@@ -495,6 +495,10 @@ function getSourceTabId(): number | undefined {
 /** Firefox desktop sidebar is window-scoped and has no sourceTabId URL; use the tab selected by background. */
 function getCurrentSourceTabId(): number | undefined {
   return resolvedSourceTabId.value ?? getSourceTabId();
+}
+
+function reloadContext() {
+  void loadContext();
 }
 
 async function loadContext(preferredTabId?: number, restoreHistory = true) {
