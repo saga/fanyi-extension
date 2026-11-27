@@ -1360,6 +1360,20 @@ async function send() {
       request?: AgentToolRequest;
     };
     if (m.type === 'tool_request' && typeof m.requestId === 'string' && m.request) {
+      if (m.request.tool.startsWith('page.')
+        && (!pageControlEnabled.value || !pageDomEnabled.value)) {
+        assistantTurn.content = 'Page Control 的网页读取与操作已关闭，本次页面工具请求已拒绝。';
+        if (currentPort.value === port) {
+          port.postMessage({
+            type: 'tool_result',
+            requestId: m.requestId,
+            approved: false,
+            summary: 'Page Control 当前关闭。不要重试 page.* 工具，继续使用已有页面上下文回答。',
+          });
+        }
+        scrollToBottom();
+        return;
+      }
       const pending: PendingAgentTool = {
         requestId: m.requestId,
         request: m.request,
