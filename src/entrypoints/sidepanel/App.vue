@@ -100,13 +100,13 @@
               <input v-model="pageNetworkEnabled" type="checkbox" @change="onPageNetworkChange" />
               网络请求捕获
             </label>
-            <select v-model="pageNetworkMode" :disabled="!pageNetworkEnabled || isFirefox" @change="onPageNetworkModeChange">
+            <select v-model="pageNetworkMode" :disabled="!pageNetworkEnabled" @change="onPageNetworkModeChange">
               <option value="auto">自动选择</option>
-              <option value="cdp">CDP / Debugger</option>
+              <option v-if="!isFirefox" value="cdp">CDP / Debugger</option>
               <option value="webRequest">webRequest</option>
             </select>
           </div>
-          <p class="page-control-help">自动模式在 Chromium 优先使用 CDP，失败后降级；Firefox 使用 webRequest。CDP 可读取受支持的文本响应体；Chrome MV3 webRequest 备用通道主要提供请求元数据和请求体，不提供通用响应体读取。</p>
+          <p class="page-control-help">自动模式在 Chromium 优先使用 CDP，失败后降级；Firefox 使用 webRequest。CDP 可读取受支持的文本响应体、WebSocket 帧和 EventSource 消息；Chrome MV3 webRequest 通道主要提供请求元数据和请求体，不提供通用响应体或 WebSocket 帧读取。</p>
           <div class="page-control-permissions">
             <span>当前站点：{{ pagePermissionLabel }}</span>
             <span>Debugger：{{ debuggerPermissionLabel }}</span>
@@ -552,7 +552,7 @@ const chatConfigIssues = computed(() => {
 });
 const pagePermissionLabel = computed(() => ({
   checking: '检查中',
-  granted: '所有网站',
+  granted: '当前站点已授权',
   missing: '未获得全站访问权限',
   unknown: '浏览器受限页面 / 未知',
 }[pagePermissionState.value]));
