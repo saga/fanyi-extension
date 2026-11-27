@@ -6,6 +6,7 @@
  * webRequest metadata when CDP cannot attach. The side panel starts it automatically.
  */
 export type NetworkCaptureMode = 'firefox-webRequest' | 'chromium-cdp' | 'chromium-webRequest';
+export type NetworkCapturePreference = 'auto' | 'cdp' | 'webRequest';
 
 export interface NetworkRequestRecord {
   id: string;
@@ -22,6 +23,18 @@ export interface NetworkRequestRecord {
   responseHeaders?: Record<string, string>;
   requestBody?: string;
   responseBody?: string;
+  webSocketFrames?: Array<{
+    direction: 'sent' | 'received';
+    opcode: number;
+    payload: string;
+    timestamp: number;
+  }>;
+  eventSourceMessages?: Array<{
+    eventName: string;
+    eventId: string;
+    data: string;
+    timestamp: number;
+  }>;
   bodyTruncated?: boolean;
 }
 
@@ -36,7 +49,7 @@ export interface NetworkCaptureSnapshot {
 
 const MAX_REQUESTS = 150;
 const MAX_BODY_BYTES = 32 * 1024;
-const SENSITIVE_KEY = /(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)/i;
+const SENSITIVE_KEY = /(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|client[-_]?secret|private[-_]?key|credential|session|auth|jwt)/i;
 const TEXT_MIME = /(?:^text\/|json|xml|javascript|x-www-form-urlencoded|graphql)/i;
 
 function sanitizeUrl(input: string): string {
@@ -54,8 +67,8 @@ function sanitizeUrl(input: string): string {
 function sanitizeText(value: string): string {
   return value
     .replace(/(Bearer\s+)[^\s"'&,]+/gi, '$1[REDACTED]')
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|session|authorization|credential)=)[^&\s]+/gi, '$1[REDACTED]')
-    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|credential|session)["']?\s*[:=]\s*["']?)[^"'&,}\s]+(["']?)/gi, '$1[REDACTED]$2');
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|client[_-]?secret|private[_-]?key|password|passwd|secret|session[_-]?(?:id|key|token)?|authorization|credential|auth)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/(["']?(?:authorization|proxy-authorization|cookie|set-cookie|token|secret|password|passwd|api[-_]?key|client[-_]?secret|private[-_]?key|credential|session[_-]?(?:id|key|token)?|auth|jwt)["']?\s*[:=]\s*["']?)[^"'&,}\s]+(["']?)/gi, '$1[REDACTED]$2');
 }
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
@@ -72,13 +85,17 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
   return value;
 }
 
-function limitBodyBytes(value: string): string {
+function limitTextBytes(value: string, maxBytes: number): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(value);
-  if (bytes.byteLength <= MAX_BODY_BYTES) return value;
+  if (bytes.byteLength <= maxBytes) return value;
   const suffix = '\n[TRUNCATED]';
   const suffixBytes = encoder.encode(suffix).byteLength;
-  return new TextDecoder().decode(bytes.subarray(0, MAX_BODY_BYTES - suffixBytes)) + suffix;
+  return new TextDecoder().decode(bytes.subarray(0, Math.max(0, maxBytes - suffixBytes))) + suffix;
+}
+
+function limitBodyBytes(value: string): string {
+  return limitTextBytes(value, MAX_BODY_BYTES);
 }
 
 function sanitizeBody(value: unknown): string | undefined {
@@ -149,6 +166,7 @@ export class NetworkCaptureController {
   private debuggerEventListener?: (...args: any[]) => void;
   private debuggerDetachListener?: (...args: any[]) => void;
   private stopping = false;
+  private capturePreference: NetworkCapturePreference = 'auto';
   private lastCaptureTabId: number | null = null;
   private sequence = 0;
 
@@ -184,9 +202,14 @@ export class NetworkCaptureController {
     this.emit();
   }
 
-  async start(tabId: number, includeBodies = false): Promise<NetworkCaptureSnapshot> {
+  async start(
+    tabId: number,
+    includeBodies = false,
+    preference: NetworkCapturePreference = 'auto',
+  ): Promise<NetworkCaptureSnapshot> {
     if (!Number.isInteger(tabId) || tabId < 0) throw new Error('无效的标签页 ID');
     await this.stop();
+    this.capturePreference = preference;
 
     // 不同来源标签页之间不复用旧请求，避免侧栏切换后把上一页的数据混在一起。
     if (this.lastCaptureTabId !== null && this.lastCaptureTabId !== tabId) {
@@ -200,23 +223,36 @@ export class NetworkCaptureController {
     const canUseDebugger = typeof chromeDebugger?.attach === 'function'
       && typeof chromeDebugger?.sendCommand === 'function';
     const canUseWebRequest = typeof webRequest?.onBeforeRequest?.addListener === 'function';
+    const isFirefox = typeof this.browserApi?.runtime?.getBrowserInfo === 'function';
+    const webRequestMode: NetworkCaptureMode = isFirefox ? 'firefox-webRequest' : 'chromium-webRequest';
 
-    // Chromium 优先使用 CDP（包含响应正文）；attach 失败或 DevTools 接管时自动降级。
+    if (preference === 'cdp') {
+      if (!canUseDebugger) throw new Error('当前浏览器不提供 CDP Debugger；请改用 webRequest');
+      await this.startChromium(chromeDebugger, tabId, includeBodies);
+      return this.snapshot();
+    }
+
+    if (preference === 'webRequest') {
+      if (!canUseWebRequest) throw new Error('webRequest 权限尚未授予或当前浏览器不支持');
+      this.startWebRequest(webRequest, tabId, includeBodies, webRequestMode);
+      return this.snapshot();
+    }
+
+    // 自动模式：Chromium 优先 CDP（可读取文本响应正文），失败或被 DevTools 占用时降级；
+    // Firefox 没有 chrome.debugger，使用 webRequest。
     if (canUseDebugger) {
       try {
         await this.startChromium(chromeDebugger, tabId, includeBodies);
         return this.snapshot();
       } catch (error) {
         if (!canUseWebRequest) throw error;
-        this.startWebRequest(webRequest, tabId, includeBodies, 'chromium-webRequest');
+        this.startWebRequest(webRequest, tabId, includeBodies, webRequestMode);
         return this.snapshot();
       }
     }
 
     if (canUseWebRequest) {
-      const isFirefox = typeof this.browserApi?.runtime?.getBrowserInfo === 'function';
-      const mode: NetworkCaptureMode = isFirefox ? 'firefox-webRequest' : 'chromium-webRequest';
-      this.startWebRequest(webRequest, tabId, includeBodies, mode);
+      this.startWebRequest(webRequest, tabId, includeBodies, webRequestMode);
       return this.snapshot();
     }
 
@@ -360,6 +396,45 @@ export class NetworkCaptureController {
           ...(includeBodies && request.postData ? { requestBody: sanitizeBody(request.postData) } : {}),
         };
         this.upsert(record);
+      } else if (method === 'Network.webSocketCreated') {
+        const existing = this.requestById.get(id);
+        this.upsert(existing || {
+          id,
+          url: sanitizeUrl(String(params.url || '')),
+          method: 'WEBSOCKET',
+          resourceType: 'WebSocket',
+          startedAt: Date.now(),
+        });
+      } else if (method === 'Network.webSocketFrameSent' || method === 'Network.webSocketFrameReceived') {
+        if (!includeBodies) return;
+        const response = params.response || {};
+        const record: NetworkRequestRecord = this.requestById.get(id) || {
+          id, url: '', method: 'WEBSOCKET', resourceType: 'WebSocket', startedAt: Date.now(),
+        };
+        const frames = record.webSocketFrames || [];
+        const payload = sanitizeBody(String(response.payloadData || '')) || '';
+        frames.push({
+          direction: method === 'Network.webSocketFrameSent' ? 'sent' : 'received',
+          opcode: Number(response.opcode || 0),
+          payload: limitTextBytes(payload, 1024),
+          timestamp: Date.now(),
+        });
+        record.webSocketFrames = frames.slice(-20);
+        this.upsert(record);
+      } else if (method === 'Network.eventSourceMessageReceived') {
+        if (!includeBodies) return;
+        const record: NetworkRequestRecord = this.requestById.get(id) || {
+          id, url: '', method: 'EVENTSOURCE', resourceType: 'EventSource', startedAt: Date.now(),
+        };
+        const messages = record.eventSourceMessages || [];
+        messages.push({
+          eventName: String(params.eventName || ''),
+          eventId: String(params.eventId || ''),
+          data: limitTextBytes(sanitizeBody(String(params.data || '')) || '', 1024),
+          timestamp: Date.now(),
+        });
+        record.eventSourceMessages = messages.slice(-20);
+        this.upsert(record);
       } else if (method === 'Network.responseReceived') {
         const record = this.requestById.get(id);
         if (!record) return;
@@ -410,7 +485,8 @@ export class NetworkCaptureController {
       // DevTools 接管同一标签页时 Chrome 会断开扩展的 CDP 会话；
       // 若标签页仍存在且 webRequest 可用，自动切换到只读元数据采集。
       const webRequest = this.browserApi?.webRequest;
-      if (reason !== 'target_closed' && typeof webRequest?.onBeforeRequest?.addListener === 'function') {
+      if (this.capturePreference === 'auto' && reason !== 'target_closed'
+        && typeof webRequest?.onBeforeRequest?.addListener === 'function') {
         try {
           this.startWebRequest(webRequest, tabId, this.state.includeBodies, 'chromium-webRequest');
           return;
@@ -476,6 +552,7 @@ export class NetworkCaptureController {
     this.state.startedAt = null;
     this.state.includeBodies = false;
     this.state.mode = null;
+    this.capturePreference = 'auto';
     this.stopping = false;
     this.emit();
     return this.snapshot();

@@ -22,7 +22,7 @@ import type browser from 'webextension-polyfill';
 import type { Config } from '../entrypoints/utils/config';
 import type { Glossary } from '../entrypoints/service/_service';
 import type { PromptStyle, TranslationMode } from '../entrypoints/service/deepseek';
-import type { NetworkCaptureSnapshot } from '../entrypoints/utils/networkCapture';
+import type { NetworkCapturePreference, NetworkCaptureSnapshot } from '../entrypoints/utils/networkCapture';
 
 // ============================================================
 // 公共子类型
@@ -144,7 +144,7 @@ export interface GetPageContextMessage {
 }
 
 export type NetworkCaptureCommandMessage =
-  | { action: 'networkCaptureStart'; sourceTabId?: number; includeBodies?: boolean }
+  | { action: 'networkCaptureStart'; sourceTabId?: number; includeBodies?: boolean; preferredMode?: NetworkCapturePreference }
   | { action: 'networkCaptureStop' }
   | { action: 'networkCaptureClear' };
 export type NetworkCaptureCommandResponse =
