@@ -125,7 +125,7 @@ describe('NetworkCaptureController', () => {
     });
     await Promise.resolve();
 
-    const record = controller.snapshot().requests[0];
+    const record = controller.snapshot().requests.find((item) => item.id === 'cdp-1');
     expect(record).toBeDefined();
     if (!record) throw new Error('Expected captured Chromium request');
     expect(record.url).toContain('token=%5BREDACTED%5D');
