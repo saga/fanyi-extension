@@ -5,7 +5,7 @@
  * the DevTools Protocol Network domain through chrome.debugger. The inspector
  * is opt-in, scoped to one tab, bounded in memory, and redacts credentials.
  */
-export type NetworkCaptureMode = 'firefox-webRequest' | 'chromium-cdp';
+export type NetworkCaptureMode = 'firefox-webRequest' | 'chromium-cdp' | 'chromium-webRequest';
 
 export interface NetworkRequestRecord {
   id: string;
@@ -133,6 +133,7 @@ export class NetworkCaptureController {
   private debuggerEventListener?: (...args: any[]) => void;
   private debuggerDetachListener?: (...args: any[]) => void;
   private stopping = false;
+  private lastCaptureTabId: number | null = null;
   private sequence = 0;
 
   constructor(browserApi: any, chromeApi?: any) {
@@ -171,22 +172,52 @@ export class NetworkCaptureController {
     if (!Number.isInteger(tabId) || tabId < 0) throw new Error('无效的标签页 ID');
     await this.stop();
 
+    // 不同来源标签页之间不复用旧请求，避免侧栏切换后把上一页的数据混在一起。
+    if (this.lastCaptureTabId !== null && this.lastCaptureTabId !== tabId) {
+      this.requestById.clear();
+      this.state.requests = [];
+    }
+    this.lastCaptureTabId = tabId;
+
     const webRequest = this.browserApi?.webRequest;
     const chromeDebugger = this.chromeApi?.debugger;
-    if (!chromeDebugger && webRequest?.onBeforeRequest?.addListener) {
-      this.state = {
-        active: true, tabId, startedAt: Date.now(), includeBodies,
-        mode: 'firefox-webRequest', requests: this.state.requests,
-      };
-      this.registerWebRequestListeners(webRequest, tabId, includeBodies);
-      this.emit();
+    const canUseDebugger = typeof chromeDebugger?.attach === 'function'
+      && typeof chromeDebugger?.sendCommand === 'function';
+    const canUseWebRequest = typeof webRequest?.onBeforeRequest?.addListener === 'function';
+
+    // Chromium 优先使用 CDP（包含响应正文）；attach 失败或 DevTools 接管时自动降级。
+    if (canUseDebugger) {
+      try {
+        await this.startChromium(chromeDebugger, tabId, includeBodies);
+        return this.snapshot();
+      } catch (error) {
+        if (!canUseWebRequest) throw error;
+        this.startWebRequest(webRequest, tabId, includeBodies, 'chromium-webRequest');
+        return this.snapshot();
+      }
+    }
+
+    if (canUseWebRequest) {
+      const mode: NetworkCaptureMode = chromeDebugger ? 'chromium-webRequest' : 'firefox-webRequest';
+      this.startWebRequest(webRequest, tabId, includeBodies, mode);
       return this.snapshot();
     }
-    if (chromeDebugger?.attach && chromeDebugger?.sendCommand) {
-      await this.startChromium(chromeDebugger, tabId, includeBodies);
-      return this.snapshot();
-    }
+
     throw new Error('当前浏览器没有可用的网络请求捕获 API');
+  }
+
+  private startWebRequest(
+    webRequest: any,
+    tabId: number,
+    includeBodies: boolean,
+    mode: NetworkCaptureMode,
+  ): void {
+    this.state = {
+      active: true, tabId, startedAt: Date.now(), includeBodies,
+      mode, requests: this.state.requests,
+    };
+    this.registerWebRequestListeners(webRequest, tabId, includeBodies);
+    this.emit();
   }
 
   private registerWebRequestListeners(web: any, tabId: number, includeBodies: boolean): void {
@@ -196,6 +227,7 @@ export class NetworkCaptureController {
       this.webListeners.push({ event, listener });
     };
 
+    const canFilterResponse = includeBodies && typeof web.filterResponseData === 'function';
     add(web.onBeforeRequest, (details: any) => {
       if (!this.matchesTab(details.tabId)) return;
       const id = String(details.requestId);
@@ -250,7 +282,7 @@ export class NetworkCaptureController {
           // Some Firefox contexts expose webRequest but not filterResponseData.
         }
       }
-    }, includeBodies ? ['blocking', 'requestBody'] : undefined);
+    }, includeBodies ? (canFilterResponse ? ['blocking', 'requestBody'] : ['requestBody']) : undefined);
 
     add(web.onBeforeSendHeaders, (details: any) => {
       const record = this.requestById.get(String(details.requestId));
@@ -351,17 +383,35 @@ export class NetworkCaptureController {
         this.upsert(record);
       }
     };
-    this.debuggerDetachListener = (source: any) => {
+    this.debuggerDetachListener = (source: any, reason?: string) => {
       if (source?.tabId !== tabId || this.stopping) return;
+      this.removeDebuggerListeners(debuggerApi);
+      this.debuggerTarget = null;
       this.state.active = false;
       this.state.mode = null;
-      this.debuggerTarget = null;
+
+      // DevTools 接管同一标签页时 Chrome 会断开扩展的 CDP 会话；
+      // 若标签页仍存在且 webRequest 可用，自动切换到只读元数据采集。
+      const webRequest = this.browserApi?.webRequest;
+      if (reason !== 'target_closed' && typeof webRequest?.onBeforeRequest?.addListener === 'function') {
+        try {
+          this.startWebRequest(webRequest, tabId, this.state.includeBodies, 'chromium-webRequest');
+          return;
+        } catch {
+          /* 自动降级失败时保持停止状态 */
+        }
+      }
+      this.state.tabId = null;
+      this.state.startedAt = null;
+      this.state.includeBodies = false;
       this.emit();
     };
     debuggerApi.onEvent?.addListener(this.debuggerEventListener);
     debuggerApi.onDetach?.addListener(this.debuggerDetachListener);
+    let attached = false;
     try {
       await debuggerApi.attach(target, '1.3');
+      attached = true;
       await debuggerApi.sendCommand(target, 'Network.enable', {
         maxTotalBufferSize: 2 * 1024 * 1024,
         maxResourceBufferSize: MAX_BODY_BYTES,
@@ -372,6 +422,9 @@ export class NetworkCaptureController {
       this.state.mode = null;
       this.debuggerTarget = null;
       this.removeDebuggerListeners(debuggerApi);
+      if (attached) {
+        try { await debuggerApi.detach(target); } catch { /* attach partially failed */ }
+      }
       throw new Error(error instanceof Error ? error.message : '无法连接 Chrome Debugger');
     }
   }
