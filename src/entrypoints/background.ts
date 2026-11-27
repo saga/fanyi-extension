@@ -1414,7 +1414,8 @@ export default defineBackground({
                 })) {
                   finalText = partial;
                   // JSON 和工具请求先缓冲，避免把待确认的调用参数展示成普通回答。
-                  if (!m.jsonMode && !partial.trimStart().startsWith('{')) {
+                  const trimmed = partial.trimStart();
+                  if (!m.jsonMode && !trimmed.startsWith('{') && !trimmed.startsWith('```')) {
                     port.postMessage({ type: 'partial', text: partial });
                     streamed = true;
                   }
@@ -1506,6 +1507,7 @@ export default defineBackground({
               const toolResult = JSON.stringify({
                 type: 'untrusted_extension_tool_result',
                 tool: toolRequest.tool,
+                request: toolRequest,
                 approved: result.approved,
                 result: result.summary,
               }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
