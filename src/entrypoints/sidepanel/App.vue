@@ -71,27 +71,24 @@
         </label>
         <div class="permission-status">
           <span>网站访问：{{ pagePermissionLabel }}</span>
-          <span>Debugger：{{ debuggerPermissionLabel }}</span>
+          <span>浏览器控制：自动选择（{{ debuggerPermissionLabel }}）</span>
         </div>
       </section>
     </details>
 
     <details class="network-panel">
-      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? '采集中' : '已停止' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
+      <summary>网络请求 <span class="settings-summary">{{ networkSnapshot.active ? networkModeLabel + ' 自动采集中' : networkError ? '自动采集不可用' : '自动检测中' }} · {{ networkSnapshot.requests.length }} 条</span></summary>
       <section class="network-inspector">
         <div class="network-toolbar">
-          <button :disabled="networkSnapshot.active" @click="startNetworkCapture">开始</button>
-          <button :disabled="!networkSnapshot.active" @click="stopNetworkCapture">停止</button>
           <button @click="clearNetworkCapture">清空</button>
-          <label><input v-model="networkIncludeBodies" type="checkbox" :disabled="networkSnapshot.active" /> 捕获正文</label>
         </div>
-        <p class="network-help">仅捕获当前对话来源标签页。正文捕获默认关闭；开启后仅保留小体积文本/JSON，敏感字段脱敏。</p>
+        <p class="network-help">面板打开后自动捕获当前对话来源标签页的网络请求，并根据浏览器能力选择 CDP/Debugger 或 webRequest。请求正文自动采集，仅保留受限长度的文本/JSON并脱敏；关闭面板后自动释放控制会话。</p>
         <p v-if="networkError" class="network-error">{{ networkError }}</p>
         <div class="network-list">
           <button v-for="item in networkSnapshot.requests" :key="item.id" @click="selectedNetworkId = item.id" :class="{ selected: selectedNetworkId === item.id }">
             <b>{{ item.method }}</b><span>{{ item.status || item.error || '…' }}</span><span>{{ networkLabel(item.url) }}</span>
           </button>
-          <p v-if="!networkSnapshot.requests.length">暂无请求。开始捕获后，在网页中执行操作。</p>
+          <p v-if="!networkSnapshot.requests.length">尚未检测到请求。页面上下文就绪后会自动开始采集。</p>
         </div>
         <pre v-if="selectedNetworkRequest">{{ JSON.stringify(selectedNetworkRequest, null, 2) }}</pre>
       </section>
@@ -192,20 +189,13 @@
 
     <!-- 输入区 -->
     <footer class="composer">
-      <button
-        class="json-toggle"
-        :class="{ active: jsonMode }"
-        :disabled="streaming"
-        :title="jsonMode ? '关闭结构化 JSON 输出' : '开启结构化 JSON 输出'"
-        @click="jsonMode = !jsonMode"
-      >JSON</button>
       <textarea
         v-model="input"
         enterkeyhint="send"
         autocapitalize="sentences"
         class="input"
         rows="1"
-        :placeholder="status === 'ready' ? (jsonMode ? '要求以 JSON 形式回答…' : '输入你的问题…') : '请先加载页面内容'"
+        :placeholder="status === 'ready' ? '输入你的问题…' : '请先加载页面内容'"
         :disabled="status !== 'ready'"
         @keydown.enter.exact.prevent="send"
       ></textarea>
@@ -222,7 +212,7 @@ import browser from 'webextension-polyfill';
 import { isSidebarSupported } from '@/entrypoints/utils/sidePanel';
 import type { PageContext, GetPageContextResponse, NetworkCaptureCommandResponse } from '@/types/messages';
 import type { NetworkCaptureSnapshot, NetworkRequestRecord } from '@/entrypoints/utils/networkCapture';
-import type { ChatUsage } from '@/entrypoints/service/chat';
+import { shouldUseJsonMode, type ChatUsage } from '@/entrypoints/service/chat';
 import type { AgentToolRequest } from '@/entrypoints/utils/agentToolProtocol';
 import { executeAgentToolInExtension, previewAgentPageClick, type AgentToolArtifact } from '@/entrypoints/utils/agentToolExecution';
 import type { PageActionResult } from '@/entrypoints/utils/pageScriptExecution';
@@ -246,19 +236,26 @@ interface PendingAgentTool {
 const pageContext = ref<PageContext | null>(null);
 const resolvedSourceTabId = ref<number | undefined>(undefined);
 const networkSnapshot = ref<NetworkCaptureSnapshot>({ active: false, tabId: null, startedAt: null, includeBodies: false, mode: null, requests: [] });
-const networkIncludeBodies = ref(false);
 const networkError = ref('');
 const selectedNetworkId = ref('');
 let networkPort: browser.Runtime.Port | null = null;
+let networkInspectorEnabled = false;
+let networkCaptureStartPromise: Promise<void> | null = null;
+let networkCaptureStartTabId: number | null = null;
 let agentToolHeartbeatTimer: number | null = null;
 const selectedNetworkRequest = computed<NetworkRequestRecord | null>(() => networkSnapshot.value.requests.find((item) => item.id === selectedNetworkId.value) ?? networkSnapshot.value.requests[0] ?? null);
+const networkModeLabel = computed(() => {
+  const mode = networkSnapshot.value.mode;
+  if (mode === 'chromium-cdp') return 'CDP';
+  if (mode === 'chromium-webRequest' || mode === 'firefox-webRequest') return 'webRequest';
+  return '自动控制';
+});
 const status = ref<'loading' | 'ready' | 'error'>('loading');
 const errorMsg = ref('');
 const messages = ref<ChatTurn[]>([]);
 const input = ref('');
 const streaming = ref(false);
 const messagesEl = ref<HTMLElement | null>(null);
-const jsonMode = ref(false);
 const lastUsage = ref<ChatUsage | null>(null);
 const currentPort = ref<browser.Runtime.Port | null>(null);
 // 手动输入上下文模式：自动读取失败时启用，让用户粘贴正文继续对话
@@ -455,34 +452,87 @@ function scrollToBottom() {
 }
 
 function connectNetworkInspector() {
-  const port = browser.runtime.connect({ name: 'network-inspector' });
-  networkPort = port;
-  port.onMessage.addListener((message: unknown) => {
-    const event = message as { type?: string; snapshot?: NetworkCaptureSnapshot };
-    if (event.type !== 'snapshot' || !event.snapshot) return;
-    networkSnapshot.value = event.snapshot;
-    if (!event.snapshot.requests.some((item) => item.id === selectedNetworkId.value)) selectedNetworkId.value = event.snapshot.requests[0]?.id || '';
-  });
-  port.onDisconnect.addListener(() => { if (networkPort === port) networkPort = null; });
-}
-async function startNetworkCapture() {
-  networkError.value = '';
+  if (!networkInspectorEnabled || networkPort) return;
   try {
-    const response = await browser.runtime.sendMessage({ action: 'networkCaptureStart', sourceTabId: getCurrentSourceTabId(), includeBodies: networkIncludeBodies.value }) as NetworkCaptureCommandResponse;
+    const port = browser.runtime.connect({ name: 'network-inspector' });
+    networkPort = port;
+    port.onMessage.addListener((message: unknown) => {
+      const event = message as { type?: string; snapshot?: NetworkCaptureSnapshot };
+      if (event.type !== 'snapshot' || !event.snapshot) return;
+      networkSnapshot.value = event.snapshot;
+      if (!event.snapshot.requests.some((item) => item.id === selectedNetworkId.value)) {
+        selectedNetworkId.value = event.snapshot.requests[0]?.id || '';
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (networkPort !== port) return;
+      networkPort = null;
+      // Service worker 重启或短暂断连后自动重连，并恢复当前标签页的网络观测。
+      if (networkInspectorEnabled) {
+        window.setTimeout(() => {
+          if (!networkInspectorEnabled || networkPort) return;
+          connectNetworkInspector();
+          void ensureNetworkCapture();
+        }, 800);
+      }
+    });
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** 网络观测随当前对话来源自动启动；同一标签页已有会话时复用，不重复 attach。 */
+async function ensureNetworkCapture() {
+  const tabId = getCurrentSourceTabId();
+  if (tabId == null) return;
+  if (networkSnapshot.value.active && networkSnapshot.value.tabId === tabId && networkSnapshot.value.includeBodies) return;
+  if (networkCaptureStartPromise && networkCaptureStartTabId === tabId) return networkCaptureStartPromise;
+
+  networkError.value = '';
+  networkCaptureStartTabId = tabId;
+  const task = (async () => {
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: 'networkCaptureStart',
+        sourceTabId: tabId,
+        includeBodies: true,
+      }) as NetworkCaptureCommandResponse;
+      if (!response.success) throw new Error(response.error);
+      networkSnapshot.value = response.snapshot;
+      selectedNetworkId.value = response.snapshot.requests[0]?.id || '';
+    } catch (error) {
+      networkError.value = error instanceof Error ? error.message : String(error);
+    }
+  })();
+  networkCaptureStartPromise = task;
+  try {
+    await task;
+  } finally {
+    if (networkCaptureStartPromise === task) {
+      networkCaptureStartPromise = null;
+      networkCaptureStartTabId = null;
+    }
+  }
+}
+
+async function clearNetworkCapture() {
+  try {
+    const response = await browser.runtime.sendMessage({ action: 'networkCaptureClear' }) as NetworkCaptureCommandResponse;
     if (!response.success) throw new Error(response.error);
     networkSnapshot.value = response.snapshot;
-    selectedNetworkId.value = response.snapshot.requests[0]?.id || '';
-  } catch (error) { networkError.value = error instanceof Error ? error.message : String(error); }
+    selectedNetworkId.value = '';
+  } catch (error) {
+    networkError.value = error instanceof Error ? error.message : String(error);
+  }
 }
-async function stopNetworkCapture() {
-  try { const response = await browser.runtime.sendMessage({ action: 'networkCaptureStop' }) as NetworkCaptureCommandResponse; if (!response.success) throw new Error(response.error); networkSnapshot.value = response.snapshot; }
-  catch (error) { networkError.value = error instanceof Error ? error.message : String(error); }
+function networkLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host + parsed.pathname + parsed.search;
+  } catch {
+    return url;
+  }
 }
-async function clearNetworkCapture() {
-  try { const response = await browser.runtime.sendMessage({ action: 'networkCaptureClear' }) as NetworkCaptureCommandResponse; if (!response.success) throw new Error(response.error); networkSnapshot.value = response.snapshot; selectedNetworkId.value = ''; }
-  catch (error) { networkError.value = error instanceof Error ? error.message : String(error); }
-}
-function networkLabel(url: string): string { try { const parsed = new URL(url); return parsed.host + parsed.pathname + parsed.search; } catch { return url; } }
 
 function getSourceTabId(): number | undefined {
   const params = new URLSearchParams(window.location.search);
@@ -516,6 +566,7 @@ async function loadContext(preferredTabId?: number, restoreHistory = true) {
     if (resp.success) {
       pageContext.value = resp.context;
       resolvedSourceTabId.value = resp.tabId ?? getSourceTabId();
+      void ensureNetworkCapture();
       // Firefox's desktop sidebar has no sourceTabId query parameter. Once
       // background resolves the active page, try restoring that tab's history.
       const restored = restoreHistory ? await loadHistory() : false;
@@ -617,6 +668,7 @@ async function initChat() {
   const restored = await loadHistory();
   if (restored && pageContext.value) {
     status.value = 'ready';
+    void ensureNetworkCapture();
   } else {
     await loadContext();
   }
@@ -704,6 +756,7 @@ function disconnectPort() {
 async function send() {
   const question = input.value.trim();
   if (!question || !pageContext.value || streaming.value) return;
+  const jsonMode = shouldUseJsonMode(question);
   if (chatConfigIssues.value.length) {
     chatOptionsError.value = '请先补全配置：' + chatConfigIssues.value.join('；');
     return;
@@ -806,7 +859,7 @@ async function send() {
     type: 'chat',
     context: pageContext.value,
     history,
-    jsonMode: jsonMode.value,
+    jsonMode,
     backend: chatBackend.value,
     model: chatModel.value.trim(),
     thinkingMode: chatThinkingMode.value,
@@ -1047,6 +1100,7 @@ function syncVisualViewport() {
 }
 
 onMounted(async () => {
+  networkInspectorEnabled = true;
   connectNetworkInspector();
   syncVisualViewport();
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
@@ -1056,8 +1110,10 @@ onMounted(async () => {
   void loadChatOptions().catch((error) => { chatOptionsError.value = error instanceof Error ? error.message : String(error); });
   void refreshPermissionStatus();
   await initChat();
+  void ensureNetworkCapture();
 });
 onUnmounted(() => {
+  networkInspectorEnabled = false;
   stopAgentToolHeartbeat();
   try { networkPort?.disconnect(); } catch { /* already disconnected */ }
   networkPort = null;
@@ -1180,14 +1236,7 @@ onUnmounted(() => {
     max-width: 50vw;
   }
 
-  /* 移动端输入区：压缩两侧固定控件的占位，让"输入框 + 发送"尽量保持同一行；
-     发送按钮独占一行时靠 wrap 兜底，不会溢出视口。 */
-  .json-toggle {
-    min-width: 40px;
-    min-height: 44px;
-    padding: 0 6px;
-    font-size: 11px;
-  }
+  /* 移动端输入区保持输入框与发送按钮可见，不会溢出视口。 */
   .send-btn {
     min-width: 48px;
     min-height: 44px;
@@ -1482,39 +1531,13 @@ onUnmounted(() => {
 .composer {
   display: flex;
   align-items: flex-end;
-  /* 允许换行：窄屏（Firefox Android 聊天以标签页打开）下 JSON / 输入框 / 发送
-     三个控件挤在一行会超出视口，导致发送按钮跑到屏幕外。wrap 保证控件不越界。 */
+  /* 窄屏下允许输入框与发送按钮换行，避免发送按钮跑到视口外。 */
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px max(8px, env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #ececec;
   flex-shrink: 0;
-}
-
-.json-toggle {
-  flex-shrink: 0;
-  min-width: 44px;
-  min-height: 42px;
-  padding: 0 8px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid #d9d9d9;
-  border-radius: 12px;
-  background: #fff;
-  color: #888;
-  cursor: pointer;
-}
-
-.json-toggle.active {
-  border-color: #1677ff;
-  background: #1677ff;
-  color: #fff;
-}
-
-.json-toggle:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .input {

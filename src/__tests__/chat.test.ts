@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { chatStream, chat, buildChatSystem } from '../entrypoints/service/chat';
+import { chatStream, chat, buildChatSystem, shouldUseJsonMode } from '../entrypoints/service/chat';
 import type { PageContext } from '../types/messages';
 
 const fakeContext: PageContext = {
@@ -23,6 +23,17 @@ function makeSSE(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe('chat service', () => {
+  it.each([
+    ['请把文章要点整理成 JSON 格式输出', true],
+    ['输出一个 JSON 对象，包含 title 和 summary', true],
+    ['Return the result as JSON.', true],
+    ['JSON 是什么？请解释它的用途', false],
+    ['不要用 JSON，直接用自然语言解释', false],
+    ['用一句话总结这篇文章', false],
+  ])('infers structured output intent from the prompt: %s', (question, expected) => {
+    expect(shouldUseJsonMode(question)).toBe(expected);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createNetworkCaptureController } from '../entrypoints/utils/networkCapture';
 
 function event() {
-  let listener: ((details: any) => unknown) | undefined;
+  let listener: ((...args: any[]) => unknown) | undefined;
   return {
-    addListener: vi.fn((next: (details: any) => unknown) => { listener = next; }),
+    addListener: vi.fn((next: (...args: any[]) => unknown) => { listener = next; }),
     removeListener: vi.fn(),
-    fire(details: any) { return listener?.(details); },
+    fire(...args: any[]) { return listener?.(...args); },
   };
 }
 
@@ -29,7 +29,10 @@ describe('NetworkCaptureController', () => {
       onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
       filterResponseData: vi.fn(() => filter),
     };
-    const controller = createNetworkCaptureController({ webRequest });
+    const controller = createNetworkCaptureController({
+      webRequest,
+      runtime: { getBrowserInfo: vi.fn() },
+    });
 
     const started = await controller.start(23, true);
     expect(started.mode).toBe('firefox-webRequest');
@@ -126,7 +129,7 @@ describe('NetworkCaptureController', () => {
     expect(eventListeners.size).toBe(0);
   });
 
-  it('keeps capture opt-in and preserves records after stopping', async () => {
+  it('keeps the controller scoped to the requested tab and preserves state after stopping', async () => {
     const events = [event(), event(), event(), event(), event()];
     const webRequest = {
       onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
@@ -140,4 +143,139 @@ describe('NetworkCaptureController', () => {
     await controller.stop();
     expect(controller.snapshot().requests).toEqual([]);
   });
+  it('falls back to Chromium webRequest metadata when CDP attach is unavailable', async () => {
+    const onBeforeRequest = event();
+    const onBeforeSendHeaders = event();
+    const onHeadersReceived = event();
+    const onCompleted = event();
+    const onErrorOccurred = event();
+    const webRequest = {
+      onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
+    };
+    const debuggerApi = {
+      onEvent: { addListener: vi.fn(), removeListener: vi.fn() },
+      onDetach: { addListener: vi.fn(), removeListener: vi.fn() },
+      attach: vi.fn().mockRejectedValue(new Error('Another debugger is already attached')),
+      sendCommand: vi.fn(),
+      detach: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const started = await controller.start(31, true);
+    expect(started.active).toBe(true);
+    expect(started.mode).toBe('chromium-webRequest');
+    expect(onBeforeRequest.addListener).toHaveBeenCalledWith(
+      expect.any(Function), { urls: ['<all_urls>'], tabId: 31 }, ['requestBody'],
+    );
+
+    onBeforeRequest.fire({
+      requestId: 'fallback-1', tabId: 31, url: 'https://example.test/api',
+      method: 'POST', type: 'xmlhttprequest', timeStamp: 200,
+      requestBody: { formData: { prompt: ['hello'], api_key: ['private'] } },
+    });
+    const record = controller.snapshot().requests[0];
+    expect(record?.requestBody).toContain('[REDACTED]');
+    expect(record?.requestBody).not.toContain('private');
+
+    await controller.stop();
+    expect(controller.snapshot().active).toBe(false);
+  });
+
+  it('automatically falls back when CDP is detached by DevTools', async () => {
+    const onBeforeRequest = event();
+    const onBeforeSendHeaders = event();
+    const onHeadersReceived = event();
+    const onCompleted = event();
+    const onErrorOccurred = event();
+    const webRequest = {
+      onBeforeRequest, onBeforeSendHeaders, onHeadersReceived, onCompleted, onErrorOccurred,
+    };
+    const onEvent = event();
+    const onDetach = event();
+    const debuggerApi = {
+      onEvent, onDetach,
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue({}),
+      detach: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = createNetworkCaptureController({ webRequest }, { debugger: debuggerApi });
+
+    const started = await controller.start(66, true);
+    expect(started.mode).toBe('chromium-cdp');
+
+    onDetach.fire({ tabId: 66 }, 'canceled_by_user');
+    expect(controller.snapshot().active).toBe(true);
+    expect(controller.snapshot().mode).toBe('chromium-webRequest');
+    expect(onBeforeRequest.addListener).toHaveBeenCalled();
+
+    onBeforeRequest.fire({
+      requestId: 'after-devtools', tabId: 66, url: 'https://example.test/after-devtools',
+      method: 'GET', type: 'xmlhttprequest', timeStamp: 300,
+    });
+    expect(controller.snapshot().requests[0]?.id).toBe('after-devtools');
+
+    await controller.stop();
+  });
+
+  it('clears requests when automatic capture switches to a different source tab', async () => {
+    const eventsA = [event(), event(), event(), event(), event()];
+    const eventsB = [event(), event(), event(), event(), event()];
+    const createWebRequest = (events: ReturnType<typeof event>[]) => ({
+      onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
+      onCompleted: events[3], onErrorOccurred: events[4],
+    });
+    let currentWebRequest = createWebRequest(eventsA);
+    const browserApi = {
+      get webRequest() { return currentWebRequest; },
+    };
+    const controller = createNetworkCaptureController(browserApi);
+
+    await controller.start(41, false);
+    eventsA[0]!.fire({
+      requestId: 'tab-41', tabId: 41, url: 'https://first.test/api',
+      method: 'GET', type: 'xmlhttprequest', timeStamp: 1,
+    });
+    expect(controller.snapshot().requests).toHaveLength(1);
+
+    currentWebRequest = createWebRequest(eventsB);
+    const switched = await controller.start(42, false);
+    expect(switched.tabId).toBe(42);
+    expect(switched.requests).toHaveLength(0);
+    expect(eventsA[0]!.removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('redacts secrets embedded in raw body strings and caps JSON bodies', async () => {
+    const events = [event(), event(), event(), event(), event()];
+    const webRequest = {
+      onBeforeRequest: events[0], onBeforeSendHeaders: events[1], onHeadersReceived: events[2],
+      onCompleted: events[3], onErrorOccurred: events[4],
+    };
+    const controller = createNetworkCaptureController({ webRequest });
+    await controller.start(55, true);
+
+    const raw = new TextEncoder().encode('api_key=raw-secret&password=another-secret').buffer;
+    events[0]!.fire({
+      requestId: 'raw-body', tabId: 55, url: 'https://example.test/form',
+      method: 'POST', type: 'xmlhttprequest', timeStamp: 1,
+      requestBody: { raw: [{ bytes: raw }] },
+    });
+    const rawRecord = controller.snapshot().requests.find((item) => item.id === 'raw-body');
+    expect(rawRecord?.requestBody).toContain('[REDACTED]');
+    expect(rawRecord?.requestBody).not.toContain('raw-secret');
+    expect(rawRecord?.requestBody).not.toContain('another-secret');
+
+    const largeRaw = new TextEncoder().encode(JSON.stringify({ note: 'x'.repeat(40 * 1024) })).buffer;
+    events[0]!.fire({
+      requestId: 'large-body', tabId: 55, url: 'https://example.test/large',
+      method: 'POST', type: 'xmlhttprequest', timeStamp: 2,
+      requestBody: { raw: [{ bytes: largeRaw }] },
+    });
+    const largeRecord = controller.snapshot().requests.find((item) => item.id === 'large-body');
+    expect(largeRecord?.requestBody).toContain('[TRUNCATED]');
+    expect(new TextEncoder().encode(largeRecord?.requestBody || '').byteLength).toBeLessThanOrEqual(32 * 1024);
+
+    await controller.stop();
+  });
+
+
 });
