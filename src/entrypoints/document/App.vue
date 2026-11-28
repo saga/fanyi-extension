@@ -149,7 +149,7 @@
             <strong>已启用 · {{ translationEffortLabel }}</strong>
           </label>
           <label v-if="effectiveDocumentTranslationMode === 'literary' && literaryReview" class="field inline"
-            title="这是审校的基础并发。初译未占用的会话槽位会自动分配给审校；默认会话池为 6 槽，实际以服务端配置为准。">
+            title="审校基础并发越高，初译可用并发越少；初译未占用的会话槽会自动分配给审校。默认会话池为 6 槽，实际以服务端配置为准。">
             <span>审校基础并发</span>
             <select :value="String(readerConfig?.documentReviewConcurrency ?? 2)" @change="onReviewConcurrencyChange">
               <option value="1">1 路</option>
