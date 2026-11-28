@@ -301,6 +301,33 @@ describe('contentDetector', () => {
       expect(root?.source).toBe('readability');
     });
 
+    // 正文直接挂在 body 下且 body 文本被非正文内容稀释时，Readability 映射
+    // 仍覆盖完整正文；评分算法即使给脚注区更高密度分，也不能替换掉它。
+    it('rejects a dense footnote fragment when Readability root covers the full article', () => {
+      const paragraph = 'Castle Bravo was a full-scale thermonuclear test whose unexpectedly large yield came from the lithium-7 reaction. The scientists had anticipated a much smaller explosion, and the fallout triggered a major international incident.';
+      const paragraphs = Array.from({ length: 16 }, (_, i) =>
+        `<p>${paragraph} This is paragraph number ${i + 1} of the main discussion.</p>`,
+      ).join('');
+      const footnotes = Array.from({ length: 16 }, (_, i) =>
+        `<li id="fn${i + 1}"><p>${paragraph} This is footnote number ${i + 1} with fewer links.</p></li>`,
+      ).join('');
+      // script 文本进入 body.textContent，但 Readability 与块抽取都会忽略它，
+      // 用来构造「正文只占 body 一部分」且噪声不会被翻译的情形。
+      const inlineNoise = 'var siteConfig = "navigation metadata for the publication"; '.repeat(120);
+
+      document.body.innerHTML = `
+        <header><h1>Which Future?</h1></header>
+        <script>${inlineNoise}</script>
+        ${paragraphs}
+        <section class="footnotes"><ol>${footnotes}</ol></section>
+      `;
+
+      const root = detectArticleRoot(document);
+      expect(root?.element).toBe(document.body);
+      expect(root?.source).toBe('readability');
+      expect(root?.evidence.articleCompleteness).toBeLessThan(0.8);
+    });
+
     // ContentRoot 契约（ADR-001 P0）：detectArticleRoot 返回 ContentRoot，
     // 携带 source / confidence / evidence，供调试与后续 Evidence Fusion 使用。
   });

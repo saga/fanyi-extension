@@ -469,6 +469,8 @@ export interface ContentRoot {
     readabilityCoverage?: number;
     /** Readability 多锚点映射时：锚段落命中率 0..1 */
     anchorCoverage?: number;
+    /** Readability 正文占选中根文本的比例；>1 表示根装不下正文 */
+    articleCompleteness?: number;
     /** 评分算法得分（scoring 路径） */
     semanticScore?: number;
     /** 子树噪声密度（可选，后续扩展） */
@@ -530,20 +532,40 @@ function tryReadabilityRoot(doc: Document): ReadabilityMappingResult | null {
 /** Readability 只映射到 body/html 时，正文需占根节点文本的多少才算「整篇正文就是根」。 */
 const READABILITY_BODY_COMPLETENESS_MIN = 0.8;
 
+/**
+ * 评分根至少要装下 Readability 正文的多少。低于此值说明评分选中的是局部
+ * 容器（脚注区 / 引用区 / 评论片段），即使密度分再高也不能当正文根。
+ */
+const SCORING_COMPLETENESS_MIN = 1.3;
+
+function toContentRoot(result: ReadabilityMappingResult): ContentRoot {
+  const textLength = (result.root.textContent || '').length;
+  const s = scoreElement(result.root);
+  return {
+    element: result.root,
+    source: 'readability',
+    confidence: result.mappingConfidence,
+    evidence: {
+      textLength,
+      readabilityCoverage: result.contentCoverage,
+      anchorCoverage: result.anchorCoverage,
+      semanticScore: s,
+      articleCompleteness: result.articleTextLength / Math.max(1, textLength),
+    },
+  };
+}
+
 export function detectArticleRoot(doc: Document): ContentRoot | null {
   // 主条件：@mozilla/readability 定位正文根。
   // Readability 比手写评分更鲁棒，能稳定聚合多 section / 缺少语义标签 /
   // 被噪声容器干扰的站点正文。因此把它作为判断主条件，评分算法仅作兜底。
   const readability = tryReadabilityRoot(doc);
+  // 未直接采用、但可用的 Readability 映射保留为候选。评分算法只能选单个
+  // 容器，正文碎片化时可能选中脚注区；此时用「装得下多少正文」这一证据
+  // 在两者之间做裁决，而不是无条件信任密度分。
+  let readabilityFallback: ReadabilityMappingResult | null = null;
   if (readability) {
     const { root: readabilityRoot, mappingConfidence, contentCoverage, anchorCoverage } = readability;
-    // tryReadabilityRoot（mapReadabilityToRoot）已校验：正文长度 >= 200、
-    // 多锚点在原始 DOM 命中、内容覆盖率达标、且返回根不是 consent SDK 容器。
-    // body/html 是特殊情况：正文若就是根节点的全部内容（Pandoc 生成的长文
-    // 常把段落直接挂在 body 下），它本身就是最准确的根，不能交给评分算法
-    // 去挑一个分数更高的局部容器（脚注区/引用区）而丢掉真正的正文。
-    // 反过来，正文只占 body 很小一部分（cookie 弹窗、正文挂在更深层）
-    // 时仍交给评分算法找更精确的容器。
     const isDocumentRoot = readabilityRoot === doc.body || readabilityRoot === doc.documentElement;
     const rootTextLength = (readabilityRoot.textContent || '').length;
     const articleCompleteness = rootTextLength > 0
@@ -556,36 +578,26 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
       !isConsentSdkContainer(readabilityRoot) &&
       (!isDocumentRoot || acceptDocumentRoot)
     ) {
-      // 直接采用 Readability 结果，打保底分数确保跨过阈值。
-      // confidence 来自映射自身的多锚点命中率（mappingConfidence），
-      // 而非硬编码 0.85 —— 映射越可靠，正文越可信。
-      const s = scoreElement(readabilityRoot);
-      const bestScore = Math.max(s, SCORE_THRESHOLD + 1);
       logger.debug(
-        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${rootTextLength}, mappingConf: ${mappingConfidence.toFixed(2)}, contentCov: ${contentCoverage.toFixed(2)}, articleCompleteness: ${articleCompleteness.toFixed(2)})`,
+        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} ` +
+          `(textLen: ${rootTextLength}, mappingConf: ${mappingConfidence.toFixed(2)}, ` +
+          `contentCov: ${contentCoverage.toFixed(2)}, articleCompleteness: ${articleCompleteness.toFixed(2)})`,
       );
-      return {
-        element: readabilityRoot,
-        source: 'readability',
-        confidence: mappingConfidence,
-        evidence: {
-          textLength: rootTextLength,
-          readabilityCoverage: contentCoverage,
-          anchorCoverage,
-          semanticScore: s,
-        },
-      };
+      return toContentRoot(readability);
     }
+    if (!isConsentSdkContainer(readabilityRoot)) readabilityFallback = readability;
     logger.debug(
       `[ContentDetector] Readability root <${readabilityRoot.tagName}> not accepted ` +
         `(consent=${isConsentSdkContainer(readabilityRoot)}, documentRoot=${isDocumentRoot}, ` +
-        `articleCompleteness=${articleCompleteness.toFixed(2)}), falling back to scoring`,
+        `articleCompleteness=${articleCompleteness.toFixed(2)}), considering scoring`,
     );
   }
 
   // 兜底：手写评分算法（处理 Readability 失败 / 返回 consent 容器的站点）。
   const candidates = collectCandidates(doc);
-  if (!candidates.length) return null;
+  if (!candidates.length) {
+    return readabilityFallback ? toContentRoot(readabilityFallback) : null;
+  }
 
   let best: Element | null = null;
   let bestScore = -1;
@@ -600,9 +612,10 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
 
   if (bestScore < SCORE_THRESHOLD) {
     logger.debug(
-      `[ContentDetector] Best score ${bestScore.toFixed(1)} < threshold ${SCORE_THRESHOLD}, fallback to body`,
+      `[ContentDetector] Best score ${bestScore.toFixed(1)} < threshold ${SCORE_THRESHOLD}, ` +
+        `using Readability mapping when available`,
     );
-    return null;
+    return readabilityFallback ? toContentRoot(readabilityFallback) : null;
   }
 
   // 防御: 即便通过了 collectCandidates 过滤, 也再校验一次冠军不是 consent SDK
@@ -611,7 +624,27 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
     logger.debug(
       `[ContentDetector] Best candidate is a consent/cookie SDK container, ignoring (score: ${bestScore.toFixed(1)})`,
     );
-    return null;
+    return readabilityFallback ? toContentRoot(readabilityFallback) : null;
+  }
+
+  // 通用护栏：评分根若装不下 Readability 正文，说明它只是高密度局部容器
+  // （脚注、引用、评论片段），不能覆盖 Readability 已定位到的完整正文。
+  // 这与根是不是 body 无关，适用于所有「评分赢过 Readability」的站点。
+  if (readabilityFallback && best) {
+    const articleLength = readabilityFallback.articleTextLength;
+    const scoringCompleteness = articleLength / Math.max(1, (best.textContent || '').length);
+    const readabilityCompleteness = articleLength /
+      Math.max(1, (readabilityFallback.root.textContent || '').length);
+    if (
+      scoringCompleteness > SCORING_COMPLETENESS_MIN &&
+      readabilityCompleteness < scoringCompleteness - 0.2
+    ) {
+      logger.debug(
+        `[ContentDetector] Scoring root <${best.tagName}> covers only ` +
+          `${(1 / scoringCompleteness).toFixed(2)} of Readability article; using Readability root <${readabilityFallback.root.tagName}>`,
+      );
+      return toContentRoot(readabilityFallback);
+    }
   }
 
   logger.debug(
