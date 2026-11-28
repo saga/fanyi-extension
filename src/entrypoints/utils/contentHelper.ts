@@ -396,6 +396,8 @@ interface RootExtractionAssessment {
   extractedTextLength: number;
   coverage: number;
   qualityScore: number;
+  /** 正文分散在多个兄弟节点时，记录实际含正文的顶层子节点。 */
+  scope?: Element[];
 }
 
 interface BestEffortRoot {
@@ -409,6 +411,69 @@ function containsOpenShadowRoot(root: Element): boolean {
     if ((el as HTMLElement).shadowRoot) return true;
   }
   return false;
+}
+
+/**
+ * 在共同祖先的克隆里只保留 scope 子节点，抽取后把 block id 写回原始 DOM 的
+ * 对应元素。 walker 不能从单个 <p> 起遍历（缺少块级父上下文），所以必须在
+ * 容器克隆上跑；id 写回后下游 findBlockNode 仍按 data 属性定位原文节点。
+ */
+function extractBlocksWithinScope(
+  root: Element,
+  scope: Element[],
+  pageUrl?: string,
+): TextBlock[] {
+  const clone = root.cloneNode(true) as Element;
+  const scopeSet = new Set(scope);
+  const cloneChildren = Array.from(clone.children);
+  const originalChildren = Array.from(root.children);
+  for (let i = cloneChildren.length - 1; i >= 0; i--) {
+    if (!scopeSet.has(originalChildren[i]!)) cloneChildren[i]!.remove();
+  }
+
+  const blocks = extractBlocks(clone, pageUrl);
+  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const used = new Set<Element>();
+  const candidates = Array.from(
+    root.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote, div, center'),
+  );
+  for (const block of blocks) {
+    const text = normalize(block.text);
+    if (text.length < 20) continue;
+    const match = candidates.find((element) =>
+      !used.has(element) && normalize(element.textContent || '') === text,
+    );
+    if (!match) continue;
+    match.setAttribute('data-fanyi-block-id', block.id);
+    used.add(match);
+  }
+  return blocks;
+}
+
+/**
+ * body 根下正文常分散在多个兄弟节点，中间夹着导航/推荐等非正文节点。
+ * 用预检中已经通过噪声过滤的块反查含正文的顶层子节点，作为正式抽取的范围。
+ * 只有确实形成多个区域且排除了部分兄弟节点时才返回 scope。
+ */
+function deriveContentScope(
+  root: Element,
+  doc: Document,
+  blocks: TextBlock[],
+): Element[] | undefined {
+  if (root !== doc.body && root !== doc.documentElement) return undefined;
+  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const wanted = blocks.map((block) => normalize(block.text)).filter((text) => text.length >= 30);
+  if (wanted.length === 0) return undefined;
+  const children = Array.from(root.children);
+  const scope = children.filter((child) => {
+    const text = normalize(child.textContent || '');
+    return text.length > 0 && wanted.some((candidate) => text.includes(candidate));
+  });
+  logger.debug(
+    `[ContentHelper] Content scope: ${scope.length} of ${children.length} top-level children`,
+  );
+  if (scope.length < 2 || scope.length >= children.length) return undefined;
+  return scope;
 }
 
 function assessArticleRoot(doc: Document, root: Element, pageUrl?: string): RootExtractionAssessment {
@@ -470,6 +535,7 @@ function assessArticleRoot(doc: Document, root: Element, pageUrl?: string): Root
       extractedTextLength,
       coverage,
       qualityScore,
+      scope: deriveContentScope(root, doc, usableBlocks),
     };
   } catch (error) {
     // 预检本身失败不应直接让整页翻译失败。记录原因并把决定权交给正式抽取兜底。
@@ -564,6 +630,7 @@ function findArticleRoot(doc: Document, pageUrlOverride?: string): ContentRoot {
     if (assessment.usable) {
       return {
         ...candidate,
+        ...(assessment.scope ? { scope: assessment.scope } : {}),
         evidence: {
           ...candidate.evidence,
           textLength: assessment.rootTextLength,
@@ -1020,7 +1087,11 @@ export function prepareDocument(root: Document | Element, pageUrl?: string): {
     hideBodyOverlays(root, effectiveRoot);
   }
 
-  let blocks = extractBlocks(effectiveRoot, pageUrl);
+  // 正文分散在多个兄弟节点时，按 scope 抽取，跳过共同祖先里的非正文节点。
+  const scope = rootOrContent instanceof Element ? undefined : rootOrContent.scope;
+  let blocks = scope && scope.length > 0
+    ? extractBlocksWithinScope(effectiveRoot, scope, pageUrl)
+    : extractBlocks(effectiveRoot, pageUrl);
 
   // 后处理噪声过滤：移除 UI 控件 / 媒体播放器 / 工具栏块。
   // 覆盖 class-less 站点（archive.md 等）内联样式噪声无法被 walker class 规则拦截的问题。

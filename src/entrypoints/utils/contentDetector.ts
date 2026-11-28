@@ -22,6 +22,7 @@
 import { Readability } from '@mozilla/readability';
 
 import { logger } from '../../utils/logger';
+import { extractBlocks } from './blockExtractor';
 import {
   mapReadabilityToRoot,
   type ReadabilityMappingResult,
@@ -458,6 +459,12 @@ export function collectCandidates(doc: Document): Element[] {
 export interface ContentRoot {
   /** 选中的根元素，供 extractBlocks 直接使用 */
   element: Element;
+  /**
+   * 正文实际所在的元素集合。多个并列正文区域时 root 只能是共同祖先，
+   * 而 extractBlocks 应按这个集合抽取，跳过祖先里的非正文兄弟节点。
+   * 缺省时等价于 [element]。
+   */
+  scope?: Element[];
   /** root 来源 */
   source: 'site-rule' | 'selector' | 'readability' | 'scoring' | 'body-fallback' | 'multi-region-main';
   /** 置信度 0..1 */
@@ -555,6 +562,45 @@ function toContentRoot(result: ReadabilityMappingResult): ContentRoot {
   };
 }
 
+/** 用正式 walker 在克隆节点上抽取的文本量，作为不依赖 Readability 的正文证据。 */
+function extractedTextLength(element: Element): number {
+  try {
+    const clone = element.cloneNode(true) as Element;
+    return extractBlocks(clone).reduce((sum, block) => sum + block.text.length, 0);
+  } catch (error) {
+    logger.warn('[ContentDetector] DOM evidence probe failed:', error);
+    return 0;
+  }
+}
+
+/**
+ * Readability 没有可用结果时，比较评分根与整页的 walker 抽取量。
+ * 评分根只装下少量正文（脚注区、引用区、评论片段）时改用 body。
+ */
+function buildDomFallbackRoot(doc: Document, scoringRoot: Element): ContentRoot | null {
+  const body = doc.body || doc.documentElement;
+  if (!body || body === scoringRoot) return null;
+  const domTextLength = extractedTextLength(body);
+  const scoringTextLength = extractedTextLength(scoringRoot);
+  if (domTextLength < 2000 || domTextLength - scoringTextLength < 2000) return null;
+  if (scoringTextLength > domTextLength * 0.35) return null;
+
+  const bodyTextLength = (body.textContent || '').length;
+  logger.debug(
+    `[ContentDetector] DOM evidence: scoring root <${scoringRoot.tagName}> yields ` +
+      `${scoringTextLength} chars vs body ${domTextLength} chars; using body`,
+  );
+  return {
+    element: body,
+    source: 'body-fallback',
+    confidence: 0.55,
+    evidence: {
+      textLength: bodyTextLength,
+      articleCompleteness: domTextLength / Math.max(1, bodyTextLength),
+    },
+  };
+}
+
 export function detectArticleRoot(doc: Document): ContentRoot | null {
   // 主条件：@mozilla/readability 定位正文根。
   // Readability 比手写评分更鲁棒，能稳定聚合多 section / 缺少语义标签 /
@@ -645,6 +691,12 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
       );
       return toContentRoot(readabilityFallback);
     }
+  }
+
+  // Readability 完全失败时没有映射证据，改用同一套 walker 的抽取量做裁决。
+  if (!readabilityFallback && best) {
+    const domRoot = buildDomFallbackRoot(doc, best);
+    if (domRoot) return domRoot;
   }
 
   logger.debug(

@@ -91,6 +91,37 @@ export function extractBlocks(rootNode: Node, pageUrl?: string): TextBlock[] {
 }
 
 /**
+ * 从多个并列正文根抽取块，按文档顺序连续编号。
+ *
+ * 正文有时分散在同一个祖先下的多个兄弟节点里，共同祖先还夹着导航、推荐
+ * 等非正文内容。此时逐个根调用 extractBlocks 会让 block id 冲突；这里共享
+ * 编号与去重状态，产出与单根抽取同构的连续 TextBlock 数组。
+ */
+export function extractBlocksFromRoots(roots: Element[], pageUrl?: string): TextBlock[] {
+  const unique = Array.from(new Set(roots.filter(Boolean)));
+  if (unique.length === 0) return [];
+  if (unique.length === 1) return extractBlocks(unique[0]!, pageUrl);
+
+  const ordered = unique.sort((a, b) => {
+    const position = a.compareDocumentPosition(b);
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    return 0;
+  });
+
+  const blocks: TextBlock[] = [];
+  const blockIdRef = { value: 0 };
+  const seenTexts = new Set<string>();
+  for (const root of ordered) {
+    collectBlocks(root, blocks, blockIdRef, seenTexts, false, pageUrl);
+  }
+  for (const block of blocks) {
+    block.text = collapseSpacedText(block.text);
+  }
+  return blocks;
+}
+
+/**
  * 按 block.id 找回 DOM 节点。
  * 优先用临时 data 属性 (更健壮, 抗 DOM 变化), 回退到 XPath。
  */
