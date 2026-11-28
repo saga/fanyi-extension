@@ -136,7 +136,6 @@ export interface AgentTrajectoryModelInfo {
   provider?: string;
   model?: string;
   thinkingMode?: string;
-  thinkingBudgetTokens?: number;
   effort?: string;
   fallbackModel?: string;
 }
@@ -153,12 +152,9 @@ export function resolveAgentTrajectoryModelInfo(event: any): AgentTrajectoryMode
   const provider = p.provider ?? top.provider ?? taskProfile.provider;
   const model = p.model ?? top.model ?? taskProfile.model;
   let thinkingMode = p.thinkingMode ?? p.thinking_mode ?? thinkingObj.type ?? thinkingObj.mode ?? taskProfile.thinkingMode;
-  let thinkingBudgetTokens = p.thinkingBudgetTokens ?? p.thinking_budget_tokens ?? p.thinkingBudget ??
-    thinkingObj.budgetTokens ?? thinkingObj.budget_tokens ?? taskProfile.thinkingBudgetTokens;
   const effort = p.effort ?? taskProfile.effort;
   const fallbackModel = p.fallbackModel ?? p.fallback_model ?? taskProfile.fallbackModel;
   if (thinkingMode != null) thinkingMode = String(thinkingMode);
-  if (thinkingBudgetTokens != null) thinkingBudgetTokens = Number(thinkingBudgetTokens);
   if (effort != null) {
     // keep as-is string
   }
@@ -166,7 +162,6 @@ export function resolveAgentTrajectoryModelInfo(event: any): AgentTrajectoryMode
     provider: provider != null ? String(provider) : undefined,
     model: model != null ? String(model) : undefined,
     thinkingMode: thinkingMode != null && thinkingMode !== '' ? String(thinkingMode) : undefined,
-    thinkingBudgetTokens: Number.isFinite(thinkingBudgetTokens as number) ? Number(thinkingBudgetTokens) : undefined,
     effort: effort != null && String(effort) !== '' ? String(effort) : undefined,
     fallbackModel: fallbackModel != null && String(fallbackModel) !== '' ? String(fallbackModel) : undefined,
   };
