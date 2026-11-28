@@ -86,9 +86,11 @@ describe('config', () => {
   });
 
   describe('getConfig', () => {
-    it('returns default config when storage is empty', async () => {
+    it('returns default config with literary translation thinking enabled at low effort', async () => {
       const config = await getConfig();
       expect(config).toEqual(defaultConfig);
+      expect(config.documentCodeBuddyTaskProfiles.translation.thinkingMode).toBe('enabled');
+      expect(config.documentCodeBuddyTaskProfiles.translation.effort).toBe('low');
     });
 
 
@@ -119,6 +121,21 @@ describe('config', () => {
       expect(Object.hasOwn(store['local:config'], 'documentSourceLang')).toBe(false);
       expect(store['local:config'].documentProvider).toBe('openrouter');
       expect(store['local:config'].documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
+    });
+
+    it('forces literary document translation thinking on even for saved legacy disabled profiles', async () => {
+      store['local:config'] = {
+        documentCodeBuddyTaskProfiles: {
+          translation: {
+            ...DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES.translation,
+            thinkingMode: 'disabled',
+            effort: 'low',
+          },
+        },
+      };
+      const config = await getConfig();
+      expect(config.documentCodeBuddyTaskProfiles.translation.thinkingMode).toBe('enabled');
+      expect(config.documentCodeBuddyTaskProfiles.translation.effort).toBe('low');
     });
 
     it('preserves an explicitly configured document source language', async () => {
