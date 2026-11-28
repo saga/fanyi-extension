@@ -260,7 +260,8 @@ const defaultConfig: Config = {
   documentDeepseekApiKey: '',
   documentProvider: 'deepseek',
   documentPromptStyle: 'default',
-  documentTranslationMode: 'technical',
+  // Local Agent document translations default to the literary workflow; web translation stays technical.
+  documentTranslationMode: 'literary',
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
@@ -315,7 +316,10 @@ export async function getConfig(): Promise<Config> {
   const migrated: Partial<Config> = {};
   for (const [documentKey, globalKey] of Object.entries(documentConfigFallbacks) as Array<[keyof typeof documentConfigFallbacks, (typeof documentConfigFallbacks)[keyof typeof documentConfigFallbacks]]>) {
     if (!Object.prototype.hasOwnProperty.call(stored, documentKey)) {
-      const value = (stored as any)[globalKey] ?? (defaultConfig as any)[globalKey];
+      const fallbackValue = documentKey === 'documentTranslationMode'
+        ? defaultConfig.documentTranslationMode
+        : (defaultConfig as any)[globalKey];
+      const value = (stored as any)[globalKey] ?? fallbackValue;
       (merged as any)[documentKey] = value;
       (migrated as any)[documentKey] = value;
     }
