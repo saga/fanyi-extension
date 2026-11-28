@@ -157,7 +157,7 @@ export interface Config {
 
 export const DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES: DocumentCodeBuddyTaskProfiles = {
   translation: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'disabled', thinkingBudgetTokens: 8192, effort: 'low',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'enabled', thinkingBudgetTokens: 8192, effort: 'low',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   accuracyReview: {
@@ -184,8 +184,10 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
   for (const task of Object.keys(DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES) as DocumentCodeBuddyTaskKey[]) {
     const value = raw[task] && typeof raw[task] === 'object' && !Array.isArray(raw[task]) ? raw[task] : {};
     const defaults = DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES[task];
-    const thinkingMode = ['disabled', 'adaptive', 'enabled'].includes(value.thinkingMode)
-      ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
+    const thinkingMode = task === 'translation'
+      ? 'enabled'
+      : ['disabled', 'adaptive', 'enabled'].includes(value.thinkingMode)
+        ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
     const effort = ['low', 'medium', 'high', 'xhigh'].includes(value.effort)
       ? value.effort as DocumentCodeBuddyEffort : defaults.effort;
     const rawBudget = Number(value.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens);
