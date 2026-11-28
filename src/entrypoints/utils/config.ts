@@ -44,7 +44,7 @@ export const DOCUMENT_REVIEW_STRENGTH_OPTIONS: ReadonlyArray<{
   {
     value: 'medium',
     label: '中',
-    hint: '每批一次合并审校：准确性 must_fix 优先，文风 finding 其次；短小片段直接跳过。',
+    hint: '每批一次合并双语审校，同时检查准确性、术语、人物声音与文风；短句和对白也会审校。',
   },
   {
     value: 'weak',
@@ -296,7 +296,7 @@ const documentConfigFallbacks = {
   documentDeepseekApiKey: 'deepseekApiKey',
   documentProvider: 'provider',
   documentPromptStyle: 'promptStyle',
-  documentTranslationMode: 'translationMode',
+  // Document mode is intentionally independent from the webpage translation mode.
   documentUseServerTranslation: 'useServerTranslation',
   documentServerUrl: 'serverUrl',
   documentUseLocalAgent: 'useLocalAgent',
@@ -316,10 +316,7 @@ export async function getConfig(): Promise<Config> {
   const migrated: Partial<Config> = {};
   for (const [documentKey, globalKey] of Object.entries(documentConfigFallbacks) as Array<[keyof typeof documentConfigFallbacks, (typeof documentConfigFallbacks)[keyof typeof documentConfigFallbacks]]>) {
     if (!Object.prototype.hasOwnProperty.call(stored, documentKey)) {
-      const fallbackValue = documentKey === 'documentTranslationMode'
-        ? defaultConfig.documentTranslationMode
-        : (defaultConfig as any)[globalKey];
-      const value = (stored as any)[globalKey] ?? fallbackValue;
+      const value = (stored as any)[globalKey] ?? (defaultConfig as any)[globalKey];
       (merged as any)[documentKey] = value;
       (migrated as any)[documentKey] = value;
     }
