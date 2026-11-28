@@ -149,7 +149,7 @@
             <strong>已启用 · {{ translationEffortLabel }}</strong>
           </label>
           <label v-if="literaryMode && literaryReview" class="field inline"
-            title="这是审校的基础并发。初译未占用的会话槽位会自动分配给审校；初译结束后，审校默认最多可使用 6 个槽位。">
+            title="这是审校的基础并发。初译未占用的会话槽位会自动分配给审校；默认会话池为 6 槽，实际以服务端配置为准。">
             <span>审校基础并发</span>
             <select :value="String(readerConfig?.documentReviewConcurrency ?? 2)" @change="onReviewConcurrencyChange">
               <option value="1">1 路</option>
@@ -159,7 +159,7 @@
             </select>
           </label>
           <span v-if="literaryMode && literaryReview" class="muted small">
-            {{ reviewStrengthHint }} 实际并发由本机 6 槽位池动态分配。
+            默认会话池为 6 槽；服务端会按实际空闲槽位分配并发。
           </span>
           <button
             v-if="!state.running"
@@ -1225,7 +1225,7 @@ const sourceLang = ref('auto');
 const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
 const literaryMode = ref(false);
-/** 文学审校开关：关闭=快速模式，每批省一次审校 LLM 调用。 */
+/** 文学审校强度：strong / medium / weak / off；初译始终保留独立 Thinking 配置。 */
 const reviewStrength = ref<DocumentReviewStrength>('medium');
 const reviewStrengthOptions = DOCUMENT_REVIEW_STRENGTH_OPTIONS;
 /** 审校是否开启完全由强度档位决定：off 就是不开。 */
