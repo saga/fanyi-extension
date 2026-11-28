@@ -95,6 +95,13 @@ describe('config', () => {
       expect(config.documentTranslationMode).toBe('literary');
     });
 
+    it('does not inherit the webpage technical mode when no document mode was saved', async () => {
+      store['local:config'] = { translationMode: 'technical' };
+      const config = await getConfig();
+      expect(config.translationMode).toBe('technical');
+      expect(config.documentTranslationMode).toBe('literary');
+    });
+
     it('preserves an explicitly selected technical document mode', async () => {
       store['local:config'] = { documentTranslationMode: 'technical' };
       const config = await getConfig();
