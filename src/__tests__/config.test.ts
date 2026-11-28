@@ -250,3 +250,20 @@ describe('CodeBuddy context-window configuration', () => {
     expect(normalized.documentCodeBuddyTaskProfiles.accuracyReview.contextWindow).toBeUndefined();
   });
 });
+
+describe('CodeBuddy prompt-cache retention configuration', () => {
+  it('defaults to long and preserves an explicitly selected short tier', async () => {
+    const defaults = await getConfig();
+    expect(defaults.documentCodeBuddyTaskProfiles.translation.promptCacheRetention).toBe('long');
+
+    store['local:config'] = {
+      documentCodeBuddyTaskProfiles: {
+        translation: { ...DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES.translation, promptCacheRetention: 'short' },
+        accuracyReview: { ...DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES.accuracyReview, promptCacheRetention: 'forever' },
+      },
+    };
+    const normalized = await getConfig();
+    expect(normalized.documentCodeBuddyTaskProfiles.translation.promptCacheRetention).toBe('short');
+    expect(normalized.documentCodeBuddyTaskProfiles.accuracyReview.promptCacheRetention).toBe('long');
+  });
+});

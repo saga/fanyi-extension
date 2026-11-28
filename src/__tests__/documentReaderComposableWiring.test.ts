@@ -338,6 +338,23 @@ describe('reader toolbar literary reasoning policy', () => {
     expect(settings).not.toContain('thinkingBudgetTokens');
   });
 
+  it('exposes prompt-cache retention for every document task profile', () => {
+    const settings = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
+      'utf8',
+    );
+    const config = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/utils/config.ts'),
+      'utf8',
+    );
+    expect(settings).toContain('onPromptCacheRetentionChange(task.key, $event)');
+    expect(settings).toContain('<option value="long">long · 默认（1 小时）</option>');
+    expect(settings).toContain('<option value="short">short · 短 TTL（排障用）</option>');
+    expect(settings).toContain('缓存命中按 0.02 元/百万 Token');
+    expect(config).toContain("promptCacheRetention: 'long'");
+    expect(config).toContain("['short', 'long'].includes(value.promptCacheRetention)");
+  });
+
   it('预处理状态卡在 checking 时给出可操作提示，不静默吞掉点击', () => {
     const graph = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/useContextGraph.ts'),

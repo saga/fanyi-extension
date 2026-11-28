@@ -101,9 +101,10 @@
       </div>
 
       <details class="strategy-settings task-profile-settings">
-        <summary>按任务配置推理强度、备用模型与 Prompt</summary>
+        <summary>按任务配置推理强度、缓存档位、备用模型与 Prompt</summary>
         <p class="muted small">
-          五个文档任务都可分别配置思考方式与推理强度；初译默认启用思考、推理强度为 low，可按需改为自适应或不思考。
+          五个文档任务都可分别配置思考方式、推理强度与 Provider prompt cache 档位；初译默认启用思考、推理强度为 low，可按需改为自适应或不思考。
+          缓存档位只影响 TTL，不会改变提示词或工具定义；前缀不稳定时，无论 long/short 都不会计费命中。
           这些设置直接对应 CodeBuddy SDK 的 query() 参数。
           对声明了多档 context window 的模型，额外显示本任务的上下文窗口档位；留空仍使用模型 defaultLength，不改变默认设置。
           为确保参数生效，这些任务使用单次 query，而非复用 V2 Session；批量任务会有额外 CLI 启动开销，推理强度越高也会越慢。
@@ -173,6 +174,15 @@
                   <option value="high">高 · 深入</option>
                   <option value="xhigh">Extra High · 最深入</option>
                 </select>
+              </label>
+              <label class="setting-field">
+                <span>Prompt Cache 档位</span>
+                <select :value="config.documentCodeBuddyTaskProfiles[task.key].promptCacheRetention || 'long'"
+                  @change="onPromptCacheRetentionChange(task.key, $event)">
+                  <option value="long">long · 默认（1 小时）</option>
+                  <option value="short">short · 短 TTL（排障用）</option>
+                </select>
+                <small class="muted">Hy4 flash 缓存命中按 0.02 元/百万 Token 计价；未命中按 0.5 元/百万 Token。档位只是 TTL，前缀不匹配时不会命中。</small>
               </label>
             </div>
           </template>
@@ -589,6 +599,14 @@ async function onThinkingModeChange(task: DocumentCodeBuddyTaskKey, event: Event
   }
   await saveConfig('documentCodeBuddyTaskProfiles');
 }
+async function onPromptCacheRetentionChange(task: DocumentCodeBuddyTaskKey, event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLSelectElement)) return;
+  const profile = config.value.documentCodeBuddyTaskProfiles[task];
+  profile.promptCacheRetention = target.value === 'short' ? 'short' : 'long';
+  await saveConfig('documentCodeBuddyTaskProfiles');
+}
+
 async function onLocalAgentToggle() {
   config.value.documentAutoSelectLocalAgent = config.value.documentUseLocalAgent;
   if (config.value.documentUseLocalAgent) {

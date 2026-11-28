@@ -13,6 +13,7 @@ export type LocalAgentProvider = 'workbuddy' | 'opencode';
 export type DocumentCodeBuddyTaskKey = 'translation' | 'accuracyReview' | 'styleReview' | 'literaryAnalysis' | 'contextGraph';
 export type DocumentCodeBuddyThinkingMode = 'disabled' | 'adaptive' | 'enabled';
 export type DocumentCodeBuddyEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type DocumentCodeBuddyPromptCacheRetention = 'short' | 'long';
 
 export interface DocumentCodeBuddyTaskProfile {
   /** Empty means inherit the local Agent's project/provider model. */
@@ -20,6 +21,8 @@ export interface DocumentCodeBuddyTaskProfile {
   fallbackModel: string;
   thinkingMode: DocumentCodeBuddyThinkingMode;
   effort: DocumentCodeBuddyEffort;
+  /** Provider prompt cache TTL; omitted values are normalized to long. */
+  promptCacheRetention?: DocumentCodeBuddyPromptCacheRetention;
   /** Supplemental instructions; built-in task contracts are retained. */
   systemPromptAppendix: string;
   /** Optional task-specific wrapper. {{CONTENT}} receives the built-in task input. */
@@ -157,22 +160,22 @@ export interface Config {
 export const DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES: DocumentCodeBuddyTaskProfiles = {
   translation: {
     model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'enabled', effort: 'low',
-    systemPromptAppendix: '', userPromptTemplate: '',
+    promptCacheRetention: 'long', systemPromptAppendix: '', userPromptTemplate: '',
   },
   accuracyReview: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'medium',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'medium', promptCacheRetention: 'long',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   styleReview: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high', promptCacheRetention: 'long',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   literaryAnalysis: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high', promptCacheRetention: 'long',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   contextGraph: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high', promptCacheRetention: 'long',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
 };
@@ -187,6 +190,9 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
       ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
     const effort = ['low', 'medium', 'high', 'xhigh'].includes(value.effort)
       ? value.effort as DocumentCodeBuddyEffort : defaults.effort;
+    const promptCacheRetention = ['short', 'long'].includes(value.promptCacheRetention)
+      ? value.promptCacheRetention as DocumentCodeBuddyPromptCacheRetention
+      : defaults.promptCacheRetention || 'long';
     const model = typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model;
     const fallbackModel = typeof value.fallbackModel === 'string' ? value.fallbackModel.trim().slice(0, 200) : defaults.fallbackModel;
     const contextWindowRaw = value.contextWindow;
@@ -203,6 +209,7 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
       fallbackModel: fallbackModel.toLowerCase() === 'auto' ? '' : fallbackModel,
       thinkingMode,
       effort,
+      promptCacheRetention,
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       systemPromptAppendix: typeof value.systemPromptAppendix === 'string' ? value.systemPromptAppendix.slice(0, 12000) : defaults.systemPromptAppendix,
       userPromptTemplate: typeof value.userPromptTemplate === 'string' ? value.userPromptTemplate.slice(0, 30000) : defaults.userPromptTemplate,

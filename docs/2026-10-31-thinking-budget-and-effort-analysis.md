@@ -174,3 +174,9 @@ grep -o 'let eh=eA.modelSettings.providerData??{}.\{600\}' cli/dist/codebuddy-he
 `local-agent-service` 的文档任务默认采用：初译 `thinking: { type: 'enabled' }` + `effort: 'low'`，审校/分析/预处理为 `adaptive`。**所有任务现在都可在扩展设置中单独改为 `disabled` / `adaptive` / `enabled`**；只有缺失或非法值才回落到任务默认值。调用链不传 `budgetTokens`，不再维护 `thinkingBudgetTokens`，也不在切换思考时补默认 token 数。旧配置中遗留的该字段会被忽略；扩展配置归一化和轨迹展示均不再保留它。SDK 的 `alwaysThinkingEnabled=true` 只影响无 task profile 的旧调用；显式 profile 按任务配置执行。
 
 本次是代码与单元测试层面的实现变更；是否在真实模型网关上运行成功，仍以部署后的实际翻译请求验证为准。
+
+## 2026-11-28 Prompt Cache 档位补充
+
+同一批任务配置新增 `promptCacheRetention: 'long' | 'short'`，默认 `long`。它映射到 SDK 的 `CODEBUDDY_DISABLE_PROMPT_CACHING_1H`：`long` 下发 `0`，`short` 下发 `1`，从而可以做 TTL A/B 排查。它只改缓存有效期，不改思考、推理强度、提示词或工具定义。
+
+Hy4 flash 的缓存单价（命中 0.02 元/百万 Token，未命中 0.5 元/百万 Token）依赖严格前缀匹配：System Prompt、文学契约、Schema 和工具定义必须逐字/逐项稳定，动态原文与批次上下文必须放在请求末尾。服务端现在在 `batch.prompt.ready.promptPrefixFingerprint` 记录 system/schema 的短哈希，在 `model.usage` 记录实际 `cacheRetention`、`sessionId`、`cacheReadTokens`、`cacheCreationTokens`，用于区分「档位没开」和「前缀漂移导致未命中」。
