@@ -167,3 +167,10 @@ grep -o 'let eh=eA.modelSettings.providerData??{}.\{600\}' cli/dist/codebuddy-he
 - 没有做真实的请求抓包（可用 `OTEL_LOG_RAW_API_BODIES=file:/tmp/raw` 让 CLI 落盘请求体，再跑一次思考翻译复核）。
 - 未验证网关对 `max_thinking_tokens` 的处理：忽略、透传，还是换算成上游的 `budget_tokens`。
 - 未验证其他可选模型（如 `glm-5.1`、`hy3`）的 `thinkingFormat` 与 `thinkingLevelMap`，结论仅适用于当前默认的 `deepseek-v4.1-flash`。
+
+
+## 2026-11-28 实施结论更新
+
+`local-agent-service` 的翻译全部属于小说文学翻译：翻译任务固定使用 `thinking: { type: 'enabled' }`，推理强度保持 `low`。调用链不传 `budgetTokens`，不再维护 `thinkingBudgetTokens`，也不在切换思考时补默认 token 数。旧配置中遗留的该字段会被忽略；扩展配置归一化和轨迹展示均不再保留它。SDK 通过 `alwaysThinkingEnabled=true` 开启思考，显式预算数字对当前调用路径没有额外收益。
+
+本次是代码与单元测试层面的实现变更；是否在真实模型网关上运行成功，仍以部署后的实际翻译请求验证为准。

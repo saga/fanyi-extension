@@ -275,6 +275,8 @@ describe('reader toolbar literary reasoning policy', () => {
     expect(settings).toContain('onThinkingModeChange(task.key, $event)');
     expect(config).toContain("const thinkingMode = task === 'translation'");
     expect(config).toContain("? 'enabled'");
+    expect(config).not.toContain('thinkingBudgetTokens');
+    expect(settings).not.toContain('thinkingBudgetTokens');
   });
 
   it('预处理状态卡在 checking 时给出可操作提示，不静默吞掉点击', () => {
