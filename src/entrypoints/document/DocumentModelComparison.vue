@@ -80,9 +80,11 @@
         <div class="comparison-model comparison-model-c">
           <div class="comparison-model-title">
             <strong>模型 C</strong>
-            <label class="comparison-enable">
-              <input v-model="thirdModelEnabled" type="checkbox" />
-              启用
+            <label class="comparison-enable">模式
+              <select v-model="thirdModelEnabled">
+                <option :value="true">启用第三模型</option>
+                <option :value="false">Off（退回双模型）</option>
+              </select>
             </label>
           </div>
           <template v-if="thirdModelEnabled">
@@ -289,7 +291,7 @@ function comparisonModelEntries(item: ComparisonRecord) {
 async function loadModelOptions() {
   try {
     const response = await workspaceApi<{ data?: Array<{ id?: string }> }>(props.serviceUrl, props.token, '/api/codebuddy/models');
-    const ids = (response.data || []).map((item) => String(item?.id || '').trim()).filter(Boolean);
+    const ids = Array.from(new Set((response.data || []).map((item) => String(item?.id || '').trim()).filter(Boolean)));
     modelOptions.value = buildModelOptions(ids, [modelA.value.model, modelB.value.model, modelC.value.model]);
     // 首次加载且模型目录至少有三个模型时，给 A/B/C 分配三个不同的可用模型；
     // 不把后续用户已调整的选择重置掉。
@@ -406,8 +408,8 @@ onBeforeUnmount(stopPolling);
 .comparison-model label, .comparison-history, .comparison-scope { display: grid; gap: 6px; }
 .comparison-model input:not([type="checkbox"]), .comparison-model select, .comparison-history select, .comparison-scope select { width: 100%; min-width: 0; }
 .comparison-model-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.comparison-enable { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 6px !important; }
-.comparison-enable input { width: auto; }
+.comparison-enable { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px !important; font-size: 12px; }
+.comparison-enable select { min-width: 150px; }
 .comparison-scope { min-width: 220px; }
 .comparison-history { gap: 8px; }
 .comparison-model-statuses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
