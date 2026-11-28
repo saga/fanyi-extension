@@ -137,7 +137,7 @@ describe('config', () => {
       expect(store['local:config'].documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
     });
 
-    it('forces literary document translation thinking on even for saved legacy disabled profiles', async () => {
+    it('preserves explicitly configured thinking modes for every document task', async () => {
       store['local:config'] = {
         documentCodeBuddyTaskProfiles: {
           translation: {
@@ -145,11 +145,16 @@ describe('config', () => {
             thinkingMode: 'disabled',
             effort: 'low',
           },
+          accuracyReview: {
+            ...DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES.accuracyReview,
+            thinkingMode: 'adaptive',
+          },
         },
       };
       const config = await getConfig();
-      expect(config.documentCodeBuddyTaskProfiles.translation.thinkingMode).toBe('enabled');
+      expect(config.documentCodeBuddyTaskProfiles.translation.thinkingMode).toBe('disabled');
       expect(config.documentCodeBuddyTaskProfiles.translation.effort).toBe('low');
+      expect(config.documentCodeBuddyTaskProfiles.accuracyReview.thinkingMode).toBe('adaptive');
     });
 
     it('preserves an explicitly configured document source language', async () => {

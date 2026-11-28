@@ -311,7 +311,7 @@ describe('reader toolbar literary reasoning policy', () => {
     expect(workspace).toContain("event.type === 'batch.completed'");
   });
 
-  it('locks literary translation thinking on while keeping other task profiles configurable', () => {
+  it('exposes configurable thinking modes for every document task profile', () => {
     const settings = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
       'utf8',
@@ -320,12 +320,20 @@ describe('reader toolbar literary reasoning policy', () => {
       resolve(process.cwd(), 'src/entrypoints/utils/config.ts'),
       'utf8',
     );
-    expect(settings).toContain("task.key === 'translation'");
-    expect(settings).toContain('<strong>固定启用</strong>');
-    expect(settings).toContain('推理强度默认 low');
+    const reader = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
+      'utf8',
+    );
     expect(settings).toContain('onThinkingModeChange(task.key, $event)');
-    expect(config).toContain("const thinkingMode = task === 'translation'");
-    expect(config).toContain("? 'enabled'");
+    expect(settings).toContain('<option value="disabled">不思考（最快）</option>');
+    expect(settings).toContain('<option value="adaptive">自适应（由运行时决定）</option>');
+    expect(settings).toContain('<option value="enabled">思考（更慢，更稳）</option>');
+    expect(settings).not.toContain('<strong>固定启用</strong>');
+    expect(settings).not.toContain('小说文学初译始终启用思考');
+    expect(config).not.toContain("const thinkingMode = task === 'translation'");
+    expect(config).not.toContain("? 'enabled'");
+    expect(reader).not.toContain('小说文学初译固定启用思考');
+    expect(reader).toContain('onTranslationThinkingModeChange');
     expect(config).not.toContain('thinkingBudgetTokens');
     expect(settings).not.toContain('thinkingBudgetTokens');
   });

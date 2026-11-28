@@ -144,9 +144,13 @@
             </select>
           </label>
           <label v-if="readerConfig?.documentUseLocalAgent" class="field inline"
-            :title="'小说文学初译固定启用思考；推理强度：' + translationEffortLabel">
-            <span>思考</span>
-            <strong>已启用 · {{ translationEffortLabel }}</strong>
+            :title="'初译思考方式；推理强度：' + translationEffortLabel + '；下一次运行生效'">
+            <span>初译思考</span>
+            <select :value="translationThinkingMode" @change="onTranslationThinkingModeChange">
+              <option value="disabled">不思考</option>
+              <option value="adaptive">自适应</option>
+              <option value="enabled">思考</option>
+            </select>
           </label>
           <label v-if="effectiveDocumentTranslationMode === 'literary' && literaryReview" class="field inline"
             title="审校基础并发越高，初译可用并发越少；初译未占用的会话槽会自动分配给审校。默认会话池为 6 槽，实际以服务端配置为准。">
@@ -391,18 +395,6 @@
         </div>
       </section>
       <p class="muted small">准确性/术语、人物声音/文风、章节文学分析、全书预处理等任务的内置 Prompt 与覆盖项，见“设置”Tab 的“按任务配置 CodeBuddy 思考、推理强度与 Prompt”。</p>
-      </template>
-      <template v-else-if="activeTab === 'model-comparison'">
-        <DocumentModelComparison
-          :project-id="workspaceProject?.projectId"
-          :service-url="readerConfig?.documentLocalAgentUrl || 'http://127.0.0.1:8789'"
-          :token="readerConfig?.documentLocalAgentToken || ''"
-          :segments="visibleSegments"
-          :pages="pages"
-          :source-lang="sourceLang"
-          :target-lang="targetLang"
-          :translation-mode="effectiveDocumentTranslationMode"
-        />
       </template>
       <template v-else-if="activeTab === 'characters'">
       <section v-if="literaryStatus.enabled" class="panel literary-status">
@@ -965,6 +957,21 @@
         <p class="muted small">当前文档未启用书籍翻译模式。EPUB / PDF 打开时默认启用；也可在本页上方勾选「实体一致性与文风审校」。</p>
       </section>
       </template>
+
+      <!-- 保持三模型对比实例常驻；切换 Tab 只隐藏，不销毁已选模型、范围和历史结果。 -->
+      <DocumentModelComparison
+        v-if="doc"
+        v-show="activeTab === 'model-comparison'"
+        :project-id="workspaceProject?.projectId"
+        :service-url="readerConfig?.documentLocalAgentUrl || 'http://127.0.0.1:8789'"
+        :token="readerConfig?.documentLocalAgentToken || ''"
+        :segments="visibleSegments"
+        :pages="pages"
+        :source-lang="sourceLang"
+        :target-lang="targetLang"
+        :translation-mode="effectiveDocumentTranslationMode"
+      />
+
       <section v-if="activeTab === 'trajectory'" class="agent-trajectory-page">
         <div class="agent-trajectory-header">
           <div>
@@ -1235,7 +1242,11 @@ const reviewStrengthHint = computed(() =>
 );
 const currentPageIndex = ref(0);
 const readerConfig = ref<Config | null>(null);
-/** 阅读页展示初译的固定思考策略及独立配置的推理强度。 */
+/** 阅读页初译思考方式，直接读写同一份文档任务配置。 */
+const translationThinkingMode = computed(() =>
+  readerConfig.value?.documentCodeBuddyTaskProfiles?.translation?.thinkingMode || 'enabled',
+);
+/** 阅读页展示初译当前配置的推理强度。 */
 const translationEffortLabel = computed(() => {
   const effort = readerConfig.value?.documentCodeBuddyTaskProfiles?.translation?.effort || 'low';
   const labels: Record<string, string> = {
@@ -1901,6 +1912,16 @@ async function onReviewConcurrencyChange(event: Event) {
   persistenceMessage.value = '审校基础并发已改为 ' + value + ' 路；服务端会按空闲槽位动态扩展，下一次运行生效。';
 }
 
+async function onTranslationThinkingModeChange(event: Event) {
+  const raw = (event.target as HTMLSelectElement).value;
+  if (raw !== 'disabled' && raw !== 'adaptive' && raw !== 'enabled') return;
+  const profiles = JSON.parse(JSON.stringify(readerConfig.value?.documentCodeBuddyTaskProfiles || {})) as Config['documentCodeBuddyTaskProfiles'];
+  profiles.translation.thinkingMode = raw;
+  await saveDocumentSpeedSetting({ documentCodeBuddyTaskProfiles: profiles });
+  const labels: Record<string, string> = { disabled: '不思考', adaptive: '自适应', enabled: '思考' };
+  persistenceMessage.value = '文档初译思考方式已改为 ' + (labels[raw] || raw) + '；下一次运行生效。';
+}
+
 async function onReviewStrengthChange() {
   const enabled = reviewStrength.value !== 'off';
   await setConfig({
@@ -2049,7 +2070,7 @@ async function refreshLocalSessionSummary() {
 
 async function persistDocumentCheckpointToLocalService(input: {
   sourceLang: string; targetLang: string; viewMode: SavedViewMode; literaryMode: boolean;
-  currentPageIndex: number; snapshot: ReturnType<typeof getSnapshot>;
+  currentPageIndex: number; activeTab: SavedDocumentTab; snapshot: ReturnType<typeof getSnapshot>;
   translationDelta: Array<[string, string]>; translatedSegmentCount: number;
 }): Promise<boolean> {
   const config = await getConfig();
@@ -2076,6 +2097,7 @@ async function persistDocumentCheckpointToLocalService(input: {
       viewMode: input.viewMode,
       literaryMode: input.literaryMode,
       currentPageIndex: input.currentPageIndex,
+      activeTab: input.activeTab,
       translatedSegmentCount: input.translatedSegmentCount,
       // This table is only a reader-resume pointer. Project content and translation state are
       // recovered from document_projects, not copied here.
@@ -2213,7 +2235,7 @@ async function loadDocumentCheckpointFromLocalService(): Promise<(LoadedActiveDo
       total: Number.isFinite(snapshot.total) ? snapshot.total : document.segments.length,
       done: Number.isFinite(snapshot.done) ? snapshot.done : translations.length,
       currentPageIndex: Number.isFinite(payload.currentPageIndex) ? Math.max(0, Math.floor(payload.currentPageIndex)) : 0,
-      activeTab: (['reading', 'settings', 'prompt', 'characters', 'agent', 'trajectory'].includes(payload.activeTab) ? payload.activeTab : 'reading') as SavedDocumentTab,
+      activeTab: (['reading', 'settings', 'prompt', 'characters', 'agent', 'model-comparison', 'trajectory'].includes(payload.activeTab) ? payload.activeTab : 'reading') as SavedDocumentTab,
       literaryMode: payload.literaryMode === true,
       document,
       rawText: typeof payload.rawText === 'string' ? payload.rawText : '',

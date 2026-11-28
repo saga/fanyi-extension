@@ -171,6 +171,6 @@ grep -o 'let eh=eA.modelSettings.providerData??{}.\{600\}' cli/dist/codebuddy-he
 
 ## 2026-11-28 实施结论更新
 
-`local-agent-service` 的翻译全部属于小说文学翻译：翻译任务固定使用 `thinking: { type: 'enabled' }`，推理强度保持 `low`。调用链不传 `budgetTokens`，不再维护 `thinkingBudgetTokens`，也不在切换思考时补默认 token 数。旧配置中遗留的该字段会被忽略；扩展配置归一化和轨迹展示均不再保留它。SDK 通过 `alwaysThinkingEnabled=true` 开启思考，显式预算数字对当前调用路径没有额外收益。
+`local-agent-service` 的文档任务默认采用：初译 `thinking: { type: 'enabled' }` + `effort: 'low'`，审校/分析/预处理为 `adaptive`。**所有任务现在都可在扩展设置中单独改为 `disabled` / `adaptive` / `enabled`**；只有缺失或非法值才回落到任务默认值。调用链不传 `budgetTokens`，不再维护 `thinkingBudgetTokens`，也不在切换思考时补默认 token 数。旧配置中遗留的该字段会被忽略；扩展配置归一化和轨迹展示均不再保留它。SDK 的 `alwaysThinkingEnabled=true` 只影响无 task profile 的旧调用；显式 profile 按任务配置执行。
 
 本次是代码与单元测试层面的实现变更；是否在真实模型网关上运行成功，仍以部署后的实际翻译请求验证为准。

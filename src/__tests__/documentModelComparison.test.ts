@@ -56,6 +56,16 @@ describe('三模型对比结果展示', () => {
     expect(template).toContain('v-model="modelC.effort"');
     expect(template).toContain('models: activeModelChoices.value');
   });
+
+  it('切换 Tab 不销毁对比面板，并保存/恢复对比 Tab', () => {
+    const app = readFileSync(
+      process.cwd() + '/src/entrypoints/document/App.vue', 'utf8',
+    );
+    expect(app).toContain('v-show="activeTab === \'model-comparison\'"');
+    expect(app).not.toContain('v-else-if="activeTab === \'model-comparison\'"');
+    expect(app).toContain('activeTab: input.activeTab');
+    expect(app).toContain("'agent', 'model-comparison', 'trajectory'");
+  });
 });
 
 describe('双模型对比面板选项', () => {

@@ -183,10 +183,8 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
   for (const task of Object.keys(DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES) as DocumentCodeBuddyTaskKey[]) {
     const value = raw[task] && typeof raw[task] === 'object' && !Array.isArray(raw[task]) ? raw[task] : {};
     const defaults = DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES[task];
-    const thinkingMode = task === 'translation'
-      ? 'enabled'
-      : ['disabled', 'adaptive', 'enabled'].includes(value.thinkingMode)
-        ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
+    const thinkingMode = ['disabled', 'adaptive', 'enabled'].includes(value.thinkingMode)
+      ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
     const effort = ['low', 'medium', 'high', 'xhigh'].includes(value.effort)
       ? value.effort as DocumentCodeBuddyEffort : defaults.effort;
     const model = typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model;
