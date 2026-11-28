@@ -279,6 +279,28 @@ describe('contentDetector', () => {
     // 组合上容易误判，而 Readability 作为主条件应稳定返回包含正文的容器。
     // 此测试锁定 detectArticleRoot 必须优先采用 Readability 的结果，而非评分算法。
 
+    // 正文段落直接挂在 body 下时，Readability 只能映射到 body；只要它几乎
+    // 覆盖整篇文档，body 就是正确根，不能退回评分去选分数更高的脚注区。
+    it('accepts the body root when Readability covers nearly the whole document', () => {
+      const paragraph = 'Castle Bravo was a full-scale thermonuclear test whose unexpectedly large yield came from the lithium-7 reaction. The scientists had anticipated a much smaller explosion, and the fallout triggered a major international incident.';
+      const paragraphs = Array.from({ length: 14 }, (_, i) =>
+        `<p>${paragraph} This is paragraph number ${i + 1} of the main discussion.</p>`,
+      ).join('');
+      const footnotes = Array.from({ length: 14 }, (_, i) =>
+        `<li id="fn${i + 1}"><p>${paragraph} This is footnote number ${i + 1} with fewer links.</p></li>`,
+      ).join('');
+
+      document.body.innerHTML = `
+        <header><h1>Which Future?</h1><p>Michael Nielsen</p></header>
+        ${paragraphs}
+        <section class="footnotes"><ol>${footnotes}</ol></section>
+      `;
+
+      const root = detectArticleRoot(document);
+      expect(root?.element).toBe(document.body);
+      expect(root?.source).toBe('readability');
+    });
+
     // ContentRoot 契约（ADR-001 P0）：detectArticleRoot 返回 ContentRoot，
     // 携带 source / confidence / evidence，供调试与后续 Evidence Fusion 使用。
   });

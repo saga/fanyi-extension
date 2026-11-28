@@ -527,6 +527,9 @@ function tryReadabilityRoot(doc: Document): ReadabilityMappingResult | null {
 // entry
 // =============================================================================
 
+/** Readability 只映射到 body/html 时，正文需占根节点文本的多少才算「整篇正文就是根」。 */
+const READABILITY_BODY_COMPLETENESS_MIN = 0.8;
+
 export function detectArticleRoot(doc: Document): ContentRoot | null {
   // 主条件：@mozilla/readability 定位正文根。
   // Readability 比手写评分更鲁棒，能稳定聚合多 section / 缺少语义标签 /
@@ -536,13 +539,22 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
     const { root: readabilityRoot, mappingConfidence, contentCoverage, anchorCoverage } = readability;
     // tryReadabilityRoot（mapReadabilityToRoot）已校验：正文长度 >= 200、
     // 多锚点在原始 DOM 命中、内容覆盖率达标、且返回根不是 consent SDK 容器。
-    // 但 Readability 有时只能定位到 body/html（如 OneTrust cookie 弹窗页的
-    // 真实文章是 body 直接子节点），此时交给评分算法取更精确的容器；
-    // 若评分也找不到，仍会落到 body 兜底。
+    // body/html 是特殊情况：正文若就是根节点的全部内容（Pandoc 生成的长文
+    // 常把段落直接挂在 body 下），它本身就是最准确的根，不能交给评分算法
+    // 去挑一个分数更高的局部容器（脚注区/引用区）而丢掉真正的正文。
+    // 反过来，正文只占 body 很小一部分（cookie 弹窗、正文挂在更深层）
+    // 时仍交给评分算法找更精确的容器。
+    const isDocumentRoot = readabilityRoot === doc.body || readabilityRoot === doc.documentElement;
+    const rootTextLength = (readabilityRoot.textContent || '').length;
+    const articleCompleteness = rootTextLength > 0
+      ? readability.articleTextLength / rootTextLength
+      : 0;
+    const acceptDocumentRoot = isDocumentRoot &&
+      articleCompleteness >= READABILITY_BODY_COMPLETENESS_MIN &&
+      mappingConfidence >= 0.8;
     if (
       !isConsentSdkContainer(readabilityRoot) &&
-      readabilityRoot !== doc.body &&
-      readabilityRoot !== doc.documentElement
+      (!isDocumentRoot || acceptDocumentRoot)
     ) {
       // 直接采用 Readability 结果，打保底分数确保跨过阈值。
       // confidence 来自映射自身的多锚点命中率（mappingConfidence），
@@ -550,14 +562,14 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
       const s = scoreElement(readabilityRoot);
       const bestScore = Math.max(s, SCORE_THRESHOLD + 1);
       logger.debug(
-        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${(readabilityRoot.textContent || '').length}, mappingConf: ${mappingConfidence.toFixed(2)}, contentCov: ${contentCoverage.toFixed(2)})`,
+        `[ContentDetector] Readability primary root: <${readabilityRoot.tagName}> .${(readabilityRoot.className || '').split(/\s+/)[0]} (score: ${bestScore.toFixed(1)}, raw: ${s.toFixed(1)}, textLen: ${rootTextLength}, mappingConf: ${mappingConfidence.toFixed(2)}, contentCov: ${contentCoverage.toFixed(2)}, articleCompleteness: ${articleCompleteness.toFixed(2)})`,
       );
       return {
         element: readabilityRoot,
         source: 'readability',
         confidence: mappingConfidence,
         evidence: {
-          textLength: (readabilityRoot.textContent || '').length,
+          textLength: rootTextLength,
           readabilityCoverage: contentCoverage,
           anchorCoverage,
           semanticScore: s,
@@ -565,7 +577,9 @@ export function detectArticleRoot(doc: Document): ContentRoot | null {
       };
     }
     logger.debug(
-      `[ContentDetector] Readability root is a consent/cookie SDK container, falling back to scoring`,
+      `[ContentDetector] Readability root <${readabilityRoot.tagName}> not accepted ` +
+        `(consent=${isConsentSdkContainer(readabilityRoot)}, documentRoot=${isDocumentRoot}, ` +
+        `articleCompleteness=${articleCompleteness.toFixed(2)}), falling back to scoring`,
     );
   }
 
