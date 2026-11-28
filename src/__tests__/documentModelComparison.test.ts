@@ -18,19 +18,42 @@ function page(id: string, title: string, ids: string[]): DocumentReaderPage {
   return { id, title, sectionTitle: title, segments: items, charCount: items.length };
 }
 
-describe('双模型对比结果展示', () => {
-  it('逐段只显示原文与译文，不再重复片段 ID 和「模型 X 译文」标签', () => {
+describe('三模型对比结果展示', () => {
+  it('每个原文段落使用纵向表格，逐行展示原文和各模型译文', () => {
     const template = readFileSync(
       process.cwd() + '/src/entrypoints/document/DocumentModelComparison.vue', 'utf8',
     );
-    expect(template).not.toContain('· 原文');
-    expect(template).not.toContain('译文</small>');
-    expect(template).toContain('class="comparison-source-text"');
-    expect(template).toContain('font-size: 1.05rem');
+    expect(template).toContain('三模型初译对比');
+    expect(template).toContain('class="comparison-table"');
+    expect(template).toContain('<th scope="row">原文</th>');
+    expect(template).toContain('<th scope="row">模型 A</th>');
+    expect(template).toContain('<th scope="row">模型 B</th>');
+    expect(template).toContain('<th scope="row">模型 C</th>');
+    expect(template).toContain('v-if="activeComparison.modelC"');
+    expect(template).not.toContain('comparison-columns');
+    expect(template).toContain('font-size: 1.02rem');
     const readerCss = readFileSync(
       process.cwd() + '/src/entrypoints/document/documentReaderStyles.css', 'utf8',
     );
     expect(readerCss).toContain('max-width: 76rem');
+  });
+
+  it('A/B/C 默认均使用 Workbuddy，C 可关闭，且每个模型可分别选择思考方式和推理强度', () => {
+    const template = readFileSync(
+      process.cwd() + '/src/entrypoints/document/DocumentModelComparison.vue', 'utf8',
+    );
+    expect(template).toContain("modelA = ref<ModelChoice>({ provider: 'workbuddy'");
+    expect(template).toContain("modelB = ref<ModelChoice>({ provider: 'workbuddy'");
+    expect(template).toContain("modelC = ref<ModelChoice>({ provider: 'workbuddy'");
+    expect(template).toContain('const thirdModelEnabled = ref(true)');
+    expect(template).toContain('v-model="thirdModelEnabled"');
+    expect(template).toContain('v-model="modelA.thinkingMode"');
+    expect(template).toContain('v-model="modelB.thinkingMode"');
+    expect(template).toContain('v-model="modelC.thinkingMode"');
+    expect(template).toContain('v-model="modelA.effort"');
+    expect(template).toContain('v-model="modelB.effort"');
+    expect(template).toContain('v-model="modelC.effort"');
+    expect(template).toContain('models: activeModelChoices.value');
   });
 });
 
