@@ -285,8 +285,8 @@ describe('reader toolbar literary reasoning policy', () => {
     );
     expect(config).toContain("translationMode: 'technical'");
     expect(config).toContain("documentTranslationMode: 'literary'");
+    expect(config).not.toContain("documentTranslationMode: 'translationMode'");
     expect(settings).toContain("documentTranslationMode: 'literary'");
-    expect(config).toContain("documentKey === 'documentTranslationMode'");
   });
 
   it('collapses task-profile and advanced-run settings by default', () => {
