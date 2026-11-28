@@ -179,4 +179,4 @@ grep -o 'let eh=eA.modelSettings.providerData??{}.\{600\}' cli/dist/codebuddy-he
 
 同一批任务配置新增 `promptCacheRetention: 'long' | 'short'`，默认 `long`。它映射到 SDK 的 `CODEBUDDY_DISABLE_PROMPT_CACHING_1H`：`long` 下发 `0`，`short` 下发 `1`，从而可以做 TTL A/B 排查。它只改缓存有效期，不改思考、推理强度、提示词或工具定义。
 
-Hy4 flash 的缓存单价（命中 0.02 元/百万 Token，未命中 0.5 元/百万 Token）依赖严格前缀匹配：System Prompt、文学契约、Schema 和工具定义必须逐字/逐项稳定，动态原文与批次上下文必须放在请求末尾。服务端现在在 `batch.prompt.ready.promptPrefixFingerprint` 记录 system/schema 的短哈希，在 `model.usage` 记录实际 `cacheRetention`、`sessionId`、`cacheReadTokens`、`cacheCreationTokens`，用于区分「档位没开」和「前缀漂移导致未命中」。
+Hy4 flash 的缓存单价（命中 0.02 元/百万 Token，未命中 0.5 元/百万 Token）依赖严格前缀匹配：System Prompt、文学契约、Schema 和工具定义必须逐字/逐项稳定，动态原文与批次上下文必须放在请求末尾。Workbuddy 调用现在把稳定契约放进 SDK 原生 system 角色（`systemPrompt: { append }`），动态负载只走 user prompt；此前把两者拼进单一 prompt 的做法已移除。服务端在 `batch.prompt.ready.promptPrefixFingerprint` 记录 system/schema 的短哈希，在 `model.usage` 记录实际 `cacheRetention`、`sessionId`、`cacheReadTokens`、`cacheCreationTokens`，用于区分「档位没开」和「前缀漂移导致未命中」。
