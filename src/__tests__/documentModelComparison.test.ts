@@ -47,6 +47,7 @@ describe('三模型对比结果展示', () => {
     expect(template).toContain("modelC = ref<ModelChoice>({ provider: 'workbuddy'");
     expect(template).toContain('const thirdModelEnabled = ref(true)');
     expect(template).toContain('v-model="thirdModelEnabled"');
+    expect(template).toContain('Off（退回双模型）');
     expect(template).toContain('v-model="modelA.thinkingMode"');
     expect(template).toContain('v-model="modelB.thinkingMode"');
     expect(template).toContain('v-model="modelC.thinkingMode"');
