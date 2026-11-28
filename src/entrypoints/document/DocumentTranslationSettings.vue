@@ -101,10 +101,10 @@
       </div>
 
       <details class="strategy-settings task-profile-settings" open>
-        <summary>按任务配置思考方式、推理强度与 Prompt</summary>
+        <summary>按任务配置推理强度、备用模型与 Prompt</summary>
         <p class="muted small">
-          初译、准确性/术语审校、人物声音/文风审校、文学分析、全书预处理分别保存。
-          思考方式、推理强度和备用模型直接对应 CodeBuddy SDK 的 query() 参数。
+          小说文学初译固定启用思考，默认推理强度为 low；准确性/术语审校、人物声音/文风审校、文学分析和全书预处理分别配置思考方式与推理强度。
+          这些设置直接对应 CodeBuddy SDK 的 query() 参数。
           对声明了多档 context window 的模型，额外显示本任务的上下文窗口档位；留空仍使用模型 defaultLength，不改变默认设置。
           为确保参数生效，这些任务使用单次 query，而非复用 V2 Session；批量任务会有额外 CLI 启动开销，推理强度越高也会越慢。
         </p>
@@ -154,7 +154,12 @@
                 </select>
                 <small class="muted">主模型不可用时尝试；列表来自本机服务 /api/codebuddy/models。</small>
               </label>
-              <label class="setting-field">
+              <div v-if="task.key === 'translation'" class="setting-field">
+                <span>思考方式</span>
+                <strong>固定启用</strong>
+                <small class="muted">小说文学初译始终启用思考；推理强度默认 low，可在下方单独调整。</small>
+              </div>
+              <label v-else class="setting-field">
                 <span>思考方式</span>
                 <select :value="config.documentCodeBuddyTaskProfiles[task.key].thinkingMode === 'disabled' ? 'disabled' : 'enabled'"
                   @change="onThinkingModeChange(task.key, $event)">
@@ -418,7 +423,7 @@ const config = ref<Config>({
   documentUserPromptTemplate: '',
 });
 const codeBuddyTaskOptions: Array<{ key: DocumentCodeBuddyTaskKey; label: string; description: string }> = [
-  { key: 'translation', label: '文档初译', description: '优先忠实原文与规范输出；默认不思考，用较低推理强度提高批量吞吐。' },
+  { key: 'translation', label: '文档初译', description: '小说文学初译固定启用思考，默认低推理强度；重点处理语义歧义、人物语气和文学表达。' },
   { key: 'accuracyReview', label: '准确性 / 术语审校', description: '核对意义、事实、漏译、增译、否定、指代和专名一致性。' },
   { key: 'styleReview', label: '人物声音 / 文风审校', description: '检查人物语气、叙述声音、语域、节奏与翻译腔。' },
   { key: 'literaryAnalysis', label: '章节文学分析', description: '分析当前章节的人物画像、关系语言、锚点与书籍记忆。' },
