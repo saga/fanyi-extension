@@ -44,7 +44,7 @@ export const DOCUMENT_REVIEW_STRENGTH_OPTIONS: ReadonlyArray<{
   {
     value: 'medium',
     label: '中',
-    hint: '每批一次合并审校：准确性 must_fix 优先，文风 finding 其次；短小片段直接跳过。',
+    hint: '每批一次合并双语审校，同时检查准确性、术语、人物声音与文风；短句和对白也会审校。',
   },
   {
     value: 'weak',
@@ -260,7 +260,8 @@ const defaultConfig: Config = {
   documentDeepseekApiKey: '',
   documentProvider: 'deepseek',
   documentPromptStyle: 'default',
-  documentTranslationMode: 'technical',
+  // Local Agent document translations default to the literary workflow; web translation stays technical.
+  documentTranslationMode: 'literary',
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
@@ -295,7 +296,7 @@ const documentConfigFallbacks = {
   documentDeepseekApiKey: 'deepseekApiKey',
   documentProvider: 'provider',
   documentPromptStyle: 'promptStyle',
-  documentTranslationMode: 'translationMode',
+  // Document mode is intentionally independent from the webpage translation mode.
   documentUseServerTranslation: 'useServerTranslation',
   documentServerUrl: 'serverUrl',
   documentUseLocalAgent: 'useLocalAgent',

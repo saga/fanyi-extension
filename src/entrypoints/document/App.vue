@@ -135,22 +135,32 @@
               <option value="original">仅原文</option>
             </select>
           </label>
-          <label v-if="literaryMode" class="field inline" title="关闭后每批减少一次审校调用；同时把 2 个槽位还给翻译，翻译并发从 2 提到 4">
-            <span>审校</span>
-            <input v-model="literaryReview" type="checkbox" />
+          <label v-if="effectiveDocumentTranslationMode === 'literary'" class="field inline" :title="reviewStrengthHint">
+            <span>审校强度</span>
+            <select v-model="reviewStrength" @change="onReviewStrengthChange">
+              <option v-for="option in reviewStrengthOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </label>
           <label v-if="readerConfig?.documentUseLocalAgent" class="field inline"
             :title="'小说文学初译固定启用思考；推理强度：' + translationEffortLabel">
             <span>思考</span>
             <strong>已启用 · {{ translationEffortLabel }}</strong>
           </label>
-          <label v-if="literaryMode && literaryReview" class="field inline" title="审校和翻译共用 4 个会话槽位：审校 2 → 翻译只剩 2；审校 1 → 翻译能拿 3">
-            <span>审校并发</span>
+          <label v-if="effectiveDocumentTranslationMode === 'literary' && literaryReview" class="field inline"
+            title="审校基础并发越高，初译可用并发越少；初译未占用的会话槽会自动分配给审校。默认会话池为 6 槽，实际以服务端配置为准。">
+            <span>审校基础并发</span>
             <select :value="String(readerConfig?.documentReviewConcurrency ?? 2)" @change="onReviewConcurrencyChange">
-              <option value="1">1 · 翻译更快</option>
-              <option value="2">2 · 默认</option>
+              <option value="1">1 路</option>
+              <option value="2">2 路（默认）</option>
+              <option value="3">3 路</option>
+              <option value="4">4 路</option>
             </select>
           </label>
+          <span v-if="effectiveDocumentTranslationMode === 'literary' && literaryReview" class="muted small">
+            默认会话池为 6 槽；服务端会按实际空闲槽位分配并发。
+          </span>
           <button
             v-if="!state.running"
             class="btn primary"
@@ -1215,7 +1225,7 @@ const sourceLang = ref('auto');
 const targetLang = ref('zh');
 const viewMode = ref<'bilingual' | 'translation' | 'original'>('bilingual');
 const literaryMode = ref(false);
-/** 文学审校开关：关闭=快速模式，每批省一次审校 LLM 调用。 */
+/** 文学审校强度：strong / medium / weak / off；初译始终保留独立 Thinking 配置。 */
 const reviewStrength = ref<DocumentReviewStrength>('medium');
 const reviewStrengthOptions = DOCUMENT_REVIEW_STRENGTH_OPTIONS;
 /** 审校是否开启完全由强度档位决定：off 就是不开。 */
@@ -1885,9 +1895,22 @@ async function saveDocumentSpeedSetting(patch: Partial<Config>) {
 }
 
 async function onReviewConcurrencyChange(event: Event) {
-  const value = Number((event.target as HTMLSelectElement).value) === 1 ? 1 : 2;
+  const raw = Number((event.target as HTMLSelectElement).value);
+  const value = Number.isFinite(raw) ? Math.max(1, Math.min(4, Math.floor(raw))) : 2;
   await saveDocumentSpeedSetting({ documentReviewConcurrency: value });
-  persistenceMessage.value = '审校并发已改为 ' + value + '，下一次运行生效。';
+  persistenceMessage.value = '审校基础并发已改为 ' + value + ' 路；服务端会按空闲槽位动态扩展，下一次运行生效。';
+}
+
+async function onReviewStrengthChange() {
+  const enabled = reviewStrength.value !== 'off';
+  await setConfig({
+    documentReviewStrength: reviewStrength.value,
+    documentLiteraryReviewEnabled: enabled,
+  });
+  readerConfig.value = await getConfig();
+  persistenceMessage.value = '文学审校强度已改为 ' +
+    (reviewStrengthOptions.find((option) => option.value === reviewStrength.value)?.label || reviewStrength.value) +
+    '，下一次运行生效。';
 }
 
 async function saveDocumentTypography() {
@@ -2766,6 +2789,7 @@ function workspacePromptInput() {
       maxBatchSourceChars: config?.documentBatchMaxSourceChars ?? 8000,
       translationConcurrency: config?.documentTranslationConcurrency ?? 4,
       reviewConcurrency: config?.documentReviewConcurrency ?? 2,
+      reviewStrength: reviewStrength.value,
       precedingContextSegments: config?.documentPrecedingContextSegments ?? 4,
       contextBudgetChars: config?.documentContextBudgetChars ?? 18000,
       maxModelAttempts: config?.documentMaxModelAttempts ?? 2,
@@ -2819,6 +2843,7 @@ watch([
   targetLang,
   effectiveDocumentTranslationMode,
   literaryReview,
+  () => reviewStrength.value,
   () => JSON.stringify(glossary.value),
   () => readerConfig.value?.documentLocalAgentProvider,
   () => readerConfig.value?.documentLocalAgentModel,

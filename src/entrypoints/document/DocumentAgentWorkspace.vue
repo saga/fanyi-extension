@@ -112,6 +112,12 @@
           <div class="agent-progress-fill" :style="{ width: (isRunning ? runProgressPercent : documentProgressPercent) + '%' }"></div>
         </div>
 
+        <div v-if="isRunning && activeBatchSummary.total > 0" class="agent-progress-foot">
+          <span v-if="activeBatchSummary.translation">初译中 {{ activeBatchSummary.translation }} 批</span>
+          <span v-if="activeBatchSummary.review">审校中 {{ activeBatchSummary.review }} 批</span>
+          <span>翻译与审校并行推进</span>
+        </div>
+
         <div v-if="progressCopy.phase !== 'idle'" class="agent-progress-foot">
           <span>已翻译 {{ acceptedSegmentCount.toLocaleString() }} / {{ totalSegmentCount.toLocaleString() }} 段</span>
           <span v-if="pendingSegmentCount > 0">还有 {{ pendingSegmentCount.toLocaleString() }} 段</span>
@@ -583,6 +589,30 @@ const runProgressPercent = computed(() => {
   // 未完成片段不能算作已处理，否则大规模失败时进度条也会显示 100%。
   const resolved = Number(counts.accepted || 0) + Number(counts.candidate || 0);
   return Math.round(Math.min(100, resolved / Number(counts.total) * 100));
+});
+/** 根据服务端批次事件分别统计尚未完成的初译和审校，不把初译完成误报为整批完成。 */
+const activeBatchSummary = computed(() => {
+  const phases = new Map<number, 'translation' | 'review'>();
+  for (const event of runEvents.value) {
+    const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
+    const batchIndex = Number(payload.batchIndex);
+    if (!Number.isInteger(batchIndex) || batchIndex < 1) continue;
+    if (event.type === 'batch.started') {
+      phases.set(batchIndex, 'translation');
+    } else if (event.type === 'batch.translation.completed') {
+      if (payload.reviewScheduled === true) phases.set(batchIndex, 'review');
+      else phases.delete(batchIndex);
+    } else if (event.type === 'batch.completed') {
+      phases.delete(batchIndex);
+    }
+  }
+  let translation = 0;
+  let review = 0;
+  for (const phase of phases.values()) {
+    if (phase === 'translation') translation++;
+    else review++;
+  }
+  return { translation, review, total: translation + review };
 });
 const qualityAuditUnavailable = computed(() =>
   !project.value || busy.value || sourceChanged.value ||

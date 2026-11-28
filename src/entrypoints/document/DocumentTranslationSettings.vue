@@ -100,7 +100,7 @@
         <span v-else-if="localStatus === 'fail'" class="connection-fail">本机服务不可用，请检查地址和服务进程</span>
       </div>
 
-      <details class="strategy-settings task-profile-settings" open>
+      <details class="strategy-settings task-profile-settings">
         <summary>按任务配置推理强度、备用模型与 Prompt</summary>
         <p class="muted small">
           小说文学初译固定启用思考，默认推理强度为 low；准确性/术语审校、人物声音/文风审校、文学分析和全书预处理分别配置思考方式与推理强度。
@@ -215,17 +215,21 @@
         </article>
       </details>
 
-      <details class="strategy-settings" open>
+      <details class="strategy-settings">
         <summary>高级运行策略</summary>
-        <label class="switch-line">
-          <input v-model="config.documentLiteraryReviewEnabled" type="checkbox"
-            @change="saveConfig('documentLiteraryReviewEnabled')" />
-          <span>默认启用文学审校（准确性/术语与人物声音/文风）</span>
-        </label>
         <p class="muted small">
-          仅影响通过本机 Local Agent 新建的翻译运行。修改后保存到文档配置，并在下一次运行生效。
-          服务端会再次限制最大值；文学模式仍强制按章节分批，并保留证据边界与防剧透约束。
+          仅影响通过本机 Local Agent 新建的文学翻译运行。修改后保存到文档配置，并在下一次运行生效。
+          服务端仍会校验并发预算；文学模式保留章节分批、人物记忆、证据边界和防剧透约束。
         </p>
+        <label class="setting-field">
+          <span>文学审校强度</span>
+          <select v-model="config.documentReviewStrength" @change="onReviewStrengthChange">
+            <option v-for="option in reviewStrengthOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+          <small class="muted">{{ reviewStrengthHint }}</small>
+        </label>
         <div class="settings-grid">
           <label class="setting-field">
             <span>每批最多片段数</span>
@@ -257,17 +261,17 @@
               <option :value="5">5 路</option>
               <option :value="6">6 路</option>
             </select>
-            <small class="muted">实际并发还受本机 Provider 会话池容量约束。</small>
+            <small class="muted">初译与审校共享默认 6 个会话槽；实际并发会按总槽位预算自动收敛，不会超出池容量。</small>
           </label>
           <label class="setting-field">
-            <span>审校并发上限</span>
+            <span>审校基础并发</span>
             <select v-model.number="config.documentReviewConcurrency" @change="saveConfig('documentReviewConcurrency')">
               <option :value="1">1 路</option>
               <option :value="2">2 路（默认）</option>
               <option :value="3">3 路</option>
               <option :value="4">4 路</option>
             </select>
-            <small class="muted">只在开启文学审校时生效，与初译共享会话池。</small>
+            <small class="muted">审校基础并发越高，初译可用并发越少；初译未占用的会话槽会自动分配给审校。初译结束后，审校可使用会话池剩余容量。默认池为 6 槽，实际以服务端配置为准。</small>
           </label>
           <label class="setting-field">
             <span>前文参考片段数</span>
@@ -339,8 +343,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
-import { DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES, getConfig, setConfig, type Config, type DocumentCodeBuddyTaskKey } from '@/entrypoints/utils/config';
+import { computed, onMounted, ref, watch } from 'vue';
+import {
+  DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES,
+  DOCUMENT_REVIEW_STRENGTH_OPTIONS,
+  getConfig,
+  setConfig,
+  type Config,
+  type DocumentCodeBuddyTaskKey,
+} from '@/entrypoints/utils/config';
 import { isLocalAgentServiceAvailable } from '@/entrypoints/utils/localAgentHealth';
 import { normalizeContextWindowOption, type CodeBuddyContextWindowOption } from '@/entrypoints/utils/codeBuddyContextWindow';
 
@@ -359,6 +370,10 @@ const emit = defineEmits<{
  * 这些读取都是可重试的展示数据，超时按失败处理比无限等待更有用。
  */
 const SETTINGS_REQUEST_TIMEOUT_MS = 8_000;
+const reviewStrengthOptions = DOCUMENT_REVIEW_STRENGTH_OPTIONS;
+const reviewStrengthHint = computed(() =>
+  reviewStrengthOptions.find((option) => option.value === config.value.documentReviewStrength)?.hint || '',
+);
 
 const config = ref<Config>({
   sourceLang: 'auto',
@@ -396,7 +411,7 @@ const config = ref<Config>({
   documentDeepseekApiKey: '',
   documentProvider: 'deepseek',
   documentPromptStyle: 'default',
-  documentTranslationMode: 'technical',
+  documentTranslationMode: 'literary',
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
@@ -449,6 +464,10 @@ const promptPreviewError = ref('');
 
 onMounted(async () => {
   config.value = await getConfig();
+  // Compatibility with installs that only had the previous boolean review switch.
+  if (config.value.documentLiteraryReviewEnabled === false) {
+    config.value.documentReviewStrength = 'off';
+  }
   applyActiveDocumentLanguages();
   initialized.value = true;
   // Probe independently of the webpage profile. The saved auto-select preference
@@ -491,9 +510,14 @@ const documentConfigFields: (keyof Config)[] = [
   'documentUseLocalAgent', 'documentAutoSelectLocalAgent', 'documentLocalAgentProvider', 'documentLocalAgentUrl',
   'documentLocalAgentModel', 'documentLocalAgentToken', 'documentCodeBuddyTaskProfiles',
   'documentBatchMaxSegments', 'documentBatchMaxSourceChars', 'documentTranslationConcurrency',
-  'documentReviewConcurrency', 'documentPrecedingContextSegments', 'documentContextBudgetChars',
+  'documentReviewConcurrency', 'documentReviewStrength', 'documentPrecedingContextSegments', 'documentContextBudgetChars',
   'documentMaxModelAttempts', 'documentLiteraryReviewEnabled',
 ];
+
+async function onReviewStrengthChange() {
+  config.value.documentLiteraryReviewEnabled = config.value.documentReviewStrength !== 'off';
+  await saveConfig('documentReviewStrength', 'documentLiteraryReviewEnabled');
+}
 
 async function saveConfig(...fields: (keyof Config)[]) {
   if (!initialized.value || fields.length === 0) return;
