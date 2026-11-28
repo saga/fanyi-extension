@@ -104,6 +104,8 @@ describe('config', () => {
         localAgentProvider: 'opencode',
         localAgentUrl: 'http://127.0.0.1:9999',
         translationMode: 'literary',
+        sourceLang: 'fr',
+        targetLang: 'zh',
       };
       const config = await getConfig();
       expect(config.documentProvider).toBe('openrouter');
@@ -113,8 +115,17 @@ describe('config', () => {
       expect(config.documentLocalAgentProvider).toBe('opencode');
       expect(config.documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
       expect(config.documentTranslationMode).toBe('literary');
+      expect(config.documentSourceLang).toBe('auto');
+      expect(Object.hasOwn(store['local:config'], 'documentSourceLang')).toBe(false);
       expect(store['local:config'].documentProvider).toBe('openrouter');
       expect(store['local:config'].documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
+    });
+
+    it('preserves an explicitly configured document source language', async () => {
+      store['local:config'] = { sourceLang: 'en', documentSourceLang: 'fr' };
+      const config = await getConfig();
+      expect(config.sourceLang).toBe('en');
+      expect(config.documentSourceLang).toBe('fr');
     });
 
     it('keeps document auto-selection independent of webpage Agent settings', async () => {

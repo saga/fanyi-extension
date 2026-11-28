@@ -255,7 +255,7 @@ const defaultConfig: Config = {
   chatSkillIds: [],
   remoteServiceToken: '',
 
-  // getConfig() inherits legacy values until these document-specific fields are persisted.
+  // Source language is intentionally independent from webpage/selection translation settings.
   documentSourceLang: 'auto',
   documentTargetLang: 'zh',
   documentDeepseekApiKey: '',
@@ -291,7 +291,7 @@ const defaultConfig: Config = {
 };
 
 const documentConfigFallbacks = {
-  documentSourceLang: 'sourceLang',
+  // Source language is document-specific. Never inherit the webpage/selection translation language.
   documentTargetLang: 'targetLang',
   documentDeepseekApiKey: 'deepseekApiKey',
   documentProvider: 'provider',
