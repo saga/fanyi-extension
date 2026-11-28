@@ -236,6 +236,7 @@ describe('document prompt source of truth', () => {
     const watchStart = source.lastIndexOf('watch([', syncStart);
     expect(watchStart).toBeGreaterThan(-1);
     expect(source.slice(watchStart, syncStart)).toContain('() => readerConfig.value?.documentPromptStyle');
+    expect(source.slice(watchStart, syncStart)).toContain('() => reviewStrength.value');
   });
 });
 
@@ -245,19 +246,69 @@ describe('reader toolbar literary reasoning policy', () => {
     'utf8',
   );
 
-  it('shows literary translation thinking as always enabled and keeps review concurrency control', () => {
-    expect(source).toContain('小说文学初译固定启用思考');
-    expect(source).toContain('已启用 · {{ translationEffortLabel }}');
-    expect(source).toContain('@change="onReviewConcurrencyChange"');
-    expect(source).toContain('v-if="literaryMode && literaryReview"');
-    expect(source).not.toContain('@change="onTranslationThinkingChange"');
+  it('shows four review strengths and uses writable state instead of binding a read-only computed', () => {
+    expect(source).toContain('v-model="reviewStrength" @change="onReviewStrengthChange"');
+    expect(source).not.toContain('v-model="literaryReview"');
+    expect(source).toContain('reviewStrengthHint');
+    expect(source).toContain('reviewStrength: reviewStrength.value');
+    expect(source).toContain('() => reviewStrength.value');
+    expect(source).toContain('onReviewConcurrencyChange');
+    expect(source).toContain('审校基础并发');
+    expect(source).toContain('<option value="4">4 路</option>');
+    expect(source).not.toContain('翻译并发从 2 提到 4');
   });
 
-  it('persists review concurrency and displays the independent translation effort', () => {
+  it('persists review strength and concurrency to extension config and the project Prompt', () => {
+    expect(source).toContain('documentReviewStrength: reviewStrength.value');
+    expect(source).toContain('documentLiteraryReviewEnabled: enabled');
+    expect(source).toContain('reviewStrength: reviewStrength.value');
     expect(source).toContain('documentReviewConcurrency: value');
-    expect(source).toContain('translationEffortLabel');
     expect(source).toContain('await setConfig(patch)');
-    expect(source).not.toContain('onTranslationThinkingChange');
+    const settings = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
+      'utf8',
+    );
+    const fieldsStart = settings.indexOf('const documentConfigFields');
+    const fieldsEnd = settings.indexOf('];', fieldsStart);
+    expect(settings.slice(fieldsStart, fieldsEnd)).toContain("'documentReviewStrength'");
+    expect(settings).toContain('onReviewStrengthChange');
+  });
+
+  it('defaults new document translation to literary without changing the webpage default', () => {
+    const config = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/utils/config.ts'),
+      'utf8',
+    );
+    const settings = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
+      'utf8',
+    );
+    expect(config).toContain("translationMode: 'technical'");
+    expect(config).toContain("documentTranslationMode: 'literary'");
+    expect(settings).toContain("documentTranslationMode: 'literary'");
+    expect(config).toContain("documentKey === 'documentTranslationMode'");
+  });
+
+  it('collapses task-profile and advanced-run settings by default', () => {
+    const settings = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
+      'utf8',
+    );
+    expect(settings).toContain('<details class="strategy-settings task-profile-settings">');
+    expect(settings).toContain('<details class="strategy-settings">');
+    expect(settings).not.toContain('<details class="strategy-settings task-profile-settings" open>');
+    expect(settings).not.toContain('<details class="strategy-settings" open>');
+  });
+
+  it('shows live counts for batches still translating or waiting for review', () => {
+    const workspace = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/document/DocumentAgentWorkspace.vue'),
+      'utf8',
+    );
+    expect(workspace).toContain('activeBatchSummary.translation');
+    expect(workspace).toContain('activeBatchSummary.review');
+    expect(workspace).toContain("event.type === 'batch.translation.completed'");
+    expect(workspace).toContain("event.type === 'batch.completed'");
   });
 
   it('locks literary translation thinking on while keeping other task profiles configurable', () => {
