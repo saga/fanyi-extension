@@ -564,10 +564,6 @@ async function onThinkingModeChange(task: DocumentCodeBuddyTaskKey, event: Event
   if (!(target instanceof HTMLSelectElement)) return;
   const profile = config.value.documentCodeBuddyTaskProfiles[task];
   profile.thinkingMode = target.value === 'enabled' ? 'enabled' : 'disabled';
-  // UI 不再暴露思考量；切到“思考”时补一个默认值，保证后端拿到合法预算。
-  if (profile.thinkingMode === 'enabled' && !(profile.thinkingBudgetTokens > 0)) {
-    profile.thinkingBudgetTokens = 8192;
-  }
   await saveConfig('documentCodeBuddyTaskProfiles');
 }
 async function onLocalAgentToggle() {
