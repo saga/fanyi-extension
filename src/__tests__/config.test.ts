@@ -58,7 +58,7 @@ const defaultConfig: Config = {
   documentDeepseekApiKey: '',
   documentProvider: 'deepseek',
   documentPromptStyle: 'default',
-  documentTranslationMode: 'technical',
+  documentTranslationMode: 'literary',
   documentUseServerTranslation: false,
   documentServerUrl: 'https://s.sunxiunan.com/fanyi/page',
   documentUseLocalAgent: false,
@@ -91,8 +91,15 @@ describe('config', () => {
       expect(config).toEqual(defaultConfig);
       expect(config.documentCodeBuddyTaskProfiles.translation.thinkingMode).toBe('enabled');
       expect(config.documentCodeBuddyTaskProfiles.translation.effort).toBe('low');
+      expect(config.translationMode).toBe('technical');
+      expect(config.documentTranslationMode).toBe('literary');
     });
 
+    it('preserves an explicitly selected technical document mode', async () => {
+      store['local:config'] = { documentTranslationMode: 'technical' };
+      const config = await getConfig();
+      expect(config.documentTranslationMode).toBe('technical');
+    });
 
   });
 
