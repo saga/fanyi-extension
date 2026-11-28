@@ -135,7 +135,7 @@
               <option value="original">仅原文</option>
             </select>
           </label>
-          <label v-if="literaryMode" class="field inline" :title="reviewStrengthHint">
+          <label v-if="effectiveDocumentTranslationMode === 'literary'" class="field inline" :title="reviewStrengthHint">
             <span>审校强度</span>
             <select v-model="reviewStrength" @change="onReviewStrengthChange">
               <option v-for="option in reviewStrengthOptions" :key="option.value" :value="option.value">
@@ -148,7 +148,7 @@
             <span>思考</span>
             <strong>已启用 · {{ translationEffortLabel }}</strong>
           </label>
-          <label v-if="literaryMode && literaryReview" class="field inline"
+          <label v-if="effectiveDocumentTranslationMode === 'literary' && literaryReview" class="field inline"
             title="这是审校的基础并发。初译未占用的会话槽位会自动分配给审校；默认会话池为 6 槽，实际以服务端配置为准。">
             <span>审校基础并发</span>
             <select :value="String(readerConfig?.documentReviewConcurrency ?? 2)" @change="onReviewConcurrencyChange">
@@ -158,7 +158,7 @@
               <option value="4">4 路</option>
             </select>
           </label>
-          <span v-if="literaryMode && literaryReview" class="muted small">
+          <span v-if="effectiveDocumentTranslationMode === 'literary' && literaryReview" class="muted small">
             默认会话池为 6 槽；服务端会按实际空闲槽位分配并发。
           </span>
           <button
