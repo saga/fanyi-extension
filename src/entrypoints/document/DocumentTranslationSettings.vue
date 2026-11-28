@@ -271,7 +271,7 @@
               <option :value="3">3 路</option>
               <option :value="4">4 路</option>
             </select>
-            <small class="muted">这是翻译阶段为审校保留的基础并发。初译未占用的会话槽会自动分配给审校；初译结束后，审校默认最多可使用整个 6 槽位池。</small>
+            <small class="muted">这是翻译阶段为审校保留的基础并发。初译未占用的会话槽会自动分配给审校；初译结束后，审校可使用会话池剩余容量。默认池为 6 槽，实际以服务端配置为准。</small>
           </label>
           <label class="setting-field">
             <span>前文参考片段数</span>
