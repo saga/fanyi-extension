@@ -19,7 +19,6 @@ export interface DocumentCodeBuddyTaskProfile {
   model: string;
   fallbackModel: string;
   thinkingMode: DocumentCodeBuddyThinkingMode;
-  thinkingBudgetTokens: number;
   effort: DocumentCodeBuddyEffort;
   /** Supplemental instructions; built-in task contracts are retained. */
   systemPromptAppendix: string;
@@ -157,23 +156,23 @@ export interface Config {
 
 export const DEFAULT_DOCUMENT_CODEBUDDY_TASK_PROFILES: DocumentCodeBuddyTaskProfiles = {
   translation: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'enabled', thinkingBudgetTokens: 8192, effort: 'low',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'enabled', effort: 'low',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   accuracyReview: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'medium',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'medium',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   styleReview: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   literaryAnalysis: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
   contextGraph: {
-    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', thinkingBudgetTokens: 8192, effort: 'high',
+    model: 'deepseek-v4.1-flash', fallbackModel: 'hy3', thinkingMode: 'adaptive', effort: 'high',
     systemPromptAppendix: '', userPromptTemplate: '',
   },
 };
@@ -190,7 +189,6 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
         ? value.thinkingMode as DocumentCodeBuddyThinkingMode : defaults.thinkingMode;
     const effort = ['low', 'medium', 'high', 'xhigh'].includes(value.effort)
       ? value.effort as DocumentCodeBuddyEffort : defaults.effort;
-    const rawBudget = Number(value.thinkingBudgetTokens ?? defaults.thinkingBudgetTokens);
     const model = typeof value.model === 'string' ? value.model.trim().slice(0, 200) : defaults.model;
     const fallbackModel = typeof value.fallbackModel === 'string' ? value.fallbackModel.trim().slice(0, 200) : defaults.fallbackModel;
     const contextWindowRaw = value.contextWindow;
@@ -206,7 +204,6 @@ function normalizeDocumentCodeBuddyTaskProfiles(input: unknown): DocumentCodeBud
       model: model.toLowerCase() === 'auto' ? '' : model,
       fallbackModel: fallbackModel.toLowerCase() === 'auto' ? '' : fallbackModel,
       thinkingMode,
-      thinkingBudgetTokens: Number.isFinite(rawBudget) ? Math.max(1024, Math.min(65536, Math.round(rawBudget))) : defaults.thinkingBudgetTokens,
       effort,
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       systemPromptAppendix: typeof value.systemPromptAppendix === 'string' ? value.systemPromptAppendix.slice(0, 12000) : defaults.systemPromptAppendix,
