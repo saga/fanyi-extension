@@ -115,7 +115,7 @@ describe('config', () => {
       expect(config.documentLocalAgentProvider).toBe('opencode');
       expect(config.documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
       expect(config.documentTranslationMode).toBe('literary');
-      expect(config.documentSourceLang).toBe('auto', 'legacy webpage source language must not leak into document translation');
+      expect(config.documentSourceLang).toBe('auto');
       expect(Object.hasOwn(store['local:config'], 'documentSourceLang')).toBe(false);
       expect(store['local:config'].documentProvider).toBe('openrouter');
       expect(store['local:config'].documentLocalAgentUrl).toBe('http://127.0.0.1:9999');
