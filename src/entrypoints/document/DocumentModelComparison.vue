@@ -255,9 +255,10 @@ const scopeOptions = computed(() => buildComparisonScopes(props.pages, props.seg
 const selectedScope = computed(() => scopeOptions.value.find((item) => item.key === scopeKey.value) ?? scopeOptions.value[0] ?? null);
 const comparisonSegments = computed(() => selectedScope.value?.segmentIds ?? []);
 const scopeValid = computed(() => !!selectedScope.value && !selectedScope.value.disabled && comparisonSegments.value.length > 0);
-const running = computed(() => ['pending', 'running'].includes(activeComparison.value?.modelA?.status) ||
-  ['pending', 'running'].includes(activeComparison.value?.modelB?.status) ||
-  ['pending', 'running'].includes(activeComparison.value?.modelC?.status));
+const isInProgress = (status?: string) => status === 'pending' || status === 'running';
+const running = computed(() => isInProgress(activeComparison.value?.modelA?.status) ||
+  isInProgress(activeComparison.value?.modelB?.status) ||
+  isInProgress(activeComparison.value?.modelC?.status));
 const endpoint = computed(() => '/api/documents/projects/' + encodeURIComponent(props.projectId || '') + '/model-comparisons');
 function formatDate(value: string) { return value ? new Date(value).toLocaleString() : ''; }
 function statusLabel(value?: string) {
