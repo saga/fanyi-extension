@@ -99,6 +99,65 @@ describe('applyServerTranslatedHtml - stale block-id mapping must not be applied
     expect(applyBlockTranslation).not.toHaveBeenCalled();
   });
 
+  it('does not treat nested syntax-span translations as the parent block translation', () => {
+    // platform.claude.com cookbook: the code line and its syntax token are both
+    // blocks. Server HTML has the token translated inside the parent, but no
+    // translation of its own for the parent. querySelector would wrongly pick
+    // the token's "“lead”" and report a stale mapping.
+    document.documentElement.innerHTML = `
+      <html><body>
+        <div id="line">reader["lead"] = create</div>
+        <span id="token">"lead"</span>
+      </body></html>`;
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '', tag: 'div', text: 'reader["lead"] = create' },
+      { id: 'b2', xpath: '', tag: 'span', text: '"lead"' },
+    ];
+    const nodeMap = new Map<string, Node>([
+      ['b1', document.querySelector('#line')!],
+      ['b2', document.querySelector('#token')!],
+    ]);
+    const cachedHtml = `
+      <html><body>
+        <div data-fanyi-block-id="b1">reader<span data-fanyi-block-id="b2"><span class="fanyi-original">"lead"</span><span class="fanyi-translation">“lead”</span></span> = create</div>
+      </body></html>`;
+
+    const result = applyServerTranslatedHtml(cachedHtml, blocks, nodeMap);
+
+    expect(result.mismatched).toBe(0);
+    expect(result.translatedIds.has('b1')).toBe(false);
+    expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '“lead”');
+  });
+
+  it('uses only direct translation/original spans when a code line has its own translation', () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <div id="line">reader["lead"]</div>
+        <span id="token">"lead"</span>
+      </body></html>`;
+    const blocks: TextBlock[] = [
+      { id: 'b1', xpath: '', tag: 'div', text: 'reader["lead"]' },
+      { id: 'b2', xpath: '', tag: 'span', text: '"lead"' },
+    ];
+    const nodeMap = new Map<string, Node>([
+      ['b1', document.querySelector('#line')!],
+      ['b2', document.querySelector('#token')!],
+    ]);
+    const cachedHtml = `
+      <html><body>
+        <div data-fanyi-block-id="b1" class="fanyi-translated">
+          <span class="fanyi-original">reader[<span data-fanyi-block-id="b2" class="fanyi-translated"><span class="fanyi-original">"lead"</span><span class="fanyi-translation">“lead”</span></span>]</span>
+          <span class="fanyi-translation">读取器[“lead”]</span>
+        </div>
+      </body></html>`;
+
+    const result = applyServerTranslatedHtml(cachedHtml, blocks, nodeMap);
+
+    expect(result.mismatched).toBe(0);
+    expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b1'), '读取器[“lead”]');
+    expect(applyBlockTranslation).toHaveBeenCalledWith(nodeMap.get('b2'), '“lead”');
+  });
+
   it('still applies when the server original merely has extra chrome around the block text', () => {
     // HN .titleline 场景：客户端 block 文本剔除了 .comhead，服务端原文包含它
     document.documentElement.innerHTML = `

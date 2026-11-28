@@ -354,12 +354,33 @@ export interface ServerApplyResult {
   mismatched: number;
 }
 
+/**
+ * 只取元素**直接子节点**里的翻译标记。
+ *
+ * 代码高亮页面会把同一个 block id 分配给父代码行和内部语法 span；服务端 HTML
+ * 里父元素内会嵌着子元素自己的 `.fanyi-original` / `.fanyi-translation`。
+ * 用 `querySelector` 会误拿子块的译文，给父块贴上 "“lead”" 这种错误译文，
+ * 并在映射校验里产生大量 false stale warning。
+ */
+function directChildWithClass(el: Element, className: string): Element | null {
+  for (const child of Array.from(el.children)) {
+    if (child.classList.contains(className)) return child;
+  }
+  return null;
+}
+
+/** 取服务端元素里属于该 block 自己的译文（不含嵌套子块的译文）。 */
+function getDirectTranslationText(el: Element): string {
+  return directChildWithClass(el, 'fanyi-translation')?.textContent?.trim() || '';
+}
+
 /** 取服务端元素里的「原文」文本，用于校验 id→元素映射是否仍然成立。 */
 function getServerOriginalText(el: Element): string {
-  const orig = el.querySelector('.fanyi-original');
-  if (orig) return orig.textContent ?? '';
-  // 兜底：没有 .fanyi-original 时，用「去掉 .fanyi-translation 后的文本」
-  const clone = el.cloneNode(true) as Element;
+  // 父元素可能只有嵌套子块的 .fanyi-original；必须用直接子节点，否则会把
+  // 子块的 `"lead"` 当成父代码行的原文。
+  const orig = directChildWithClass(el, 'fanyi-original');
+  const clone = (orig ?? el).cloneNode(true) as Element;
+  // 子块的译文需要剔除，否则父块原文里会混入 `“lead”` 之类的译文。
   clone.querySelectorAll('.fanyi-translation').forEach((n) => n.remove());
   return clone.textContent ?? '';
 }
@@ -394,8 +415,7 @@ export function applyServerTranslatedHtml(
 
     // 服务端返回的是双语对照 HTML：元素内部有 .fanyi-original 和 .fanyi-translation
     // 扩展端只取 .fanyi-translation 的文本回填，保持与本地翻译一致的双语显示。
-    const translationSpan = el.querySelector('.fanyi-translation');
-    const translatedText = translationSpan?.textContent?.trim();
+    const translatedText = getDirectTranslationText(el);
     if (!translatedText || translatedText === block.text) continue;
 
     // 映射校验：服务端这份 HTML 里该 id 对应的原文，必须就是当前这个块的内容。
@@ -536,7 +556,7 @@ export async function translateBlocksViaServer(
   for (const block of blocks) {
     const element = elements.get(block.id);
     if (!element) continue;
-    const translated = element.querySelector('.fanyi-translation')?.textContent?.trim();
+    const translated = getDirectTranslationText(element);
     if (!translated || translated === block.text) continue;
     if (!isSameBlockText(getServerOriginalText(element), block.text)) {
       logger.warn('[ServerTranslation] PDF block mapping mismatch; ignoring cached translation:', block.id);
