@@ -239,41 +239,42 @@ describe('document prompt source of truth', () => {
   });
 });
 
-describe('reader toolbar speed knobs', () => {
+describe('reader toolbar literary reasoning policy', () => {
   const source = readFileSync(
     resolve(process.cwd(), 'src/entrypoints/document/App.vue'),
     'utf8',
   );
 
-  it('exposes thinking and review-concurrency next to the run controls', () => {
-    expect(source).toContain('@change="onTranslationThinkingChange"');
+  it('shows literary translation thinking as always enabled and keeps review concurrency control', () => {
+    expect(source).toContain('小说文学初译固定启用思考');
+    expect(source).toContain('已启用 · {{ translationEffortLabel }}');
     expect(source).toContain('@change="onReviewConcurrencyChange"');
     expect(source).toContain('v-if="literaryMode && literaryReview"');
+    expect(source).not.toContain('@change="onTranslationThinkingChange"');
   });
 
-  it('writes the same config keys the settings panel uses', () => {
-    // 关掉思考必须同时把 effort 降下来，否则只是少一段思考文本、耗时几乎不变。
-    expect(source).toContain("...(mode === 'enabled' ? {} : { effort: 'low' })");
-    // 思考只有开/关两档：不再向用户暴露 adaptive 与思考量（token）概念。
-    expect(source).not.toContain('value="adaptive"');
-    expect(source).not.toContain('自动判断');
-    expect(source).not.toContain('固定思考量');
+  it('persists review concurrency and displays the independent translation effort', () => {
     expect(source).toContain('documentReviewConcurrency: value');
-    // 两个旋钮都必须落盘，否则下次打开文档就丢了。
+    expect(source).toContain('translationEffortLabel');
     expect(source).toContain('await setConfig(patch)');
+    expect(source).not.toContain('onTranslationThinkingChange');
   });
 
-  it('设置页的思考选项同样只保留开/关两档，不暴露 adaptive 与 token 预算', () => {
+  it('locks literary translation thinking on while keeping other task profiles configurable', () => {
     const settings = readFileSync(
       resolve(process.cwd(), 'src/entrypoints/document/DocumentTranslationSettings.vue'),
       'utf8',
     );
-    expect(settings).not.toContain('value="adaptive"');
-    expect(settings).not.toContain('自动判断');
-    expect(settings).not.toContain('固定思考量');
-    expect(settings).not.toContain('思考量（tokens');
-    expect(settings).toContain('不思考（最快）');
-    expect(settings).toContain('思考（更慢，更稳）');
+    const config = readFileSync(
+      resolve(process.cwd(), 'src/entrypoints/utils/config.ts'),
+      'utf8',
+    );
+    expect(settings).toContain("task.key === 'translation'");
+    expect(settings).toContain('<strong>固定启用</strong>');
+    expect(settings).toContain('推理强度默认 low');
+    expect(settings).toContain('onThinkingModeChange(task.key, $event)');
+    expect(config).toContain("const thinkingMode = task === 'translation'");
+    expect(config).toContain("? 'enabled'");
   });
 
   it('预处理状态卡在 checking 时给出可操作提示，不静默吞掉点击', () => {
