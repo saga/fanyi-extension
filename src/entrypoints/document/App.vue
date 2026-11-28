@@ -139,12 +139,10 @@
             <span>审校</span>
             <input v-model="literaryReview" type="checkbox" />
           </label>
-          <label v-if="readerConfig?.documentUseLocalAgent" class="field inline" title="不思考：批量初译最快（实测单批 46s→20s 级），代价是长句断句与风格判断变弱；思考：模型先推理再译，更慢但长句和风格更稳">
+          <label v-if="readerConfig?.documentUseLocalAgent" class="field inline"
+            :title="'小说文学初译固定启用思考；推理强度：' + translationEffortLabel">
             <span>思考</span>
-            <select :value="translationThinkingMode" @change="onTranslationThinkingChange">
-              <option value="disabled">不思考（最快）</option>
-              <option value="enabled">思考（更慢，更稳）</option>
-            </select>
+            <strong>已启用 · {{ translationEffortLabel }}</strong>
           </label>
           <label v-if="literaryMode && literaryReview" class="field inline" title="审校和翻译共用 4 个会话槽位：审校 2 → 翻译只剩 2；审校 1 → 翻译能拿 3">
             <span>审校并发</span>
@@ -1227,11 +1225,16 @@ const reviewStrengthHint = computed(() =>
 );
 const currentPageIndex = ref(0);
 const readerConfig = ref<Config | null>(null);
-/** 阅读页「思考」旋钮的当前值：直接读任务配置，避免再存一份状态。 */
-const translationThinkingMode = computed<'disabled' | 'enabled'>(() => {
-  const mode = readerConfig.value?.documentCodeBuddyTaskProfiles?.translation?.thinkingMode;
-  // 旧的 adaptive 配置也视作“思考”，用户看到的只有开/关两档。
-  return mode === 'adaptive' || mode === 'enabled' ? 'enabled' : 'disabled';
+/** 阅读页展示初译的固定思考策略及独立配置的推理强度。 */
+const translationEffortLabel = computed(() => {
+  const effort = readerConfig.value?.documentCodeBuddyTaskProfiles?.translation?.effort || 'low';
+  const labels: Record<string, string> = {
+    low: '低',
+    medium: '中',
+    high: '高',
+    xhigh: 'Extra High',
+  };
+  return labels[effort] || '低';
 });
 /** 当前文档对应的本机 workspace；阅读页与 Agent Tab 都从这里读写同一份 SQLite。 */
 const workspaceProject = ref<any>(null);
@@ -1871,37 +1874,14 @@ watch([sourceLang, targetLang, literaryMode, () => JSON.stringify(glossary.value
 });
 
 /**
- * 阅读页的两个快捷速度旋钮（思考、审校并发）。
+ * 阅读页的快捷速度设置（审校并发）。
  *
- * 它们写的是全局文档配置，和设置页里那些项是同一份数据；区别只是不必翻两层折叠面板。
+ * 它写的是全局文档配置，和设置页里的配置是同一份数据；区别只是不必翻两层折叠面板。
  * 服务端在新建 Run 时读取这份配置，所以对**下一次**运行生效，正在跑的 Run 不受影响。
  */
 async function saveDocumentSpeedSetting(patch: Partial<Config>) {
   await setConfig(patch);
   readerConfig.value = await getConfig();
-}
-
-async function onTranslationThinkingChange(event: Event) {
-  const raw = (event.target as HTMLSelectElement).value;
-  const mode = raw === 'enabled' ? 'enabled' : 'disabled';
-  const profiles = readerConfig.value?.documentCodeBuddyTaskProfiles;
-  if (!profiles?.translation) return;
-  await saveDocumentSpeedSetting({
-    documentCodeBuddyTaskProfiles: {
-      ...profiles,
-      translation: {
-        ...profiles.translation,
-        thinkingMode: mode,
-        // 关掉思考时 effort 一起降到 low；开着思考则保留用户已选的推理强度。
-        ...(mode === 'enabled' ? {} : { effort: 'low' }),
-        // UI 不再暴露思考量；切到“思考”时补一个默认值，保证后端有合法预算。
-        ...(mode === 'enabled' && !(profiles.translation.thinkingBudgetTokens > 0)
-          ? { thinkingBudgetTokens: 8192 }
-          : {}),
-      },
-    },
-  });
-  persistenceMessage.value = '翻译思考已改为' + (mode === 'disabled' ? '不思考' : '思考') + '，下一次运行生效。';
 }
 
 async function onReviewConcurrencyChange(event: Event) {
